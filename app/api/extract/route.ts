@@ -94,7 +94,7 @@ async function scrapeInstagramCaption(url: string): Promise<string> {
   }
 
   // 3. window._sharedData에서 추출
-  const sharedDataMatch = html.match(/window\._sharedData\s*=\s*({.+?});\s*<\/script>/s);
+  const sharedDataMatch = html.match(/window\._sharedData\s*=\s*({[\s\S]+?});\s*<\/script>/);
   if (sharedDataMatch?.[1]) {
     try {
       const data = JSON.parse(sharedDataMatch[1]);
