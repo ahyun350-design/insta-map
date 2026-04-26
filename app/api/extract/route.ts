@@ -279,7 +279,7 @@ export async function POST(req: Request) {
     const places: Place[] = [];
     for (const item of rawPlaces) {
       const name = typeof item.name === "string" ? item.name.trim() : "";
-      const hint = typeof item.hint === "string" ? item.hint.trim() : "";
+      const hint = typeof (item as any).hint === "string" ? (item as any).hint.trim() : "";
       const category = normalizeCategory(item.category);
 
       if (!name || !category) continue;
