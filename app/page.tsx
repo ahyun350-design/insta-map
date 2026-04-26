@@ -244,7 +244,8 @@ export default function HomePage() {
     // Realtime 구독
     supabase.channel(`room-${room.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, async (payload: any) => {
       const m = payload.new;
-      setMessages(prev => [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read }]);
+      // 이미 화면에 있는 메시지면 무시 (본인이 보낸 메시지가 다시 돌아올 때)
+      setMessages(prev => prev.some(msg => msg.id === m.id) ? prev : [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read }]);
       // 받은 메시지면 즉시 읽음 처리 (채팅방 열려있으니까)
       if (m.sender_id !== MY_USER) {
         await supabase.from("messages").update({ read: true }).eq("id", m.id);
@@ -258,9 +259,14 @@ export default function HomePage() {
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !activeChatRoom) return;
-    const msg = { id: Date.now().toString(), room_id: activeChatRoom.id, sender_id: MY_USER, text: newMessage.trim(), read: false };
-    await supabase.from("messages").insert(msg);
+    const text = newMessage.trim();
+    const id = Date.now().toString();
+    const createdAt = new Date().toISOString();
+    // 화면에 즉시 추가 (서버 응답 기다리지 않음)
+    setMessages(prev => [...prev, { id, senderId: MY_USER, text, createdAt, read: false }]);
     setNewMessage("");
+    // DB에 저장
+    await supabase.from("messages").insert({ id, room_id: activeChatRoom.id, sender_id: MY_USER, text, read: false });
   };
 
   // 저장 목록 장소 클릭 → 지도에서 보기
@@ -425,9 +431,10 @@ export default function HomePage() {
             }
           });
         });
-        const strokeColor = mode === "walk" ? "#22c55e" : "#1a2a7a";
+        const strokeColor = mode === "walk" ? "#16a34a" : "#1a2a7a";
+        const strokeWeight = mode === "walk" ? 7 : 5;
         const strokeStyle = mode === "walk" ? "shortdash" : "solid";
-        routePolylineRef.current = new window.kakao.maps.Polyline({ path: linePath, strokeWeight: 5, strokeColor, strokeOpacity: 0.8, strokeStyle });
+        routePolylineRef.current = new window.kakao.maps.Polyline({ path: linePath, strokeWeight, strokeColor, strokeOpacity: 0.95, strokeStyle });
         routePolylineRef.current.setMap(expandedMapRef.current);
         const bounds = new window.kakao.maps.LatLngBounds();
         linePath.forEach(p => bounds.extend(p));
