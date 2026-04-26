@@ -461,10 +461,10 @@ export default function HomePage() {
   return (
     <main className="mobileRoot">
       <section className="phoneFrame">
-        <header className="appHeader">
-          <h1 className="appTitle">InstaMap</h1>
-          <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>
-        </header>
+      <header className="appHeader">
+  <h1 className="appTitle">InstaMap</h1>
+  {activeTab === "home" && <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>}
+</header>
         <section className="appContent">
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
 
