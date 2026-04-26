@@ -330,12 +330,23 @@ export default function HomePage() {
             <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#888" }}>{selectedPlace.category_name}</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            {!savedPlaces.some(p => p.name === selectedPlace.place_name) && (
-              <button onClick={async () => { const category: Category = selectedPlace.category_name?.includes("카페") ? "카페" : selectedPlace.category_name?.includes("음식") || selectedPlace.category_name?.includes("맛집") ? "맛집" : selectedPlace.category_name?.includes("숙박") || selectedPlace.category_name?.includes("호텔") ? "숙소" : "쇼핑"; await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), name: selectedPlace.place_name, address: selectedPlace.road_address_name || selectedPlace.address_name || "", category }); }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </button>
-            )}
-            {savedPlaces.some(p => p.name === selectedPlace.place_name) && (<svg width="22" height="22" viewBox="0 0 24 24" fill="#1a2a7a"><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke="#1a2a7a" strokeWidth="1.5"/></svg>)}
+            {(() => {
+              const saved = savedPlaces.find(p => p.name === selectedPlace.place_name);
+              return (
+                <button onClick={async () => {
+                  if (saved) {
+                    await deletePlace(saved.id);
+                  } else {
+                    const category: Category = selectedPlace.category_name?.includes("카페") ? "카페" : selectedPlace.category_name?.includes("음식") || selectedPlace.category_name?.includes("맛집") ? "맛집" : selectedPlace.category_name?.includes("숙박") || selectedPlace.category_name?.includes("호텔") ? "숙소" : "쇼핑";
+                    await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), name: selectedPlace.place_name, address: selectedPlace.road_address_name || selectedPlace.address_name || "", category });
+                  }
+                }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill={saved ? "#1a2a7a" : "none"}>
+                    <path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              );
+            })()}
             <button onClick={() => setSelectedPlace(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#bbb", fontSize: "20px", padding: 0, lineHeight: 1 }}>×</button>
           </div>
         </div>
