@@ -78,13 +78,15 @@ export default function HomePage() {
   const [postComment, setPostComment] = useState(""); const [postSearchQuery, setPostSearchQuery] = useState("");
   const [postSearchResults, setPostSearchResults] = useState<any[]>([]); const [postImages, setPostImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [directionsLoading, setDirectionsLoading] = useState(false);
+  const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null); const mapExpandedRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null); const expandedMapRef = useRef<any>(null);
   const geocoderRef = useRef<any>(null); const markersRef = useRef<any[]>([]);
   const expandedMarkersRef = useRef<any[]>([]); const feedMarkersRef = useRef<any[]>([]);
-  const searchMarkersRef = useRef<any[]>([]); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
+  const searchMarkersRef = useRef<any[]>([]); const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
@@ -252,6 +254,45 @@ export default function HomePage() {
     });
   };
 
+  const clearRoute = () => {
+    if (routePolylineRef.current) { routePolylineRef.current.setMap(null); routePolylineRef.current = null; }
+    setDirectionsInfo(null);
+  };
+
+  const drawRoute = async (destLat: number, destLng: number) => {
+    if (!expandedMapRef.current || !window.kakao?.maps) return;
+    setDirectionsLoading(true);
+    clearRoute();
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      try {
+        const res = await fetch("/api/directions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ origin: { lat: pos.coords.latitude, lng: pos.coords.longitude }, destination: { lat: destLat, lng: destLng } }),
+        });
+        const data = await res.json();
+        if (!data.routes?.[0]) { alert("경로를 찾을 수 없습니다."); setDirectionsLoading(false); return; }
+        const route = data.routes[0];
+        const summary = route.summary;
+        setDirectionsInfo({ duration: Math.round(summary.duration / 60), distance: Math.round(summary.distance / 1000 * 10) / 10 });
+        const linePath: any[] = [];
+        route.sections.forEach((section: any) => {
+          section.roads.forEach((road: any) => {
+            for (let i = 0; i < road.vertexes.length; i += 2) {
+              linePath.push(new window.kakao.maps.LatLng(road.vertexes[i + 1], road.vertexes[i]));
+            }
+          });
+        });
+        routePolylineRef.current = new window.kakao.maps.Polyline({ path: linePath, strokeWeight: 5, strokeColor: "#1a2a7a", strokeOpacity: 0.8, strokeStyle: "solid" });
+        routePolylineRef.current.setMap(expandedMapRef.current);
+        const bounds = new window.kakao.maps.LatLngBounds();
+        linePath.forEach(p => bounds.extend(p));
+        expandedMapRef.current.setBounds(bounds);
+      } catch { alert("길찾기에 실패했습니다."); }
+      finally { setDirectionsLoading(false); }
+    }, () => { alert("현재 위치를 가져올 수 없습니다."); setDirectionsLoading(false); });
+  };
+
   const handleSearch = () => {
     if (!searchQuery.trim() || !expandedMapRef.current || !window.kakao?.maps) return;
     const ps = new window.kakao.maps.services.Places(); const geocoder = new window.kakao.maps.services.Geocoder();
@@ -361,6 +402,20 @@ export default function HomePage() {
           {selectedPlace.road_address_name && (<div style={{ display: "flex", gap: "8px" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>주소</span><span style={{ fontSize: "13px", color: "#444" }}>{selectedPlace.road_address_name}</span></div>)}
           {selectedPlace.phone && (<div style={{ display: "flex", gap: "8px", alignItems: "center" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 }}>전화</span><a href={"tel:" + String(selectedPlace.phone)} style={{ fontSize: "13px", color: "#1a2a7a", textDecoration: "none" }}>{String(selectedPlace.phone)}</a></div>)}
           {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px" }}>카카오맵에서 영업시간 보기</a>)}
+          {selectedPlace.y && selectedPlace.x && (
+            <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
+              <button onClick={() => drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x))} disabled={directionsLoading} style={{ fontSize: "13px", color: "#fff", background: "#2563eb", border: "none", padding: "10px 16px", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", opacity: directionsLoading ? 0.6 : 1 }}>
+                🧭 {directionsLoading ? "경로 계산 중..." : "앱에서 길찾기"}
+              </button>
+              {directionsInfo && (
+                <div style={{ background: "#f0f4ff", borderRadius: "8px", padding: "10px 14px", display: "flex", gap: "16px", alignItems: "center" }}>
+                  <span style={{ fontSize: "13px", color: "#1a2a7a", fontWeight: 600 }}>🕐 {directionsInfo.duration}분</span>
+                  <span style={{ fontSize: "13px", color: "#1a2a7a", fontWeight: 600 }}>📍 {directionsInfo.distance}km</span>
+                  <button onClick={clearRoute} style={{ marginLeft: "auto", border: "none", background: "transparent", color: "#aaa", fontSize: "12px", cursor: "pointer" }}>경로 지우기</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         {relatedPosts.length > 0 && (
           <div style={{ borderTop: "0.5px solid #f0f0f0" }}>
