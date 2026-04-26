@@ -297,7 +297,7 @@ export default function HomePage() {
   }, [activeTab, kakaoStatus]);
 
   useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
-
+  useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current || loading) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [loading]);
   useEffect(() => {
     if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return;
     setTimeout(() => {
