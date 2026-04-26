@@ -209,7 +209,7 @@ export default function HomePage() {
 
   // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
   const initMap = (places: Place[], posts: FeedPost[]) => {
-    if (!mapContainerRef.current) return; if (mapRef.current) { mapRef.current.relayout(); return; }
+    if (!mapContainerRef.current || mapRef.current) return;
     mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 });
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current);
@@ -293,9 +293,15 @@ export default function HomePage() {
 
   // 지도 탭이 활성화될 때 지도 초기화 (DOM이 준비된 후)
   useEffect(() => {
-    if (activeTab !== "map" || kakaoStatus !== "ready") return;
-    setTimeout(() => { initMap(savedPlaces, feedPosts); }, 50);
-  }, [activeTab, kakaoStatus]);
+    if (kakaoStatus !== "ready") return;
+    setTimeout(() => { initMap(savedPlaces, feedPosts); }, 100);
+  }, [kakaoStatus]);
+
+  // 탭 전환 시 지도 relayout
+  useEffect(() => {
+    if (activeTab !== "map" || !mapRef.current) return;
+    setTimeout(() => { mapRef.current.relayout(); }, 50);
+  }, [activeTab]);
 
   useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
 
@@ -355,7 +361,6 @@ export default function HomePage() {
           {selectedPlace.road_address_name && (<div style={{ display: "flex", gap: "8px" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>주소</span><span style={{ fontSize: "13px", color: "#444" }}>{selectedPlace.road_address_name}</span></div>)}
           {selectedPlace.phone && (<div style={{ display: "flex", gap: "8px", alignItems: "center" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 }}>전화</span><a href={"tel:" + String(selectedPlace.phone)} style={{ fontSize: "13px", color: "#1a2a7a", textDecoration: "none" }}>{String(selectedPlace.phone)}</a></div>)}
           {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px" }}>카카오맵에서 영업시간 보기</a>)}
-          <a href={`https://map.kakao.com/link/to/${encodeURIComponent(selectedPlace.place_name)},${selectedPlace.y ?? ""},${selectedPlace.x ?? ""}`} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#1a2a7a", background: "#f0f4ff", border: "1px solid #d0daff", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "6px" }}>🧭 카카오맵 길찾기</a>
         </div>
         {relatedPosts.length > 0 && (
           <div style={{ borderTop: "0.5px solid #f0f0f0" }}>
@@ -461,10 +466,10 @@ export default function HomePage() {
   return (
     <main className="mobileRoot">
       <section className="phoneFrame">
-      <header className="appHeader">
-  <h1 className="appTitle">InstaMap</h1>
-  {activeTab === "home" && <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>}
-</header>
+        <header className="appHeader">
+          <h1 className="appTitle">InstaMap</h1>
+          <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>
+        </header>
         <section className="appContent">
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
 
@@ -572,8 +577,7 @@ export default function HomePage() {
 
           {activeTab === "messages" && (<div className="screen"><p className="screenTitle">메시지</p>{CHAT_LIST.map((chat) => (<article key={chat.id} className="chatItem"><div className="avatar">{chat.name.slice(0, 1)}</div><div className="chatBody"><p className="chatName">{chat.name}</p><p className="chatPreview">{chat.preview}</p></div><span className="chatTime">{chat.time}</span></article>))}</div>)}
 
-          {activeTab === "map" && (
-            <div className="screen">
+          <div className="screen" style={{ display: activeTab === "map" ? "flex" : "none", flexDirection: "column" }}>
               <p className="screenTitle">지도</p>
               <div className="mapInputWrap">
                 <input className="mapInput" placeholder="Instagram 릴스/게시물 URL 붙여넣기" value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} />
@@ -614,14 +618,13 @@ export default function HomePage() {
                   <article key={place.id} className="miniItem">
                     <span className={`dot ${CATEGORY_CLASS[place.category]}`} />
                     <div style={{ flex: 1 }}><p className="miniName">{place.name}</p><p className="miniMeta">{place.address} · {place.category}</p></div>
-                    <button onClick={() => deletePlace(place.id)} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
+                    <button onClick={() => hideFromMap(place.id)} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
                   </article>
                 ))}
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={() => setHiddenIds(new Set())} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
                 {savedPlaces.length === 0 && <p className="emptyText">아직 핀이 없습니다. URL을 입력해 시작해보세요.</p>}
               </div>
-            </div>
-          )}
+          </div>
 
           {activeTab === "saved" && (<div className="screen"><p className="screenTitle">저장한 장소</p>{savedPlaces.map((place) => (<article key={place.id} className="savedItem"><span className={`dot ${CATEGORY_CLASS[place.category]}`} /><div className="savedBody"><p className="savedName">{place.name}</p><p className="savedMeta">{place.address} · {place.category}</p></div><button className="ghostButton" type="button" onClick={() => deletePlace(place.id)}>삭제</button></article>))}{savedPlaces.length === 0 && <p className="emptyText">저장된 장소가 아직 없어요.</p>}</div>)}
 
