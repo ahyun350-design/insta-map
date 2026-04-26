@@ -91,15 +91,11 @@ export default function HomePage() {
   const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImages.length > 0;
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
 
-  // ── Supabase 데이터 불러오기 ──
   const loadData = async () => {
     setLoading(true);
     try {
-      // 장소 불러오기
       const { data: placesData } = await supabase.from("places").select("*").order("created_at", { ascending: false });
       if (placesData) setSavedPlaces(placesData.map(p => ({ id: p.id, name: p.name, address: p.address, category: p.category as Category })));
-
-      // 피드 불러오기 (댓글 포함)
       const { data: postsData } = await supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false });
       if (postsData) {
         setFeedPosts(postsData.map(p => ({
@@ -115,53 +111,34 @@ export default function HomePage() {
 
   useEffect(() => { loadData(); }, []);
 
-  // ── Supabase 저장 함수들 ──
-  const persistPlaces = async (next: Place[]) => {
-    setSavedPlaces(next);
-  };
-
   const addPlace = async (place: Place) => {
     await supabase.from("places").upsert({ id: place.id, name: place.name, address: place.address, category: place.category });
     setSavedPlaces(prev => [place, ...prev.filter(p => p.id !== place.id)]);
   };
-
   const deletePlace = async (id: string) => {
     await supabase.from("places").delete().eq("id", id);
     setSavedPlaces(prev => prev.filter(p => p.id !== id));
   };
-
   const submitPost = async (post: FeedPost) => {
-    await supabase.from("feed_posts").insert({
-      id: post.id, user_name: post.user, title: post.title, place_name: post.placeName,
-      address: post.address, category: post.category, comment: post.comment,
-      images: post.images, likes: [], archived: false,
-    });
+    await supabase.from("feed_posts").insert({ id: post.id, user_name: post.user, title: post.title, place_name: post.placeName, address: post.address, category: post.category, comment: post.comment, images: post.images, likes: [], archived: false });
     setFeedPosts(prev => [post, ...prev]);
   };
-
   const deletePost = async (id: string) => {
     await supabase.from("feed_posts").delete().eq("id", id);
-    setFeedPosts(prev => prev.filter(p => p.id !== id));
-    setOpenMenuId(null);
+    setFeedPosts(prev => prev.filter(p => p.id !== id)); setOpenMenuId(null);
   };
-
   const toggleArchive = async (id: string) => {
-    const post = feedPosts.find(p => p.id === id);
-    if (!post) return;
+    const post = feedPosts.find(p => p.id === id); if (!post) return;
     await supabase.from("feed_posts").update({ archived: !post.archived }).eq("id", id);
-    setFeedPosts(prev => prev.map(p => p.id === id ? { ...p, archived: !p.archived } : p));
-    setOpenMenuId(null);
+    setFeedPosts(prev => prev.map(p => p.id === id ? { ...p, archived: !p.archived } : p)); setOpenMenuId(null);
   };
-
   const openEdit = (post: FeedPost) => { setEditingPost(post); setEditComment(post.comment); setOpenMenuId(null); };
-
   const submitEdit = async () => {
     if (!editingPost || !editComment.trim()) return;
     await supabase.from("feed_posts").update({ comment: editComment }).eq("id", editingPost.id);
     setFeedPosts(prev => prev.map(p => p.id === editingPost.id ? { ...p, comment: editComment } : p));
     setEditingPost(null); setEditComment("");
   };
-
   const toggleLike = async (postId: string) => {
     const post = feedPosts.find(p => p.id === postId); if (!post) return;
     const liked = post.likes.includes(MY_USER);
@@ -169,7 +146,6 @@ export default function HomePage() {
     await supabase.from("feed_posts").update({ likes: newLikes }).eq("id", postId);
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: newLikes } : p));
   };
-
   const addComment = async (postId: string) => {
     if (!newComment.trim()) return;
     const c = { id: Date.now().toString(), post_id: postId, user_name: MY_USER, text: newComment.trim() };
@@ -178,7 +154,6 @@ export default function HomePage() {
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...p.comments, newC] } : p));
     setNewComment("");
   };
-
   const deleteComment = async (postId: string, commentId: string) => {
     await supabase.from("comments").delete().eq("id", commentId);
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: p.comments.filter(c => c.id !== commentId) } : p));
@@ -191,10 +166,7 @@ export default function HomePage() {
       const response = await fetch("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ instagramUrl: instagramUrl.trim() }) });
       const data = await response.json() as { places?: Array<Omit<Place, "id">>; error?: string };
       if (!response.ok || !data.places?.length) throw new Error(data.error ?? "장소 추출에 실패했습니다.");
-      for (const p of data.places) {
-        const place: Place = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), ...p };
-        await addPlace(place);
-      }
+      for (const p of data.places) { await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), ...p }); }
       setInstagramUrl(""); setStatus(`${data.places.length}개 장소를 지도에 추가했어요.`);
     } catch (e) { setStatus(""); setError(e instanceof Error ? e.message : "요청 처리 중 오류가 발생했습니다."); }
     finally { setIsSubmitting(false); }
@@ -207,39 +179,25 @@ export default function HomePage() {
       reader.readAsDataURL(file);
     }); e.target.value = "";
   };
-
   const handlePostSearch = () => {
-    if (!postSearchQuery.trim()) return;
-    if (!window.kakao?.maps?.services) { alert("지도가 아직 로딩 중입니다."); return; }
+    if (!postSearchQuery.trim() || !window.kakao?.maps?.services) return;
     new window.kakao.maps.services.Places().keywordSearch(postSearchQuery.trim(), (data: any[], st: string) => {
       if (st === window.kakao.maps.services.Status.OK) setPostSearchResults(data.slice(0, 5)); else alert("검색 결과가 없습니다.");
     });
   };
-
   const handleSelectPostPlace = (place: any) => {
     setPostPlaceName(place.place_name); setPostAddress(place.road_address_name || place.address_name || "");
     const cat: Category = place.category_name?.includes("카페") ? "카페" : place.category_name?.includes("음식") || place.category_name?.includes("맛집") ? "맛집" : place.category_name?.includes("숙박") || place.category_name?.includes("호텔") ? "숙소" : "쇼핑";
     setPostCategory(cat); setPostSearchResults([]); setPostSearchQuery("");
   };
-
   const handleSubmitPost = async () => {
     if (!canPost) return;
-    const newPost: FeedPost = {
-      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
-      user: MY_USER, title: postTitle, placeName: postPlaceName, address: postAddress,
-      category: postCategory, comment: postComment, images: postImages,
-      createdAt: new Date().toISOString(), likes: [], comments: [],
-    };
+    const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USER, title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
     await submitPost(newPost);
-    setShowPostModal(false);
-    setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]);
-    setActiveTab("home");
+    setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]); setActiveTab("home");
   };
-
   const resetModal = () => {
-    setShowPostModal(false);
-    setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페");
-    setPostImages([]); setPostSearchQuery(""); setPostSearchResults([]);
+    setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]); setPostSearchQuery(""); setPostSearchResults([]);
   };
 
   const addMyLocation = (map: any) => {
@@ -247,6 +205,15 @@ export default function HomePage() {
     navigator.geolocation.getCurrentPosition((pos) => {
       new window.kakao.maps.Marker({ map, position: new window.kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude), image: new window.kakao.maps.MarkerImage(makeMyLocationImage(), new window.kakao.maps.Size(24, 24), { offset: new window.kakao.maps.Point(12, 12) }) });
     });
+  };
+
+  // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
+  const initMap = () => {
+    if (!mapContainerRef.current || mapRef.current) return;
+    mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 });
+    geocoderRef.current = new window.kakao.maps.services.Geocoder();
+    addMyLocation(mapRef.current);
+    setKakaoStatus("ready");
   };
 
   const addPlacePins = (map: any, arr: any[], posts: FeedPost[]) => {
@@ -272,18 +239,13 @@ export default function HomePage() {
     if (!geocoderRef.current) return;
     arr.forEach((m) => m.setMap(null)); arr.length = 0;
     const byAddress = new Map<string, FeedPost[]>();
-    posts.filter(p => !p.archived && p.address).forEach(p => {
-      if (!byAddress.has(p.address)) byAddress.set(p.address, []);
-      byAddress.get(p.address)!.push(p);
-    });
+    posts.filter(p => !p.archived && p.address).forEach(p => { if (!byAddress.has(p.address)) byAddress.set(p.address, []); byAddress.get(p.address)!.push(p); });
     byAddress.forEach((groupPosts, address) => {
       geocoderRef.current.addressSearch(address, (result: any[], sv: string) => {
         if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
         const rep = groupPosts[0];
         const marker = new window.kakao.maps.Marker({ map, position: new window.kakao.maps.LatLng(result[0].y, result[0].x), image: new window.kakao.maps.MarkerImage(makeMarkerImage(rep.category), new window.kakao.maps.Size(36, 44)) });
-        window.kakao.maps.event.addListener(marker, "click", () => {
-          setSelectedPlace({ place_name: rep.placeName, category_name: rep.category, road_address_name: rep.address, phone: "", place_url: "", _feedPosts: groupPosts });
-        });
+        window.kakao.maps.event.addListener(marker, "click", () => { setSelectedPlace({ place_name: rep.placeName, category_name: rep.category, road_address_name: rep.address, phone: "", place_url: "", _feedPosts: groupPosts }); });
         arr.push(marker);
       });
     });
@@ -307,25 +269,32 @@ export default function HomePage() {
       if (st === window.kakao.maps.services.Status.OK && result[0]) {
         searchMarkersRef.current.forEach((m) => m.setMap(null)); searchMarkersRef.current = [];
         const marker = new window.kakao.maps.Marker({ map: expandedMapRef.current, position: new window.kakao.maps.LatLng(result[0].y, result[0].x) });
-        searchMarkersRef.current.push(marker);
-        expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x)); expandedMapRef.current.setLevel(3); setSearchQuery("");
+        searchMarkersRef.current.push(marker); expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x)); expandedMapRef.current.setLevel(3); setSearchQuery("");
       } else ps.keywordSearch(searchQuery.trim(), doSearch);
     });
   };
 
+  // 카카오 스크립트 최초 로드 (DOM 준비와 무관하게 스크립트만 로드)
   useEffect(() => {
-    if (!mapKey || activeTab !== "map") return;
-    if (window.kakao?.maps) {
-      if (mapContainerRef.current) { mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 }); geocoderRef.current = new window.kakao.maps.services.Geocoder(); addMyLocation(mapRef.current); setKakaoStatus("ready"); }
-      return;
-    }
+    if (!mapKey) return;
+    if (window.kakao?.maps) { setKakaoStatus("ready"); return; }
     setKakaoStatus("loading");
     const script = document.createElement("script");
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${mapKey}&autoload=false&libraries=services`; script.async = true;
-    script.onload = () => { if (!window.kakao?.maps) { setKakaoStatus("error"); return; } window.kakao.maps.load(() => { mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 }); geocoderRef.current = new window.kakao.maps.services.Geocoder(); addMyLocation(mapRef.current); setKakaoStatus("ready"); }); };
+    script.onload = () => {
+      if (!window.kakao?.maps) { setKakaoStatus("error"); return; }
+      window.kakao.maps.load(() => { setKakaoStatus("ready"); });
+    };
     script.onerror = () => setKakaoStatus("error");
-    document.head.appendChild(script); return () => { document.head.removeChild(script); };
+    document.head.appendChild(script);
+    return () => { try { document.head.removeChild(script); } catch {} };
   }, [mapKey]);
+
+  // 지도 탭이 활성화될 때 지도 초기화 (DOM이 준비된 후)
+  useEffect(() => {
+    if (activeTab !== "map" || kakaoStatus !== "ready") return;
+    setTimeout(() => { initMap(); }, 50);
+  }, [activeTab, kakaoStatus]);
 
   useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
 
@@ -366,9 +335,7 @@ export default function HomePage() {
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
             )}
-            {savedPlaces.some(p => p.name === selectedPlace.place_name) && (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="#1a2a7a"><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke="#1a2a7a" strokeWidth="1.5"/></svg>
-            )}
+            {savedPlaces.some(p => p.name === selectedPlace.place_name) && (<svg width="22" height="22" viewBox="0 0 24 24" fill="#1a2a7a"><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke="#1a2a7a" strokeWidth="1.5"/></svg>)}
             <button onClick={() => setSelectedPlace(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#bbb", fontSize: "20px", padding: 0, lineHeight: 1 }}>×</button>
           </div>
         </div>
@@ -407,7 +374,6 @@ export default function HomePage() {
     );
   };
 
-  // ── 게시물 상세 페이지 ──
   if (detailPost) {
     const liked = detailPost.likes.includes(MY_USER);
     return (
@@ -424,9 +390,7 @@ export default function HomePage() {
               <div className="avatar">{detailPost.user.slice(0, 1).toUpperCase()}</div>
               <div><p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#1a1a2e" }}>{detailPost.user}</p><p style={{ margin: 0, fontSize: "11px", color: "#aaa" }}>{timeAgo(detailPost.createdAt)}</p></div>
             </div>
-            <div style={{ padding: "14px 20px 0" }}>
-              <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p>
-            </div>
+            <div style={{ padding: "14px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p></div>
             <div style={{ margin: "12px 20px 0", padding: "12px 14px", background: "#f8f8fc", borderRadius: "8px", display: "flex", alignItems: "center", gap: "10px" }}>
               <span style={{ fontSize: "22px" }}>{CATEGORY_PIN[detailPost.category].emoji}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -440,9 +404,7 @@ export default function HomePage() {
                 {detailPost.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "200px", height: "200px", objectFit: "cover", borderRadius: "10px", flexShrink: 0, cursor: "pointer" }} />)}
               </div>
             )}
-            <div style={{ padding: "16px 20px 0" }}>
-              <p style={{ margin: 0, fontSize: "14px", color: "#333", lineHeight: 1.9 }}>{detailPost.comment}</p>
-            </div>
+            <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontSize: "14px", color: "#333", lineHeight: 1.9 }}>{detailPost.comment}</p></div>
             <div style={{ padding: "16px 20px 0", display: "flex", alignItems: "center", gap: "14px", borderTop: "0.5px solid #f0f0f0", marginTop: "16px" }}>
               <button onClick={() => toggleLike(detailPost.id)} style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", padding: 0 }}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill={liked ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={liked ? "#e05555" : "#aaa"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -483,7 +445,6 @@ export default function HomePage() {
     );
   }
 
-  // ── 메인 앱 ──
   return (
     <main className="mobileRoot">
       <section className="phoneFrame">
@@ -525,11 +486,7 @@ export default function HomePage() {
                     <input className="mapInput" placeholder="장소명 검색" value={postSearchQuery} onChange={(e) => setPostSearchQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handlePostSearch()} style={{ flex: 1 }} />
                     <button className="primaryButton" onClick={handlePostSearch} type="button" style={{ padding: "0 14px", flexShrink: 0 }}>검색</button>
                   </div>
-                  {postSearchResults.length > 0 && (
-                    <div style={{ border: "0.5px solid #eee", borderRadius: "4px", marginTop: "6px", overflow: "hidden" }}>
-                      {postSearchResults.map((r) => (<button key={r.id} type="button" onClick={() => handleSelectPostPlace(r)} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", background: "transparent", border: "none", borderBottom: "0.5px solid #f5f5f5", cursor: "pointer" }}><p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e" }}>{r.place_name}</p><p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999" }}>{r.road_address_name || r.address_name}</p></button>))}
-                    </div>
-                  )}
+                  {postSearchResults.length > 0 && (<div style={{ border: "0.5px solid #eee", borderRadius: "4px", marginTop: "6px", overflow: "hidden" }}>{postSearchResults.map((r) => (<button key={r.id} type="button" onClick={() => handleSelectPostPlace(r)} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", background: "transparent", border: "none", borderBottom: "0.5px solid #f5f5f5", cursor: "pointer" }}><p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e" }}>{r.place_name}</p><p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999" }}>{r.road_address_name || r.address_name}</p></button>))}</div>)}
                   {postPlaceName ? (
                     <div style={{ marginTop: "8px", padding: "10px 12px", background: "#f0f4ff", borderRadius: "4px", display: "flex", alignItems: "center", gap: "8px", border: "1px solid #d0daff" }}>
                       <span style={{ fontSize: "16px" }}>{CATEGORY_PIN[postCategory].emoji}</span>
@@ -538,9 +495,7 @@ export default function HomePage() {
                     </div>
                   ) : <p style={{ fontSize: "11px", color: "#bbb", marginTop: "6px" }}>장소를 검색하고 선택해주세요</p>}
                 </div>
-                <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>카테고리</p>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>{(["맛집", "카페", "쇼핑", "숙소"] as Category[]).map((cat) => (<button key={cat} type="button" onClick={() => setPostCategory(cat)} style={{ padding: "6px 14px", borderRadius: "20px", border: `1px solid ${postCategory === cat ? CATEGORY_COLORS[cat] : "#eee"}`, background: postCategory === cat ? CATEGORY_COLORS[cat] : "transparent", color: postCategory === cat ? "#fff" : "#888", fontSize: "12px", cursor: "pointer" }}>{CATEGORY_PIN[cat].emoji} {cat}</button>))}</div>
-                </div>
+                <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>카테고리</p><div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>{(["맛집", "카페", "쇼핑", "숙소"] as Category[]).map((cat) => (<button key={cat} type="button" onClick={() => setPostCategory(cat)} style={{ padding: "6px 14px", borderRadius: "20px", border: `1px solid ${postCategory === cat ? CATEGORY_COLORS[cat] : "#eee"}`, background: postCategory === cat ? CATEGORY_COLORS[cat] : "transparent", color: postCategory === cat ? "#fff" : "#888", fontSize: "12px", cursor: "pointer" }}>{CATEGORY_PIN[cat].emoji} {cat}</button>))}</div></div>
                 <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>사진 추가 (최대 6장)</p>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                     {postImages.map((img, i) => (<div key={i} style={{ position: "relative", width: "72px", height: "72px" }}><img src={img} style={{ width: "72px", height: "72px", objectFit: "cover", borderRadius: "6px" }} /><button onClick={() => setPostImages(prev => prev.filter((_, idx) => idx !== i))} style={{ position: "absolute", top: "-6px", right: "-6px", width: "18px", height: "18px", borderRadius: "50%", background: "#333", border: "none", color: "#fff", fontSize: "11px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button></div>))}
@@ -586,11 +541,7 @@ export default function HomePage() {
                     <span style={{ fontSize: "12px", color: "#888" }}>{post.placeName}</span>
                     <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[post.category], padding: "2px 7px", borderRadius: "10px" }}>{post.category}</span>
                   </div>
-                  {post.images.length > 0 && (
-                    <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: "6px", marginBottom: "10px", overflowX: "auto" }}>
-                      {post.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "72px", height: "72px", objectFit: "cover", borderRadius: "6px", flexShrink: 0, cursor: "pointer" }} />)}
-                    </div>
-                  )}
+                  {post.images.length > 0 && (<div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: "6px", marginBottom: "10px", overflowX: "auto" }}>{post.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "72px", height: "72px", objectFit: "cover", borderRadius: "6px", flexShrink: 0, cursor: "pointer" }} />)}</div>)}
                   <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: "14px" }}>
                     <button onClick={() => toggleLike(post.id)} style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", padding: 0 }}>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill={post.likes.includes(MY_USER) ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={post.likes.includes(MY_USER) ? "#e05555" : "#ccc"} strokeWidth="1.5"/></svg>
