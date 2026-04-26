@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ApifyClient } from "apify-client";
+import ApifyClient from "apify-client";
 
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 export const runtime = "nodejs";
