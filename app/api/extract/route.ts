@@ -65,7 +65,7 @@ async function scrapeInstagramCaption(url: string): Promise<string> {
   if (!token) throw new Error("APIFY_API_TOKEN이 설정되지 않았습니다.");
 
   // Apify REST API로 직접 호출
-  const runRes = await fetch("https://api.apify.com/v2/acts/apify~instagram-post-scraper/runs?token=" + token, {
+  const runRes = await fetch("https://api.apify.com/v2/acts/apify~instagram-scraper/runs?token=" + token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
