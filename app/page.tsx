@@ -208,12 +208,13 @@ export default function HomePage() {
   };
 
   // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
-  const initMap = () => {
+  const initMap = (places: Place[], posts: FeedPost[]) => {
     if (!mapContainerRef.current || mapRef.current) return;
     mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 });
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current);
     setKakaoStatus("ready");
+    setTimeout(() => { addPlacePins(mapRef.current, markersRef.current, posts); }, 300);
   };
 
   const addPlacePins = (map: any, arr: any[], posts: FeedPost[]) => {
@@ -293,11 +294,11 @@ export default function HomePage() {
   // 지도 탭이 활성화될 때 지도 초기화 (DOM이 준비된 후)
   useEffect(() => {
     if (activeTab !== "map" || kakaoStatus !== "ready") return;
-    setTimeout(() => { initMap(); }, 50);
+    setTimeout(() => { initMap(savedPlaces, feedPosts); }, 50);
   }, [activeTab, kakaoStatus]);
 
   useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
-  useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current || loading) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [loading]);
+
   useEffect(() => {
     if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return;
     setTimeout(() => {
