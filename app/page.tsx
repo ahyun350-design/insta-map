@@ -314,7 +314,7 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    if (!mapKey) return;
+    if (!mapKey || activeTab !== "map") return;
     if (window.kakao?.maps) {
       if (mapContainerRef.current) { mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 }); geocoderRef.current = new window.kakao.maps.services.Geocoder(); addMyLocation(mapRef.current); setKakaoStatus("ready"); }
       return;
