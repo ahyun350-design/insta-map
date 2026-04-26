@@ -15,8 +15,6 @@ type FeedPost = {
 };
 type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; };
 type Message = { id: string; senderId: string; text: string; createdAt: string; };
-type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; };
-type Message = { id: string; senderId: string; text: string; createdAt: string; };
 
 declare global { interface Window { kakao: any; } }
 
@@ -91,15 +89,6 @@ export default function HomePage() {
   const [friendSearchError, setFriendSearchError] = useState("");
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
-  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
-  const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState("");
-  const [friendSearch, setFriendSearch] = useState("");
-  const [friendSearchResult, setFriendSearchResult] = useState<{id: string; username: string} | null>(null);
-  const [friendSearchError, setFriendSearchError] = useState("");
-  const [showAddFriend, setShowAddFriend] = useState(false);
-  const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
   const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
 
@@ -129,16 +118,6 @@ export default function HomePage() {
           likes: p.likes ?? [],
           comments: (p.comments ?? []).map((c: any) => ({ id: c.id, user: c.user_name, text: c.text, createdAt: c.created_at })),
         })));
-      }
-      // 채팅방 로드
-      const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`);
-      if (roomsData) {
-        const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
-          const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
-          const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
-          return { id: r.id, friendId, friendName: friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at };
-        }));
-        setChatRooms(rooms);
       }
       // 채팅방 로드
       const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`);
@@ -270,69 +249,6 @@ export default function HomePage() {
     }
   };
 
-  const searchFriend = async () => {
-    if (!friendSearch.trim()) return;
-    setFriendSearchError("");
-    setFriendSearchResult(null);
-    const { data } = await supabase.from("users").select("*").eq("username", friendSearch.trim()).single();
-    if (!data) { setFriendSearchError("유저를 찾을 수 없어요."); return; }
-    if (data.username === MY_USER) { setFriendSearchError("나 자신은 추가할 수 없어요."); return; }
-    setFriendSearchResult(data);
-  };
-
-  const addFriend = async () => {
-    if (!friendSearchResult) return;
-    // 기존 채팅방 확인
-    const { data: existing } = await supabase.from("chat_rooms").select("*")
-      .or(`and(user1_id.eq.${MY_USER},user2_id.eq.${friendSearchResult.id}),and(user1_id.eq.${friendSearchResult.id},user2_id.eq.${MY_USER})`);
-    let roomId = existing?.[0]?.id;
-    if (!roomId) {
-      roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: friendSearchResult.id });
-    }
-    const newRoom: ChatRoom = { id: roomId, friendId: friendSearchResult.id, friendName: friendSearchResult.username, lastMessage: "", lastTime: new Date().toISOString() };
-    setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
-    setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null);
-    setActiveChatRoom(newRoom);
-  };
-
-  const openChat = async (room: ChatRoom) => {
-    setActiveChatRoom(room);
-    const { data } = await supabase.from("messages").select("*").eq("room_id", room.id).order("created_at", { ascending: true });
-    if (data) setMessages(data.map((m: any) => ({ id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at })));
-    // Realtime 구독
-    supabase.channel(`room-${room.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, (payload: any) => {
-      const m = payload.new;
-      setMessages(prev => [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at }]);
-    }).subscribe();
-  };
-
-  const sendMessage = async () => {
-    if (!newMessage.trim() || !activeChatRoom) return;
-    const msg = { id: Date.now().toString(), room_id: activeChatRoom.id, sender_id: MY_USER, text: newMessage.trim() };
-    await supabase.from("messages").insert(msg);
-    setNewMessage("");
-  };
-
-  // 저장 목록 장소 클릭 → 지도에서 보기
-  const handleSavedPlaceClick = (place: Place) => {
-    setSelectedMapPlace(place);
-    setActiveTab("map");
-    if (mapRef.current && geocoderRef.current) {
-      geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
-        if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
-        mapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x));
-        mapRef.current.setLevel(4);
-        const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
-        new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
-          const base = (st === window.kakao.maps.services.Status.OK && data[0]) ? data[0] : { place_name: place.name, category_name: place.category, road_address_name: place.address, phone: "", place_url: "" };
-          setSelectedPlace({ ...base, _feedPosts: relatedPosts });
-          setMapExpanded(true);
-        });
-      });
-    }
-  };
-
   const handleAddFromInstagram = async () => {
     if (!canSubmit) return;
     setIsSubmitting(true); setStatus("Instagram 링크를 분석해서 장소를 추출하는 중..."); setError("");
@@ -385,9 +301,7 @@ export default function HomePage() {
   const initMap = (places: Place[], posts: FeedPost[]) => {
     if (!mapContainerRef.current || mapRef.current) return;
     const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
-    const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
     mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 });
-    mapRef.current.setMapTypeId && mapRef.current.setMapTypeId(mapTypeId);
     mapRef.current.setMapTypeId && mapRef.current.setMapTypeId(mapTypeId);
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current);
