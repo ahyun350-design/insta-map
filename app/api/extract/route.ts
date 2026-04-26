@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ApifyClient } from "apify-client";
 
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 export const runtime = "nodejs";
@@ -60,50 +61,25 @@ async function searchKakaoPlace(name: string, hint: string): Promise<{ address: 
   } catch { return null; }
 }
 
-// fetch로 Instagram HTML에서 캡션 추출 시도
 async function scrapeInstagramCaption(url: string): Promise<string> {
-  const headers = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-  };
+  const token = process.env.APIFY_API_TOKEN;
+  if (!token) throw new Error("APIFY_API_TOKEN이 설정되지 않았습니다.");
 
-  const res = await fetch(url, { headers, redirect: "follow" });
-  if (!res.ok) throw new Error(`Instagram 페이지 로딩 실패: ${res.status}`);
-  const html = await res.text();
+  const client = new ApifyClient({ token });
 
-  // 1. og:description 메타태그에서 추출
-  const ogMatch = html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]*)"[^>]*>/i)
-    || html.match(/<meta[^>]*content="([^"]*)"[^>]*property="og:description"[^>]*>/i);
-  if (ogMatch?.[1]) {
-    const decoded = ogMatch[1].replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
-    if (decoded.length > 5) return decoded;
-  }
+  const run = await client.actor("apify/instagram-post-scraper").call({
+    directUrls: [url],
+    resultsType: "posts",
+    resultsLimit: 1,
+  });
 
-  // 2. JSON-LD에서 추출
-  const jsonLdMatch = html.match(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i);
-  if (jsonLdMatch?.[1]) {
-    try {
-      const parsed = JSON.parse(jsonLdMatch[1]);
-      const caption = parsed?.caption ?? parsed?.articleBody ?? parsed?.description ?? "";
-      if (typeof caption === "string" && caption.trim().length > 5) return caption.trim();
-    } catch { }
-  }
+  const { items } = await client.dataset(run.defaultDatasetId).listItems();
+  if (!items?.length) throw new Error("Instagram 게시물을 가져올 수 없습니다.");
 
-  // 3. window._sharedData에서 추출
-  const sharedDataMatch = html.match(/window\._sharedData\s*=\s*({[\s\S]+?});\s*<\/script>/);
-  if (sharedDataMatch?.[1]) {
-    try {
-      const data = JSON.parse(sharedDataMatch[1]);
-      const edges = data?.entry_data?.PostPage?.[0]?.graphql?.shortcode_media?.edge_media_to_caption?.edges;
-      if (edges?.[0]?.node?.text) return edges[0].node.text;
-    } catch { }
-  }
-
-  throw new Error("Instagram 캡션을 가져올 수 없습니다. Instagram이 자동 접근을 차단했을 수 있습니다.");
+  const post = items[0] as any;
+  const caption = post?.caption ?? post?.text ?? post?.description ?? "";
+  if (!caption) throw new Error("캡션을 찾을 수 없습니다.");
+  return String(caption).trim();
 }
 
 async function extractPlacesByClaude(caption: string): Promise<RawPlace[]> {
