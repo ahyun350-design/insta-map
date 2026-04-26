@@ -209,8 +209,7 @@ export default function HomePage() {
 
   // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
   const initMap = () => {
-    if (!mapContainerRef.current) return;
-    if (mapRef.current) { mapRef.current.relayout(); return; }
+    if (!mapContainerRef.current || mapRef.current) return;
     mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 });
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current);
