@@ -1,0 +1,1 @@
+type ClaudeCategory = "맛집" | "카페" | "쇼핑";

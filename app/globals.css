@@ -1,0 +1,492 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500&display=swap');
+
+:root {
+  color-scheme: light;
+  --navy: #1a2a7a;
+  --navy-light: #c0c8e8;
+  --black: #0a0a0a;
+  --gray-100: #f9f9f9;
+  --gray-200: #f0f0f0;
+  --gray-300: #e5e5e5;
+  --gray-400: #ccc;
+  --gray-500: #aaa;
+  --gray-600: #888;
+  --border: #efefef;
+  --white: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f5f5f5;
+  color: var(--black);
+}
+
+/* ── 레이아웃 ── */
+.mobileRoot {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px 0;
+}
+
+.phoneFrame {
+  width: min(420px, 100vw);
+  height: min(860px, 100vh);
+  background: var(--white);
+  border-radius: 34px;
+  border: 1px solid var(--gray-300);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 헤더 ── */
+.appHeader {
+  height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 0.5px solid var(--border);
+  background: var(--white);
+}
+
+.appTitle {
+  margin: 0;
+  font-family: 'Playfair Display', serif;
+  font-size: 26px;
+  font-weight: 400;
+  color: var(--navy);
+  letter-spacing: 0.5px;
+}
+
+.headerAction {
+  width: 34px;
+  height: 34px;
+  border: 1.5px dashed var(--gray-400);
+  border-radius: 50%;
+  background: transparent;
+  font-size: 18px;
+  color: var(--gray-500);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: border-color 0.2s;
+}
+
+.headerAction:hover {
+  border-color: var(--navy);
+  color: var(--navy);
+}
+
+/* ── 콘텐츠 ── */
+.appContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 90px;
+  background: var(--white);
+}
+
+.screen {
+  display: grid;
+  gap: 14px;
+}
+
+.screenTitle {
+  margin: 0 0 4px;
+  font-family: 'Playfair Display', serif;
+  font-size: 18px;
+  font-weight: 400;
+  color: var(--navy);
+  letter-spacing: 0.3px;
+}
+
+/* ── 피드 카드 ── */
+.feedCard {
+  background: var(--white);
+  border: 0.5px solid var(--gray-300);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.feedTop {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: var(--white);
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: 'Playfair Display', serif;
+}
+
+.feedUser {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--black);
+}
+
+.feedMeta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--gray-500);
+  letter-spacing: 0.3px;
+}
+
+.feedImage {
+  margin-top: 12px;
+  height: 160px;
+  border-radius: 12px;
+  background: var(--gray-100);
+  border: 0.5px solid var(--gray-300);
+  color: var(--gray-500);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+
+.feedText {
+  margin: 12px 0 6px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #333;
+}
+
+.feedLike {
+  margin: 0;
+  font-size: 12px;
+  color: var(--gray-500);
+  letter-spacing: 0.3px;
+}
+
+/* ── 채팅 ── */
+.chatItem {
+  background: var(--white);
+  border: 0.5px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chatBody {
+  flex: 1;
+}
+
+.chatName {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--black);
+}
+
+.chatPreview {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--gray-500);
+}
+
+.chatTime {
+  font-size: 11px;
+  color: var(--gray-400);
+  letter-spacing: 0.3px;
+}
+
+/* ── 지도 입력 ── */
+.mapInputWrap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.mapInput {
+  border: 0.5px solid var(--gray-300);
+  background: var(--gray-100);
+  padding: 13px 14px;
+  font-size: 13px;
+  font-family: 'Inter', sans-serif;
+  color: var(--black);
+  outline: none;
+  border-radius: 2px;
+  transition: border-color 0.2s;
+}
+
+.mapInput::placeholder {
+  color: var(--gray-400);
+}
+
+.mapInput:focus {
+  border-color: var(--navy);
+}
+
+.primaryButton {
+  border: none;
+  background: var(--navy);
+  color: var(--white);
+  padding: 0 20px;
+  font-family: 'Playfair Display', serif;
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: opacity 0.2s;
+  white-space: nowrap;
+}
+
+.primaryButton:hover {
+  opacity: 0.85;
+}
+
+.primaryButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 힌트 / 에러 텍스트 ── */
+.hintText {
+  margin: 0;
+  font-size: 12px;
+  color: var(--navy);
+  letter-spacing: 0.3px;
+  opacity: 0.7;
+}
+
+.emptyText {
+  margin: 0;
+  font-size: 12px;
+  color: var(--gray-500);
+  letter-spacing: 0.3px;
+}
+
+/* ── 카카오 지도 ── */
+.kakaoMap {
+  height: 220px;
+  border: 0.5px solid var(--gray-300);
+  overflow: hidden;
+}
+
+/* ── 미니 리스트 ── */
+.miniList {
+  display: grid;
+  gap: 0;
+}
+
+.miniItem {
+  border-bottom: 0.5px solid var(--border);
+  padding: 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.miniItem:last-child {
+  border-bottom: none;
+}
+
+.miniName {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--black);
+  font-family: 'Playfair Display', serif;
+}
+
+.miniMeta {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--gray-600);
+  letter-spacing: 0.2px;
+}
+
+/* ── 도트 ── */
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot.restaurant { background: #e85555; }
+.dot.cafe       { background: var(--navy); }
+.dot.shopping   { background: #888; }
+
+/* ── 저장 탭 ── */
+.savedItem {
+  border-bottom: 0.5px solid var(--border);
+  padding: 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: transparent;
+}
+
+.savedBody {
+  flex: 1;
+}
+
+.savedName {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--black);
+  font-family: 'Playfair Display', serif;
+}
+
+.savedMeta {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--gray-600);
+  letter-spacing: 0.2px;
+}
+
+.ghostButton {
+  border: 0.5px solid var(--navy-light);
+  background: transparent;
+  color: var(--navy);
+  border-radius: 2px;
+  padding: 6px 12px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.ghostButton:hover {
+  background: var(--navy);
+  color: var(--white);
+}
+
+/* ── 프로필 ── */
+.profileCard {
+  border-bottom: 0.5px solid var(--border);
+  padding: 0 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: transparent;
+}
+
+.profileAvatar {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: var(--white);
+  display: grid;
+  place-items: center;
+  font-family: 'Playfair Display', serif;
+  font-size: 22px;
+  font-weight: 400;
+}
+
+.profileName {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--black);
+}
+
+.profileHandle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--gray-500);
+  letter-spacing: 0.3px;
+}
+
+/* ── 설정 리스트 ── */
+.settingList {
+  display: grid;
+  gap: 0;
+}
+
+.settingItem {
+  border: none;
+  border-bottom: 0.5px solid var(--border);
+  background: transparent;
+  padding: 16px 0;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--black);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  letter-spacing: 0.2px;
+  transition: color 0.2s;
+}
+
+.settingItem::after {
+  content: '›';
+  font-size: 18px;
+  color: var(--gray-400);
+}
+
+.settingItem:hover {
+  color: var(--navy);
+}
+
+/* ── 탭바 ── */
+.tabBar {
+  position: sticky;
+  bottom: 0;
+  height: 70px;
+  border-top: 0.5px solid var(--border);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(12px);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.tabItem {
+  border: 0;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  color: var(--gray-400);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.2s;
+  font-family: 'Inter', sans-serif;
+}
+
+.tabIcon {
+  font-size: 16px;
+}
+
+.tabItem.active {
+  color: var(--navy);
+  font-weight: 500;
+}
+
+/* ── 반응형 ── */
+@media (max-width: 440px) {
+  .phoneFrame {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+    border: 0;
+    box-shadow: none;
+  }
+}
