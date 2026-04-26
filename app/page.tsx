@@ -905,7 +905,7 @@ export default function HomePage() {
               <div className="miniList">
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).map((place) => (
                   <article key={place.id} className="miniItem">
-                    <span className={`dot ${CATEGORY_CLASS[place.category]}`} />
+                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[place.category], flexShrink: 0, display: "inline-block" }} />
                     <div style={{ flex: 1 }}><p className="miniName">{place.name}</p><p className="miniMeta">{place.address} · {place.category}</p></div>
                     <button onClick={() => deletePlace(place.id)} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
                   </article>
@@ -915,7 +915,35 @@ export default function HomePage() {
               </div>
           </div>
 
-          {activeTab === "saved" && (<div className="screen"><p className="screenTitle">저장한 장소</p>{savedPlaces.map((place) => (<article key={place.id} className="savedItem" style={{ cursor: "pointer" }} onClick={() => handleSavedPlaceClick(place)}><span className={`dot ${CATEGORY_CLASS[place.category]}`} /><div className="savedBody"><p className="savedName">{place.name}</p><p className="savedMeta">{place.address} · {place.category}</p></div><button className="ghostButton" type="button" onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }}>삭제</button></article>))}{savedPlaces.length === 0 && <p className="emptyText">저장된 장소가 아직 없어요.</p>}</div>)}
+          {activeTab === "saved" && (
+  <div className="screen">
+    <p className="screenTitle">저장한 장소</p>
+    {savedPlaces.length === 0 && <p className="emptyText">저장된 장소가 아직 없어요.</p>}
+    {(["맛집", "카페", "쇼핑", "숙소"] as Category[]).map(cat => {
+      const places = savedPlaces.filter(p => p.category === cat);
+      if (places.length === 0) return null;
+      return (
+        <div key={cat} style={{ marginBottom: "24px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", padding: "0 4px" }}>
+            <span style={{ fontSize: "16px" }}>{CATEGORY_PIN[cat].emoji}</span>
+            <span style={{ fontSize: "12px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
+            <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{places.length}</span>
+          </div>
+          {places.map(place => (
+            <article key={place.id} className="savedItem" style={{ cursor: "pointer", borderLeft: `3px solid ${CATEGORY_COLORS[cat]}`, paddingLeft: "12px", marginBottom: "2px" }} onClick={() => handleSavedPlaceClick(place)}>
+              <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[cat], flexShrink: 0, display: "inline-block" }} />
+              <div className="savedBody">
+                <p className="savedName">{place.name}</p>
+                <p className="savedMeta">{place.address}</p>
+              </div>
+              <button className="ghostButton" type="button" onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }}>삭제</button>
+            </article>
+          ))}
+        </div>
+      );
+    })}
+  </div>
+)}
 
           {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">A</div><div><p className="profileName">ahyun</p><p className="profileHandle">@ahyun_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem">프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem">로그아웃</button></div></div>)}
         </section>
