@@ -13,6 +13,10 @@ type FeedPost = {
   category: Category; comment: string; images: string[]; createdAt: string;
   archived?: boolean; likes: string[]; comments: Comment[];
 };
+type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; };
+type Message = { id: string; senderId: string; text: string; createdAt: string; };
+type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; };
+type Message = { id: string; senderId: string; text: string; createdAt: string; };
 
 declare global { interface Window { kakao: any; } }
 
@@ -78,6 +82,24 @@ export default function HomePage() {
   const [postComment, setPostComment] = useState(""); const [postSearchQuery, setPostSearchQuery] = useState("");
   const [postSearchResults, setPostSearchResults] = useState<any[]>([]); const [postImages, setPostImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [friendSearch, setFriendSearch] = useState("");
+  const [friendSearchResult, setFriendSearchResult] = useState<{id: string; username: string} | null>(null);
+  const [friendSearchError, setFriendSearchError] = useState("");
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [friendSearch, setFriendSearch] = useState("");
+  const [friendSearchResult, setFriendSearchResult] = useState<{id: string; username: string} | null>(null);
+  const [friendSearchError, setFriendSearchError] = useState("");
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
   const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
 
@@ -108,10 +130,34 @@ export default function HomePage() {
           comments: (p.comments ?? []).map((c: any) => ({ id: c.id, user: c.user_name, text: c.text, createdAt: c.created_at })),
         })));
       }
+      // 채팅방 로드
+      const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`);
+      if (roomsData) {
+        const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
+          const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
+          const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
+          return { id: r.id, friendId, friendName: friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at };
+        }));
+        setChatRooms(rooms);
+      }
+      // 채팅방 로드
+      const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`);
+      if (roomsData) {
+        const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
+          const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
+          const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
+          return { id: r.id, friendId, friendName: friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at };
+        }));
+        setChatRooms(rooms);
+      }
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    loadData();
+    // 유저 자동 등록
+    supabase.from("users").upsert({ id: MY_USER, username: MY_USER }).then(() => {});
+  }, []);
 
   const addPlace = async (place: Place) => {
     await supabase.from("places").upsert({ id: place.id, name: place.name, address: place.address, category: place.category });
@@ -159,6 +205,132 @@ export default function HomePage() {
   const deleteComment = async (postId: string, commentId: string) => {
     await supabase.from("comments").delete().eq("id", commentId);
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: p.comments.filter(c => c.id !== commentId) } : p));
+  };
+
+  const searchFriend = async () => {
+    if (!friendSearch.trim()) return;
+    setFriendSearchError("");
+    setFriendSearchResult(null);
+    const { data } = await supabase.from("users").select("*").eq("username", friendSearch.trim()).single();
+    if (!data) { setFriendSearchError("유저를 찾을 수 없어요."); return; }
+    if (data.username === MY_USER) { setFriendSearchError("나 자신은 추가할 수 없어요."); return; }
+    setFriendSearchResult(data);
+  };
+
+  const addFriend = async () => {
+    if (!friendSearchResult) return;
+    // 기존 채팅방 확인
+    const { data: existing } = await supabase.from("chat_rooms").select("*")
+      .or(`and(user1_id.eq.${MY_USER},user2_id.eq.${friendSearchResult.id}),and(user1_id.eq.${friendSearchResult.id},user2_id.eq.${MY_USER})`);
+    let roomId = existing?.[0]?.id;
+    if (!roomId) {
+      roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: friendSearchResult.id });
+    }
+    const newRoom: ChatRoom = { id: roomId, friendId: friendSearchResult.id, friendName: friendSearchResult.username, lastMessage: "", lastTime: new Date().toISOString() };
+    setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
+    setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null);
+    setActiveChatRoom(newRoom);
+  };
+
+  const openChat = async (room: ChatRoom) => {
+    setActiveChatRoom(room);
+    const { data } = await supabase.from("messages").select("*").eq("room_id", room.id).order("created_at", { ascending: true });
+    if (data) setMessages(data.map((m: any) => ({ id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at })));
+    // Realtime 구독
+    supabase.channel(`room-${room.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, (payload: any) => {
+      const m = payload.new;
+      setMessages(prev => [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at }]);
+    }).subscribe();
+  };
+
+  const sendMessage = async () => {
+    if (!newMessage.trim() || !activeChatRoom) return;
+    const msg = { id: Date.now().toString(), room_id: activeChatRoom.id, sender_id: MY_USER, text: newMessage.trim() };
+    await supabase.from("messages").insert(msg);
+    setNewMessage("");
+  };
+
+  // 저장 목록 장소 클릭 → 지도에서 보기
+  const handleSavedPlaceClick = (place: Place) => {
+    setSelectedMapPlace(place);
+    setActiveTab("map");
+    if (mapRef.current && geocoderRef.current) {
+      geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
+        if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
+        mapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x));
+        mapRef.current.setLevel(4);
+        const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
+        new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
+          const base = (st === window.kakao.maps.services.Status.OK && data[0]) ? data[0] : { place_name: place.name, category_name: place.category, road_address_name: place.address, phone: "", place_url: "" };
+          setSelectedPlace({ ...base, _feedPosts: relatedPosts });
+          setMapExpanded(true);
+        });
+      });
+    }
+  };
+
+  const searchFriend = async () => {
+    if (!friendSearch.trim()) return;
+    setFriendSearchError("");
+    setFriendSearchResult(null);
+    const { data } = await supabase.from("users").select("*").eq("username", friendSearch.trim()).single();
+    if (!data) { setFriendSearchError("유저를 찾을 수 없어요."); return; }
+    if (data.username === MY_USER) { setFriendSearchError("나 자신은 추가할 수 없어요."); return; }
+    setFriendSearchResult(data);
+  };
+
+  const addFriend = async () => {
+    if (!friendSearchResult) return;
+    // 기존 채팅방 확인
+    const { data: existing } = await supabase.from("chat_rooms").select("*")
+      .or(`and(user1_id.eq.${MY_USER},user2_id.eq.${friendSearchResult.id}),and(user1_id.eq.${friendSearchResult.id},user2_id.eq.${MY_USER})`);
+    let roomId = existing?.[0]?.id;
+    if (!roomId) {
+      roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: friendSearchResult.id });
+    }
+    const newRoom: ChatRoom = { id: roomId, friendId: friendSearchResult.id, friendName: friendSearchResult.username, lastMessage: "", lastTime: new Date().toISOString() };
+    setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
+    setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null);
+    setActiveChatRoom(newRoom);
+  };
+
+  const openChat = async (room: ChatRoom) => {
+    setActiveChatRoom(room);
+    const { data } = await supabase.from("messages").select("*").eq("room_id", room.id).order("created_at", { ascending: true });
+    if (data) setMessages(data.map((m: any) => ({ id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at })));
+    // Realtime 구독
+    supabase.channel(`room-${room.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, (payload: any) => {
+      const m = payload.new;
+      setMessages(prev => [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at }]);
+    }).subscribe();
+  };
+
+  const sendMessage = async () => {
+    if (!newMessage.trim() || !activeChatRoom) return;
+    const msg = { id: Date.now().toString(), room_id: activeChatRoom.id, sender_id: MY_USER, text: newMessage.trim() };
+    await supabase.from("messages").insert(msg);
+    setNewMessage("");
+  };
+
+  // 저장 목록 장소 클릭 → 지도에서 보기
+  const handleSavedPlaceClick = (place: Place) => {
+    setSelectedMapPlace(place);
+    setActiveTab("map");
+    if (mapRef.current && geocoderRef.current) {
+      geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
+        if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
+        mapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x));
+        mapRef.current.setLevel(4);
+        const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
+        new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
+          const base = (st === window.kakao.maps.services.Status.OK && data[0]) ? data[0] : { place_name: place.name, category_name: place.category, road_address_name: place.address, phone: "", place_url: "" };
+          setSelectedPlace({ ...base, _feedPosts: relatedPosts });
+          setMapExpanded(true);
+        });
+      });
+    }
   };
 
   const handleAddFromInstagram = async () => {
@@ -212,7 +384,11 @@ export default function HomePage() {
   // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
   const initMap = (places: Place[], posts: FeedPost[]) => {
     if (!mapContainerRef.current || mapRef.current) return;
+    const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
+    const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
     mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 });
+    mapRef.current.setMapTypeId && mapRef.current.setMapTypeId(mapTypeId);
+    mapRef.current.setMapTypeId && mapRef.current.setMapTypeId(mapTypeId);
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current);
     setKakaoStatus("ready");
@@ -523,7 +699,7 @@ export default function HomePage() {
       <section className="phoneFrame">
         <header className="appHeader">
           <h1 className="appTitle">InstaMap</h1>
-          <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>
+          {activeTab === "home" && <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>}
         </header>
         <section className="appContent">
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
@@ -630,7 +806,65 @@ export default function HomePage() {
             </div>
           )}
 
-          {activeTab === "messages" && (<div className="screen"><p className="screenTitle">메시지</p>{CHAT_LIST.map((chat) => (<article key={chat.id} className="chatItem"><div className="avatar">{chat.name.slice(0, 1)}</div><div className="chatBody"><p className="chatName">{chat.name}</p><p className="chatPreview">{chat.preview}</p></div><span className="chatTime">{chat.time}</span></article>))}</div>)}
+          {activeTab === "messages" && (
+  <div className="screen">
+    {activeChatRoom ? (
+      <>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0 0 14px", borderBottom: "0.5px solid #f0f0f0", marginBottom: "12px" }}>
+          <button onClick={() => setActiveChatRoom(null)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+          <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{activeChatRoom.friendName}</span>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", paddingBottom: "70px" }}>
+          {messages.map(m => (
+            <div key={m.id} style={{ display: "flex", justifyContent: m.senderId === MY_USER ? "flex-end" : "flex-start" }}>
+              <div style={{ maxWidth: "70%", padding: "8px 12px", borderRadius: m.senderId === MY_USER ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: m.senderId === MY_USER ? "#1a2a7a" : "#f0f0f5", color: m.senderId === MY_USER ? "#fff" : "#333", fontSize: "13px", lineHeight: 1.5 }}>{m.text}</div>
+            </div>
+          ))}
+          {messages.length === 0 && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", marginTop: "40px" }}>첫 메시지를 보내보세요 💬</p>}
+        </div>
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "12px 16px", background: "#fff", borderTop: "0.5px solid #efefef", display: "flex", gap: "8px" }}>
+          <input className="mapInput" placeholder="메시지 입력..." value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMessage()} style={{ flex: 1 }} />
+          <button className="primaryButton" onClick={sendMessage} disabled={!newMessage.trim()} style={{ padding: "0 16px", opacity: newMessage.trim() ? 1 : 0.4 }}>전송</button>
+        </div>
+      </>
+    ) : (
+      <>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <p className="screenTitle" style={{ margin: 0 }}>메시지</p>
+          <button onClick={() => setShowAddFriend(true)} style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "20px", padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}>+ 친구 추가</button>
+        </div>
+        {showAddFriend && (
+          <div style={{ background: "#f8f8fc", borderRadius: "12px", padding: "16px", marginBottom: "16px" }}>
+            <p style={{ margin: "0 0 10px", fontSize: "12px", color: "#1a2a7a", fontWeight: 600 }}>유저명으로 친구 찾기</p>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input className="mapInput" placeholder="유저명 입력" value={friendSearch} onChange={e => setFriendSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchFriend()} style={{ flex: 1 }} />
+              <button className="primaryButton" onClick={searchFriend} style={{ padding: "0 14px" }}>검색</button>
+            </div>
+            {friendSearchError && <p style={{ color: "#e07070", fontSize: "11px", marginTop: "6px" }}>{friendSearchError}</p>}
+            {friendSearchResult && (
+              <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: "#fff", borderRadius: "8px" }}>
+                <div className="avatar">{friendSearchResult.username.slice(0,1).toUpperCase()}</div>
+                <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{friendSearchResult.username}</span>
+                <button className="primaryButton" onClick={addFriend} style={{ padding: "6px 14px", fontSize: "12px" }}>채팅 시작</button>
+              </div>
+            )}
+            <button onClick={() => { setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null); setFriendSearchError(""); }} style={{ marginTop: "10px", border: "none", background: "transparent", color: "#bbb", fontSize: "12px", cursor: "pointer" }}>취소</button>
+          </div>
+        )}
+        {chatRooms.length === 0 && !showAddFriend && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", padding: "40px 0" }}>아직 채팅이 없어요. 친구를 추가해보세요!</p>}
+        {chatRooms.map(room => (
+          <article key={room.id} className="chatItem" onClick={() => openChat(room)} style={{ cursor: "pointer" }}>
+            <div className="avatar">{room.friendName.slice(0,1).toUpperCase()}</div>
+            <div className="chatBody"><p className="chatName">{room.friendName}</p><p className="chatPreview">{room.lastMessage || "대화를 시작해보세요"}</p></div>
+            <span className="chatTime">{room.lastTime ? timeAgo(room.lastTime) : ""}</span>
+          </article>
+        ))}
+      </>
+    )}
+  </div>
+)}
 
           <div className="screen" style={{ display: activeTab === "map" ? "flex" : "none", flexDirection: "column" }}>
               <p className="screenTitle">지도</p>
@@ -673,7 +907,7 @@ export default function HomePage() {
                   <article key={place.id} className="miniItem">
                     <span className={`dot ${CATEGORY_CLASS[place.category]}`} />
                     <div style={{ flex: 1 }}><p className="miniName">{place.name}</p><p className="miniMeta">{place.address} · {place.category}</p></div>
-                    <button onClick={() => hideFromMap(place.id)} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
+                    <button onClick={() => deletePlace(place.id)} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
                   </article>
                 ))}
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={() => setHiddenIds(new Set())} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
@@ -681,7 +915,7 @@ export default function HomePage() {
               </div>
           </div>
 
-          {activeTab === "saved" && (<div className="screen"><p className="screenTitle">저장한 장소</p>{savedPlaces.map((place) => (<article key={place.id} className="savedItem"><span className={`dot ${CATEGORY_CLASS[place.category]}`} /><div className="savedBody"><p className="savedName">{place.name}</p><p className="savedMeta">{place.address} · {place.category}</p></div><button className="ghostButton" type="button" onClick={() => deletePlace(place.id)}>삭제</button></article>))}{savedPlaces.length === 0 && <p className="emptyText">저장된 장소가 아직 없어요.</p>}</div>)}
+          {activeTab === "saved" && (<div className="screen"><p className="screenTitle">저장한 장소</p>{savedPlaces.map((place) => (<article key={place.id} className="savedItem" style={{ cursor: "pointer" }} onClick={() => handleSavedPlaceClick(place)}><span className={`dot ${CATEGORY_CLASS[place.category]}`} /><div className="savedBody"><p className="savedName">{place.name}</p><p className="savedMeta">{place.address} · {place.category}</p></div><button className="ghostButton" type="button" onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }}>삭제</button></article>))}{savedPlaces.length === 0 && <p className="emptyText">저장된 장소가 아직 없어요.</p>}</div>)}
 
           {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">A</div><div><p className="profileName">ahyun</p><p className="profileHandle">@ahyun_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem">프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem">로그아웃</button></div></div>)}
         </section>
