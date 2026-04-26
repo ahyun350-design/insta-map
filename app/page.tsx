@@ -307,6 +307,24 @@ export default function HomePage() {
     });
   };
 
+  // 게시물에서 바로 팔로우
+  const followUser = async (username: string) => {
+    if (username === MY_USER) return;
+    // 이미 팔로우 중이면 무시
+    if (chatRooms.some(r => r.friendName === username)) return;
+    const { data } = await supabase.from("users").select("*").eq("username", username).single();
+    if (!data) { alert("유저를 찾을 수 없어요."); return; }
+    const { data: existing } = await supabase.from("chat_rooms").select("*")
+      .or(`and(user1_id.eq.${MY_USER},user2_id.eq.${data.id}),and(user1_id.eq.${data.id},user2_id.eq.${MY_USER})`);
+    let roomId = existing?.[0]?.id;
+    if (!roomId) {
+      roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: data.id });
+    }
+    const newRoom: ChatRoom = { id: roomId, friendId: data.id, friendName: data.username, lastMessage: "", lastTime: new Date().toISOString(), unreadCount: 0 };
+    setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
+  };
+
   const handleAddFromInstagram = async () => {
     if (!canSubmit) return;
     setIsSubmitting(true); setStatus("Instagram 링크를 분석해서 장소를 추출하는 중..."); setError("");
@@ -820,6 +838,16 @@ export default function HomePage() {
                   <div className="feedTop" onClick={(e) => e.stopPropagation()}>
                     <div className="avatar">{post.user.slice(0, 1).toUpperCase()}</div>
                     <div style={{ flex: 1 }}><p className="feedUser">{post.user}</p><p className="feedMeta">{timeAgo(post.createdAt)}</p></div>
+                    {post.user !== MY_USER && !chatRooms.some(r => r.friendName === post.user) && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); followUser(post.user); }}
+                        style={{ border: "1px solid #1a2a7a", background: "#fff", color: "#1a2a7a", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
+                      >+ 팔로우</button>
+                    )}
+                    {post.user !== MY_USER && chatRooms.some(r => r.friendName === post.user) && (
+                      <span style={{ fontSize: "10px", color: "#aaa", marginRight: "8px" }}>팔로잉</span>
+                    )}
                     {post.user === MY_USER && (
                       <div style={{ position: "relative" }}>
                         <button type="button" onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === post.id ? null : post.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px 6px", display: "flex", flexDirection: "column", gap: "3px", alignItems: "center" }}>
