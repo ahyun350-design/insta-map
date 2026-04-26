@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import ApifyClient from "apify-client";
 
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 export const runtime = "nodejs";
@@ -65,18 +64,41 @@ async function scrapeInstagramCaption(url: string): Promise<string> {
   const token = process.env.APIFY_API_TOKEN;
   if (!token) throw new Error("APIFY_API_TOKEN이 설정되지 않았습니다.");
 
-  const client = new ApifyClient({ token });
-
-  const run = await client.actor("apify/instagram-post-scraper").call({
-    directUrls: [url],
-    resultsType: "posts",
-    resultsLimit: 1,
+  // Apify REST API로 직접 호출
+  const runRes = await fetch("https://api.apify.com/v2/acts/apify~instagram-post-scraper/runs?token=" + token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      directUrls: [url],
+      resultsType: "posts",
+      resultsLimit: 1,
+    }),
   });
 
-  const { items } = await client.dataset(run.defaultDatasetId).listItems();
+  if (!runRes.ok) throw new Error("Apify 실행 실패: " + await runRes.text());
+  const runData = await runRes.json() as { data?: { id?: string; defaultDatasetId?: string } };
+  const runId = runData.data?.id;
+  if (!runId) throw new Error("Apify run ID를 가져올 수 없습니다.");
+
+  // 완료될 때까지 폴링 (최대 60초)
+  let datasetId = runData.data?.defaultDatasetId;
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const statusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
+    const statusData = await statusRes.json() as { data?: { status?: string; defaultDatasetId?: string } };
+    const status = statusData.data?.status;
+    datasetId = statusData.data?.defaultDatasetId ?? datasetId;
+    if (status === "SUCCEEDED") break;
+    if (status === "FAILED" || status === "ABORTED") throw new Error("Apify 작업 실패");
+  }
+
+  if (!datasetId) throw new Error("Dataset ID를 가져올 수 없습니다.");
+
+  const itemsRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}`);
+  const items = await itemsRes.json() as any[];
   if (!items?.length) throw new Error("Instagram 게시물을 가져올 수 없습니다.");
 
-  const post = items[0] as any;
+  const post = items[0];
   const caption = post?.caption ?? post?.text ?? post?.description ?? "";
   if (!caption) throw new Error("캡션을 찾을 수 없습니다.");
   return String(caption).trim();
@@ -122,14 +144,10 @@ export async function POST(req: Request) {
     const body = await req.json() as { instagramUrl?: string };
     const instagramUrl = body.instagramUrl?.trim();
 
-    if (!instagramUrl) {
-      return NextResponse.json({ error: "instagramUrl이 필요합니다." }, { status: 400 });
-    }
+    if (!instagramUrl) return NextResponse.json({ error: "instagramUrl이 필요합니다." }, { status: 400 });
 
     const validHost = /^https?:\/\/(www\.)?instagram\.com\/(p|reel|tv)\//i.test(instagramUrl);
-    if (!validHost) {
-      return NextResponse.json({ error: "유효한 Instagram 게시물 URL을 입력해주세요." }, { status: 400 });
-    }
+    if (!validHost) return NextResponse.json({ error: "유효한 Instagram 게시물 URL을 입력해주세요." }, { status: 400 });
 
     const caption = await scrapeInstagramCaption(instagramUrl);
     const rawPlaces = await extractPlacesByClaude(caption);
