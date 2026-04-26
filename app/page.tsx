@@ -99,6 +99,7 @@ export default function HomePage() {
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
   const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
+  const [savedSearchQuery, setSavedSearchQuery] = useState("");
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
@@ -761,16 +762,16 @@ export default function HomePage() {
           )}
 
           {activeTab === "messages" && (
-  <div className="screen">
+  <div className="screen" style={activeChatRoom ? { display: "flex", flexDirection: "column", height: "100%", padding: 0 } : undefined}>
     {activeChatRoom ? (
       <>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0 0 14px", borderBottom: "0.5px solid #f0f0f0", marginBottom: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px 20px 14px", borderBottom: "0.5px solid #f0f0f0", flexShrink: 0 }}>
           <button onClick={() => setActiveChatRoom(null)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{activeChatRoom.friendName}</span>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", paddingBottom: "130px" }}>
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 20px" }}>
           {messages.map(m => (
             <div key={m.id} style={{ display: "flex", justifyContent: m.senderId === MY_USER ? "flex-end" : "flex-start" }}>
               <div style={{ maxWidth: "70%", padding: "8px 12px", borderRadius: m.senderId === MY_USER ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: m.senderId === MY_USER ? "#1a2a7a" : "#f0f0f5", color: m.senderId === MY_USER ? "#fff" : "#333", fontSize: "13px", lineHeight: 1.5 }}>{m.text}</div>
@@ -778,9 +779,9 @@ export default function HomePage() {
           ))}
           {messages.length === 0 && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", marginTop: "40px" }}>첫 메시지를 보내보세요 💬</p>}
         </div>
-        <div style={{ position: "absolute", bottom: "60px", left: 0, right: 0, padding: "10px 16px", background: "#fff", borderTop: "0.5px solid #efefef", display: "flex", gap: "8px", zIndex: 50 }}>
-          <input className="mapInput" placeholder="메시지 입력..." value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMessage()} style={{ flex: 1 }} />
-          <button className="primaryButton" onClick={sendMessage} disabled={!newMessage.trim()} style={{ padding: "0 16px", opacity: newMessage.trim() ? 1 : 0.4 }}>전송</button>
+        <div style={{ flexShrink: 0, padding: "10px 16px", background: "#fff", borderTop: "0.5px solid #efefef", display: "flex", gap: "8px" }}>
+          <input className="mapInput" placeholder="메시지 입력..." value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMessage()} style={{ flex: 1, minWidth: 0 }} />
+          <button className="primaryButton" onClick={sendMessage} disabled={!newMessage.trim()} style={{ padding: "0 16px", flexShrink: 0, opacity: newMessage.trim() ? 1 : 0.4 }}>전송</button>
         </div>
       </>
     ) : (
@@ -873,10 +874,36 @@ export default function HomePage() {
   <div className="screen">
     <p className="screenTitle">저장한 장소</p>
     {savedPlaces.length === 0 && <p className="emptyText">저장된 장소가 아직 없어요.</p>}
+    {savedPlaces.length > 0 && (
+      <div style={{ position: "relative", marginBottom: "16px" }}>
+        <input
+          className="mapInput"
+          placeholder="🔍 지역, 장소명으로 검색 (예: 마포구)"
+          value={savedSearchQuery}
+          onChange={(e) => setSavedSearchQuery(e.target.value)}
+          style={{ width: "100%", boxSizing: "border-box", paddingRight: savedSearchQuery ? "32px" : undefined }}
+        />
+        {savedSearchQuery && (
+          <button
+            type="button"
+            onClick={() => setSavedSearchQuery("")}
+            style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", color: "#bbb", fontSize: "16px", cursor: "pointer", padding: "0 4px" }}
+          >×</button>
+        )}
+      </div>
+    )}
     {savedPlaces.length > 0 && (() => {
+      // 검색어로 필터링
+      const q = savedSearchQuery.trim().toLowerCase();
+      const filtered = q
+        ? savedPlaces.filter(p => p.name.toLowerCase().includes(q) || p.address.toLowerCase().includes(q) || p.category.toLowerCase().includes(q))
+        : savedPlaces;
+      if (filtered.length === 0) {
+        return <p className="emptyText" style={{ textAlign: "center" }}>"{savedSearchQuery}"에 해당하는 장소가 없어요.</p>;
+      }
       // 1차: 지역별로 그룹
       const regions = new Map<string, Place[]>();
-      savedPlaces.forEach(p => {
+      filtered.forEach(p => {
         const region = extractRegion(p.address);
         if (!regions.has(region)) regions.set(region, []);
         regions.get(region)!.push(p);
