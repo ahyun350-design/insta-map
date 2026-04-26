@@ -99,7 +99,6 @@ export default function HomePage() {
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
   const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
-  const [savedCategoryFilter, setSavedCategoryFilter] = useState<"전체" | Category>("전체");
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
@@ -771,7 +770,7 @@ export default function HomePage() {
           </button>
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{activeChatRoom.friendName}</span>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", paddingBottom: "70px" }}>
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", paddingBottom: "130px" }}>
           {messages.map(m => (
             <div key={m.id} style={{ display: "flex", justifyContent: m.senderId === MY_USER ? "flex-end" : "flex-start" }}>
               <div style={{ maxWidth: "70%", padding: "8px 12px", borderRadius: m.senderId === MY_USER ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: m.senderId === MY_USER ? "#1a2a7a" : "#f0f0f5", color: m.senderId === MY_USER ? "#fff" : "#333", fontSize: "13px", lineHeight: 1.5 }}>{m.text}</div>
@@ -779,7 +778,7 @@ export default function HomePage() {
           ))}
           {messages.length === 0 && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", marginTop: "40px" }}>첫 메시지를 보내보세요 💬</p>}
         </div>
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "12px 16px", background: "#fff", borderTop: "0.5px solid #efefef", display: "flex", gap: "8px" }}>
+        <div style={{ position: "absolute", bottom: "60px", left: 0, right: 0, padding: "10px 16px", background: "#fff", borderTop: "0.5px solid #efefef", display: "flex", gap: "8px", zIndex: 50 }}>
           <input className="mapInput" placeholder="메시지 입력..." value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMessage()} style={{ flex: 1 }} />
           <button className="primaryButton" onClick={sendMessage} disabled={!newMessage.trim()} style={{ padding: "0 16px", opacity: newMessage.trim() ? 1 : 0.4 }}>전송</button>
         </div>
@@ -788,11 +787,11 @@ export default function HomePage() {
       <>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <p className="screenTitle" style={{ margin: 0 }}>메시지</p>
-          <button onClick={() => setShowAddFriend(true)} style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "20px", padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}>+ 친구 추가</button>
+          <button onClick={() => setShowAddFriend(true)} style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "20px", padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}>+ 팔로우</button>
         </div>
         {showAddFriend && (
           <div style={{ background: "#f8f8fc", borderRadius: "12px", padding: "16px", marginBottom: "16px" }}>
-            <p style={{ margin: "0 0 10px", fontSize: "12px", color: "#1a2a7a", fontWeight: 600 }}>유저명으로 친구 찾기</p>
+            <p style={{ margin: "0 0 10px", fontSize: "12px", color: "#1a2a7a", fontWeight: 600 }}>검색</p>
             <div style={{ display: "flex", gap: "8px" }}>
               <input className="mapInput" placeholder="유저명 입력" value={friendSearch} onChange={e => setFriendSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchFriend()} style={{ flex: 1 }} />
               <button className="primaryButton" onClick={searchFriend} style={{ padding: "0 14px" }}>검색</button>
@@ -802,7 +801,7 @@ export default function HomePage() {
               <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: "#fff", borderRadius: "8px" }}>
                 <div className="avatar">{friendSearchResult.username.slice(0,1).toUpperCase()}</div>
                 <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{friendSearchResult.username}</span>
-                <button className="primaryButton" onClick={addFriend} style={{ padding: "6px 14px", fontSize: "12px" }}>채팅 시작</button>
+                <button className="primaryButton" onClick={addFriend} style={{ padding: "6px 14px", fontSize: "12px" }}>팔로우</button>
               </div>
             )}
             <button onClick={() => { setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null); setFriendSearchError(""); }} style={{ marginTop: "10px", border: "none", background: "transparent", color: "#bbb", fontSize: "12px", cursor: "pointer" }}>취소</button>
@@ -874,69 +873,51 @@ export default function HomePage() {
   <div className="screen">
     <p className="screenTitle">저장한 장소</p>
     {savedPlaces.length === 0 && <p className="emptyText">저장된 장소가 아직 없어요.</p>}
-    {savedPlaces.length > 0 && (
-      <>
-        <div style={{ display: "flex", gap: "6px", marginBottom: "20px", flexWrap: "wrap" }}>
-          {(["전체", "맛집", "카페", "쇼핑", "숙소"] as const).map(cat => {
-            const isActive = savedCategoryFilter === cat;
-            const color = cat === "전체" ? "#1a2a7a" : CATEGORY_COLORS[cat as Category];
+    {savedPlaces.length > 0 && (() => {
+      // 1차: 지역별로 그룹
+      const regions = new Map<string, Place[]>();
+      savedPlaces.forEach(p => {
+        const region = extractRegion(p.address);
+        if (!regions.has(region)) regions.set(region, []);
+        regions.get(region)!.push(p);
+      });
+      const sorted = Array.from(regions.entries()).sort((a, b) => a[0].localeCompare(b[0], "ko"));
+      const CATEGORY_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소"];
+      return sorted.map(([region, regionPlaces]) => (
+        <div key={region} style={{ marginBottom: "28px" }}>
+          {/* 지역 헤더 */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", padding: "0 4px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
+            <span style={{ fontSize: "16px" }}>📍</span>
+            <span style={{ fontSize: "14px", fontWeight: 600, color: "#1a2a7a", letterSpacing: "0.5px" }}>{region}</span>
+            <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{regionPlaces.length}</span>
+          </div>
+          {/* 2차: 지역 안에서 카테고리별 소그룹 */}
+          {CATEGORY_ORDER.map(cat => {
+            const places = regionPlaces.filter(p => p.category === cat);
+            if (places.length === 0) return null;
             return (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setSavedCategoryFilter(cat)}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: "20px",
-                  border: `1px solid ${isActive ? color : "#eee"}`,
-                  background: isActive ? color : "transparent",
-                  color: isActive ? "#fff" : "#888",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                  fontFamily: "inherit"
-                }}
-              >
-                {cat === "전체" ? "전체" : `${CATEGORY_PIN[cat as Category].emoji} ${cat}`}
-              </button>
+              <div key={cat} style={{ marginBottom: "16px", paddingLeft: "8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "13px" }}>{CATEGORY_PIN[cat].emoji}</span>
+                  <span style={{ fontSize: "11px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
+                  <span style={{ fontSize: "10px", color: "#bbb" }}>{places.length}</span>
+                </div>
+                {places.map(place => (
+                  <article key={place.id} className="savedItem" style={{ cursor: "pointer", borderLeft: `3px solid ${CATEGORY_COLORS[cat]}`, paddingLeft: "12px", marginBottom: "2px" }} onClick={() => handleSavedPlaceClick(place)}>
+                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[cat], flexShrink: 0, display: "inline-block" }} />
+                    <div className="savedBody">
+                      <p className="savedName">{place.name}</p>
+                      <p className="savedMeta">{place.address}</p>
+                    </div>
+                    <button className="ghostButton" type="button" onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }}>삭제</button>
+                  </article>
+                ))}
+              </div>
             );
           })}
         </div>
-        {(() => {
-          const filtered = savedCategoryFilter === "전체"
-            ? savedPlaces
-            : savedPlaces.filter(p => p.category === savedCategoryFilter);
-          if (filtered.length === 0) {
-            return <p className="emptyText" style={{ textAlign: "center" }}>해당 카테고리에 저장된 장소가 없어요.</p>;
-          }
-          const regions = new Map<string, Place[]>();
-          filtered.forEach(p => {
-            const region = extractRegion(p.address);
-            if (!regions.has(region)) regions.set(region, []);
-            regions.get(region)!.push(p);
-          });
-          const sorted = Array.from(regions.entries()).sort((a, b) => a[0].localeCompare(b[0], "ko"));
-          return sorted.map(([region, places]) => (
-            <div key={region} style={{ marginBottom: "24px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", padding: "0 4px" }}>
-                <span style={{ fontSize: "14px" }}>📍</span>
-                <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a2a7a", letterSpacing: "0.5px" }}>{region}</span>
-                <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{places.length}</span>
-              </div>
-              {places.map(place => (
-                <article key={place.id} className="savedItem" style={{ cursor: "pointer", borderLeft: `3px solid ${CATEGORY_COLORS[place.category]}`, paddingLeft: "12px", marginBottom: "2px" }} onClick={() => handleSavedPlaceClick(place)}>
-                  <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[place.category], flexShrink: 0, display: "inline-block" }} />
-                  <div className="savedBody">
-                    <p className="savedName">{place.name}</p>
-                    <p className="savedMeta">{CATEGORY_PIN[place.category].emoji} {place.category} · {place.address}</p>
-                  </div>
-                  <button className="ghostButton" type="button" onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }}>삭제</button>
-                </article>
-              ))}
-            </div>
-          ));
-        })()}
-      </>
-    )}
+      ));
+    })()}
   </div>
 )}
 
