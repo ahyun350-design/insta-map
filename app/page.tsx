@@ -13,8 +13,8 @@ type FeedPost = {
   category: Category; comment: string; images: string[]; createdAt: string;
   archived?: boolean; likes: string[]; comments: Comment[];
 };
-type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; };
-type Message = { id: string; senderId: string; text: string; createdAt: string; };
+type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; unreadCount: number; };
+type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; };
 
 declare global { interface Window { kakao: any; } }
 
@@ -56,6 +56,14 @@ function timeAgo(dateStr: string) {
   if (m < 1) return "방금 전"; if (m < 60) return `${m}분 전`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}시간 전`; return `${Math.floor(h / 24)}일 전`;
+}
+function formatTime(dateStr: string) {
+  const d = new Date(dateStr);
+  const h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, "0");
+  const ampm = h < 12 ? "오전" : "오후";
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${ampm} ${hour12}:${m}`;
 }
 function extractRegion(address: string): string {
   if (!address) return "기타";
@@ -99,6 +107,7 @@ export default function HomePage() {
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
   const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
+  const [directionsMode, setDirectionsMode] = useState<"car" | "walk">("car");
   const [savedSearchQuery, setSavedSearchQuery] = useState("");
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -137,7 +146,8 @@ export default function HomePage() {
         const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
           const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
           const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
-          return { id: r.id, friendId, friendName: friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at };
+          const { count: unread } = await supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false);
+          return { id: r.id, friendId, friendName: friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at, unreadCount: unread ?? 0 };
         }));
         setChatRooms(rooms);
       }
@@ -218,7 +228,7 @@ export default function HomePage() {
       roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
       await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: friendSearchResult.id });
     }
-    const newRoom: ChatRoom = { id: roomId, friendId: friendSearchResult.id, friendName: friendSearchResult.username, lastMessage: "", lastTime: new Date().toISOString() };
+    const newRoom: ChatRoom = { id: roomId, friendId: friendSearchResult.id, friendName: friendSearchResult.username, lastMessage: "", lastTime: new Date().toISOString(), unreadCount: 0 };
     setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
     setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null);
     setActiveChatRoom(newRoom);
@@ -226,18 +236,29 @@ export default function HomePage() {
 
   const openChat = async (room: ChatRoom) => {
     setActiveChatRoom(room);
+    // 채팅방 들어가면 자기 앞으로 온 메시지를 모두 읽음 처리
+    await supabase.from("messages").update({ read: true }).eq("room_id", room.id).neq("sender_id", MY_USER).eq("read", false);
+    setChatRooms(prev => prev.map(r => r.id === room.id ? { ...r, unreadCount: 0 } : r));
     const { data } = await supabase.from("messages").select("*").eq("room_id", room.id).order("created_at", { ascending: true });
-    if (data) setMessages(data.map((m: any) => ({ id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at })));
+    if (data) setMessages(data.map((m: any) => ({ id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read })));
     // Realtime 구독
-    supabase.channel(`room-${room.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, (payload: any) => {
+    supabase.channel(`room-${room.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, async (payload: any) => {
       const m = payload.new;
-      setMessages(prev => [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at }]);
+      setMessages(prev => [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read }]);
+      // 받은 메시지면 즉시 읽음 처리 (채팅방 열려있으니까)
+      if (m.sender_id !== MY_USER) {
+        await supabase.from("messages").update({ read: true }).eq("id", m.id);
+      }
+    }).on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, (payload: any) => {
+      // 메시지 read 상태 변경 시 화면에 반영
+      const m = payload.new;
+      setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, read: m.read } : msg));
     }).subscribe();
   };
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !activeChatRoom) return;
-    const msg = { id: Date.now().toString(), room_id: activeChatRoom.id, sender_id: MY_USER, text: newMessage.trim() };
+    const msg = { id: Date.now().toString(), room_id: activeChatRoom.id, sender_id: MY_USER, text: newMessage.trim(), read: false };
     await supabase.from("messages").insert(msg);
     setNewMessage("");
   };
@@ -380,7 +401,7 @@ export default function HomePage() {
     setDirectionsInfo(null);
   };
 
-  const drawRoute = async (destLat: number, destLng: number) => {
+  const drawRoute = async (destLat: number, destLng: number, mode: "car" | "walk" = "car") => {
     if (!expandedMapRef.current || !window.kakao?.maps) return;
     setDirectionsLoading(true);
     clearRoute();
@@ -389,7 +410,7 @@ export default function HomePage() {
         const res = await fetch("/api/directions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ origin: { lat: pos.coords.latitude, lng: pos.coords.longitude }, destination: { lat: destLat, lng: destLng } }),
+          body: JSON.stringify({ origin: { lat: pos.coords.latitude, lng: pos.coords.longitude }, destination: { lat: destLat, lng: destLng }, mode }),
         });
         const data = await res.json();
         if (!data.routes?.[0]) { alert("경로를 찾을 수 없습니다."); setDirectionsLoading(false); return; }
@@ -404,7 +425,9 @@ export default function HomePage() {
             }
           });
         });
-        routePolylineRef.current = new window.kakao.maps.Polyline({ path: linePath, strokeWeight: 5, strokeColor: "#1a2a7a", strokeOpacity: 0.8, strokeStyle: "solid" });
+        const strokeColor = mode === "walk" ? "#22c55e" : "#1a2a7a";
+        const strokeStyle = mode === "walk" ? "shortdash" : "solid";
+        routePolylineRef.current = new window.kakao.maps.Polyline({ path: linePath, strokeWeight: 5, strokeColor, strokeOpacity: 0.8, strokeStyle });
         routePolylineRef.current.setMap(expandedMapRef.current);
         const bounds = new window.kakao.maps.LatLngBounds();
         linePath.forEach(p => bounds.extend(p));
@@ -412,6 +435,18 @@ export default function HomePage() {
       } catch { alert("길찾기에 실패했습니다."); }
       finally { setDirectionsLoading(false); }
     }, () => { alert("현재 위치를 가져올 수 없습니다."); setDirectionsLoading(false); });
+  };
+
+  const openTransitInKakaoMap = (destName: string, destLat: number, destLng: number) => {
+    // 카카오맵 앱 딥링크: 출발지=현재위치, 도착지=장소
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const url = `https://map.kakao.com/?sName=현재위치&sX=${pos.coords.longitude}&sY=${pos.coords.latitude}&eName=${encodeURIComponent(destName)}&eX=${destLng}&eY=${destLat}`;
+      window.open(url, "_blank");
+    }, () => {
+      // 위치 권한 없으면 도착지만으로
+      const url = `https://map.kakao.com/?eName=${encodeURIComponent(destName)}&eX=${destLng}&eY=${destLat}`;
+      window.open(url, "_blank");
+    });
   };
 
   const handleSearch = () => {
@@ -464,6 +499,23 @@ export default function HomePage() {
     if (activeTab !== "map" || !mapRef.current) return;
     setTimeout(() => { mapRef.current.relayout(); }, 50);
   }, [activeTab]);
+
+  // 메시지 탭 진입 시 안 읽은 개수 갱신
+  useEffect(() => {
+    if (activeTab !== "messages" || activeChatRoom) return;
+    const refreshRooms = async () => {
+      const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`);
+      if (!roomsData) return;
+      const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
+        const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
+        const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
+        const { count: unread } = await supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false);
+        return { id: r.id, friendId, friendName: friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at, unreadCount: unread ?? 0 };
+      }));
+      setChatRooms(rooms);
+    };
+    refreshRooms();
+  }, [activeTab, activeChatRoom]);
 
   useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
 
@@ -534,11 +586,48 @@ export default function HomePage() {
           {selectedPlace.phone && (<div style={{ display: "flex", gap: "8px", alignItems: "center" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 }}>전화</span><a href={"tel:" + String(selectedPlace.phone)} style={{ fontSize: "13px", color: "#1a2a7a", textDecoration: "none" }}>{String(selectedPlace.phone)}</a></div>)}
           {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px" }}>카카오맵에서 영업시간 보기</a>)}
           {selectedPlace.y && selectedPlace.x && (
-            <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
-              <button onClick={() => drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x))} disabled={directionsLoading} style={{ fontSize: "13px", color: "#fff", background: "#2563eb", border: "none", padding: "10px 16px", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", opacity: directionsLoading ? 0.6 : 1 }}>
-                🧭 {directionsLoading ? "경로 계산 중..." : "앱에서 길찾기"}
-              </button>
-              {directionsInfo && (
+            <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
+              {/* 모드 토글 */}
+              <div style={{ display: "flex", gap: "6px" }}>
+                {([
+                  { id: "car", label: "🚗 자동차" },
+                  { id: "walk", label: "🚶 도보" },
+                  { id: "transit", label: "🚌 대중교통" },
+                ] as const).map(m => {
+                  const isActive = m.id !== "transit" && directionsMode === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => {
+                        if (m.id === "transit") {
+                          openTransitInKakaoMap(selectedPlace.place_name, parseFloat(selectedPlace.y), parseFloat(selectedPlace.x));
+                        } else {
+                          setDirectionsMode(m.id);
+                          drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), m.id);
+                        }
+                      }}
+                      disabled={directionsLoading}
+                      style={{
+                        flex: 1,
+                        padding: "8px 10px",
+                        borderRadius: "8px",
+                        border: `1px solid ${isActive ? "#1a2a7a" : "#ddd"}`,
+                        background: isActive ? "#1a2a7a" : "#fff",
+                        color: isActive ? "#fff" : "#555",
+                        fontSize: "12px",
+                        cursor: directionsLoading ? "wait" : "pointer",
+                        fontFamily: "inherit",
+                        opacity: directionsLoading ? 0.6 : 1
+                      }}
+                    >
+                      {m.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {directionsLoading && <p style={{ fontSize: "12px", color: "#888", textAlign: "center", margin: 0 }}>경로 계산 중...</p>}
+              {directionsInfo && !directionsLoading && (
                 <div style={{ background: "#f0f4ff", borderRadius: "8px", padding: "10px 14px", display: "flex", gap: "16px", alignItems: "center" }}>
                   <span style={{ fontSize: "13px", color: "#1a2a7a", fontWeight: 600 }}>🕐 {directionsInfo.duration}분</span>
                   <span style={{ fontSize: "13px", color: "#1a2a7a", fontWeight: 600 }}>📍 {directionsInfo.distance}km</span>
@@ -772,11 +861,23 @@ export default function HomePage() {
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{activeChatRoom.friendName}</span>
         </div>
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 20px" }}>
-          {messages.map(m => (
-            <div key={m.id} style={{ display: "flex", justifyContent: m.senderId === MY_USER ? "flex-end" : "flex-start" }}>
-              <div style={{ maxWidth: "70%", padding: "8px 12px", borderRadius: m.senderId === MY_USER ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: m.senderId === MY_USER ? "#1a2a7a" : "#f0f0f5", color: m.senderId === MY_USER ? "#fff" : "#333", fontSize: "13px", lineHeight: 1.5 }}>{m.text}</div>
-            </div>
-          ))}
+          {messages.map(m => {
+            const isMine = m.senderId === MY_USER;
+            return (
+              <div key={m.id} style={{ display: "flex", justifyContent: isMine ? "flex-end" : "flex-start", alignItems: "flex-end", gap: "4px" }}>
+                {isMine && (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", fontSize: "10px", color: "#bbb", lineHeight: 1.3 }}>
+                    {!m.read && <span style={{ color: "#1a2a7a", fontWeight: 600 }}>1</span>}
+                    <span>{formatTime(m.createdAt)}</span>
+                  </div>
+                )}
+                <div style={{ maxWidth: "70%", padding: "8px 12px", borderRadius: isMine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: isMine ? "#1a2a7a" : "#f0f0f5", color: isMine ? "#fff" : "#333", fontSize: "13px", lineHeight: 1.5 }}>{m.text}</div>
+                {!isMine && (
+                  <span style={{ fontSize: "10px", color: "#bbb", lineHeight: 1.3 }}>{formatTime(m.createdAt)}</span>
+                )}
+              </div>
+            );
+          })}
           {messages.length === 0 && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", marginTop: "40px" }}>첫 메시지를 보내보세요 💬</p>}
         </div>
         <div style={{ flexShrink: 0, padding: "10px 16px", background: "#fff", borderTop: "0.5px solid #efefef", display: "flex", gap: "8px" }}>
@@ -813,7 +914,14 @@ export default function HomePage() {
           <article key={room.id} className="chatItem" onClick={() => openChat(room)} style={{ cursor: "pointer" }}>
             <div className="avatar">{room.friendName.slice(0,1).toUpperCase()}</div>
             <div className="chatBody"><p className="chatName">{room.friendName}</p><p className="chatPreview">{room.lastMessage || "대화를 시작해보세요"}</p></div>
-            <span className="chatTime">{room.lastTime ? timeAgo(room.lastTime) : ""}</span>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+              <span className="chatTime">{room.lastTime ? timeAgo(room.lastTime) : ""}</span>
+              {room.unreadCount > 0 && (
+                <span style={{ background: "#e05555", color: "#fff", borderRadius: "10px", minWidth: "18px", height: "18px", padding: "0 6px", fontSize: "10px", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {room.unreadCount}
+                </span>
+              )}
+            </div>
           </article>
         ))}
       </>
@@ -951,7 +1059,23 @@ export default function HomePage() {
           {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">{MY_USER.slice(0,1).toUpperCase()}</div><div><p className="profileName">{MY_USER}</p><p className="profileHandle">@{MY_USER}_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem">프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem">로그아웃</button></div></div>)}
         </section>
         <nav className="tabBar">
-          {TABS.map((tab) => (<button key={tab.id} type="button" className={`tabItem ${activeTab === tab.id ? "active" : ""}`} onClick={() => setActiveTab(tab.id)}><span className="tabIcon">{tab.icon}</span><span>{tab.label}</span></button>))}
+          {TABS.map((tab) => {
+            const totalUnread = chatRooms.reduce((sum, r) => sum + (r.unreadCount ?? 0), 0);
+            const showBadge = tab.id === "messages" && totalUnread > 0;
+            return (
+              <button key={tab.id} type="button" className={`tabItem ${activeTab === tab.id ? "active" : ""}`} onClick={() => setActiveTab(tab.id)}>
+                <span className="tabIcon" style={{ position: "relative", display: "inline-block" }}>
+                  {tab.icon}
+                  {showBadge && (
+                    <span style={{ position: "absolute", top: "-4px", right: "-12px", background: "#e05555", color: "#fff", borderRadius: "10px", minWidth: "16px", height: "16px", padding: "0 4px", fontSize: "9px", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
+                      {totalUnread}
+                    </span>
+                  )}
+                </span>
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </nav>
         {selectedPlace && !mapExpanded && (
           <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: "0.5px solid #efefef", borderRadius: "16px 16px 0 0", boxShadow: "0 -4px 20px rgba(0,0,0,0.12)", zIndex: 9998, maxHeight: "70vh", overflowY: "auto" }}>
@@ -965,7 +1089,35 @@ export default function HomePage() {
             <div style={{ padding: "12px 24px", display: "flex", flexDirection: "column", gap: "6px" }}>
               {selectedPlace.road_address_name && (<div style={{ display: "flex", gap: "8px" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>주소</span><span style={{ fontSize: "13px", color: "#444" }}>{selectedPlace.road_address_name}</span></div>)}
               {selectedPlace.phone && (<div style={{ display: "flex", gap: "8px", alignItems: "center" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 }}>전화</span><a href={"tel:" + String(selectedPlace.phone)} style={{ fontSize: "13px", color: "#1a2a7a", textDecoration: "none" }}>{String(selectedPlace.phone)}</a></div>)}
-              {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px" }}>카카오맵에서 영업시간 보기</a>)}
+              {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px", textAlign: "center", borderRadius: "6px" }}>카카오맵에서 영업시간 보기</a>)}
+              {selectedPlace.y && selectedPlace.x && (
+                <div style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // 전체화면 지도 열고 자동차 길찾기
+                      setMapExpanded(true);
+                      setDirectionsMode("car");
+                      setTimeout(() => drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), "car"), 600);
+                    }}
+                    style={{ flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid #1a2a7a", background: "#1a2a7a", color: "#fff", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}
+                  >🚗 자동차</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMapExpanded(true);
+                      setDirectionsMode("walk");
+                      setTimeout(() => drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), "walk"), 600);
+                    }}
+                    style={{ flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#555", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}
+                  >🚶 도보</button>
+                  <button
+                    type="button"
+                    onClick={() => openTransitInKakaoMap(selectedPlace.place_name, parseFloat(selectedPlace.y), parseFloat(selectedPlace.x))}
+                    style={{ flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#555", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}
+                  >🚌 대중교통</button>
+                </div>
+              )}
             </div>
             {(selectedPlace._feedPosts ?? []).length > 0 && (
               <div style={{ borderTop: "0.5px solid #f0f0f0" }}>
