@@ -55,6 +55,12 @@ function timeAgo(dateStr: string) {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}시간 전`; return `${Math.floor(h / 24)}일 전`;
 }
+function extractRegion(address: string): string {
+  if (!address) return "기타";
+  const parts = address.trim().split(/\s+/);
+  if (parts.length >= 2) return `${parts[0]} ${parts[1]}`;
+  return parts[0] || "기타";
+}
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabId>("home");
@@ -91,6 +97,7 @@ export default function HomePage() {
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
   const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
+  const [savedViewMode, setSavedViewMode] = useState<"category" | "region">("category");
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null); const mapExpandedRef = useRef<HTMLDivElement | null>(null);
@@ -247,6 +254,25 @@ export default function HomePage() {
         });
       });
     }
+  };
+
+  // 지도 탭의 작은 목록에서 장소 클릭 → 상세 카드만 띄움 (전체화면 X)
+  const handleMiniListClick = (place: Place) => {
+    const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
+    if (!window.kakao?.maps?.services) {
+      setSelectedPlace({
+        place_name: place.name, category_name: place.category,
+        road_address_name: place.address, phone: "", place_url: "",
+        _feedPosts: relatedPosts,
+      });
+      return;
+    }
+    new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
+      const base = (st === window.kakao.maps.services.Status.OK && data[0])
+        ? data[0]
+        : { place_name: place.name, category_name: place.category, road_address_name: place.address, phone: "", place_url: "" };
+      setSelectedPlace({ ...base, _feedPosts: relatedPosts });
+    });
   };
 
   const handleAddFromInstagram = async () => {
@@ -818,10 +844,10 @@ export default function HomePage() {
               )}
               <div className="miniList">
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).map((place) => (
-                  <article key={place.id} className="miniItem">
+                  <article key={place.id} className="miniItem" onClick={() => handleMiniListClick(place)} style={{ cursor: "pointer" }}>
                     <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[place.category], flexShrink: 0, display: "inline-block" }} />
                     <div style={{ flex: 1 }}><p className="miniName">{place.name}</p><p className="miniMeta">{place.address} · {place.category}</p></div>
-                    <button onClick={() => deletePlace(place.id)} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
+                    <button onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
                   </article>
                 ))}
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={() => setHiddenIds(new Set())} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
@@ -833,7 +859,25 @@ export default function HomePage() {
   <div className="screen">
     <p className="screenTitle">저장한 장소</p>
     {savedPlaces.length === 0 && <p className="emptyText">저장된 장소가 아직 없어요.</p>}
-    {(["맛집", "카페", "쇼핑", "숙소"] as Category[]).map(cat => {
+    {savedPlaces.length > 0 && (
+      <div style={{ display: "flex", gap: "16px", marginBottom: "16px", borderBottom: "1px solid #f0f0f0" }}>
+        <button onClick={() => setSavedViewMode("category")} type="button" style={{
+          background: "transparent", border: "none", padding: "10px 4px",
+          fontSize: "13px", fontWeight: 600,
+          color: savedViewMode === "category" ? "#1a2a7a" : "#aaa",
+          borderBottom: savedViewMode === "category" ? "2px solid #1a2a7a" : "2px solid transparent",
+          cursor: "pointer", marginBottom: "-1px"
+        }}>카테고리별</button>
+        <button onClick={() => setSavedViewMode("region")} type="button" style={{
+          background: "transparent", border: "none", padding: "10px 4px",
+          fontSize: "13px", fontWeight: 600,
+          color: savedViewMode === "region" ? "#1a2a7a" : "#aaa",
+          borderBottom: savedViewMode === "region" ? "2px solid #1a2a7a" : "2px solid transparent",
+          cursor: "pointer", marginBottom: "-1px"
+        }}>지역별</button>
+      </div>
+    )}
+    {savedViewMode === "category" && (["맛집", "카페", "쇼핑", "숙소"] as Category[]).map(cat => {
       const places = savedPlaces.filter(p => p.category === cat);
       if (places.length === 0) return null;
       return (
@@ -856,6 +900,34 @@ export default function HomePage() {
         </div>
       );
     })}
+    {savedViewMode === "region" && (() => {
+      const regions = new Map<string, Place[]>();
+      savedPlaces.forEach(p => {
+        const region = extractRegion(p.address);
+        if (!regions.has(region)) regions.set(region, []);
+        regions.get(region)!.push(p);
+      });
+      const sorted = Array.from(regions.entries()).sort((a, b) => a[0].localeCompare(b[0], "ko"));
+      return sorted.map(([region, places]) => (
+        <div key={region} style={{ marginBottom: "24px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", padding: "0 4px" }}>
+            <span style={{ fontSize: "16px" }}>📍</span>
+            <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a2a7a", letterSpacing: "0.5px" }}>{region}</span>
+            <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{places.length}</span>
+          </div>
+          {places.map(place => (
+            <article key={place.id} className="savedItem" style={{ cursor: "pointer", borderLeft: `3px solid ${CATEGORY_COLORS[place.category]}`, paddingLeft: "12px", marginBottom: "2px" }} onClick={() => handleSavedPlaceClick(place)}>
+              <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[place.category], flexShrink: 0, display: "inline-block" }} />
+              <div className="savedBody">
+                <p className="savedName">{place.name}</p>
+                <p className="savedMeta">{CATEGORY_PIN[place.category].emoji} {place.category} · {place.address}</p>
+              </div>
+              <button className="ghostButton" type="button" onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }}>삭제</button>
+            </article>
+          ))}
+        </div>
+      ));
+    })()}
   </div>
 )}
 
@@ -864,6 +936,48 @@ export default function HomePage() {
         <nav className="tabBar">
           {TABS.map((tab) => (<button key={tab.id} type="button" className={`tabItem ${activeTab === tab.id ? "active" : ""}`} onClick={() => setActiveTab(tab.id)}><span className="tabIcon">{tab.icon}</span><span>{tab.label}</span></button>))}
         </nav>
+        {selectedPlace && !mapExpanded && (
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: "0.5px solid #efefef", borderRadius: "16px 16px 0 0", boxShadow: "0 -4px 20px rgba(0,0,0,0.12)", zIndex: 9998, maxHeight: "70vh", overflowY: "auto" }}>
+            <div style={{ padding: "20px 24px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "0.5px solid #f0f0f0" }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a1a2e", fontWeight: 400 }}>{selectedPlace.place_name}</p>
+                <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#888" }}>{selectedPlace.category_name}</p>
+              </div>
+              <button onClick={() => setSelectedPlace(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#bbb", fontSize: "22px", padding: 0, lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ padding: "12px 24px", display: "flex", flexDirection: "column", gap: "6px" }}>
+              {selectedPlace.road_address_name && (<div style={{ display: "flex", gap: "8px" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>주소</span><span style={{ fontSize: "13px", color: "#444" }}>{selectedPlace.road_address_name}</span></div>)}
+              {selectedPlace.phone && (<div style={{ display: "flex", gap: "8px", alignItems: "center" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 }}>전화</span><a href={"tel:" + String(selectedPlace.phone)} style={{ fontSize: "13px", color: "#1a2a7a", textDecoration: "none" }}>{String(selectedPlace.phone)}</a></div>)}
+              {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px" }}>카카오맵에서 영업시간 보기</a>)}
+            </div>
+            {(selectedPlace._feedPosts ?? []).length > 0 && (
+              <div style={{ borderTop: "0.5px solid #f0f0f0" }}>
+                <p style={{ margin: 0, padding: "12px 24px 8px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>큐레이션 {(selectedPlace._feedPosts as FeedPost[]).length}</p>
+                {(selectedPlace._feedPosts as FeedPost[]).map((post) => (
+                  <div key={post.id} onClick={() => { setDetailPostId(post.id); setSelectedPlace(null); }} style={{ padding: "12px 24px", borderTop: "0.5px solid #f8f8f8", cursor: "pointer" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                      <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", flexShrink: 0 }}>{post.user.slice(0, 1).toUpperCase()}</div>
+                      <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a1a2e" }}>{post.user}</span>
+                      <span style={{ fontSize: "10px", color: "#bbb", marginLeft: "auto" }}>{timeAgo(post.createdAt)}</span>
+                    </div>
+                    <p style={{ margin: "0 0 8px", fontFamily: "'Playfair Display', serif", fontSize: "14px", color: "#1a2a7a" }}>{post.title || post.placeName}</p>
+                    {post.images.length > 0 && (
+                      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: "6px", marginBottom: "8px", overflowX: "auto" }}>
+                        {post.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "80px", height: "80px", objectFit: "cover", borderRadius: "8px", flexShrink: 0, cursor: "pointer" }} />)}
+                      </div>
+                    )}
+                    <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#555", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>{post.comment}</p>
+                    <div style={{ display: "flex", gap: "12px" }}>
+                      <span style={{ fontSize: "11px", color: post.likes.includes(MY_USER) ? "#e05555" : "#ccc" }}>♥ {post.likes.length}</span>
+                      <span style={{ fontSize: "11px", color: "#ccc" }}>💬 {post.comments.length}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(selectedPlace._feedPosts ?? []).length === 0 && (<div style={{ padding: "14px 24px 20px", textAlign: "center" }}><p style={{ margin: 0, fontSize: "12px", color: "#ccc" }}>아직 큐레이션이 없어요</p></div>)}
+          </div>
+        )}
       </section>
     </main>
   );
