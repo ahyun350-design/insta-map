@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-
+import { useUser, logout } from "@/lib/useUser";
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소";
 type Place = { id: string; name: string; address: string; category: Category };
@@ -30,9 +31,7 @@ const CHAT_LIST = [
   { id: "2", name: "민호", preview: "저장해둔 카페 링크 보내줘!", time: "오전 11:05" },
   { id: "3", name: "여행메이트", preview: "부산 맛집 리스트 공유했어", time: "어제" },
 ];
-const MY_USER = typeof window !== "undefined"
-  ? (new URLSearchParams(window.location.search).get("user") || "ahyun")
-  : "ahyun";
+
 const CATEGORY_CLASS: Record<Category, string> = { 맛집: "restaurant", 카페: "cafe", 쇼핑: "shopping", 숙소: "stay" };
 const CATEGORY_PIN: Record<Category, { color: string; emoji: string }> = {
   맛집: { color: "#513229", emoji: "🍽️" }, 카페: { color: "#FCE6B7", emoji: "☕" },
@@ -73,6 +72,9 @@ function extractRegion(address: string): string {
 }
 
 export default function HomePage() {
+  const router = useRouter();
+  const { user, loading: userLoading } = useUser();
+  const MY_USER = user?.username || "";
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [instagramUrl, setInstagramUrl] = useState("");
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
@@ -155,10 +157,14 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    loadData();
-    // 유저 자동 등록
-    supabase.from("users").upsert({ id: MY_USER, username: MY_USER }).then(() => {});
-  }, []);
+    if (!userLoading && !user) {
+      router.push("/login");
+      return;
+    }
+    if (user) {
+      loadData();
+    }
+  }, [user, userLoading]);
 
   const addPlace = async (place: Place) => {
     await supabase.from("places").upsert({ id: place.id, name: place.name, address: place.address, category: place.category });
@@ -258,15 +264,13 @@ export default function HomePage() {
   };
 
   const sendMessage = async () => {
-    if (!newMessage.trim() || !activeChatRoom) return;
+    if (!newMessage.trim() || !activeChatRoom || !user) return;
     const text = newMessage.trim();
     const id = Date.now().toString();
     const createdAt = new Date().toISOString();
-    // 화면에 즉시 추가 (서버 응답 기다리지 않음)
-    setMessages(prev => [...prev, { id, senderId: MY_USER, text, createdAt, read: false }]);
+    setMessages(prev => [...prev, { id, senderId: user.id, text, createdAt, read: false }]);
     setNewMessage("");
-    // DB에 저장
-    await supabase.from("messages").insert({ id, room_id: activeChatRoom.id, sender_id: MY_USER, text, read: false });
+    await supabase.from("messages").insert({ id, room_id: activeChatRoom.id, sender_id: user.id, text, read: false });
   };
 
   // 저장 목록 장소 클릭 → 지도에서 보기
@@ -542,6 +546,33 @@ export default function HomePage() {
     refreshRooms();
   }, [activeTab, activeChatRoom]);
 
+  // 전역 메시지 구독 - 어느 탭에 있든 새 메시지 오면 알림 갱신
+  useEffect(() => {
+    const channel = supabase.channel(`global-messages-${MY_USER}`).on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages" },
+      (payload: any) => {
+        const m = payload.new;
+        // 본인이 보낸 메시지면 무시
+        if (m.sender_id === MY_USER) return;
+        // 내가 속한 채팅방이 아니면 무시
+        setChatRooms(prev => {
+          const room = prev.find(r => r.id === m.room_id);
+          if (!room) return prev;
+          // 현재 그 채팅방을 보고 있으면 unread 증가시키지 않음
+          const isViewing = activeChatRoom?.id === m.room_id;
+          return prev.map(r => r.id === m.room_id ? {
+            ...r,
+            lastMessage: m.text,
+            lastTime: m.created_at,
+            unreadCount: isViewing ? 0 : r.unreadCount + 1
+          } : r);
+        });
+      }
+    ).subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [activeChatRoom]);
+
   useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
 
   useEffect(() => {
@@ -691,7 +722,17 @@ export default function HomePage() {
       </div>
     );
   };
+  if (userLoading) {
+    return (
+      <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}>
+        <p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p>
+      </main>
+    );
+  }
 
+  if (!user) {
+    return null;
+  }
   if (detailPost) {
     const liked = detailPost.likes.includes(MY_USER);
     return (
@@ -767,7 +808,14 @@ export default function HomePage() {
     <main className="mobileRoot">
       <section className="phoneFrame">
         <header className="appHeader">
-          <h1 className="appTitle">InstaMap</h1>
+        <h1 className="appTitle" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+  <svg width="22" height="22" viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
+    <rect width="32" height="32" rx="6" fill="#1a2a7a"/>
+    <path d="M16 6C12 6 9 9 9 13C9 18 16 25 16 25S23 18 23 13C23 9 20 6 16 6Z" fill="white"/>
+    <circle cx="16" cy="13" r="3" fill="#1a2a7a"/>
+  </svg>
+  PindMap
+</h1>
           {activeTab === "home" && <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>}
         </header>
         <section className="appContent">
@@ -986,7 +1034,7 @@ export default function HomePage() {
                     <button onClick={() => { setMapExpanded(false); setSelectedPlace(null); }} style={{ position: "absolute", left: "20px", border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", padding: 0 }}>
                       <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </button>
-                    <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>InstaMap</span>
+                    <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
                   </div>
                   <div style={{ padding: "10px 20px", borderBottom: "0.5px solid #efefef", display: "flex", gap: "8px", background: "#fff" }}>
                     <input className="mapInput" placeholder="장소명으로 검색" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSearch()} style={{ flex: 1 }} />
@@ -1091,7 +1139,7 @@ export default function HomePage() {
   </div>
 )}
 
-          {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">{MY_USER.slice(0,1).toUpperCase()}</div><div><p className="profileName">{MY_USER}</p><p className="profileHandle">@{MY_USER}_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem">프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem">로그아웃</button></div></div>)}
+          {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">{MY_USER.slice(0,1).toUpperCase()}</div><div><p className="profileName">{MY_USER}</p><p className="profileHandle">@{MY_USER}_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem">프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem" onClick={() => { if (confirm("정말 로그아웃하시겠어요?")) logout(); }}>로그아웃</button></div></div>)}
         </section>
         <nav className="tabBar">
           {TABS.map((tab) => {

@@ -2,15 +2,24 @@
 
 :root {
   color-scheme: light;
-  --navy: #1a2a7a;
-  --navy-light: #c0c8e8;
-  --black: #0a0a0a;
-  --gray-100: #f9f9f9;
+  /* 메인 색상 — 모던 차콜 */
+  --navy: #1a1a1a;          /* 메인 (검정에 가까운 차콜) */
+  --navy-light: #e8e8e8;    /* 메인 연한 버전 */
+  --accent: #ff5a3d;        /* 포인트 색 (코랄 레드) - 좋아요, 강조 */
+
+  /* 글자 색 */
+  --black: #1a1a1a;
+  --text-secondary: #666666;
+
+  /* 회색 단계 */
+  --gray-100: #fafafa;
   --gray-200: #f0f0f0;
   --gray-300: #e5e5e5;
   --gray-400: #ccc;
-  --gray-500: #aaa;
-  --gray-600: #888;
+  --gray-500: #999;
+  --gray-600: #666;
+
+  /* 테두리 & 배경 */
   --border: #efefef;
   --white: #ffffff;
 }
