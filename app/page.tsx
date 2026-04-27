@@ -146,7 +146,8 @@ function buildCourse(
     currentLng = chosenPlace.lng;
 
     // 한 번 쓰면 풀에서 제거 (같은 장소 두 번 X)
-    pools[chosenCategory] = pools[chosenCategory].filter((p) => p.id !== chosenPlace.id);
+    const newPool: CoursePlace[] = pools[chosenCategory].filter((p: CoursePlace) => p.id !== chosenPlace.id);
+    pools[chosenCategory] = newPool;
   }
 
   return result;
