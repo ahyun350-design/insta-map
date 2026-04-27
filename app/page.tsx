@@ -342,12 +342,38 @@ export default function HomePage() {
     finally { setIsSubmitting(false); }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    Array.from(e.target.files ?? []).slice(0, 6 - postImages.length).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => { if (ev.target?.result) setPostImages(prev => [...prev, ev.target!.result as string]); };
-      reader.readAsDataURL(file);
-    }); e.target.value = "";
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []).slice(0, 6 - postImages.length);
+    e.target.value = "";
+
+    for (const file of files) {
+      try {
+        // 파일 이름을 고유하게 만들기 (시간 + 랜덤)
+        const ext = file.name.split('.').pop() || 'jpg';
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${ext}`;
+
+        // Supabase Storage에 업로드
+        const { error: uploadError } = await supabase.storage
+          .from('post-images')
+          .upload(fileName, file);
+
+        if (uploadError) {
+          console.error("업로드 실패:", uploadError);
+          alert(`사진 업로드 실패: ${uploadError.message}`);
+          continue;
+        }
+
+        // 업로드된 사진의 공개 URL 가져오기
+        const { data: { publicUrl } } = supabase.storage
+          .from('post-images')
+          .getPublicUrl(fileName);
+
+        setPostImages(prev => [...prev, publicUrl]);
+      } catch (err) {
+        console.error("업로드 에러:", err);
+        alert("사진 업로드 중 오류가 발생했어요.");
+      }
+    }
   };
   const handlePostSearch = () => {
     if (!postSearchQuery.trim() || !window.kakao?.maps?.services) return;

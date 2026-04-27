@@ -1,0 +1,17 @@
+{
+    "name": "PindMap",
+    "short_name": "PindMap",
+    "description": "인스타에서 본 그곳, 지도 위에서 다시 만나다",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#fafafa",
+    "theme_color": "#1a1a1a",
+    "orientation": "portrait",
+    "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+  }
