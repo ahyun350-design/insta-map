@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser, logout } from "@/lib/useUser";
@@ -165,6 +165,14 @@ function buildCourse(
   return result;
 }
 export default function HomePage() {
+  return (
+    <Suspense fallback={<main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}><p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p></main>}>
+      <HomePageContent />
+    </Suspense>
+  );
+}
+
+function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: userLoading } = useUser();
