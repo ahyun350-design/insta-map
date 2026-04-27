@@ -99,55 +99,67 @@ function buildCourse(
   let currentLat = origin.lat;
   let currentLng = origin.lng;
 
-  // 카테고리별 남은 횟수
-  const remaining: Record<Category, number> = {
+  // 카테고리별 남은 횟수 (일반 객체로 만들고 키 접근 시 안전하게)
+  const remaining: { [K in Category]: number } = {
     카페: counts.카페,
     맛집: counts.맛집,
     쇼핑: counts.쇼핑,
     숙소: counts.숙소,
   };
 
-  // 카테고리별 사용 가능한 후보
-  const pools: Record<Category, CoursePlace[]> = {
-    카페: [...candidates.카페],
-    맛집: [...candidates.맛집],
-    쇼핑: [...candidates.쇼핑],
-    숙소: [...candidates.숙소],
+  // 카테고리별 사용 가능한 후보 (배열을 복사해서 보관)
+  let cafePool: CoursePlace[] = [...candidates.카페];
+  let restaurantPool: CoursePlace[] = [...candidates.맛집];
+  let shoppingPool: CoursePlace[] = [...candidates.쇼핑];
+  let stayPool: CoursePlace[] = [...candidates.숙소];
+
+  const getPool = (cat: Category): CoursePlace[] => {
+    if (cat === "카페") return cafePool;
+    if (cat === "맛집") return restaurantPool;
+    if (cat === "쇼핑") return shoppingPool;
+    return stayPool;
+  };
+
+  const setPool = (cat: Category, newPool: CoursePlace[]) => {
+    if (cat === "카페") cafePool = newPool;
+    else if (cat === "맛집") restaurantPool = newPool;
+    else if (cat === "쇼핑") shoppingPool = newPool;
+    else stayPool = newPool;
   };
 
   while (remaining.카페 + remaining.맛집 + remaining.쇼핑 + remaining.숙소 > 0) {
-    // 모든 사용 가능한 카테고리에서 가장 가까운 장소 찾기
     let bestPlace: CoursePlace | null = null;
     let bestCategory: Category | null = null;
     let bestDistance = Infinity;
 
-    (Object.keys(remaining) as Category[]).forEach((cat) => {
-      if (remaining[cat] <= 0) return;
-      if (pools[cat].length === 0) return;
-      pools[cat].forEach((p) => {
+    const allCategories: Category[] = ["카페", "맛집", "쇼핑", "숙소"];
+    for (const cat of allCategories) {
+      if (remaining[cat] <= 0) continue;
+      const pool = getPool(cat);
+      if (pool.length === 0) continue;
+      for (const p of pool) {
         const d = getDistance(currentLat, currentLng, p.lat, p.lng);
         if (d < bestDistance) {
           bestDistance = d;
           bestPlace = p;
           bestCategory = cat;
         }
-      });
-    });
+      }
+    }
 
     if (bestPlace === null || bestCategory === null) break;
 
-    // TypeScript 타입 좁히기를 위해 명시적으로 변수에 담기
     const chosenPlace: CoursePlace = bestPlace;
     const chosenCategory: Category = bestCategory;
 
     result.push(chosenPlace);
-    remaining[chosenCategory]--;
+    remaining[chosenCategory] = remaining[chosenCategory] - 1;
     currentLat = chosenPlace.lat;
     currentLng = chosenPlace.lng;
 
-    // 한 번 쓰면 풀에서 제거 (같은 장소 두 번 X)
-    const newPool: CoursePlace[] = pools[chosenCategory].filter((p: CoursePlace) => p.id !== chosenPlace.id);
-    pools[chosenCategory] = newPool;
+    // 한 번 쓰면 풀에서 제거
+    const oldPool = getPool(chosenCategory);
+    setPool(chosenCategory, oldPool.filter((p) => p.id !== chosenPlace.id));
   }
 
   return result;
