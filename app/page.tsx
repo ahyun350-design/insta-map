@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser, logout } from "@/lib/useUser";
 import FeedSkeleton from "@/components/FeedSkeleton";
@@ -74,8 +74,83 @@ function extractRegion(address: string): string {
   return parts[0] || "기타";
 }
 
+// 두 좌표 사이의 직선거리 (km) - Haversine 공식
+function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371; // 지구 반지름 (km)
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// 좌표가 있는 장소들에서 가까운 순으로 코스 짜기 (Nearest Neighbor 알고리즘)
+type CoursePlace = Place & { lat: number; lng: number };
+
+function buildCourse(
+  origin: { lat: number; lng: number },
+  candidates: { 카페: CoursePlace[]; 맛집: CoursePlace[]; 쇼핑: CoursePlace[]; 숙소: CoursePlace[] },
+  counts: { 카페: number; 맛집: number; 쇼핑: number; 숙소: number }
+): CoursePlace[] {
+  const result: CoursePlace[] = [];
+  let currentLat = origin.lat;
+  let currentLng = origin.lng;
+
+  // 카테고리별 남은 횟수
+  const remaining: Record<Category, number> = {
+    카페: counts.카페,
+    맛집: counts.맛집,
+    쇼핑: counts.쇼핑,
+    숙소: counts.숙소,
+  };
+
+  // 카테고리별 사용 가능한 후보 (맛집/카페/숙소는 한 번 쓰면 제거, 쇼핑은 중복 가능하지만 전체 개수만큼만)
+  const pools: Record<Category, CoursePlace[]> = {
+    카페: [...candidates.카페],
+    맛집: [...candidates.맛집],
+    쇼핑: [...candidates.쇼핑],
+    숙소: [...candidates.숙소],
+  };
+
+  while (remaining.카페 + remaining.맛집 + remaining.쇼핑 + remaining.숙소 > 0) {
+    // 모든 사용 가능한 카테고리에서 가장 가까운 장소 찾기
+    let bestPlace: CoursePlace | null = null;
+    let bestCategory: Category | null = null;
+    let bestDistance = Infinity;
+
+    (Object.keys(remaining) as Category[]).forEach((cat) => {
+      if (remaining[cat] <= 0) return;
+      if (pools[cat].length === 0) return;
+      pools[cat].forEach((p) => {
+        const d = getDistance(currentLat, currentLng, p.lat, p.lng);
+        if (d < bestDistance) {
+          bestDistance = d;
+          bestPlace = p;
+          bestCategory = cat;
+        }
+      });
+    });
+
+    if (!bestPlace || !bestCategory) break;
+
+    result.push(bestPlace);
+    remaining[bestCategory]--;
+    currentLat = bestPlace.lat;
+    currentLng = bestPlace.lng;
+
+    // 맛집/카페/숙소는 한 번 쓰면 제거 (중복 X)
+    // 쇼핑은 전체 풀에서 같은 장소가 두 번 추천되지 않게 제거 (현실적으로 같은 가게 두 번 가지 않으니까)
+    pools[bestCategory] = pools[bestCategory].filter((p) => p.id !== bestPlace!.id);
+  }
+
+  return result;
+}
 export default function HomePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading: userLoading } = useUser();
   const MY_USER = user?.username || "";
   const { showToast } = useToast();
@@ -116,6 +191,14 @@ export default function HomePage() {
   const [directionsMode, setDirectionsMode] = useState<"car" | "walk">("car");
   const [savedSearchQuery, setSavedSearchQuery] = useState("");
 
+  // 코스 만들기 관련 state
+  const [showCourseModal, setShowCourseModal] = useState(false);
+  const [courseCounts, setCourseCounts] = useState({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0 });
+  const [courseOriginMode, setCourseOriginMode] = useState<"current" | "manual">("current");
+  const [courseOriginAddress, setCourseOriginAddress] = useState("");
+  const [courseLoading, setCourseLoading] = useState(false);
+  const [courseResult, setCourseResult] = useState<CoursePlace[] | null>(null);
+  const [showCourseRoute, setShowCourseRoute] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
   const commentSectionRef = useRef<HTMLDivElement | null>(null);
@@ -134,7 +217,11 @@ export default function HomePage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const { data: placesData } = await supabase.from("places").select("*").order("created_at", { ascending: false });
+      const { data: placesData } = await supabase
+        .from("places")
+        .select("*")
+        .eq("user_id", user?.id ?? "")
+        .order("created_at", { ascending: false });
       if (placesData) setSavedPlaces(placesData.map(p => ({ id: p.id, name: p.name, address: p.address, category: p.category as Category })));
       const { data: postsData } = await supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false });
       if (postsData) {
@@ -171,7 +258,8 @@ export default function HomePage() {
   }, [user, userLoading]);
 
   const addPlace = async (place: Place) => {
-    await supabase.from("places").upsert({ id: place.id, name: place.name, address: place.address, category: place.category });
+    if (!user?.id) return;
+    await supabase.from("places").upsert({ id: place.id, user_id: user.id, name: place.name, address: place.address, category: place.category });
     setSavedPlaces(prev => [place, ...prev.filter(p => p.id !== place.id)]);
   };
   const deletePlace = async (id: string) => {
@@ -333,6 +421,158 @@ export default function HomePage() {
     setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
   };
 
+  // 코스 만들기 실행
+  const generateCourse = async () => {
+    if (!geocoderRef.current) {
+      showToast("지도가 아직 준비되지 않았어요. 지도 탭을 한 번 열어주세요.", "info");
+      return;
+    }
+    const totalCount = courseCounts.카페 + courseCounts.맛집 + courseCounts.쇼핑 + courseCounts.숙소;
+    if (totalCount === 0) {
+      showToast("최소 한 개 이상 선택해주세요", "info");
+      return;
+    }
+    setCourseLoading(true);
+    try {
+      // 1. 출발지 좌표 결정
+      let originLat = 37.5665;
+      let originLng = 126.978;
+      if (courseOriginMode === "current") {
+        await new Promise<void>((resolve) => {
+          if (!navigator.geolocation) { resolve(); return; }
+          navigator.geolocation.getCurrentPosition(
+            (pos) => { originLat = pos.coords.latitude; originLng = pos.coords.longitude; resolve(); },
+            () => { resolve(); },
+            { timeout: 5000 }
+          );
+        });
+      } else if (courseOriginAddress.trim()) {
+        await new Promise<void>((resolve) => {
+          geocoderRef.current.addressSearch(courseOriginAddress.trim(), (result: any[], st: string) => {
+            if (st === window.kakao.maps.services.Status.OK && result[0]) {
+              originLat = parseFloat(result[0].y);
+              originLng = parseFloat(result[0].x);
+            }
+            resolve();
+          });
+        });
+      }
+
+      // 2. savedPlaces 각 장소의 좌표 조회 (주소 → 위경도)
+      const placesWithCoords: CoursePlace[] = [];
+      await Promise.all(
+        savedPlaces.map(
+          (place) =>
+            new Promise<void>((resolve) => {
+              geocoderRef.current.addressSearch(place.address, (result: any[], st: string) => {
+                if (st === window.kakao.maps.services.Status.OK && result[0]) {
+                  placesWithCoords.push({
+                    ...place,
+                    lat: parseFloat(result[0].y),
+                    lng: parseFloat(result[0].x),
+                  });
+                }
+                resolve();
+              });
+            })
+        )
+      );
+
+      // 3. 카테고리별로 분류
+      const candidates = {
+        카페: placesWithCoords.filter((p) => p.category === "카페"),
+        맛집: placesWithCoords.filter((p) => p.category === "맛집"),
+        쇼핑: placesWithCoords.filter((p) => p.category === "쇼핑"),
+        숙소: placesWithCoords.filter((p) => p.category === "숙소"),
+      };
+
+      // 4. 요청한 개수가 가능한지 체크 (쇼핑은 중복 OK라고 했지만, 일단 같은 장소 2번은 X 정책으로 갔으니 후보가 부족하면 가능한 만큼만)
+      const adjustedCounts = {
+        카페: Math.min(courseCounts.카페, candidates.카페.length),
+        맛집: Math.min(courseCounts.맛집, candidates.맛집.length),
+        쇼핑: Math.min(courseCounts.쇼핑, candidates.쇼핑.length),
+        숙소: Math.min(courseCounts.숙소, candidates.숙소.length),
+      };
+
+      // 5. 알고리즘 실행
+      const course = buildCourse({ lat: originLat, lng: originLng }, candidates, adjustedCounts);
+
+      if (course.length === 0) {
+        showToast("코스를 만들 수 없어요. 저장된 장소를 더 추가해보세요.", "info");
+        return;
+      }
+      setCourseResult(course);
+
+      // 부족했으면 안내
+      const requested = courseCounts.카페 + courseCounts.맛집 + courseCounts.쇼핑 + courseCounts.숙소;
+      if (course.length < requested) {
+        showToast(`저장된 장소가 부족해서 ${course.length}곳으로 코스를 만들었어요`, "info");
+      }
+    } catch (e) {
+      showToast("코스를 만드는 중 오류가 발생했어요", "error");
+    } finally {
+      setCourseLoading(false);
+    }
+  };
+
+  // 코스를 전체화면 지도에 경로로 표시
+  const showCourseOnMap = async () => {
+    if (!courseResult || courseResult.length === 0) return;
+    setShowCourseModal(false);
+    setShowCourseRoute(true);
+    setMapExpanded(true);
+    setActiveTab("map");
+    // 지도가 그려진 후에 마커와 폴리라인 그리기 (살짝 딜레이)
+    setTimeout(() => drawCourseRoute(), 800);
+  };
+
+  // 전체화면 지도에 코스 경로 그리기
+  const drawCourseRoute = () => {
+    if (!courseResult || !expandedMapRef.current || !window.kakao?.maps) return;
+    // 기존 경로 지우기
+    clearRoute();
+    searchMarkersRef.current.forEach((m) => m.setMap(null));
+    searchMarkersRef.current = [];
+
+    const path: any[] = [];
+    const bounds = new window.kakao.maps.LatLngBounds();
+    courseResult.forEach((place, idx) => {
+      const pos = new window.kakao.maps.LatLng(place.lat, place.lng);
+      path.push(pos);
+      bounds.extend(pos);
+      // 순번 마커
+      const numberSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40"><path d="M16 0C7.16 0 0 7.16 0 16c0 12 16 24 16 24S32 28 32 16C32 7.16 24.84 0 16 0z" fill="#1a2a7a" stroke="#fff" stroke-width="1.5"/><circle cx="16" cy="16" r="11" fill="#fff"/><text x="16" y="20" text-anchor="middle" font-size="13" font-weight="700" fill="#1a2a7a">${idx + 1}</text></svg>`;
+      const markerImg = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(numberSvg)}`;
+      const marker = new window.kakao.maps.Marker({
+        map: expandedMapRef.current,
+        position: pos,
+        image: new window.kakao.maps.MarkerImage(markerImg, new window.kakao.maps.Size(32, 40)),
+      });
+      window.kakao.maps.event.addListener(marker, "click", () => {
+        setSelectedPlace({
+          place_name: place.name,
+          category_name: place.category,
+          road_address_name: place.address,
+          phone: "",
+          place_url: "",
+          y: place.lat,
+          x: place.lng,
+          _feedPosts: feedPosts.filter((p) => !p.archived && p.placeName === place.name),
+        });
+      });
+      searchMarkersRef.current.push(marker);
+    });
+    // 경로선
+    routePolylineRef.current = new window.kakao.maps.Polyline({
+      path,
+      strokeWeight: 4,
+      strokeColor: "#1a2a7a",
+      strokeOpacity: 0.85,
+      strokeStyle: "solid",
+    });
+    routePolylineRef.current.setMap(expandedMapRef.current);
+    expandedMapRef.current.setBounds(bounds);
+  };
   const handleAddFromInstagram = async () => {
     if (!canSubmit) return;
     setIsSubmitting(true); setStatus("Instagram 링크를 분석해서 장소를 추출하는 중..."); setError("");
@@ -391,12 +631,9 @@ export default function HomePage() {
     setPostCategory(cat); setPostSearchResults([]); setPostSearchQuery("");
   };
   const handleSubmitPost = async () => {
-    console.log("1️⃣ handleSubmitPost 시작, canPost:", canPost);
     if (!canPost) return;
     const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USER, title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
-    console.log("2️⃣ submitPost 호출 직전");
     await submitPost(newPost);
-    console.log("3️⃣ showToast 호출 직전");
     showToast("큐레이션이 등록됐어요 ✨", "success");
     setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]); setActiveTab("home");
   };
@@ -553,15 +790,73 @@ export default function HomePage() {
 
   // 지도 탭이 활성화될 때 지도 초기화 (DOM이 준비된 후)
   useEffect(() => {
-    if (kakaoStatus !== "ready") return;
-    setTimeout(() => { initMap(savedPlaces, feedPosts); }, 100);
-  }, [kakaoStatus]);
+    if (kakaoStatus !== "ready" || activeTab !== "map") return;
+    const container = mapContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const timer = setTimeout(() => { initMap(savedPlaces, feedPosts); }, 100);
+    return () => clearTimeout(timer);
+  }, [kakaoStatus, activeTab]);
 
   // 탭 전환 시 지도 relayout
   useEffect(() => {
     if (activeTab !== "map" || !mapRef.current) return;
-    setTimeout(() => { mapRef.current.relayout(); }, 50);
+    const relayoutTimers = [100, 300, 600].map((delay) => setTimeout(() => {
+      const map = mapRef.current;
+      if (!map) return;
+      map.relayout();
+      const container = mapContainerRef.current;
+      const parent = container?.parentElement;
+      if (parent && (parent.clientWidth === 0 || parent.clientHeight === 0)) {
+        const center = map.getCenter?.() ?? new window.kakao.maps.LatLng(37.5665, 126.978);
+        map.setCenter(center);
+      }
+    }, delay));
+    return () => relayoutTimers.forEach(clearTimeout);
   }, [activeTab]);
+
+  // URL에 ?openChatRoom=xxx 있으면 자동으로 그 채팅방 열기
+  useEffect(() => {
+    const roomIdFromUrl = searchParams?.get("openChatRoom");
+    if (!roomIdFromUrl || !user) return;
+
+    const handleOpen = async () => {
+      // 1. 일단 메시지 탭으로 이동
+      setActiveTab("messages");
+
+      // 2. chatRooms에서 먼저 찾아보기
+      let targetRoom = chatRooms.find(r => r.id === roomIdFromUrl);
+
+      // 3. 없으면 DB에서 직접 가져오기 (chatRooms 로딩 타이밍 회피)
+      if (!targetRoom) {
+        const { data } = await supabase.from("chat_rooms").select("*").eq("id", roomIdFromUrl).maybeSingle();
+        if (data) {
+          const friendId = data.user1_id === user.id ? data.user2_id : data.user1_id;
+          // 친구 username 가져오기
+          const { data: friendData } = await supabase.from("users").select("username").eq("id", friendId).maybeSingle();
+          targetRoom = {
+            id: data.id,
+            friendId,
+            friendName: friendData?.username ?? friendId,
+            lastMessage: "",
+            lastTime: data.created_at,
+            unreadCount: 0,
+          };
+          // chatRooms에도 추가해두기
+          setChatRooms(prev => prev.some(r => r.id === targetRoom!.id) ? prev : [targetRoom!, ...prev]);
+        }
+      }
+
+      if (targetRoom) {
+        await openChat(targetRoom);
+        // URL에서 쿼리 파라미터 제거 (새로고침 시 중복 동작 방지)
+        window.history.replaceState({}, "", "/");
+      }
+    };
+
+    void handleOpen();
+  }, [searchParams, user]);
 
   // 메시지 탭 진입 시 안 읽은 개수 갱신
   useEffect(() => {
@@ -624,7 +919,7 @@ export default function HomePage() {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
     addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts);
     addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts);
-  }, [feedPosts, mapExpanded]);
+  }, [feedPosts, mapExpanded, savedPlaces]);
 
   useEffect(() => { if (!openMenuId) return; const handler = () => setOpenMenuId(null); document.addEventListener("click", handler); return () => document.removeEventListener("click", handler); }, [openMenuId]);
 
@@ -652,7 +947,10 @@ export default function HomePage() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             {(() => {
-              const saved = savedPlaces.find(p => p.name === selectedPlace.place_name);
+              const selectedAddress = selectedPlace.road_address_name || selectedPlace.address_name || "";
+              const saved = savedPlaces.find(
+                (p) => p.name === selectedPlace.place_name && (!selectedAddress || p.address === selectedAddress),
+              );
               return (
                 <button onClick={async () => {
                   if (saved) {
@@ -872,6 +1170,81 @@ export default function HomePage() {
             </div>
           )}
 
+{showCourseModal && (
+            <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
+              <div style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>
+                    {courseResult ? "✨ 추천 코스" : "🗺️ 코스 만들기"}
+                  </span>
+                  <button onClick={() => { setShowCourseModal(false); setCourseResult(null); }} style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: "pointer" }}>×</button>
+                </div>
+
+                {!courseResult && (
+                  <>
+                    <div>
+                      <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>출발지</p>
+                      <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                        <button type="button" onClick={() => setCourseOriginMode("current")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: courseOriginMode === "current" ? "1px solid #1a2a7a" : "1px solid #ddd", background: courseOriginMode === "current" ? "#1a2a7a" : "#fff", color: courseOriginMode === "current" ? "#fff" : "#666", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>📍 현재 위치</button>
+                        <button type="button" onClick={() => setCourseOriginMode("manual")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: courseOriginMode === "manual" ? "1px solid #1a2a7a" : "1px solid #ddd", background: courseOriginMode === "manual" ? "#1a2a7a" : "#fff", color: courseOriginMode === "manual" ? "#fff" : "#666", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>✏️ 직접 입력</button>
+                      </div>
+                      {courseOriginMode === "manual" && (
+                        <input className="mapInput" placeholder="예: 성수역, 망원동" value={courseOriginAddress} onChange={(e) => setCourseOriginAddress(e.target.value)} style={{ width: "100%", boxSizing: "border-box" }} />
+                      )}
+                    </div>
+
+                    <div>
+                      <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "10px", marginTop: 0 }}>몇 곳을 방문할까요?</p>
+                      {(["카페", "맛집", "쇼핑", "숙소"] as Category[]).map((cat) => {
+                        const available = savedPlaces.filter(p => p.category === cat).length;
+                        const max = available;
+                        return (
+                          <div key={cat} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 0", borderBottom: "0.5px solid #f5f5f5" }}>
+                            <div style={{ flex: 1 }}>
+                              <span style={{ fontSize: "14px", color: "#1a1a2e" }}>{CATEGORY_PIN[cat].emoji} {cat}</span>
+                              <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "6px" }}>(저장 {available}곳)</span>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                              <button type="button" disabled={courseCounts[cat] === 0} onClick={() => setCourseCounts(prev => ({ ...prev, [cat]: Math.max(0, prev[cat] - 1) }))} style={{ width: "28px", height: "28px", borderRadius: "50%", border: "1px solid #ddd", background: "#fff", color: "#1a2a7a", fontSize: "14px", cursor: courseCounts[cat] === 0 ? "not-allowed" : "pointer", opacity: courseCounts[cat] === 0 ? 0.4 : 1 }}>−</button>
+                              <span style={{ fontSize: "14px", color: "#1a2a7a", fontWeight: 600, minWidth: "20px", textAlign: "center" }}>{courseCounts[cat]}</span>
+                              <button type="button" disabled={courseCounts[cat] >= max} onClick={() => setCourseCounts(prev => ({ ...prev, [cat]: Math.min(max, prev[cat] + 1) }))} style={{ width: "28px", height: "28px", borderRadius: "50%", border: "1px solid #ddd", background: "#fff", color: "#1a2a7a", fontSize: "14px", cursor: courseCounts[cat] >= max ? "not-allowed" : "pointer", opacity: courseCounts[cat] >= max ? 0.4 : 1 }}>＋</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <button type="button" onClick={generateCourse} disabled={courseLoading} style={{ width: "100%", padding: "14px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "14px", letterSpacing: "1px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading ? 0.6 : 1 }}>
+                      {courseLoading ? "코스를 짜는 중..." : "코스 만들기"}
+                    </button>
+                  </>
+                )}
+
+                {courseResult && (
+                  <>
+                    <p style={{ margin: 0, fontSize: "12px", color: "#888", lineHeight: 1.5 }}>📍 출발지에서 가까운 순서로 동선을 짜드렸어요. 시간에 여유 두고 다녀오세요!</p>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                      {courseResult.map((place, idx) => (
+                        <div key={`${place.id}-${idx}`} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px", background: "#f8f8fc", borderRadius: "10px" }}>
+                          <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: 700, flexShrink: 0 }}>{idx + 1}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{place.name}</p>
+                            <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{CATEGORY_PIN[place.category].emoji} {place.category} · {place.address}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button type="button" onClick={() => { setCourseResult(null); }} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>다시 만들기</button>
+                      <button type="button" onClick={showCourseOnMap} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           {showPostModal && (
             <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
               <div style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box" }}>
@@ -924,9 +1297,15 @@ export default function HomePage() {
 )}
               {visibleFeedPosts.map((post) => (
                 <article key={post.id} className="feedCard" style={{ position: "relative", cursor: "pointer", overflow: "hidden" }} onClick={() => setDetailPostId(post.id)}>
-                  <div className="feedTop" onClick={(e) => e.stopPropagation()}>
-                    <div className="avatar">{post.user.slice(0, 1).toUpperCase()}</div>
-                    <div style={{ flex: 1 }}><p className="feedUser">{post.user}</p><p className="feedMeta">{timeAgo(post.createdAt)}</p></div>
+                  <div className="feedTop">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); router.push(`/profile/${encodeURIComponent(post.user)}`); }}
+                      style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, border: "none", background: "transparent", padding: 0, textAlign: "left", cursor: "pointer", minWidth: 0 }}
+                    >
+                      <div className="avatar">{post.user.slice(0, 1).toUpperCase()}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}><p className="feedUser">{post.user}</p><p className="feedMeta">{timeAgo(post.createdAt)}</p></div>
+                    </button>
                     {post.user !== MY_USER && !chatRooms.some(r => r.friendName === post.user) && (
                       <button
                         type="button"
@@ -995,7 +1374,43 @@ export default function HomePage() {
                     <span>{formatTime(m.createdAt)}</span>
                   </div>
                 )}
-                <div style={{ maxWidth: "70%", padding: "8px 12px", borderRadius: isMine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: isMine ? "#1a2a7a" : "#f0f0f5", color: isMine ? "#fff" : "#333", fontSize: "13px", lineHeight: 1.5 }}>{m.text}</div>
+                <div style={{ maxWidth: "70%", padding: "8px 12px", borderRadius: isMine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: isMine ? "#1a2a7a" : "#f0f0f5", color: isMine ? "#fff" : "#333", fontSize: "13px", lineHeight: 1.5, whiteSpace: "pre-wrap" as any }}>
+                  {(() => {
+                    const shareMatch = m.text.match(/\[share:([^\]]+)\]/);
+                    if (shareMatch) {
+                      const sharedPostId = shareMatch[1];
+                      const cleanText = m.text.replace(/\[share:[^\]]+\]/, "").trim();
+                      return (
+                        <>
+                          <span>{cleanText}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveChatRoom(null);
+                              setDetailPostId(sharedPostId);
+                            }}
+                            style={{
+                              display: "block",
+                              marginTop: "8px",
+                              padding: "6px 10px",
+                              background: isMine ? "rgba(255,255,255,0.2)" : "#fff",
+                              border: isMine ? "1px solid rgba(255,255,255,0.3)" : "1px solid #1a2a7a",
+                              borderRadius: "6px",
+                              color: isMine ? "#fff" : "#1a2a7a",
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            📍 큐레이션 열어보기
+                          </button>
+                        </>
+                      );
+                    }
+                    return m.text;
+                  })()}
+                </div>
                 {!isMine && (
                   <span style={{ fontSize: "10px", color: "#bbb", lineHeight: 1.3 }}>{formatTime(m.createdAt)}</span>
                 )}
@@ -1016,21 +1431,27 @@ export default function HomePage() {
           <button onClick={() => setShowAddFriend(true)} style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "20px", padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}>+ 팔로우</button>
         </div>
         {showAddFriend && (
-          <div style={{ background: "#f8f8fc", borderRadius: "12px", padding: "16px", marginBottom: "16px" }}>
-            <p style={{ margin: "0 0 10px", fontSize: "12px", color: "#1a2a7a", fontWeight: 600 }}>검색</p>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <input className="mapInput" placeholder="유저명 입력" value={friendSearch} onChange={e => setFriendSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchFriend()} style={{ flex: 1 }} />
-              <button className="primaryButton" onClick={searchFriend} style={{ padding: "0 14px" }}>검색</button>
+          <div style={{ background: "#fff", borderRadius: "14px", padding: "16px", marginBottom: "16px", boxShadow: "0 6px 20px rgba(20, 30, 80, 0.06)", border: "0.5px solid #eef0f6" }}>
+            <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>새 친구 찾기</p>
+            <p style={{ margin: "6px 0 12px", fontSize: "11px", color: "#8a90a6", lineHeight: 1.5 }}>유저명을 정확히 입력해 주세요</p>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <input placeholder="🔍 유저명으로 검색" value={friendSearch} onChange={e => setFriendSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchFriend()} style={{ flex: 1, height: "36px", border: "0.5px solid #dde2f0", borderRadius: "999px", padding: "0 12px", fontSize: "12px", color: "#333", outline: "none", fontFamily: "inherit", background: "#fbfcff" }} />
+              <button onClick={searchFriend} type="button" style={{ height: "36px", border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "999px", padding: "0 14px", fontSize: "12px", cursor: "pointer", fontFamily: "inherit", letterSpacing: "0.3px" }}>검색</button>
             </div>
             {friendSearchError && <p style={{ color: "#e07070", fontSize: "11px", marginTop: "6px" }}>{friendSearchError}</p>}
             {friendSearchResult && (
-              <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: "#fff", borderRadius: "8px" }}>
-                <div className="avatar">{friendSearchResult.username.slice(0,1).toUpperCase()}</div>
-                <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{friendSearchResult.username}</span>
-                <button className="primaryButton" onClick={addFriend} style={{ padding: "6px 14px", fontSize: "12px" }}>팔로우</button>
+              <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "10px", padding: "12px", background: "#f7f9ff", borderRadius: "10px", border: "0.5px solid #e1e7f7" }}>
+                <div style={{ width: "34px", height: "34px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", flexShrink: 0 }}>{friendSearchResult.username.slice(0,1).toUpperCase()}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{friendSearchResult.username}</p>
+                  <p style={{ margin: "3px 0 0", fontSize: "10px", color: "#9ca3b6" }}>검색 결과</p>
+                </div>
+                <button onClick={addFriend} type="button" style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "16px", padding: "7px 12px", fontSize: "11px", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>팔로우</button>
               </div>
             )}
-            <button onClick={() => { setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null); setFriendSearchError(""); }} style={{ marginTop: "10px", border: "none", background: "transparent", color: "#bbb", fontSize: "12px", cursor: "pointer" }}>취소</button>
+            <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
+              <button onClick={() => { setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null); setFriendSearchError(""); }} style={{ border: "0.5px solid #d9deec", background: "#fff", color: "#76809a", borderRadius: "999px", fontSize: "11px", cursor: "pointer", padding: "6px 12px", fontFamily: "inherit" }}>닫기</button>
+            </div>
           </div>
         )}
         {chatRooms.length === 0 && !showAddFriend && (
@@ -1070,12 +1491,20 @@ export default function HomePage() {
               {error && <p className="emptyText">{error}</p>}
               {kakaoStatus === "loading" && <p className="hintText">카카오맵을 불러오는 중...</p>}
               {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}
-              <div ref={mapContainerRef} className="kakaoMap" />
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "6px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", marginBottom: "6px" }}>
                 <button onClick={() => setMapExpanded(true)} style={{ background: "transparent", border: "0.5px solid #ddd", borderRadius: "4px", padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "0.5px", fontFamily: "'Inter', sans-serif" }}>
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 5V1H5M7 1H11V5M11 7V11H7M5 11H1V7" stroke="#1a2a7a" strokeWidth="1.2" strokeLinecap="round"/></svg>전체화면
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setHiddenIds(new Set(savedPlaces.map((p) => p.id)))}
+                  disabled={savedPlaces.length === 0}
+                  style={{ background: "transparent", border: "0.5px solid #ddd", borderRadius: "4px", padding: "6px 12px", cursor: savedPlaces.length === 0 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "0.5px", fontFamily: "'Inter', sans-serif", opacity: savedPlaces.length === 0 ? 0.5 : 1 }}
+                >
+                  🗑️ 검색기록 삭제
+                </button>
               </div>
+              <div ref={mapContainerRef} className="kakaoMap" />
               {mapExpanded && (
                 <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, background: "#fff", display: "flex", flexDirection: "column" }}>
                   <div style={{ padding: "14px 20px", borderBottom: "0.5px solid #efefef", display: "flex", justifyContent: "center", alignItems: "center", background: "#fff", position: "relative" }}>
@@ -1101,7 +1530,7 @@ export default function HomePage() {
                   <article key={place.id} className="miniItem" onClick={() => handleMiniListClick(place)} style={{ cursor: "pointer" }}>
                     <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[place.category], flexShrink: 0, display: "inline-block" }} />
                     <div style={{ flex: 1 }}><p className="miniName">{place.name}</p><p className="miniMeta">{place.address} · {place.category}</p></div>
-                    <button onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
+                    <button onClick={(e) => { e.stopPropagation(); hideFromMap(place.id); }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
                   </article>
                 ))}
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={() => setHiddenIds(new Set())} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
@@ -1111,8 +1540,36 @@ export default function HomePage() {
 
           {activeTab === "saved" && (
   <div className="screen">
-    <p className="screenTitle">저장한 장소</p>
-    {savedPlaces.length === 0 && (
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+    <p className="screenTitle" style={{ margin: 0 }}>저장한 장소</p>
+    {savedPlaces.length > 0 && (
+      <button
+        type="button"
+        onClick={() => {
+          setShowCourseModal(true);
+          setCourseResult(null);
+          setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0 });
+        }}
+        style={{
+          border: "1px solid #1a2a7a",
+          background: "#fff",
+          color: "#1a2a7a",
+          borderRadius: "20px",
+          padding: "6px 14px",
+          fontSize: "12px",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontWeight: 500,
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
+        }}
+      >
+        🗺️ 코스 만들기
+      </button>
+    )}
+  </div>
+  {savedPlaces.length === 0 && (
   <EmptyState
     icon="🔖"
     title="저장한 장소가 없어요"
