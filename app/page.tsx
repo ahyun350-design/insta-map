@@ -107,7 +107,7 @@ function buildCourse(
     숙소: counts.숙소,
   };
 
-  // 카테고리별 사용 가능한 후보 (맛집/카페/숙소는 한 번 쓰면 제거, 쇼핑은 중복 가능하지만 전체 개수만큼만)
+  // 카테고리별 사용 가능한 후보
   const pools: Record<Category, CoursePlace[]> = {
     카페: [...candidates.카페],
     맛집: [...candidates.맛집],
@@ -134,16 +134,19 @@ function buildCourse(
       });
     });
 
-    if (!bestPlace || !bestCategory) break;
+    if (bestPlace === null || bestCategory === null) break;
 
-    result.push(bestPlace);
-    remaining[bestCategory]--;
-    currentLat = bestPlace.lat;
-    currentLng = bestPlace.lng;
+    // TypeScript 타입 좁히기를 위해 명시적으로 변수에 담기
+    const chosenPlace: CoursePlace = bestPlace;
+    const chosenCategory: Category = bestCategory;
 
-    // 맛집/카페/숙소는 한 번 쓰면 제거 (중복 X)
-    // 쇼핑은 전체 풀에서 같은 장소가 두 번 추천되지 않게 제거 (현실적으로 같은 가게 두 번 가지 않으니까)
-    pools[bestCategory] = pools[bestCategory].filter((p) => p.id !== bestPlace!.id);
+    result.push(chosenPlace);
+    remaining[chosenCategory]--;
+    currentLat = chosenPlace.lat;
+    currentLng = chosenPlace.lng;
+
+    // 한 번 쓰면 풀에서 제거 (같은 장소 두 번 X)
+    pools[chosenCategory] = pools[chosenCategory].filter((p) => p.id !== chosenPlace.id);
   }
 
   return result;
