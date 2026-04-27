@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser, logout } from "@/lib/useUser";
+import FeedSkeleton from "@/components/FeedSkeleton";
+import EmptyState from "@/components/EmptyState";
+import { useToast } from "@/components/Toast";
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소";
 type Place = { id: string; name: string; address: string; category: Category };
@@ -75,6 +78,7 @@ export default function HomePage() {
   const router = useRouter();
   const { user, loading: userLoading } = useUser();
   const MY_USER = user?.username || "";
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [instagramUrl, setInstagramUrl] = useState("");
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
@@ -317,7 +321,7 @@ export default function HomePage() {
     // 이미 팔로우 중이면 무시
     if (chatRooms.some(r => r.friendName === username)) return;
     const { data } = await supabase.from("users").select("*").eq("username", username).single();
-    if (!data) { alert("유저를 찾을 수 없어요."); return; }
+    if (!data) { showToast("유저를 찾을 수 없어요", "error"); return; }
     const { data: existing } = await supabase.from("chat_rooms").select("*")
       .or(`and(user1_id.eq.${MY_USER},user2_id.eq.${data.id}),and(user1_id.eq.${data.id},user2_id.eq.${MY_USER})`);
     let roomId = existing?.[0]?.id;
@@ -359,7 +363,7 @@ export default function HomePage() {
 
         if (uploadError) {
           console.error("업로드 실패:", uploadError);
-          alert(`사진 업로드 실패: ${uploadError.message}`);
+          showToast("사진 업로드에 실패했어요", "error");
           continue;
         }
 
@@ -371,14 +375,14 @@ export default function HomePage() {
         setPostImages(prev => [...prev, publicUrl]);
       } catch (err) {
         console.error("업로드 에러:", err);
-        alert("사진 업로드 중 오류가 발생했어요.");
+        showToast("사진 업로드 중 오류가 발생했어요", "error");
       }
     }
   };
   const handlePostSearch = () => {
     if (!postSearchQuery.trim() || !window.kakao?.maps?.services) return;
     new window.kakao.maps.services.Places().keywordSearch(postSearchQuery.trim(), (data: any[], st: string) => {
-      if (st === window.kakao.maps.services.Status.OK) setPostSearchResults(data.slice(0, 5)); else alert("검색 결과가 없습니다.");
+      if (st === window.kakao.maps.services.Status.OK) setPostSearchResults(data.slice(0, 5)); else showToast("검색 결과가 없어요", "info");
     });
   };
   const handleSelectPostPlace = (place: any) => {
@@ -387,9 +391,13 @@ export default function HomePage() {
     setPostCategory(cat); setPostSearchResults([]); setPostSearchQuery("");
   };
   const handleSubmitPost = async () => {
+    console.log("1️⃣ handleSubmitPost 시작, canPost:", canPost);
     if (!canPost) return;
     const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USER, title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
+    console.log("2️⃣ submitPost 호출 직전");
     await submitPost(newPost);
+    console.log("3️⃣ showToast 호출 직전");
+    showToast("큐레이션이 등록됐어요 ✨", "success");
     setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]); setActiveTab("home");
   };
   const resetModal = () => {
@@ -467,7 +475,7 @@ export default function HomePage() {
           body: JSON.stringify({ origin: { lat: pos.coords.latitude, lng: pos.coords.longitude }, destination: { lat: destLat, lng: destLng }, mode }),
         });
         const data = await res.json();
-        if (!data.routes?.[0]) { alert("경로를 찾을 수 없습니다."); setDirectionsLoading(false); return; }
+        if (!data.routes?.[0]) { showToast("경로를 찾을 수 없어요", "error"); setDirectionsLoading(false); return; }
         const route = data.routes[0];
         const summary = route.summary;
         setDirectionsInfo({ duration: Math.round(summary.duration / 60), distance: Math.round(summary.distance / 1000 * 10) / 10 });
@@ -487,9 +495,9 @@ export default function HomePage() {
         const bounds = new window.kakao.maps.LatLngBounds();
         linePath.forEach(p => bounds.extend(p));
         expandedMapRef.current.setBounds(bounds);
-      } catch { alert("길찾기에 실패했습니다."); }
+      } catch { showToast("길찾기에 실패했어요", "error"); }
       finally { setDirectionsLoading(false); }
-    }, () => { alert("현재 위치를 가져올 수 없습니다."); setDirectionsLoading(false); });
+    }, () => { showToast("현재 위치를 가져올 수 없어요", "error"); setDirectionsLoading(false); });
   };
 
   const openTransitInKakaoMap = (destName: string, destLat: number, destLng: number) => {
@@ -508,7 +516,7 @@ export default function HomePage() {
     if (!searchQuery.trim() || !expandedMapRef.current || !window.kakao?.maps) return;
     const ps = new window.kakao.maps.services.Places(); const geocoder = new window.kakao.maps.services.Geocoder();
     const doSearch = (data: any[], st: string) => {
-      if (st !== window.kakao.maps.services.Status.OK) { alert("검색 결과가 없습니다."); return; }
+      if (st !== window.kakao.maps.services.Status.OK) { showToast("검색 결과가 없어요", "info"); return; }
       searchMarkersRef.current.forEach((m) => m.setMap(null)); searchMarkersRef.current = [];
       const bounds = new window.kakao.maps.LatLngBounds();
       data.forEach((place) => {
@@ -905,8 +913,15 @@ export default function HomePage() {
           {activeTab === "home" && (
             <div className="screen">
               <p className="screenTitle">홈 피드</p>
-              {loading && <p className="hintText" style={{ textAlign: "center" }}>불러오는 중...</p>}
-              {!loading && visibleFeedPosts.length === 0 && (<div style={{ textAlign: "center", padding: "40px 20px", color: "#bbb" }}><p style={{ fontSize: "32px", marginBottom: "8px" }}>✍️</p><p style={{ fontSize: "13px" }}>아직 큐레이션이 없어요.</p><p style={{ fontSize: "12px", marginTop: "4px" }}>오른쪽 위 + 버튼으로 첫 장소를 올려보세요!</p></div>)}
+              {loading && <FeedSkeleton />}
+              {!loading && visibleFeedPosts.length === 0 && (
+  <EmptyState
+    icon="✍️"
+    title="아직 큐레이션이 없어요"
+    description="오른쪽 위 + 버튼을 눌러 첫 번째 장소를 추가해보세요"
+    action={{ label: "큐레이션 작성하기", onClick: () => setShowPostModal(true) }}
+  />
+)}
               {visibleFeedPosts.map((post) => (
                 <article key={post.id} className="feedCard" style={{ position: "relative", cursor: "pointer", overflow: "hidden" }} onClick={() => setDetailPostId(post.id)}>
                   <div className="feedTop" onClick={(e) => e.stopPropagation()}>
@@ -1018,7 +1033,14 @@ export default function HomePage() {
             <button onClick={() => { setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null); setFriendSearchError(""); }} style={{ marginTop: "10px", border: "none", background: "transparent", color: "#bbb", fontSize: "12px", cursor: "pointer" }}>취소</button>
           </div>
         )}
-        {chatRooms.length === 0 && !showAddFriend && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", padding: "40px 0" }}>아직 채팅이 없어요. 친구를 추가해보세요!</p>}
+        {chatRooms.length === 0 && !showAddFriend && (
+  <EmptyState
+    icon="💌"
+    title="아직 메시지가 없어요"
+    description="친구를 추가해 첫 대화를 시작해보세요"
+    action={{ label: "친구 추가하기", onClick: () => setShowAddFriend(true) }}
+  />
+)}
         {chatRooms.map(room => (
           <article key={room.id} className="chatItem" onClick={() => openChat(room)} style={{ cursor: "pointer" }}>
             <div className="avatar">{room.friendName.slice(0,1).toUpperCase()}</div>
@@ -1090,7 +1112,14 @@ export default function HomePage() {
           {activeTab === "saved" && (
   <div className="screen">
     <p className="screenTitle">저장한 장소</p>
-    {savedPlaces.length === 0 && <p className="emptyText">저장된 장소가 아직 없어요.</p>}
+    {savedPlaces.length === 0 && (
+  <EmptyState
+    icon="🔖"
+    title="저장한 장소가 없어요"
+    description="지도에서 마음에 드는 장소를 저장해보세요"
+    action={{ label: "지도 보러가기", onClick: () => setActiveTab("map") }}
+  />
+)}
     {savedPlaces.length > 0 && (
       <div style={{ position: "relative", marginBottom: "16px" }}>
         <input
