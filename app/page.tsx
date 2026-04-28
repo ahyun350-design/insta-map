@@ -257,6 +257,13 @@ function HomePageContent() {
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
   const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImages.length > 0;
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
+  const isAnalyzing = activeJobs.length > 0;
+  const analyzingMainText = isAnalyzing
+    ? activeJobs.length > 1
+      ? `${activeJobs.length}개 작업을 분석하고 있어요`
+      : "정확한 장소를 파악하고 있어요"
+    : "";
+  const analyzingSubText = isAnalyzing ? "잠시 후 핀이 추가될 거예요" : "";
 
   const loadData = async () => {
     setLoading(true);
@@ -389,7 +396,21 @@ function HomePageContent() {
         if (nextStatus === "completed") {
           removeJob(jobId);
           const places = data.result_places ?? [];
-          const rows = places.map((p) => ({
+          const { data: existingPlaces } = await supabase
+            .from("places")
+            .select("name,address")
+            .eq("user_id", user.id);
+          const existingSet = new Set(
+            (existingPlaces ?? []).map((p) => `${String(p.name).trim()}::${String(p.address).trim()}`),
+          );
+          const uniquePlaces = places.filter((p) => {
+            const key = `${p.name.trim()}::${p.address.trim()}`;
+            if (existingSet.has(key)) return false;
+            existingSet.add(key);
+            return true;
+          });
+          const duplicateCount = places.length - uniquePlaces.length;
+          const rows = uniquePlaces.map((p) => ({
             id: Math.random().toString(36).substring(2) + Date.now().toString(36),
             user_id: user.id,
             name: p.name,
@@ -397,14 +418,14 @@ function HomePageContent() {
             category: p.category,
           }));
           if (rows.length > 0) {
-            await supabase.from("places").upsert(rows);
+            await supabase.from("places").insert(rows);
             setSavedPlaces((prev) => [
               ...rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category })),
               ...prev.filter((p) => !rows.some((r) => r.id === p.id)),
             ]);
           }
-          showToast(`✨ ${places.length}개 장소를 추가했어요`, "success");
-          setStatus(`${places.length}개 장소를 지도에 추가했어요.`);
+          showToast(`✨ ${rows.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
+          setStatus(`${rows.length}개 장소를 지도에 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}.`);
           return;
         }
 
@@ -1735,7 +1756,13 @@ function HomePageContent() {
                 <input className="mapInput" placeholder="Instagram 릴스/게시물 URL 붙여넣기" value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} />
                 <button className="primaryButton" onClick={handleAddFromInstagram} type="button" disabled={!canSubmit}>{isSubmitting ? "분석 중..." : "핀 추가"}</button>
               </div>
-              {status && <p className="hintText">{status}</p>}
+              {isAnalyzing && (
+                <div style={{ marginTop: "6px" }}>
+                  <p style={{ margin: 0, color: "#1a2a7a", fontSize: "12px" }}>{analyzingMainText}</p>
+                  <p style={{ margin: "3px 0 0", color: "#888", fontSize: "11px" }}>{analyzingSubText}</p>
+                </div>
+              )}
+              {!isAnalyzing && status && <p className="hintText">{status}</p>}
               {error && <p className="emptyText">{error}</p>}
               {kakaoStatus === "loading" && <p className="hintText">카카오맵을 불러오는 중...</p>}
               {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}

@@ -16,9 +16,18 @@ type ExtractJobStatusRow = {
 
 export async function GET(req: Request) {
   try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    const missingEnv: string[] = [];
+    if (!supabaseUrl) missingEnv.push("NEXT_PUBLIC_SUPABASE_URL");
+    if (!serviceKey) missingEnv.push("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ error: `서버 환경변수 미설정: ${missingEnv.join(", ")}` }, { status: 500 });
+    }
+
     const adminClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      supabaseUrl,
+      serviceKey,
       { auth: { persistSession: false, autoRefreshToken: false } },
     );
 
