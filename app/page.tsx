@@ -241,6 +241,8 @@ function HomePageContent() {
   const [courseLoading, setCourseLoading] = useState(false);
   const [courseResult, setCourseResult] = useState<CoursePlace[] | null>(null);
   const [showCourseRoute, setShowCourseRoute] = useState(false);
+  const pollAttemptsRef = useRef<Record<string, number>>({});
+  const pollInFlightRef = useRef<Set<string>>(new Set());
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
   const commentSectionRef = useRef<HTMLDivElement | null>(null);
@@ -349,9 +351,28 @@ function HomePageContent() {
   }, [activeJobs]);
 
   useEffect(() => {
-    if (activeJobs.length === 0 || !user?.id) return;
+    if (!user?.id) return;
+    const pollingTargets = activeJobs.filter((job) => job.status === "pending" || job.status === "processing");
+    if (pollingTargets.length === 0) return;
+
+    const removeJob = (jobId: string) => {
+      delete pollAttemptsRef.current[jobId];
+      pollInFlightRef.current.delete(jobId);
+      setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
+    };
 
     const pollJob = async (jobId: string) => {
+      if (pollInFlightRef.current.has(jobId)) return;
+
+      const attempts = (pollAttemptsRef.current[jobId] ?? 0) + 1;
+      pollAttemptsRef.current[jobId] = attempts;
+      if (attempts > 30) {
+        showToast("작업 상태 확인 시간이 초과되어 자동 중단했어요.", "info");
+        removeJob(jobId);
+        return;
+      }
+
+      pollInFlightRef.current.add(jobId);
       try {
         const res = await fetch(`/api/extract/status?jobId=${encodeURIComponent(jobId)}&userId=${encodeURIComponent(user.id)}`, {
           credentials: "include",
@@ -366,35 +387,46 @@ function HomePageContent() {
         setActiveJobs((prev) => prev.map((job) => job.jobId === jobId ? { ...job, status: nextStatus, progressStep: nextStep } : job));
 
         if (nextStatus === "completed") {
+          removeJob(jobId);
           const places = data.result_places ?? [];
-          for (const p of places) {
-            await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), ...p });
+          const rows = places.map((p) => ({
+            id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+            user_id: user.id,
+            name: p.name,
+            address: p.address,
+            category: p.category,
+          }));
+          if (rows.length > 0) {
+            await supabase.from("places").upsert(rows);
+            setSavedPlaces((prev) => [
+              ...rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category })),
+              ...prev.filter((p) => !rows.some((r) => r.id === p.id)),
+            ]);
           }
-          showToast(`${places.length}개 장소를 지도에 추가했어요`, "success");
+          showToast(`✨ ${places.length}개 장소를 추가했어요`, "success");
           setStatus(`${places.length}개 장소를 지도에 추가했어요.`);
-          setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
           return;
         }
 
         if (nextStatus === "failed") {
           const message = data.error_message || "장소 분석 작업에 실패했어요.";
           showToast(message, "error");
-          setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
+          removeJob(jobId);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : "작업 상태 확인 중 오류가 발생했어요.";
         showToast(message, "error");
-        setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
+        removeJob(jobId);
+      } finally {
+        pollInFlightRef.current.delete(jobId);
       }
     };
 
     const interval = window.setInterval(() => {
-      const targetJobs = activeJobs.filter((job) => job.status === "pending" || job.status === "processing");
-      targetJobs.forEach((job) => { void pollJob(job.jobId); });
+      pollingTargets.forEach((job) => { void pollJob(job.jobId); });
     }, 2000);
 
-    const targetJobs = activeJobs.filter((job) => job.status === "pending" || job.status === "processing");
-    targetJobs.forEach((job) => { void pollJob(job.jobId); });
+    pollingTargets.forEach((job) => { void pollJob(job.jobId); });
 
     return () => window.clearInterval(interval);
   }, [activeJobs, user?.id]);
