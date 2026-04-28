@@ -19,6 +19,20 @@ type FeedPost = {
 };
 type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; unreadCount: number; };
 type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; };
+type ExtractJobStatus = "pending" | "processing" | "completed" | "failed";
+type ActiveExtractJob = {
+  jobId: string;
+  instagramUrl: string;
+  status: ExtractJobStatus;
+  progressStep: string;
+};
+type ExtractStatusResponse = {
+  status: ExtractJobStatus;
+  progress_step?: string;
+  result_places?: Array<Omit<Place, "id">>;
+  error_message?: string | null;
+  error?: string;
+};
 
 declare global { interface Window { kakao: any; } }
 
@@ -41,6 +55,7 @@ const CATEGORY_PIN: Record<Category, { color: string; emoji: string }> = {
   쇼핑: { color: "#D8EBF9", emoji: "🛍️" }, 숙소: { color: "#D7D4B1", emoji: "🏠" },
 };
 const CATEGORY_COLORS: Record<Category, string> = { 맛집: "#513229", 카페: "#b08d57", 쇼핑: "#4a7fa5", 숙소: "#7a7a50" };
+const ACTIVE_JOBS_STORAGE_KEY = "pindmap_active_extract_jobs";
 
 function makeMarkerImage(category: Category) {
   const { color, emoji } = CATEGORY_PIN[category];
@@ -186,6 +201,8 @@ function HomePageContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [kakaoStatus, setKakaoStatus] = useState<KakaoStatus>("idle");
   const [mapExpanded, setMapExpanded] = useState(false);
+  const [showJobsModal, setShowJobsModal] = useState(false);
+  const [activeJobs, setActiveJobs] = useState<ActiveExtractJob[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
@@ -280,6 +297,86 @@ function HomePageContent() {
       loadData();
     }
   }, [user, userLoading]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || userLoading || !user) return;
+    try {
+      const raw = window.localStorage.getItem(ACTIVE_JOBS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as ActiveExtractJob[];
+      if (!Array.isArray(parsed)) return;
+      const normalized = parsed.filter((item) => item && typeof item.jobId === "string" && item.jobId.length > 0);
+      if (normalized.length > 0) {
+        setActiveJobs((prev) => {
+          const merged = [...normalized, ...prev];
+          const map = new Map<string, ActiveExtractJob>();
+          merged.forEach((job) => map.set(job.jobId, job));
+          return Array.from(map.values());
+        });
+      }
+    } catch {
+      // ignore invalid storage value
+    }
+  }, [user, userLoading]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const incomplete = activeJobs.filter((job) => job.status !== "completed" && job.status !== "failed");
+    if (incomplete.length === 0) {
+      window.localStorage.removeItem(ACTIVE_JOBS_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(ACTIVE_JOBS_STORAGE_KEY, JSON.stringify(incomplete));
+  }, [activeJobs]);
+
+  useEffect(() => {
+    if (activeJobs.length === 0 || !user?.id) return;
+
+    const pollJob = async (jobId: string) => {
+      try {
+        const res = await fetch(`/api/extract/status?jobId=${encodeURIComponent(jobId)}`);
+        const data = await res.json() as ExtractStatusResponse;
+        if (!res.ok) {
+          throw new Error(data.error || data.error_message || "작업 상태를 확인할 수 없어요.");
+        }
+
+        const nextStatus = data.status;
+        const nextStep = data.progress_step ?? "";
+        setActiveJobs((prev) => prev.map((job) => job.jobId === jobId ? { ...job, status: nextStatus, progressStep: nextStep } : job));
+
+        if (nextStatus === "completed") {
+          const places = data.result_places ?? [];
+          for (const p of places) {
+            await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), ...p });
+          }
+          showToast(`${places.length}개 장소를 지도에 추가했어요`, "success");
+          setStatus(`${places.length}개 장소를 지도에 추가했어요.`);
+          setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
+          return;
+        }
+
+        if (nextStatus === "failed") {
+          const message = data.error_message || "장소 분석 작업에 실패했어요.";
+          showToast(message, "error");
+          setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "작업 상태 확인 중 오류가 발생했어요.";
+        showToast(message, "error");
+        setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      const targetJobs = activeJobs.filter((job) => job.status === "pending" || job.status === "processing");
+      targetJobs.forEach((job) => { void pollJob(job.jobId); });
+    }, 2000);
+
+    const targetJobs = activeJobs.filter((job) => job.status === "pending" || job.status === "processing");
+    targetJobs.forEach((job) => { void pollJob(job.jobId); });
+
+    return () => window.clearInterval(interval);
+  }, [activeJobs, user?.id]);
 
   const addPlace = async (place: Place) => {
     if (!user?.id) return;
@@ -599,13 +696,26 @@ function HomePageContent() {
   };
   const handleAddFromInstagram = async () => {
     if (!canSubmit) return;
-    setIsSubmitting(true); setStatus("Instagram 링크를 분석해서 장소를 추출하는 중..."); setError("");
+    const trimmedUrl = instagramUrl.trim();
+    setIsSubmitting(true); setStatus(""); setError("");
     try {
-      const response = await fetch("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ instagramUrl: instagramUrl.trim() }) });
-      const data = await response.json() as { places?: Array<Omit<Place, "id">>; error?: string };
-      if (!response.ok || !data.places?.length) throw new Error(data.error ?? "장소 추출에 실패했습니다.");
-      for (const p of data.places) { await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), ...p }); }
-      setInstagramUrl(""); setStatus(`${data.places.length}개 장소를 지도에 추가했어요.`);
+      const response = await fetch("/api/extract/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instagramUrl: trimmedUrl }),
+      });
+      const data = await response.json() as { jobId?: string; error?: string };
+      if (!response.ok || !data.jobId) throw new Error(data.error ?? "분석 작업 시작에 실패했습니다.");
+      const newJob: ActiveExtractJob = {
+        jobId: data.jobId,
+        instagramUrl: trimmedUrl,
+        status: "pending",
+        progressStep: "대기 중",
+      };
+      setActiveJobs((prev) => [newJob, ...prev.filter((job) => job.jobId !== newJob.jobId)]);
+      setInstagramUrl("");
+      setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
+      showToast("분석 작업을 백그라운드에서 시작했어요", "success");
     } catch (e) { setStatus(""); setError(e instanceof Error ? e.message : "요청 처리 중 오류가 발생했습니다."); }
     finally { setIsSubmitting(false); }
   };
@@ -1506,7 +1616,35 @@ function HomePageContent() {
 )}
 
           <div className="screen" style={{ display: activeTab === "map" ? "flex" : "none", flexDirection: "column" }}>
-              <p className="screenTitle">지도</p>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <p className="screenTitle" style={{ marginBottom: 0 }}>지도</p>
+                {activeJobs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowJobsModal(true)}
+                    style={{ border: "0.5px solid #d9deec", borderRadius: "999px", background: "#f7f9ff", color: "#1a2a7a", fontSize: "11px", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit" }}
+                  >
+                    분석 중인 작업: {activeJobs.length}개
+                  </button>
+                )}
+              </div>
+              {showJobsModal && (
+                <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "flex-end" }}>
+                  <div style={{ width: "100%", background: "#fff", borderRadius: "18px 18px 0 0", padding: "18px 16px 24px", maxHeight: "62vh", overflowY: "auto" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                      <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", color: "#1a2a7a", fontSize: "18px" }}>분석 작업 상태</p>
+                      <button type="button" onClick={() => setShowJobsModal(false)} style={{ border: "none", background: "transparent", color: "#bbb", cursor: "pointer", fontSize: "20px" }}>×</button>
+                    </div>
+                    {activeJobs.length === 0 && <p style={{ margin: 0, fontSize: "12px", color: "#aaa", textAlign: "center", padding: "16px 0" }}>진행 중인 작업이 없어요</p>}
+                    {activeJobs.map((job) => (
+                      <article key={job.jobId} style={{ border: "0.5px solid #eceff7", borderRadius: "10px", padding: "10px 12px", marginBottom: "8px", background: "#fafbff" }}>
+                        <p style={{ margin: 0, fontSize: "11px", color: "#8b93aa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.instagramUrl}</p>
+                        <p style={{ margin: "6px 0 0", fontSize: "12px", color: "#1a2a7a" }}>{job.progressStep || "대기 중"}</p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="mapInputWrap">
                 <input className="mapInput" placeholder="Instagram 릴스/게시물 URL 붙여넣기" value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} />
                 <button className="primaryButton" onClick={handleAddFromInstagram} type="button" disabled={!canSubmit}>{isSubmitting ? "분석 중..." : "핀 추가"}</button>

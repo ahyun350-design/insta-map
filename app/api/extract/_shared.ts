@@ -1,12 +1,11 @@
-import { NextResponse } from "next/server";
+export const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+export type ClaudeCategory = "맛집" | "카페" | "쇼핑" | "숙소";
+export type Place = { name: string; address: string; category: ClaudeCategory };
+export type RawPlace = { name?: unknown; address?: unknown; category?: unknown; hint?: unknown };
 
-const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-type ClaudeCategory = "맛집" | "카페" | "쇼핑" | "숙소";
-type Place = { name: string; address: string; category: ClaudeCategory };
-type RawPlace = { name?: unknown; address?: unknown; category?: unknown; hint?: unknown };
+export function isValidInstagramPostUrl(url: string): boolean {
+  return /^https?:\/\/(www\.)?instagram\.com\/(p|reel|tv)\//i.test(url);
+}
 
 function sanitizeJsonLikeText(input: string): string {
   return input.replace(/```json|```/gi, "").replace(/[""]/g, '"').replace(/['']/g, "'").replace(/,\s*([}\]])/g, "$1").trim();
@@ -28,10 +27,16 @@ function parseClaudeJsonSafely(rawText: string): unknown {
   const base = sanitizeJsonLikeText(rawText);
   const jsonPayload = extractJsonPayload(base);
   const attempts = [jsonPayload, quoteUnquotedKeys(jsonPayload), singleQuotedToDoubleQuoted(jsonPayload), quoteUnquotedKeys(singleQuotedToDoubleQuoted(jsonPayload))];
-  for (const attempt of attempts) { try { return JSON.parse(attempt); } catch { } }
+  for (const attempt of attempts) {
+    try {
+      return JSON.parse(attempt);
+    } catch {
+      // try next normalization
+    }
+  }
   throw new Error("Claude 응답 JSON 파싱에 실패했습니다.");
 }
-function normalizeCategory(raw: unknown): ClaudeCategory | null {
+export function normalizeCategory(raw: unknown): ClaudeCategory | null {
   if (raw === "맛집" || raw === "카페" || raw === "쇼핑" || raw === "숙소") return raw;
   if (raw === "restaurant") return "맛집";
   if (raw === "cafe") return "카페";
@@ -45,10 +50,10 @@ function parseClaudePlacesSafely(rawText: string): RawPlace[] {
   return items.filter((item) => item && typeof item === "object") as RawPlace[];
 }
 
-async function searchKakaoPlace(name: string, hint: string): Promise<{ address: string; roadAddress: string } | null> {
+export async function searchKakaoPlace(name: string, hint: string): Promise<{ address: string; roadAddress: string } | null> {
   const kakaoKey = process.env.KAKAO_REST_API_KEY;
   if (!kakaoKey) return null;
-  const regionHint = hint.replace(/[-~]/g, " ").split(/[\s,]+/).find(w => w.length >= 2 && /[가-힣]/.test(w)) ?? "";
+  const regionHint = hint.replace(/[-~]/g, " ").split(/[\s,]+/).find((w) => w.length >= 2 && /[가-힣]/.test(w)) ?? "";
   const query = regionHint ? `${name} ${regionHint}` : name;
   try {
     const res = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=1`, { headers: { Authorization: `KakaoAK ${kakaoKey}` } });
@@ -57,15 +62,16 @@ async function searchKakaoPlace(name: string, hint: string): Promise<{ address: 
     const first = data.documents?.[0];
     if (!first) return null;
     return { address: first.address_name, roadAddress: first.road_address_name || first.address_name };
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
-async function scrapeInstagramCaption(url: string): Promise<string> {
+export async function scrapeInstagramCaption(url: string): Promise<string> {
   const token = process.env.APIFY_API_TOKEN;
   if (!token) throw new Error("APIFY_API_TOKEN이 설정되지 않았습니다.");
 
-  // Apify REST API로 직접 호출
-  const runRes = await fetch("https://api.apify.com/v2/acts/apify~instagram-scraper/runs?token=" + token, {
+  const runRes = await fetch("https://api.apify.com/v2/acts//runs?token=" + token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -80,10 +86,9 @@ async function scrapeInstagramCaption(url: string): Promise<string> {
   const runId = runData.data?.id;
   if (!runId) throw new Error("Apify run ID를 가져올 수 없습니다.");
 
-  // 완료될 때까지 폴링 (최대 60초)
   let datasetId = runData.data?.defaultDatasetId;
   for (let i = 0; i < 12; i++) {
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise((r) => setTimeout(r, 5000));
     const statusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
     const statusData = await statusRes.json() as { data?: { status?: string; defaultDatasetId?: string } };
     const status = statusData.data?.status;
@@ -95,7 +100,7 @@ async function scrapeInstagramCaption(url: string): Promise<string> {
   if (!datasetId) throw new Error("Dataset ID를 가져올 수 없습니다.");
 
   const itemsRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}`);
-  const items = await itemsRes.json() as any[];
+  const items = await itemsRes.json() as Array<{ caption?: unknown; text?: unknown; description?: unknown }>;
   if (!items?.length) throw new Error("Instagram 게시물을 가져올 수 없습니다.");
 
   const post = items[0];
@@ -104,7 +109,7 @@ async function scrapeInstagramCaption(url: string): Promise<string> {
   return String(caption).trim();
 }
 
-async function extractPlacesByClaude(caption: string): Promise<RawPlace[]> {
+export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("서버에 ANTHROPIC_API_KEY가 설정되지 않았습니다.");
 
@@ -132,41 +137,12 @@ async function extractPlacesByClaude(caption: string): Promise<RawPlace[]> {
     }),
   });
 
-  if (!res.ok) { const err = await res.text(); throw new Error(`Claude API 오류: ${err}`); }
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Claude API 오류: ${err}`);
+  }
   const data = await res.json() as { content?: Array<{ type: string; text?: string }> };
   const text = data.content?.find((c) => c.type === "text")?.text?.trim();
   if (!text) throw new Error("Claude 응답이 비어 있습니다.");
   return parseClaudePlacesSafely(text);
-}
-
-export async function POST(req: Request) {
-  try {
-    const body = await req.json() as { instagramUrl?: string };
-    const instagramUrl = body.instagramUrl?.trim();
-
-    if (!instagramUrl) return NextResponse.json({ error: "instagramUrl이 필요합니다." }, { status: 400 });
-
-    const validHost = /^https?:\/\/(www\.)?instagram\.com\/(p|reel|tv)\//i.test(instagramUrl);
-    if (!validHost) return NextResponse.json({ error: "유효한 Instagram 게시물 URL을 입력해주세요." }, { status: 400 });
-
-    const caption = await scrapeInstagramCaption(instagramUrl);
-    const rawPlaces = await extractPlacesByClaude(caption);
-
-    const places: Place[] = [];
-    for (const item of rawPlaces) {
-      const name = typeof item.name === "string" ? item.name.trim() : "";
-      const hint = typeof item.hint === "string" ? item.hint.trim() : "";
-      const category = normalizeCategory(item.category);
-      if (!name || !category) continue;
-      const kakaoResult = await searchKakaoPlace(name, hint);
-      if (kakaoResult) places.push({ name, address: kakaoResult.roadAddress || kakaoResult.address, category });
-    }
-
-    if (places.length === 0) throw new Error("장소 추출에 실패했습니다.");
-    return NextResponse.json({ caption, places });
-
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
 }
