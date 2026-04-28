@@ -108,74 +108,34 @@ type CoursePlace = Place & { lat: number; lng: number };
 
 function buildCourse(
   origin: { lat: number; lng: number },
-  candidates: { 카페: CoursePlace[]; 맛집: CoursePlace[]; 쇼핑: CoursePlace[]; 숙소: CoursePlace[] },
-  counts: { 카페: number; 맛집: number; 쇼핑: number; 숙소: number }
+  candidates: CoursePlace[]
 ): CoursePlace[] {
+  const remaining = [...candidates];
   const result: CoursePlace[] = [];
   let currentLat = origin.lat;
   let currentLng = origin.lng;
 
-  // 카테고리별 남은 횟수 (일반 객체로 만들고 키 접근 시 안전하게)
-  const remaining: { [K in Category]: number } = {
-    카페: counts.카페,
-    맛집: counts.맛집,
-    쇼핑: counts.쇼핑,
-    숙소: counts.숙소,
-  };
-
-  // 카테고리별 사용 가능한 후보 (배열을 복사해서 보관)
-  let cafePool: CoursePlace[] = [...candidates.카페];
-  let restaurantPool: CoursePlace[] = [...candidates.맛집];
-  let shoppingPool: CoursePlace[] = [...candidates.쇼핑];
-  let stayPool: CoursePlace[] = [...candidates.숙소];
-
-  const getPool = (cat: Category): CoursePlace[] => {
-    if (cat === "카페") return cafePool;
-    if (cat === "맛집") return restaurantPool;
-    if (cat === "쇼핑") return shoppingPool;
-    return stayPool;
-  };
-
-  const setPool = (cat: Category, newPool: CoursePlace[]) => {
-    if (cat === "카페") cafePool = newPool;
-    else if (cat === "맛집") restaurantPool = newPool;
-    else if (cat === "쇼핑") shoppingPool = newPool;
-    else stayPool = newPool;
-  };
-
-  while (remaining.카페 + remaining.맛집 + remaining.쇼핑 + remaining.숙소 > 0) {
+  while (remaining.length > 0) {
     let bestPlace: CoursePlace | null = null;
-    let bestCategory: Category | null = null;
+    let bestIndex = -1;
     let bestDistance = Infinity;
 
-    const allCategories: Category[] = ["카페", "맛집", "쇼핑", "숙소"];
-    for (const cat of allCategories) {
-      if (remaining[cat] <= 0) continue;
-      const pool = getPool(cat);
-      if (pool.length === 0) continue;
-      for (const p of pool) {
-        const d = getDistance(currentLat, currentLng, p.lat, p.lng);
-        if (d < bestDistance) {
-          bestDistance = d;
-          bestPlace = p;
-          bestCategory = cat;
-        }
+    for (let i = 0; i < remaining.length; i += 1) {
+      const p = remaining[i];
+      const d = getDistance(currentLat, currentLng, p.lat, p.lng);
+      if (d < bestDistance) {
+        bestDistance = d;
+        bestPlace = p;
+        bestIndex = i;
       }
     }
 
-    if (bestPlace === null || bestCategory === null) break;
+    if (bestPlace === null || bestIndex < 0) break;
 
-    const chosenPlace: CoursePlace = bestPlace;
-    const chosenCategory: Category = bestCategory;
-
-    result.push(chosenPlace);
-    remaining[chosenCategory] = remaining[chosenCategory] - 1;
-    currentLat = chosenPlace.lat;
-    currentLng = chosenPlace.lng;
-
-    // 한 번 쓰면 풀에서 제거
-    const oldPool = getPool(chosenCategory);
-    setPool(chosenCategory, oldPool.filter((p) => p.id !== chosenPlace.id));
+    result.push(bestPlace);
+    currentLat = bestPlace.lat;
+    currentLng = bestPlace.lng;
+    remaining.splice(bestIndex, 1);
   }
 
   return result;
@@ -264,6 +224,20 @@ function HomePageContent() {
       : "정확한 장소를 파악하고 있어요"
     : "";
   const analyzingSubText = isAnalyzing ? "잠시 후 핀이 추가될 거예요" : "";
+  const courseRegionKeyword = courseOriginAddress.trim();
+  const courseBasePlaces = useMemo(
+    () => (courseOriginMode === "manual" && courseRegionKeyword ? savedPlaces.filter((p) => p.address.includes(courseRegionKeyword)) : savedPlaces),
+    [courseOriginMode, courseRegionKeyword, savedPlaces],
+  );
+  const courseAvailableByCategory = useMemo(
+    () => ({
+      카페: courseBasePlaces.filter((p) => p.category === "카페").length,
+      맛집: courseBasePlaces.filter((p) => p.category === "맛집").length,
+      쇼핑: courseBasePlaces.filter((p) => p.category === "쇼핑").length,
+      숙소: courseBasePlaces.filter((p) => p.category === "숙소").length,
+    }),
+    [courseBasePlaces],
+  );
 
   const loadData = async () => {
     setLoading(true);
@@ -656,7 +630,7 @@ function HomePageContent() {
       // 2. savedPlaces 각 장소의 좌표 조회 (주소 → 위경도)
       const placesWithCoords: CoursePlace[] = [];
       await Promise.all(
-        savedPlaces.map(
+        courseBasePlaces.map(
           (place) =>
             new Promise<void>((resolve) => {
               geocoderRef.current.addressSearch(place.address, (result: any[], st: string) => {
@@ -689,8 +663,30 @@ function HomePageContent() {
         숙소: Math.min(courseCounts.숙소, candidates.숙소.length),
       };
 
+      if (courseOriginMode === "manual" && courseRegionKeyword) {
+        const labels: Record<Category, string> = { 카페: "카페", 맛집: "맛집", 쇼핑: "쇼핑", 숙소: "숙소" };
+        (["카페", "맛집", "쇼핑", "숙소"] as Category[]).forEach((cat) => {
+          if (courseCounts[cat] > adjustedCounts[cat]) {
+            showToast(`${courseRegionKeyword}에 ${labels[cat]}가 ${adjustedCounts[cat]}개뿐이에요`, "info");
+          }
+        });
+      }
+
+      const selectedPools = {
+        카페: candidates.카페.sort((a, b) => getDistance(originLat, originLng, a.lat, a.lng) - getDistance(originLat, originLng, b.lat, b.lng)).slice(0, adjustedCounts.카페),
+        맛집: candidates.맛집.sort((a, b) => getDistance(originLat, originLng, a.lat, a.lng) - getDistance(originLat, originLng, b.lat, b.lng)).slice(0, adjustedCounts.맛집),
+        쇼핑: candidates.쇼핑.sort((a, b) => getDistance(originLat, originLng, a.lat, a.lng) - getDistance(originLat, originLng, b.lat, b.lng)).slice(0, adjustedCounts.쇼핑),
+        숙소: candidates.숙소.sort((a, b) => getDistance(originLat, originLng, a.lat, a.lng) - getDistance(originLat, originLng, b.lat, b.lng)).slice(0, adjustedCounts.숙소),
+      };
+      const mergedCandidates: CoursePlace[] = [
+        ...selectedPools.카페,
+        ...selectedPools.맛집,
+        ...selectedPools.쇼핑,
+        ...selectedPools.숙소,
+      ];
+
       // 5. 알고리즘 실행
-      const course = buildCourse({ lat: originLat, lng: originLng }, candidates, adjustedCounts);
+      const course = buildCourse({ lat: originLat, lng: originLng }, mergedCandidates);
 
       if (course.length === 0) {
         showToast("코스를 만들 수 없어요. 저장된 장소를 더 추가해보세요.", "info");
@@ -1424,7 +1420,7 @@ function HomePageContent() {
                 {!courseResult && (
                   <>
                     <div>
-                      <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>출발지</p>
+                      <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>출발지 / 지역</p>
                       <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
                         <button type="button" onClick={() => setCourseOriginMode("current")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: courseOriginMode === "current" ? "1px solid #1a2a7a" : "1px solid #ddd", background: courseOriginMode === "current" ? "#1a2a7a" : "#fff", color: courseOriginMode === "current" ? "#fff" : "#666", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>📍 현재 위치</button>
                         <button type="button" onClick={() => setCourseOriginMode("manual")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: courseOriginMode === "manual" ? "1px solid #1a2a7a" : "1px solid #ddd", background: courseOriginMode === "manual" ? "#1a2a7a" : "#fff", color: courseOriginMode === "manual" ? "#fff" : "#666", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>✏️ 직접 입력</button>
@@ -1437,13 +1433,15 @@ function HomePageContent() {
                     <div>
                       <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "10px", marginTop: 0 }}>몇 곳을 방문할까요?</p>
                       {(["카페", "맛집", "쇼핑", "숙소"] as Category[]).map((cat) => {
-                        const available = savedPlaces.filter(p => p.category === cat).length;
+                        const available = courseAvailableByCategory[cat];
                         const max = available;
                         return (
                           <div key={cat} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 0", borderBottom: "0.5px solid #f5f5f5" }}>
                             <div style={{ flex: 1 }}>
                               <span style={{ fontSize: "14px", color: "#1a1a2e" }}>{CATEGORY_PIN[cat].emoji} {cat}</span>
-                              <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "6px" }}>(저장 {available}곳)</span>
+                              <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "6px" }}>
+                                {courseOriginMode === "manual" && courseRegionKeyword ? `(${courseRegionKeyword}에 ${available}곳)` : `(저장 ${available}곳)`}
+                              </span>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                               <button type="button" disabled={courseCounts[cat] === 0} onClick={() => setCourseCounts(prev => ({ ...prev, [cat]: Math.max(0, prev[cat] - 1) }))} style={{ width: "28px", height: "28px", borderRadius: "50%", border: "1px solid #ddd", background: "#fff", color: "#1a2a7a", fontSize: "14px", cursor: courseCounts[cat] === 0 ? "not-allowed" : "pointer", opacity: courseCounts[cat] === 0 ? 0.4 : 1 }}>−</button>
