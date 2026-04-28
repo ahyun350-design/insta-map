@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { Place } from "@/app/api/extract/_shared";
-import { createSupabaseServerClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,20 +16,28 @@ type ExtractJobStatusRow = {
 
 export async function GET(req: Request) {
   try {
-    const jobId = new URL(req.url).searchParams.get("jobId")?.trim();
+    const adminClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { persistSession: false, autoRefreshToken: false } },
+    );
+
+    const url = new URL(req.url);
+    const jobId = url.searchParams.get("jobId")?.trim();
+    const userId = url.searchParams.get("userId")?.trim();
     if (!jobId) return NextResponse.json({ error: "jobId가 필요합니다." }, { status: 400 });
+    if (!userId) return NextResponse.json({ error: "userId가 필요합니다." }, { status: 400 });
 
-    const supabase = await createSupabaseServerClient();
+    const { data: userData, error: userError } = await adminClient.auth.admin.getUserById(userId);
+    if (userError || !userData.user) {
+      return NextResponse.json({ error: "유효하지 않은 사용자" }, { status: 401 });
+    }
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
-
-    const { data, error } = await supabase
+    const { data, error } = await adminClient
       .from("extract_jobs")
       .select("id, status, progress_step, result_places, error_message")
       .eq("id", jobId)
+      .eq("user_id", userId)
       .maybeSingle<ExtractJobStatusRow>();
     if (error) throw error;
     if (!data) return NextResponse.json({ error: "작업을 찾을 수 없어요." }, { status: 404 });

@@ -334,7 +334,7 @@ function HomePageContent() {
 
     const pollJob = async (jobId: string) => {
       try {
-        const res = await fetch(`/api/extract/status?jobId=${encodeURIComponent(jobId)}`, {
+        const res = await fetch(`/api/extract/status?jobId=${encodeURIComponent(jobId)}&userId=${encodeURIComponent(user.id)}`, {
           credentials: "include",
         });
         const data = await res.json() as ExtractStatusResponse;
@@ -698,6 +698,10 @@ function HomePageContent() {
   };
   const handleAddFromInstagram = async () => {
     if (!canSubmit) return;
+    if (!user?.id) {
+      showToast("로그인이 필요합니다.", "error");
+      return;
+    }
     const trimmedUrl = instagramUrl.trim();
     setIsSubmitting(true); setStatus(""); setError("");
     try {
@@ -705,7 +709,7 @@ function HomePageContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ instagramUrl: trimmedUrl }),
+        body: JSON.stringify({ instagramUrl: trimmedUrl, userId: user.id }),
       });
       const data = await response.json() as { jobId?: string; error?: string };
       if (!response.ok || !data.jobId) throw new Error(data.error ?? "분석 작업 시작에 실패했습니다.");
