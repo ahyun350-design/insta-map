@@ -75,6 +75,7 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
   if (!actorId) throw new Error("APIFY actor ID가 설정되지 않았습니다.");
 
   const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
+  console.log("Apify URL:", runUrl);
   console.log("[extract] Apify run start", { actorId, instagramUrl: url, runUrl });
 
   const runRes = await fetch(runUrl, {
@@ -86,6 +87,7 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
       resultsLimit: 1,
     }),
   });
+  console.log("Apify response:", runRes.status);
 
   if (!runRes.ok) {
     const runErrText = await runRes.text();
