@@ -18,13 +18,14 @@ type ExtractJobRow = {
   status: "pending" | "processing" | "completed" | "failed";
 };
 
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
 function createServiceSupabase() {
-  if (!serviceRoleKey) {
-    throw new Error("SUPABASE_SERVICE_ROLE_KEY가 설정되지 않았습니다.");
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("서버 환경변수 미설정: NEXT_PUBLIC_SUPABASE_URL 또는 SUPABASE_SERVICE_ROLE_KEY");
   }
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey, {
+  return createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }

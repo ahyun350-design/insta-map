@@ -7,9 +7,15 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ error: "서버 환경변수 미설정: NEXT_PUBLIC_SUPABASE_URL 또는 SUPABASE_SERVICE_ROLE_KEY" }, { status: 500 });
+    }
+
     const adminClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      supabaseUrl,
+      serviceKey,
       { auth: { persistSession: false, autoRefreshToken: false } },
     );
 
@@ -42,14 +48,36 @@ export async function POST(req: Request) {
     });
     if (insertError) throw insertError;
 
-    const processUrl = new URL("/api/extract/process", req.url).toString();
-    void fetch(processUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId }),
-    }).catch(() => {
-      // fire-and-forget
-    });
+    const baseUrl = req.headers.get("origin") || process.env.NEXT_PUBLIC_SITE_URL?.trim() || new URL(req.url).origin;
+    if (!baseUrl) {
+      return NextResponse.json({ error: "서버 base URL을 확인할 수 없습니다." }, { status: 500 });
+    }
+    const processUrl = new URL("/api/extract/process", baseUrl).toString();
+
+    const triggerProcess = async () => {
+      const res = await fetch(processUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`process 호출 실패(${res.status}): ${text}`);
+      }
+    };
+
+    void (async () => {
+      try {
+        await triggerProcess();
+      } catch (firstErr) {
+        console.error("[extract] process trigger first attempt failed", firstErr);
+        try {
+          await triggerProcess();
+        } catch (secondErr) {
+          console.error("[extract] process trigger second attempt failed", secondErr);
+        }
+      }
+    })();
 
     return NextResponse.json({ jobId });
   } catch (error) {
