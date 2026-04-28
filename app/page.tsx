@@ -33,6 +33,7 @@ type ExtractStatusResponse = {
   error_message?: string | null;
   error?: string;
 };
+type LatLng = { lat: number; lng: number };
 
 declare global { interface Window { kakao: any; } }
 
@@ -201,6 +202,9 @@ function HomePageContent() {
   const [courseLoading, setCourseLoading] = useState(false);
   const [courseResult, setCourseResult] = useState<CoursePlace[] | null>(null);
   const [showCourseRoute, setShowCourseRoute] = useState(false);
+  const [courseCurrentLocation, setCourseCurrentLocation] = useState<LatLng | null>(null);
+  const [courseLocationLoading, setCourseLocationLoading] = useState(false);
+  const [coursePlaceCoords, setCoursePlaceCoords] = useState<Record<string, LatLng>>({});
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -225,10 +229,19 @@ function HomePageContent() {
     : "";
   const analyzingSubText = isAnalyzing ? "잠시 후 핀이 추가될 거예요" : "";
   const courseRegionKeyword = courseOriginAddress.trim();
-  const courseBasePlaces = useMemo(
-    () => (courseOriginMode === "manual" && courseRegionKeyword ? savedPlaces.filter((p) => p.address.includes(courseRegionKeyword)) : savedPlaces),
-    [courseOriginMode, courseRegionKeyword, savedPlaces],
-  );
+  const courseBasePlaces = useMemo(() => {
+    if (courseOriginMode === "manual" && courseRegionKeyword) {
+      return savedPlaces.filter((p) => p.address.includes(courseRegionKeyword));
+    }
+    if (courseOriginMode === "current" && courseCurrentLocation) {
+      return savedPlaces.filter((p) => {
+        const coord = coursePlaceCoords[p.id];
+        if (!coord) return false;
+        return getDistance(courseCurrentLocation.lat, courseCurrentLocation.lng, coord.lat, coord.lng) <= 5;
+      });
+    }
+    return savedPlaces;
+  }, [courseOriginMode, courseRegionKeyword, savedPlaces, courseCurrentLocation, coursePlaceCoords]);
   const courseAvailableByCategory = useMemo(
     () => ({
       카페: courseBasePlaces.filter((p) => p.category === "카페").length,
@@ -238,6 +251,56 @@ function HomePageContent() {
     }),
     [courseBasePlaces],
   );
+
+  useEffect(() => {
+    if (!showCourseModal || courseOriginMode !== "current") return;
+    if (!navigator.geolocation) return;
+    setCourseLocationLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setCourseCurrentLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setCourseLocationLoading(false);
+      },
+      () => {
+        setCourseCurrentLocation(null);
+        setCourseLocationLoading(false);
+      },
+      { timeout: 5000 },
+    );
+  }, [showCourseModal, courseOriginMode]);
+
+  useEffect(() => {
+    if (!showCourseModal || courseOriginMode !== "current" || !geocoderRef.current || savedPlaces.length === 0) return;
+    const missing = savedPlaces.filter((p) => !coursePlaceCoords[p.id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    Promise.all(
+      missing.map(
+        (place) =>
+          new Promise<{ id: string; coord: LatLng | null }>((resolve) => {
+            geocoderRef.current.addressSearch(place.address, (result: any[], st: string) => {
+              if (st === window.kakao.maps.services.Status.OK && result[0]) {
+                resolve({ id: place.id, coord: { lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) } });
+              } else {
+                resolve({ id: place.id, coord: null });
+              }
+            });
+          }),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      setCoursePlaceCoords((prev) => {
+        const next = { ...prev };
+        results.forEach(({ id, coord }) => {
+          if (coord) next[id] = coord;
+        });
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showCourseModal, courseOriginMode, savedPlaces, coursePlaceCoords]);
 
   const loadData = async () => {
     setLoading(true);
@@ -633,13 +696,21 @@ function HomePageContent() {
         courseBasePlaces.map(
           (place) =>
             new Promise<void>((resolve) => {
+              const cached = coursePlaceCoords[place.id];
+              if (cached) {
+                placesWithCoords.push({ ...place, lat: cached.lat, lng: cached.lng });
+                resolve();
+                return;
+              }
               geocoderRef.current.addressSearch(place.address, (result: any[], st: string) => {
                 if (st === window.kakao.maps.services.Status.OK && result[0]) {
+                  const coord = { lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) };
                   placesWithCoords.push({
                     ...place,
-                    lat: parseFloat(result[0].y),
-                    lng: parseFloat(result[0].x),
+                    lat: coord.lat,
+                    lng: coord.lng,
                   });
+                  setCoursePlaceCoords((prev) => ({ ...prev, [place.id]: coord }));
                 }
                 resolve();
               });
@@ -1428,6 +1499,15 @@ function HomePageContent() {
                       {courseOriginMode === "manual" && (
                         <input className="mapInput" placeholder="예: 성수역, 망원동" value={courseOriginAddress} onChange={(e) => setCourseOriginAddress(e.target.value)} style={{ width: "100%", boxSizing: "border-box" }} />
                       )}
+                      {courseOriginMode === "current" && (
+                        <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888" }}>
+                          {courseLocationLoading
+                            ? "📍 현재 위치를 확인하는 중..."
+                            : courseCurrentLocation
+                              ? `📍 현재 위치 반경 5km 이내 장소(${courseBasePlaces.length}곳)로 코스를 짤게요`
+                              : "📍 위치 권한을 허용하면 반경 5km 이내 장소로 코스를 짤 수 있어요"}
+                        </p>
+                      )}
                     </div>
 
                     <div>
@@ -1440,7 +1520,11 @@ function HomePageContent() {
                             <div style={{ flex: 1 }}>
                               <span style={{ fontSize: "14px", color: "#1a1a2e" }}>{CATEGORY_PIN[cat].emoji} {cat}</span>
                               <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "6px" }}>
-                                {courseOriginMode === "manual" && courseRegionKeyword ? `(${courseRegionKeyword}에 ${available}곳)` : `(저장 ${available}곳)`}
+                                {courseOriginMode === "manual" && courseRegionKeyword
+                                  ? `(${courseRegionKeyword}에 ${available}곳)`
+                                  : courseOriginMode === "current"
+                                    ? `(주변에 ${available}곳)`
+                                    : `(저장 ${available}곳)`}
                               </span>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -1453,9 +1537,12 @@ function HomePageContent() {
                       })}
                     </div>
 
-                    <button type="button" onClick={generateCourse} disabled={courseLoading} style={{ width: "100%", padding: "14px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "14px", letterSpacing: "1px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading ? 0.6 : 1 }}>
+                    <button type="button" onClick={generateCourse} disabled={courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0)} style={{ width: "100%", padding: "14px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "14px", letterSpacing: "1px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0) ? 0.6 : 1 }}>
                       {courseLoading ? "코스를 짜는 중..." : "코스 만들기"}
                     </button>
+                    {courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0 && (
+                      <p style={{ margin: 0, textAlign: "center", fontSize: "11px", color: "#999" }}>주변에 저장된 장소가 없어요. 다른 방식으로 시도해보세요</p>
+                    )}
                   </>
                 )}
 
