@@ -21,8 +21,10 @@ export async function GET(req: Request) {
 
     const supabase = await createSupabaseServerClient();
 
-    const { data: authData } = await supabase.auth.getUser();
-    if (!authData.user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 
     const { data, error } = await supabase
       .from("extract_jobs")

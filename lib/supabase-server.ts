@@ -15,7 +15,7 @@ export async function createSupabaseServerClient() {
           try {
             cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
           } catch {
-            // noop
+            // Server Component에서 호출되면 무시
           }
         },
       },
