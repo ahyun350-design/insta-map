@@ -56,6 +56,7 @@ const CATEGORY_PIN: Record<Category, { color: string; emoji: string }> = {
 };
 const CATEGORY_COLORS: Record<Category, string> = { 맛집: "#513229", 카페: "#b08d57", 쇼핑: "#4a7fa5", 숙소: "#7a7a50" };
 const ACTIVE_JOBS_STORAGE_KEY = "pindmap_active_extract_jobs";
+const HIDDEN_PLACE_IDS_STORAGE_KEY = "pindmap_hidden_place_ids";
 
 function makeMarkerImage(category: Category) {
   const { color, emoji } = CATEGORY_PIN[category];
@@ -297,6 +298,24 @@ function HomePageContent() {
       loadData();
     }
   }, [user, userLoading]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = window.localStorage.getItem(HIDDEN_PLACE_IDS_STORAGE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as string[];
+      if (!Array.isArray(parsed)) return;
+      setHiddenIds(new Set(parsed.filter((id) => typeof id === "string")));
+    } catch {
+      // ignore invalid storage value
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(HIDDEN_PLACE_IDS_STORAGE_KEY, JSON.stringify([...hiddenIds]));
+  }, [hiddenIds]);
 
   useEffect(() => {
     if (typeof window === "undefined" || userLoading || !user) return;
@@ -704,13 +723,18 @@ function HomePageContent() {
     }
     const trimmedUrl = instagramUrl.trim();
     setIsSubmitting(true); setStatus(""); setError("");
+    let timeout: number | undefined;
     try {
+      const controller = new AbortController();
+      timeout = window.setTimeout(() => controller.abort(), 10000);
       const response = await fetch("/api/extract/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ instagramUrl: trimmedUrl, userId: user.id }),
+        signal: controller.signal,
       });
+      window.clearTimeout(timeout);
       const data = await response.json() as { jobId?: string; error?: string };
       if (!response.ok || !data.jobId) throw new Error(data.error ?? "분석 작업 시작에 실패했습니다.");
       const newJob: ActiveExtractJob = {
@@ -723,8 +747,19 @@ function HomePageContent() {
       setInstagramUrl("");
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
       showToast("분석 작업을 백그라운드에서 시작했어요", "success");
-    } catch (e) { setStatus(""); setError(e instanceof Error ? e.message : "요청 처리 중 오류가 발생했습니다."); }
-    finally { setIsSubmitting(false); }
+    } catch (e) {
+      const message = e instanceof Error && e.name === "AbortError"
+        ? "요청이 지연되고 있어요. 잠시 후 다시 시도해주세요."
+        : e instanceof Error
+          ? e.message
+          : "요청 처리 중 오류가 발생했습니다.";
+      setStatus("");
+      setError(message);
+    }
+    finally {
+      if (typeof timeout === "number") window.clearTimeout(timeout);
+      setIsSubmitting(false);
+    }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1251,13 +1286,25 @@ function HomePageContent() {
               <p style={{ margin: "0 0 10px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>댓글 {detailPost.comments.length}</p>
               {detailPost.comments.map((c) => (
                 <div key={c.id} style={{ display: "flex", gap: "10px", marginBottom: "14px", alignItems: "flex-start" }}>
-                  <div style={{ width: "30px", height: "30px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", flexShrink: 0 }}>{c.user.slice(0, 1).toUpperCase()}</div>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/profile/${encodeURIComponent(c.user)}`)}
+                    style={{ width: "30px", height: "30px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", flexShrink: 0, border: "none", cursor: "pointer", padding: 0 }}
+                  >
+                    {c.user.slice(0, 1).toUpperCase()}
+                  </button>
                   <div style={{ flex: 1, background: "#f8f8fc", borderRadius: "10px", padding: "8px 12px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                      <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a1a2e" }}>{c.user}</span>
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/profile/${encodeURIComponent(c.user)}`)}
+                        style={{ fontSize: "12px", fontWeight: 600, color: "#1a1a2e", border: "none", background: "transparent", cursor: "pointer", padding: 0 }}
+                      >
+                        {c.user}
+                      </button>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <span style={{ fontSize: "10px", color: "#bbb" }}>{timeAgo(c.createdAt)}</span>
-                        {c.user === MY_USER && <button onClick={() => deleteComment(detailPost.id, c.id)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "13px", padding: 0, lineHeight: 1 }}>×</button>}
+                        {c.user === MY_USER && <button onClick={(e) => { e.stopPropagation(); deleteComment(detailPost.id, c.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "13px", padding: 0, lineHeight: 1 }}>×</button>}
                       </div>
                     </div>
                     <p style={{ margin: 0, fontSize: "13px", color: "#444", lineHeight: 1.5 }}>{c.text}</p>
