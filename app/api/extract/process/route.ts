@@ -50,6 +50,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json() as { jobId?: string };
     jobId = body.jobId?.trim() ?? "";
+    console.log("[extract] process route called", { jobId });
     if (!jobId) return NextResponse.json({ error: "jobId가 필요합니다." }, { status: 400 });
 
     const supabase = createServiceSupabase();
@@ -62,12 +63,15 @@ export async function POST(req: Request) {
     if (jobError) throw jobError;
     if (!job) return NextResponse.json({ error: "작업을 찾을 수 없습니다." }, { status: 404 });
     if (job.status === "completed") return NextResponse.json({ ok: true, skipped: true });
+    console.log("[extract] job loaded", { jobId: job.id, status: job.status, instagramUrl: job.instagram_url });
 
     await updateJobProgress(jobId, "인스타 캡션 가져오는 중");
     const caption = await scrapeInstagramCaption(job.instagram_url);
+    console.log("[extract] caption fetched", { jobId, captionLength: caption.length });
 
     await updateJobProgress(jobId, "AI가 장소 분석하는 중");
     const rawPlaces = await extractPlacesByClaude(caption);
+    console.log("[extract] claude parsed places", { jobId, rawPlaceCount: rawPlaces.length });
 
     await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
     const resolved: Array<{ name: string; category: Place["category"]; address: string }> = [];
@@ -83,6 +87,7 @@ export async function POST(req: Request) {
     }
 
     const places = buildPlaces(resolved);
+    console.log("[extract] kakao resolved places", { jobId, resolvedCount: places.length });
     if (places.length === 0) throw new Error("장소 추출에 실패했습니다.");
 
     const { error: doneError } = await supabase
@@ -97,10 +102,12 @@ export async function POST(req: Request) {
       })
       .eq("id", jobId);
     if (doneError) throw doneError;
+    console.log("[extract] job completed", { jobId, placeCount: places.length });
 
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "작업 처리 중 오류가 발생했습니다.";
+    console.error("[extract] process route failed", { jobId, message });
     if (jobId) {
       try {
         const supabase = createServiceSupabase();

@@ -1,4 +1,5 @@
 export const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+const DEFAULT_APIFY_ACTOR_ID = "apify~instagram-post-scraper";
 export type ClaudeCategory = "맛집" | "카페" | "쇼핑" | "숙소";
 export type Place = { name: string; address: string; category: ClaudeCategory };
 export type RawPlace = { name?: unknown; address?: unknown; category?: unknown; hint?: unknown };
@@ -69,9 +70,14 @@ export async function searchKakaoPlace(name: string, hint: string): Promise<{ ad
 
 export async function scrapeInstagramCaption(url: string): Promise<string> {
   const token = process.env.APIFY_API_TOKEN;
+  const actorId = process.env.APIFY_ACTOR_ID?.trim() || DEFAULT_APIFY_ACTOR_ID;
   if (!token) throw new Error("APIFY_API_TOKEN이 설정되지 않았습니다.");
+  if (!actorId) throw new Error("APIFY actor ID가 설정되지 않았습니다.");
 
-  const runRes = await fetch("https://api.apify.com/v2/acts//runs?token=" + token, {
+  const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
+  console.log("[extract] Apify run start", { actorId, instagramUrl: url, runUrl });
+
+  const runRes = await fetch(runUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -81,9 +87,14 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
     }),
   });
 
-  if (!runRes.ok) throw new Error("Apify 실행 실패: " + await runRes.text());
+  if (!runRes.ok) {
+    const runErrText = await runRes.text();
+    console.error("[extract] Apify run failed", { status: runRes.status, statusText: runRes.statusText, runErrText });
+    throw new Error("Apify 실행 실패: " + runErrText);
+  }
   const runData = await runRes.json() as { data?: { id?: string; defaultDatasetId?: string } };
   const runId = runData.data?.id;
+  console.log("[extract] Apify run created", { runId, defaultDatasetId: runData.data?.defaultDatasetId });
   if (!runId) throw new Error("Apify run ID를 가져올 수 없습니다.");
 
   let datasetId = runData.data?.defaultDatasetId;
@@ -93,6 +104,7 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
     const statusData = await statusRes.json() as { data?: { status?: string; defaultDatasetId?: string } };
     const status = statusData.data?.status;
     datasetId = statusData.data?.defaultDatasetId ?? datasetId;
+    console.log("[extract] Apify run polling", { runId, status, datasetId, pollCount: i + 1 });
     if (status === "SUCCEEDED") break;
     if (status === "FAILED" || status === "ABORTED") throw new Error("Apify 작업 실패");
   }
@@ -101,6 +113,7 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
 
   const itemsRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}`);
   const items = await itemsRes.json() as Array<{ caption?: unknown; text?: unknown; description?: unknown }>;
+  console.log("[extract] Apify dataset fetched", { datasetId, itemCount: items?.length ?? 0 });
   if (!items?.length) throw new Error("Instagram 게시물을 가져올 수 없습니다.");
 
   const post = items[0];
