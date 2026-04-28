@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
 import { Place } from "@/app/api/extract/_shared";
+import { createSupabaseServerClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,25 +19,7 @@ export async function GET(req: Request) {
     const jobId = new URL(req.url).searchParams.get("jobId")?.trim();
     if (!jobId) return NextResponse.json({ error: "jobId가 필요합니다." }, { status: 400 });
 
-    const cookieStore = await cookies();
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
-            } catch {
-              // noop
-            }
-          },
-        },
-      },
-    );
+    const supabase = await createSupabaseServerClient();
 
     const { data: authData } = await supabase.auth.getUser();
     if (!authData.user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });

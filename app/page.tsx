@@ -334,7 +334,9 @@ function HomePageContent() {
 
     const pollJob = async (jobId: string) => {
       try {
-        const res = await fetch(`/api/extract/status?jobId=${encodeURIComponent(jobId)}`);
+        const res = await fetch(`/api/extract/status?jobId=${encodeURIComponent(jobId)}`, {
+          credentials: "include",
+        });
         const data = await res.json() as ExtractStatusResponse;
         if (!res.ok) {
           throw new Error(data.error || data.error_message || "작업 상태를 확인할 수 없어요.");
@@ -702,6 +704,7 @@ function HomePageContent() {
       const response = await fetch("/api/extract/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ instagramUrl: trimmedUrl }),
       });
       const data = await response.json() as { jobId?: string; error?: string };

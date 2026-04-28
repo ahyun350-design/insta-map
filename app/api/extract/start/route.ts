@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
 import { isValidInstagramPostUrl } from "@/app/api/extract/_shared";
+import { createSupabaseServerClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,25 +17,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "유효한 Instagram 게시물 URL을 입력해주세요." }, { status: 400 });
     }
 
-    const cookieStore = await cookies();
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
-            } catch {
-              // noop
-            }
-          },
-        },
-      },
-    );
+    const supabase = await createSupabaseServerClient();
 
     const { data: authData } = await supabase.auth.getUser();
     const user = authData.user;
