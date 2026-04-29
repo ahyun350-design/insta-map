@@ -91,12 +91,6 @@ function extractRegion(address: string): string {
   return parts[0] || "기타";
 }
 
-function cleanInstagramUrl(url: string): string {
-  const match = url.match(/(https?:\/\/(?:www\.)?instagram\.com\/(?:p|reel|tv)\/[^/?#]+)/);
-  if (match) return `${match[1]}/`;
-  return url;
-}
-
 // 두 좌표 사이의 직선거리 (km) - Haversine 공식
 function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // 지구 반지름 (km)
@@ -184,7 +178,6 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const { user, loading: userLoading } = useUser();
   const MY_USER = user?.username || "";
-  const MY_USER_ID = user?.id || "";
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>("map");
   const [instagramUrl, setInstagramUrl] = useState("");
@@ -344,7 +337,7 @@ function HomePageContent() {
       const [placesRes, postsRes, roomsRes] = await Promise.all([
         supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
         supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false }),
-        supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER_ID},user2_id.eq.${MY_USER_ID}`),
+        supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`),
       ]);
 
       if (placesRes.data) {
@@ -364,10 +357,10 @@ function HomePageContent() {
       if (roomsData && roomsData.length > 0) {
         const rooms: ChatRoom[] = await Promise.all(
           roomsData.map(async (r: any) => {
-            const friendId = r.user1_id === MY_USER_ID ? r.user2_id : r.user1_id;
+            const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
             const [msgsRes, unreadRes] = await Promise.all([
               supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1),
-              supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER_ID).eq("read", false),
+              supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false),
             ]);
             const unread = typeof unreadRes.count === "number" ? unreadRes.count : 0;
             return {
@@ -398,6 +391,10 @@ function HomePageContent() {
       loadData();
     }
   }, [user, userLoading]);
+
+  useEffect(() => {
+    console.log("🗺️ Kakao SDK loaded:", isKakaoMapLoaded);
+  }, [isKakaoMapLoaded]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -596,26 +593,21 @@ function HomePageContent() {
     if (!friendSearch.trim()) return;
     setFriendSearchError("");
     setFriendSearchResult(null);
-    const { data } = await supabase
-      .from("users")
-      .select("*")
-      .ilike("username", friendSearch.trim())
-      .limit(1)
-      .maybeSingle();
+    const { data } = await supabase.from("users").select("*").eq("username", friendSearch.trim()).single();
     if (!data) { setFriendSearchError("유저를 찾을 수 없어요."); return; }
     if (data.username === MY_USER) { setFriendSearchError("나 자신은 추가할 수 없어요."); return; }
     setFriendSearchResult(data);
   };
 
   const addFriend = async () => {
-    if (!friendSearchResult || !MY_USER_ID) return;
+    if (!friendSearchResult) return;
     // 기존 채팅방 확인
     const { data: existing } = await supabase.from("chat_rooms").select("*")
-      .or(`and(user1_id.eq.${MY_USER_ID},user2_id.eq.${friendSearchResult.id}),and(user1_id.eq.${friendSearchResult.id},user2_id.eq.${MY_USER_ID})`);
+      .or(`and(user1_id.eq.${MY_USER},user2_id.eq.${friendSearchResult.id}),and(user1_id.eq.${friendSearchResult.id},user2_id.eq.${MY_USER})`);
     let roomId = existing?.[0]?.id;
     if (!roomId) {
       roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER_ID, user2_id: friendSearchResult.id });
+      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: friendSearchResult.id });
     }
     const newRoom: ChatRoom = { id: roomId, friendId: friendSearchResult.id, friendName: friendSearchResult.username, lastMessage: "", lastTime: new Date().toISOString(), unreadCount: 0 };
     setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
@@ -626,7 +618,7 @@ function HomePageContent() {
   const openChat = async (room: ChatRoom) => {
     setActiveChatRoom(room);
     // 채팅방 들어가면 자기 앞으로 온 메시지를 모두 읽음 처리
-    await supabase.from("messages").update({ read: true }).eq("room_id", room.id).neq("sender_id", MY_USER_ID).eq("read", false);
+    await supabase.from("messages").update({ read: true }).eq("room_id", room.id).neq("sender_id", MY_USER).eq("read", false);
     setChatRooms(prev => prev.map(r => r.id === room.id ? { ...r, unreadCount: 0 } : r));
     const { data } = await supabase.from("messages").select("*").eq("room_id", room.id).order("created_at", { ascending: true });
     if (data) setMessages(data.map((m: any) => ({ id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read })));
@@ -636,7 +628,7 @@ function HomePageContent() {
       // 이미 화면에 있는 메시지면 무시 (본인이 보낸 메시지가 다시 돌아올 때)
       setMessages(prev => prev.some(msg => msg.id === m.id) ? prev : [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read }]);
       // 받은 메시지면 즉시 읽음 처리 (채팅방 열려있으니까)
-      if (m.sender_id !== MY_USER_ID) {
+      if (m.sender_id !== MY_USER) {
         await supabase.from("messages").update({ read: true }).eq("id", m.id);
       }
     }).on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, (payload: any) => {
@@ -696,18 +688,17 @@ function HomePageContent() {
 
   // 게시물에서 바로 팔로우
   const followUser = async (username: string) => {
-    if (!MY_USER_ID) return;
     if (username === MY_USER) return;
     // 이미 팔로우 중이면 무시
     if (chatRooms.some(r => r.friendName === username)) return;
     const { data } = await supabase.from("users").select("*").eq("username", username).single();
     if (!data) { showToast("유저를 찾을 수 없어요", "error"); return; }
     const { data: existing } = await supabase.from("chat_rooms").select("*")
-      .or(`and(user1_id.eq.${MY_USER_ID},user2_id.eq.${data.id}),and(user1_id.eq.${data.id},user2_id.eq.${MY_USER_ID})`);
+      .or(`and(user1_id.eq.${MY_USER},user2_id.eq.${data.id}),and(user1_id.eq.${data.id},user2_id.eq.${MY_USER})`);
     let roomId = existing?.[0]?.id;
     if (!roomId) {
       roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER_ID, user2_id: data.id });
+      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: data.id });
     }
     const newRoom: ChatRoom = { id: roomId, friendId: data.id, friendName: data.username, lastMessage: "", lastTime: new Date().toISOString(), unreadCount: 0 };
     setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
@@ -908,7 +899,7 @@ function HomePageContent() {
       showToast("로그인이 필요합니다.", "error");
       return;
     }
-    const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
+    const trimmedUrl = instagramUrl.trim();
     setIsSubmitting(true); setStatus(""); setError("");
     let timeout: number | undefined;
     try {
@@ -932,7 +923,7 @@ function HomePageContent() {
       };
       setActiveJobs((prev) => [newJob, ...prev.filter((job) => job.jobId !== newJob.jobId)]);
       setInstagramUrl("");
-      setStatus("정확한 장소를 파악하고 있어요");
+      setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
       showToast("분석 작업을 백그라운드에서 시작했어요", "success");
     } catch (e) {
       const message = e instanceof Error && e.name === "AbortError"
@@ -995,21 +986,6 @@ function HomePageContent() {
   };
   const handleSubmitPost = async () => {
     if (!canPost) return;
-    const normalizedPlaceName = postPlaceName.trim();
-    const normalizedAddress = postAddress.trim();
-    const { data: duplicatePost } = await supabase
-      .from("feed_posts")
-      .select("id")
-      .eq("user_name", MY_USER)
-      .eq("place_name", normalizedPlaceName)
-      .eq("address", normalizedAddress)
-      .eq("archived", false)
-      .limit(1)
-      .maybeSingle();
-    if (duplicatePost) {
-      showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
-      return;
-    }
     const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USER, title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
     await submitPost(newPost);
     showToast("큐레이션이 등록됐어요 ✨", "success");
@@ -1035,6 +1011,7 @@ function HomePageContent() {
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current);
     setCompactMapReady(true);
+    console.log("🗺️ Map initialized");
     setTimeout(() => { addPlacePins(mapRef.current, markersRef.current, posts); }, 300);
   };
 
@@ -1159,6 +1136,7 @@ function HomePageContent() {
     }
     const notifySdkReady = () => {
       setIsKakaoMapLoaded(true);
+      console.log("🗺️ Kakao SDK loaded:", true);
       setKakaoStatus("ready");
     };
     if (window.kakao?.maps) {
@@ -1328,28 +1306,28 @@ function HomePageContent() {
   useEffect(() => {
     if (activeTab !== "messages" || activeChatRoom) return;
     const refreshRooms = async () => {
-      const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER_ID},user2_id.eq.${MY_USER_ID}`);
+      const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`);
       if (!roomsData) return;
       const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
-        const friendId = r.user1_id === MY_USER_ID ? r.user2_id : r.user1_id;
+        const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
         const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
-        const { count: unread } = await supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER_ID).eq("read", false);
+        const { count: unread } = await supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false);
         return { id: r.id, friendId, friendName: friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at, unreadCount: unread ?? 0 };
       }));
       setChatRooms(rooms);
     };
     refreshRooms();
-  }, [activeTab, activeChatRoom, MY_USER_ID]);
+  }, [activeTab, activeChatRoom]);
 
   // 전역 메시지 구독 - 어느 탭에 있든 새 메시지 오면 알림 갱신
   useEffect(() => {
-    const channel = supabase.channel(`global-messages-${MY_USER_ID}`).on(
+    const channel = supabase.channel(`global-messages-${MY_USER}`).on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "messages" },
       (payload: any) => {
         const m = payload.new;
         // 본인이 보낸 메시지면 무시
-        if (m.sender_id === MY_USER_ID) return;
+        if (m.sender_id === MY_USER) return;
         // 내가 속한 채팅방이 아니면 무시
         setChatRooms(prev => {
           const room = prev.find(r => r.id === m.room_id);
@@ -1366,7 +1344,7 @@ function HomePageContent() {
       }
     ).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [activeChatRoom, MY_USER_ID]);
+  }, [activeChatRoom]);
 
   useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
 
@@ -1879,7 +1857,7 @@ function HomePageContent() {
         </div>
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 20px" }}>
           {messages.map(m => {
-            const isMine = m.senderId === MY_USER_ID;
+            const isMine = m.senderId === MY_USER;
             return (
               <div key={m.id} style={{ display: "flex", justifyContent: isMine ? "flex-end" : "flex-start", alignItems: "flex-end", gap: "4px" }}>
                 {isMine && (
