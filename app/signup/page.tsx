@@ -54,15 +54,18 @@ export default function SignupPage() {
 
     // users 테이블에도 추가
     if (data.user) {
+      const finalUsername = username.trim() || email.split("@")[0] || "user";
       const { error: insertError } = await supabase
         .from("users")
-        .insert({
+        .upsert({
           id: data.user.id,
-          username: username.trim(),
-        });
+          username: finalUsername,
+        }, { onConflict: "id" });
       if (insertError) {
         console.error("users INSERT 실패:", insertError);
         setError("회원가입은 완료됐지만 프로필 생성에 실패했어요. 로그인 후 다시 시도해주세요.");
+      } else {
+        console.log("users INSERT 성공:", finalUsername);
       }
     }
 
