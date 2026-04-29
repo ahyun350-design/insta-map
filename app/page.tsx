@@ -473,15 +473,21 @@ function HomePageContent() {
           credentials: "include",
         });
         const data = await res.json() as ExtractStatusResponse;
+        console.log("폴링 응답:", data);
+        console.log("status 값:", data.status);
         if (!res.ok) {
           throw new Error(data.error || data.error_message || "작업 상태를 확인할 수 없어요.");
         }
 
         const nextStatus = data.status;
         const nextStep = data.progress_step ?? "";
+        console.log("[poll] status payload", { jobId, nextStatus, progressStep: nextStep, resultPlacesCount: Array.isArray(data.result_places) ? data.result_places.length : 0 });
         setActiveJobs((prev) => prev.map((job) => job.jobId === jobId ? { ...job, status: nextStatus, progressStep: nextStep } : job));
 
-        if (nextStatus === "completed") {
+        const shouldHandleCompleted = nextStatus === "completed"
+          || (!!nextStep && nextStep.includes("완료") && Array.isArray(data.result_places));
+        if (shouldHandleCompleted) {
+          console.log("[poll] completed branch reached", { jobId });
           removeJob(jobId);
           const places = data.result_places ?? [];
           const { data: existingPlaces } = await supabase

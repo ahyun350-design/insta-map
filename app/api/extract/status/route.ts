@@ -51,6 +51,13 @@ export async function GET(req: Request) {
     if (error) throw error;
     if (!data) return NextResponse.json({ error: "작업을 찾을 수 없어요." }, { status: 404 });
 
+    console.log("status response:", {
+      jobId,
+      status: data.status,
+      progress_step: data.progress_step ?? "",
+      result_places_count: data.result_places?.length ?? 0,
+    });
+
     return NextResponse.json({
       status: data.status,
       progress_step: data.progress_step ?? "",
