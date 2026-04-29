@@ -186,6 +186,10 @@ function HomePageContent() {
   const [status, setStatus] = useState(""); const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [kakaoStatus, setKakaoStatus] = useState<KakaoStatus>("idle");
+  /** 카카오맵 JS SDK 객체 사용 가능 (`kakao.maps.load` 콜백 이후 true) */
+  const [isKakaoMapLoaded, setIsKakaoMapLoaded] = useState(false);
+  /** 지도 탭 작은 지도 패널에 Map 인스턴스 생성까지 완료 */
+  const [compactMapReady, setCompactMapReady] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
   const [showJobsModal, setShowJobsModal] = useState(false);
   const [activeJobs, setActiveJobs] = useState<ActiveExtractJob[]>([]);
@@ -387,6 +391,10 @@ function HomePageContent() {
       loadData();
     }
   }, [user, userLoading]);
+
+  useEffect(() => {
+    console.log("🗺️ Kakao SDK loaded:", isKakaoMapLoaded);
+  }, [isKakaoMapLoaded]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1002,7 +1010,8 @@ function HomePageContent() {
     mapRef.current.setMapTypeId && mapRef.current.setMapTypeId(mapTypeId);
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current);
-    setKakaoStatus("ready");
+    setCompactMapReady(true);
+    console.log("🗺️ Map initialized");
     setTimeout(() => { addPlacePins(mapRef.current, markersRef.current, posts); }, 300);
   };
 
@@ -1121,12 +1130,18 @@ function HomePageContent() {
   // 카카오 스크립트 최초 로드 (DOM 준비와 무관하게 스크립트만 로드)
   useEffect(() => {
     if (!mapKey) {
+      setIsKakaoMapLoaded(false);
       setKakaoStatus("error");
       return;
     }
+    const notifySdkReady = () => {
+      setIsKakaoMapLoaded(true);
+      console.log("🗺️ Kakao SDK loaded:", true);
+      setKakaoStatus("ready");
+    };
     if (window.kakao?.maps) {
       window.kakao.maps.load(() => {
-        setKakaoStatus("ready");
+        notifySdkReady();
       });
       return;
     }
@@ -1134,11 +1149,12 @@ function HomePageContent() {
     if (existing) {
       const done = () => {
         if (!window.kakao?.maps) {
+          setIsKakaoMapLoaded(false);
           setKakaoStatus("error");
           return;
         }
         window.kakao.maps.load(() => {
-          setKakaoStatus("ready");
+          notifySdkReady();
         });
       };
       if (window.kakao?.maps || existing.getAttribute("data-loaded") === "1") {
@@ -1155,21 +1171,26 @@ function HomePageContent() {
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${mapKey}&autoload=false&libraries=services`;
     script.async = true;
     const failTimer = window.setTimeout(() => {
-      if (!window.kakao?.maps) setKakaoStatus("error");
+      if (!window.kakao?.maps) {
+        setIsKakaoMapLoaded(false);
+        setKakaoStatus("error");
+      }
     }, 25000);
     script.onload = () => {
       window.clearTimeout(failTimer);
       script.setAttribute("data-loaded", "1");
       if (!window.kakao?.maps) {
+        setIsKakaoMapLoaded(false);
         setKakaoStatus("error");
         return;
       }
       window.kakao.maps.load(() => {
-        setKakaoStatus("ready");
+        notifySdkReady();
       });
     };
     script.onerror = () => {
       window.clearTimeout(failTimer);
+      setIsKakaoMapLoaded(false);
       setKakaoStatus("error");
     };
     document.head.appendChild(script);
@@ -1178,16 +1199,49 @@ function HomePageContent() {
     };
   }, [mapKey]);
 
-  // 지도 탭이 활성화될 때 지도 초기화 (DOM이 준비된 후)
+  // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 RAF·재시도로 해소
   useEffect(() => {
     if (kakaoStatus !== "ready" || activeTab !== "map") return;
-    const container = mapContainerRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
-    const timer = setTimeout(() => { initMap(savedPlaces, feedPosts); }, 100);
-    return () => clearTimeout(timer);
-  }, [kakaoStatus, activeTab]);
+    if (mapRef.current) return;
+
+    let cancelled = false;
+    const timeouts: number[] = [];
+    let attempt = 0;
+    const maxAttempts = 50;
+
+    const tryInit = () => {
+      if (cancelled || mapRef.current) return;
+      const container = mapContainerRef.current;
+      if (!container) {
+        if (attempt < maxAttempts) {
+          attempt += 1;
+          const t = window.setTimeout(tryInit, 100);
+          timeouts.push(t);
+        }
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        initMap(savedPlaces, feedPosts);
+        return;
+      }
+      if (attempt < maxAttempts) {
+        attempt += 1;
+        const t = window.setTimeout(tryInit, 100);
+        timeouts.push(t);
+      } else {
+        initMap(savedPlaces, feedPosts);
+      }
+    };
+
+    const tStart = window.setTimeout(tryInit, 0);
+    timeouts.push(tStart);
+
+    return () => {
+      cancelled = true;
+      timeouts.forEach((tid) => window.clearTimeout(tid));
+    };
+  }, [kakaoStatus, activeTab, savedPlaces, feedPosts]);
 
   // 탭 전환 시 지도 relayout
   useEffect(() => {
@@ -1961,7 +2015,7 @@ function HomePageContent() {
               )}
               {!isAnalyzing && status && <p className="hintText">{status}</p>}
               {error && <p className="emptyText">{error}</p>}
-              {kakaoStatus === "loading" && <p className="hintText">카카오맵을 불러오는 중...</p>}
+              {kakaoStatus === "loading" && <p className="hintText">카카오맵 SDK를 불러오는 중입니다</p>}
               {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", marginBottom: "6px" }}>
                 <button onClick={() => setMapExpanded(true)} style={{ background: "transparent", border: "0.5px solid #ddd", borderRadius: "4px", padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "0.5px", fontFamily: "'Inter', sans-serif" }}>
@@ -1976,7 +2030,38 @@ function HomePageContent() {
                   🗑️ 검색기록 삭제
                 </button>
               </div>
-              <div ref={mapContainerRef} className="kakaoMap" />
+              <div style={{ position: "relative", width: "100%", minHeight: 220 }}>
+                {(kakaoStatus === "idle" || kakaoStatus === "loading" || (kakaoStatus === "ready" && !compactMapReady)) && (
+                  <div
+                    aria-hidden={compactMapReady}
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      zIndex: 4,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "10px",
+                      background: "linear-gradient(180deg, #f7f9ff 0%, #eef1fb 100%)",
+                      border: "0.5px solid #e4e9f7",
+                      borderRadius: "8px",
+                      minHeight: 220,
+                    }}
+                  >
+                    <span style={{ fontSize: "28px", lineHeight: 1 }}>🗺️</span>
+                    <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 600, letterSpacing: "0.3px" }}>지도를 불러오는 중...</p>
+                    <p style={{ margin: 0, fontSize: "11px", color: "#7a849e", textAlign: "center", paddingInline: "12px" }}>
+                      {kakaoStatus !== "ready" ? "카카오맵 SDK를 불러오고 있어요" : "지도를 그리고 있어요"}
+                    </p>
+                  </div>
+                )}
+                <div
+                  ref={mapContainerRef}
+                  className="kakaoMap"
+                  style={{ position: "relative", zIndex: 1 }}
+                />
+              </div>
               {mapExpanded && (
                 <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, background: "#fff", display: "flex", flexDirection: "column" }}>
                   <div style={{ padding: "14px 20px", borderBottom: "0.5px solid #efefef", display: "flex", justifyContent: "center", alignItems: "center", background: "#fff", position: "relative" }}>
