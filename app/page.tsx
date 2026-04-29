@@ -109,34 +109,45 @@ type CoursePlace = Place & { lat: number; lng: number };
 
 function buildCourse(
   origin: { lat: number; lng: number },
-  candidates: CoursePlace[]
+  candidates: CoursePlace[],
+  options?: { enforceNoConsecutiveSameExceptShopping?: boolean }
 ): CoursePlace[] {
   const remaining = [...candidates];
   const result: CoursePlace[] = [];
   let currentLat = origin.lat;
   let currentLng = origin.lng;
+  const enforce = options?.enforceNoConsecutiveSameExceptShopping === true;
 
   while (remaining.length > 0) {
-    let bestPlace: CoursePlace | null = null;
-    let bestIndex = -1;
-    let bestDistance = Infinity;
+    const lastCat = result[result.length - 1]?.category;
+    const scored = remaining
+      .map((p, i) => ({ i, p, d: getDistance(currentLat, currentLng, p.lat, p.lng) }))
+      .sort((a, b) => a.d - b.d);
 
-    for (let i = 0; i < remaining.length; i += 1) {
-      const p = remaining[i];
-      const d = getDistance(currentLat, currentLng, p.lat, p.lng);
-      if (d < bestDistance) {
-        bestDistance = d;
-        bestPlace = p;
-        bestIndex = i;
+    let pickI: number;
+    let pickP: CoursePlace;
+
+    if (!enforce || !lastCat || remaining.length === 1) {
+      pickI = scored[0]!.i;
+      pickP = scored[0]!.p;
+    } else if (lastCat === "쇼핑") {
+      pickI = scored[0]!.i;
+      pickP = scored[0]!.p;
+    } else {
+      const found = scored.find(({ p }) => p.category === "쇼핑" || p.category !== lastCat);
+      if (found) {
+        pickI = found.i;
+        pickP = found.p;
+      } else {
+        pickI = scored[0]!.i;
+        pickP = scored[0]!.p;
       }
     }
 
-    if (bestPlace === null || bestIndex < 0) break;
-
-    result.push(bestPlace);
-    currentLat = bestPlace.lat;
-    currentLng = bestPlace.lng;
-    remaining.splice(bestIndex, 1);
+    result.push(pickP);
+    currentLat = pickP.lat;
+    currentLng = pickP.lng;
+    remaining.splice(pickI, 1);
   }
 
   return result;
@@ -168,7 +179,7 @@ function HomePageContent() {
   const { user, loading: userLoading } = useUser();
   const MY_USER = user?.username || "";
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<TabId>("home");
+  const [activeTab, setActiveTab] = useState<TabId>("map");
   const [instagramUrl, setInstagramUrl] = useState("");
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
@@ -318,15 +329,18 @@ function HomePageContent() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const { data: placesData } = await supabase
-        .from("places")
-        .select("*")
-        .eq("user_id", user?.id ?? "")
-        .order("created_at", { ascending: false });
-      if (placesData) setSavedPlaces(placesData.map(p => ({ id: p.id, name: p.name, address: p.address, category: p.category as Category })));
-      const { data: postsData } = await supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false });
-      if (postsData) {
-        setFeedPosts(postsData.map(p => ({
+      const uid = user?.id ?? "";
+      const [placesRes, postsRes, roomsRes] = await Promise.all([
+        supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
+        supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false }),
+        supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`),
+      ]);
+
+      if (placesRes.data) {
+        setSavedPlaces(placesRes.data.map((p) => ({ id: p.id, name: p.name, address: p.address, category: p.category as Category })));
+      }
+      if (postsRes.data) {
+        setFeedPosts(postsRes.data.map((p) => ({
           id: p.id, user: p.user_name, title: p.title, placeName: p.place_name,
           address: p.address, category: p.category as Category, comment: p.comment,
           images: p.images ?? [], createdAt: p.created_at, archived: p.archived,
@@ -334,18 +348,34 @@ function HomePageContent() {
           comments: (p.comments ?? []).map((c: any) => ({ id: c.id, user: c.user_name, text: c.text, createdAt: c.created_at })),
         })));
       }
-      // 채팅방 로드
-      const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`);
-      if (roomsData) {
-        const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
-          const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
-          const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
-          const { count: unread } = await supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false);
-          return { id: r.id, friendId, friendName: friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at, unreadCount: unread ?? 0 };
-        }));
+
+      const roomsData = roomsRes.data;
+      if (roomsData && roomsData.length > 0) {
+        const rooms: ChatRoom[] = await Promise.all(
+          roomsData.map(async (r: any) => {
+            const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
+            const [msgsRes, unreadRes] = await Promise.all([
+              supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1),
+              supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false),
+            ]);
+            const unread = typeof unreadRes.count === "number" ? unreadRes.count : 0;
+            return {
+              id: r.id,
+              friendId,
+              friendName: friendId,
+              lastMessage: msgsRes.data?.[0]?.text ?? "",
+              lastTime: msgsRes.data?.[0]?.created_at ?? r.created_at,
+              unreadCount: unread,
+            };
+          }),
+        );
         setChatRooms(rooms);
+      } else {
+        setChatRooms([]);
       }
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -769,8 +799,15 @@ function HomePageContent() {
         ...selectedPools.숙소,
       ];
 
+      const selectedCategorySlots = (["카페", "맛집", "쇼핑", "숙소"] as const).filter((c) => courseCounts[c] > 0).length;
+      const enforceNoConsecutiveSameExceptShopping = selectedCategorySlots >= 2;
+
       // 5. 알고리즘 실행
-      const course = buildCourse({ lat: originLat, lng: originLng }, mergedCandidates);
+      const course = buildCourse(
+        { lat: originLat, lng: originLng },
+        mergedCandidates,
+        { enforceNoConsecutiveSameExceptShopping },
+      );
 
       if (course.length === 0) {
         showToast("코스를 만들 수 없어요. 저장된 장소를 더 추가해보세요.", "info");
@@ -1083,18 +1120,62 @@ function HomePageContent() {
 
   // 카카오 스크립트 최초 로드 (DOM 준비와 무관하게 스크립트만 로드)
   useEffect(() => {
-    if (!mapKey) return;
-    if (window.kakao?.maps) { setKakaoStatus("ready"); return; }
+    if (!mapKey) {
+      setKakaoStatus("error");
+      return;
+    }
+    if (window.kakao?.maps) {
+      window.kakao.maps.load(() => {
+        setKakaoStatus("ready");
+      });
+      return;
+    }
+    const existing = document.querySelector<HTMLScriptElement>("script[data-pindmap-kakao]");
+    if (existing) {
+      const done = () => {
+        if (!window.kakao?.maps) {
+          setKakaoStatus("error");
+          return;
+        }
+        window.kakao.maps.load(() => {
+          setKakaoStatus("ready");
+        });
+      };
+      if (window.kakao?.maps || existing.getAttribute("data-loaded") === "1") {
+        done();
+        return;
+      }
+      setKakaoStatus("loading");
+      existing.addEventListener("load", done, { once: true });
+      return;
+    }
     setKakaoStatus("loading");
     const script = document.createElement("script");
-    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${mapKey}&autoload=false&libraries=services`; script.async = true;
+    script.setAttribute("data-pindmap-kakao", "1");
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${mapKey}&autoload=false&libraries=services`;
+    script.async = true;
+    const failTimer = window.setTimeout(() => {
+      if (!window.kakao?.maps) setKakaoStatus("error");
+    }, 25000);
     script.onload = () => {
-      if (!window.kakao?.maps) { setKakaoStatus("error"); return; }
-      window.kakao.maps.load(() => { setKakaoStatus("ready"); });
+      window.clearTimeout(failTimer);
+      script.setAttribute("data-loaded", "1");
+      if (!window.kakao?.maps) {
+        setKakaoStatus("error");
+        return;
+      }
+      window.kakao.maps.load(() => {
+        setKakaoStatus("ready");
+      });
     };
-    script.onerror = () => setKakaoStatus("error");
+    script.onerror = () => {
+      window.clearTimeout(failTimer);
+      setKakaoStatus("error");
+    };
     document.head.appendChild(script);
-    return () => { try { document.head.removeChild(script); } catch {} };
+    return () => {
+      window.clearTimeout(failTimer);
+    };
   }, [mapKey]);
 
   // 지도 탭이 활성화될 때 지도 초기화 (DOM이 준비된 후)
@@ -1370,8 +1451,21 @@ function HomePageContent() {
   };
   if (userLoading) {
     return (
-      <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}>
-        <p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p>
+      <main className="mobileRoot">
+        <section className="phoneFrame" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#fafafa" }}>
+          <header className="appHeader" style={{ opacity: 0.85 }}>
+            <h1 className="appTitle" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="skeleton" style={{ width: 22, height: 22, borderRadius: 6, display: "inline-block" }} />
+              <span className="skeleton" style={{ width: 88, height: 18, borderRadius: 4, display: "inline-block" }} />
+            </h1>
+          </header>
+          <section className="appContent" style={{ flex: 1, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="skeleton" style={{ width: "40%", height: 14, borderRadius: 4 }} />
+            <div className="skeleton" style={{ width: "100%", height: 220, borderRadius: 12 }} />
+            <div className="skeleton" style={{ width: "100%", height: 44, borderRadius: 8 }} />
+            <p style={{ margin: "8px 0 0", fontSize: "12px", color: "#aaa", textAlign: "center" }}>불러오는 중...</p>
+          </section>
+        </section>
       </main>
     );
   }
