@@ -75,8 +75,6 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
   if (!actorId) throw new Error("APIFY actor ID가 설정되지 않았습니다.");
 
   const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
-  console.log("Apify URL:", runUrl);
-  console.log("[extract] Apify run start", { actorId, instagramUrl: url, runUrl });
 
   const runRes = await fetch(runUrl, {
     method: "POST",
@@ -87,7 +85,6 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
       resultsLimit: 1,
     }),
   });
-  console.log("Apify response:", runRes.status);
 
   if (!runRes.ok) {
     const runErrText = await runRes.text();
@@ -96,7 +93,6 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
   }
   const runData = await runRes.json() as { data?: { id?: string; defaultDatasetId?: string } };
   const runId = runData.data?.id;
-  console.log("[extract] Apify run created", { runId, defaultDatasetId: runData.data?.defaultDatasetId });
   if (!runId) throw new Error("Apify run ID를 가져올 수 없습니다.");
 
   let datasetId = runData.data?.defaultDatasetId;
@@ -106,7 +102,6 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
     const statusData = await statusRes.json() as { data?: { status?: string; defaultDatasetId?: string } };
     const status = statusData.data?.status;
     datasetId = statusData.data?.defaultDatasetId ?? datasetId;
-    console.log("[extract] Apify run polling", { runId, status, datasetId, pollCount: i + 1 });
     if (status === "SUCCEEDED") break;
     if (status === "FAILED" || status === "ABORTED") throw new Error("Apify 작업 실패");
   }
@@ -115,7 +110,6 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
 
   const itemsRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}`);
   const items = await itemsRes.json() as Array<{ caption?: unknown; text?: unknown; description?: unknown }>;
-  console.log("[extract] Apify dataset fetched", { datasetId, itemCount: items?.length ?? 0 });
   if (!items?.length) throw new Error("Instagram 게시물을 가져올 수 없습니다.");
 
   const post = items[0];
