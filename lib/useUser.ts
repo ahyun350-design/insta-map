@@ -15,6 +15,29 @@ export function useUser() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const ensureUserExists = async (userId: string, email?: string, preferredUsername?: string) => {
+      const { data: existing } = await supabase
+        .from("users")
+        .select("id")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (existing) return;
+
+      const fallbackUsername =
+        preferredUsername?.trim() ||
+        email?.split("@")[0] ||
+        "user";
+
+      const { error } = await supabase.from("users").insert({
+        id: userId,
+        username: fallbackUsername,
+      });
+      if (error) {
+        console.error("users ensure INSERT 실패:", error);
+      }
+    };
+
     // 1) 페이지 처음 로드시 현재 세션 확인
     const loadUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -24,6 +47,12 @@ export function useUser() {
         setLoading(false);
         return;
       }
+
+      await ensureUserExists(
+        session.user.id,
+        session.user.email,
+        session.user.user_metadata?.username || session.user.user_metadata?.name
+      );
 
       // users 테이블에서 username 가져오기
       const { data } = await supabase
@@ -54,8 +83,15 @@ export function useUser() {
       async (_event, session) => {
         if (!session?.user) {
           setUser(null);
+          setLoading(false);
           return;
         }
+
+        await ensureUserExists(
+          session.user.id,
+          session.user.email,
+          session.user.user_metadata?.username || session.user.user_metadata?.name
+        );
 
         const { data } = await supabase
           .from("users")
@@ -75,6 +111,7 @@ export function useUser() {
           username,
           email: session.user.email,
         });
+        setLoading(false);
       }
     );
 
