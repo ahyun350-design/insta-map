@@ -141,6 +141,19 @@ function buildCourse(
 
   return result;
 }
+
+function shufflePick<T>(items: T[], count: number): T[] {
+  if (count <= 0) return [];
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = copy[i]!;
+    copy[i] = copy[j]!;
+    copy[j] = temp;
+  }
+  return copy.slice(0, count);
+}
+
 export default function HomePage() {
   return (
     <Suspense fallback={<main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}><p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p></main>}>
@@ -744,10 +757,10 @@ function HomePageContent() {
       }
 
       const selectedPools = {
-        카페: candidates.카페.sort((a, b) => getDistance(originLat, originLng, a.lat, a.lng) - getDistance(originLat, originLng, b.lat, b.lng)).slice(0, adjustedCounts.카페),
-        맛집: candidates.맛집.sort((a, b) => getDistance(originLat, originLng, a.lat, a.lng) - getDistance(originLat, originLng, b.lat, b.lng)).slice(0, adjustedCounts.맛집),
-        쇼핑: candidates.쇼핑.sort((a, b) => getDistance(originLat, originLng, a.lat, a.lng) - getDistance(originLat, originLng, b.lat, b.lng)).slice(0, adjustedCounts.쇼핑),
-        숙소: candidates.숙소.sort((a, b) => getDistance(originLat, originLng, a.lat, a.lng) - getDistance(originLat, originLng, b.lat, b.lng)).slice(0, adjustedCounts.숙소),
+        카페: shufflePick(candidates.카페, adjustedCounts.카페),
+        맛집: shufflePick(candidates.맛집, adjustedCounts.맛집),
+        쇼핑: shufflePick(candidates.쇼핑, adjustedCounts.쇼핑),
+        숙소: shufflePick(candidates.숙소, adjustedCounts.숙소),
       };
       const mergedCandidates: CoursePlace[] = [
         ...selectedPools.카페,
@@ -1243,21 +1256,26 @@ function HomePageContent() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             {(() => {
-              const selectedAddress = selectedPlace.road_address_name || selectedPlace.address_name || "";
-              const saved = savedPlaces.find(
-                (p) => p.name === selectedPlace.place_name && (!selectedAddress || p.address === selectedAddress),
-              );
+              const searchAddr = (selectedPlace.road_address_name || selectedPlace.address_name || "").trim();
+              const saved = savedPlaces.find((p) => {
+                if (p.name.trim() !== selectedPlace.place_name.trim()) return false;
+                if (!searchAddr) return true;
+                return p.address.trim() === searchAddr;
+              });
+              const heartFill = saved ? "#e53935" : "none";
+              const heartStroke = saved ? "#e53935" : "#1a2a7a";
               return (
                 <button onClick={async () => {
                   if (saved) {
                     await deletePlace(saved.id);
+                    showToast("저장이 취소되었어요", "info");
                   } else {
                     const category: Category = selectedPlace.category_name?.includes("카페") ? "카페" : selectedPlace.category_name?.includes("음식") || selectedPlace.category_name?.includes("맛집") ? "맛집" : selectedPlace.category_name?.includes("숙박") || selectedPlace.category_name?.includes("호텔") ? "숙소" : "쇼핑";
                     await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), name: selectedPlace.place_name, address: selectedPlace.road_address_name || selectedPlace.address_name || "", category });
                   }
                 }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill={saved ? "#1a2a7a" : "none"}>
-                    <path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill={heartFill}>
+                    <path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={heartStroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 </button>
               );
@@ -1563,7 +1581,7 @@ function HomePageContent() {
                     </div>
 
                     <div style={{ display: "flex", gap: "8px" }}>
-                      <button type="button" onClick={() => { setCourseResult(null); }} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>다시 만들기</button>
+                      <button type="button" onClick={() => { void generateCourse(); }} disabled={courseLoading} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: "13px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading ? 0.6 : 1 }}>{courseLoading ? "다시 짜는 중..." : "다시 만들기"}</button>
                       <button type="button" onClick={showCourseOnMap} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
                     </div>
                   </>
