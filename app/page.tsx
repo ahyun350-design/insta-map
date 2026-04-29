@@ -1000,6 +1000,20 @@ function HomePageContent() {
   };
   const handleSubmitPost = async () => {
     if (!canPost) return;
+    const normalizedPlaceName = postPlaceName.trim();
+    const normalizedAddress = postAddress.trim();
+    const { data: existing } = await supabase
+      .from("feed_posts")
+      .select("id")
+      .eq("user_name", MY_USER)
+      .eq("place_name", normalizedPlaceName)
+      .eq("address", normalizedAddress)
+      .eq("archived", false)
+      .maybeSingle();
+    if (existing) {
+      showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
+      return;
+    }
     const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USER, title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
     await submitPost(newPost);
     showToast("큐레이션이 등록됐어요 ✨", "success");
