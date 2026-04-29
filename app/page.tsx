@@ -91,6 +91,14 @@ function extractRegion(address: string): string {
   return parts[0] || "기타";
 }
 
+function cleanInstagramUrl(url: string): string {
+  const match = url.match(/(https?:\/\/(?:www\.)?instagram\.com\/(?:p|reel|tv)\/[^/?#]+)/);
+  if (match) {
+    return `${match[1]}/`;
+  }
+  return url;
+}
+
 // 두 좌표 사이의 직선거리 (km) - Haversine 공식
 function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // 지구 반지름 (km)
@@ -905,7 +913,7 @@ function HomePageContent() {
       showToast("로그인이 필요합니다.", "error");
       return;
     }
-    const trimmedUrl = instagramUrl.trim();
+    const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
     setIsSubmitting(true); setStatus(""); setError("");
     let timeout: number | undefined;
     try {
