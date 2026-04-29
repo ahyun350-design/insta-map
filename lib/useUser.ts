@@ -16,13 +16,22 @@ export function useUser() {
 
   useEffect(() => {
     const ensureUserExists = async (userId: string, email?: string, preferredUsername?: string) => {
-      const { data: existing } = await supabase
+      console.log("users 테이블 체크 시작", { userId });
+      const { data: existing, error: selectError } = await supabase
         .from("users")
         .select("id")
         .eq("id", userId)
         .maybeSingle();
 
-      if (existing) return;
+      if (selectError) {
+        console.error("users 체크 실패:", selectError);
+        return;
+      }
+
+      if (existing) {
+        console.log("users 이미 존재:", preferredUsername?.trim() || email?.split("@")[0] || email || userId);
+        return;
+      }
 
       const fallbackUsername =
         preferredUsername?.trim() ||
@@ -35,6 +44,8 @@ export function useUser() {
       }, { onConflict: "id" });
       if (error) {
         console.error("users 자동 INSERT 실패:", error);
+      } else {
+        console.log("users INSERT 성공:", fallbackUsername);
       }
     };
 
