@@ -366,6 +366,7 @@ function HomePageContent() {
         const rooms: ChatRoom[] = await Promise.all(
           roomsData.map(async (r: any) => {
             const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
+            const { data: friendData } = await supabase.from("users").select("username").eq("id", friendId).maybeSingle();
             const [msgsRes, unreadRes] = await Promise.all([
               supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1),
               supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false),
@@ -374,7 +375,7 @@ function HomePageContent() {
             return {
               id: r.id,
               friendId,
-              friendName: friendId,
+              friendName: friendData?.username || friendId,
               lastMessage: msgsRes.data?.[0]?.text ?? "",
               lastTime: msgsRes.data?.[0]?.created_at ?? r.created_at,
               unreadCount: unread,
@@ -1328,9 +1329,10 @@ function HomePageContent() {
       if (!roomsData) return;
       const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
         const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
+        const { data: friendData } = await supabase.from("users").select("username").eq("id", friendId).maybeSingle();
         const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
         const { count: unread } = await supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false);
-        return { id: r.id, friendId, friendName: friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at, unreadCount: unread ?? 0 };
+        return { id: r.id, friendId, friendName: friendData?.username || friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at, unreadCount: unread ?? 0 };
       }));
       setChatRooms(rooms);
     };
