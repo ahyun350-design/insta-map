@@ -2228,7 +2228,7 @@ function HomePageContent() {
   </div>
 )}
 
-          {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">{MY_USER.slice(0,1).toUpperCase()}</div><div><p className="profileName">{MY_USER}</p><p className="profileHandle">@{MY_USER}_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem">프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem" onClick={() => { if (confirm("정말 로그아웃하시겠어요?")) logout(); }}>로그아웃</button></div></div>)}
+          {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">{(user?.username || "").slice(0,1).toUpperCase()}</div><div><p className="profileName">{user?.username || ""}</p><p className="profileHandle">@{user?.username || ""}_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem">프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem" onClick={() => { if (confirm("정말 로그아웃하시겠어요?")) logout(); }}>로그아웃</button></div></div>)}
         </section>
         <nav className="tabBar">
           {TABS.map((tab) => {
