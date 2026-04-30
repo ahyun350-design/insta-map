@@ -186,6 +186,7 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const { user, loading: userLoading } = useUser();
   const MY_USER = user?.id || "";
+  const MY_USERNAME = user?.username || "";
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>("map");
   const [instagramUrl, setInstagramUrl] = useState("");
@@ -557,7 +558,7 @@ function HomePageContent() {
     setSavedPlaces(prev => prev.filter(p => p.id !== id));
   };
   const submitPost = async (post: FeedPost) => {
-    await supabase.from("feed_posts").insert({ id: post.id, user_name: post.user, title: post.title, place_name: post.placeName, address: post.address, category: post.category, comment: post.comment, images: post.images, likes: [], archived: false });
+    await supabase.from("feed_posts").insert({ id: post.id, user_name: MY_USERNAME, title: post.title, place_name: post.placeName, address: post.address, category: post.category, comment: post.comment, images: post.images, likes: [], archived: false });
     setFeedPosts(prev => [post, ...prev]);
   };
   const deletePost = async (id: string) => {
@@ -578,16 +579,16 @@ function HomePageContent() {
   };
   const toggleLike = async (postId: string) => {
     const post = feedPosts.find(p => p.id === postId); if (!post) return;
-    const liked = post.likes.includes(MY_USER);
-    const newLikes = liked ? post.likes.filter(u => u !== MY_USER) : [...post.likes, MY_USER];
+    const liked = post.likes.includes(MY_USERNAME);
+    const newLikes = liked ? post.likes.filter(u => u !== MY_USERNAME) : [...post.likes, MY_USERNAME];
     await supabase.from("feed_posts").update({ likes: newLikes }).eq("id", postId);
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: newLikes } : p));
   };
   const addComment = async (postId: string) => {
     if (!newComment.trim()) return;
-    const c = { id: Date.now().toString(), post_id: postId, user_name: MY_USER, text: newComment.trim() };
+    const c = { id: Date.now().toString(), post_id: postId, user_name: MY_USERNAME, text: newComment.trim() };
     await supabase.from("comments").insert(c);
-    const newC: Comment = { id: c.id, user: MY_USER, text: newComment.trim(), createdAt: new Date().toISOString() };
+    const newC: Comment = { id: c.id, user: MY_USERNAME, text: newComment.trim(), createdAt: new Date().toISOString() };
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...p.comments, newC] } : p));
     setNewComment("");
   };
@@ -998,7 +999,7 @@ function HomePageContent() {
     const { data: existing } = await supabase
       .from("feed_posts")
       .select("id")
-      .eq("user_name", MY_USER)
+      .eq("user_name", MY_USERNAME)
       .eq("place_name", normalizedPlaceName)
       .eq("address", normalizedAddress)
       .eq("archived", false)
@@ -1007,7 +1008,7 @@ function HomePageContent() {
       showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
       return;
     }
-    const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USER, title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
+    const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USERNAME, title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
     await submitPost(newPost);
     showToast("큐레이션이 등록됐어요 ✨", "success");
     setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]); setActiveTab("home");
@@ -1512,7 +1513,7 @@ function HomePageContent() {
                 )}
                 <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#555", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>{post.comment}</p>
                 <div style={{ display: "flex", gap: "12px" }}>
-                  <span style={{ fontSize: "11px", color: post.likes.includes(MY_USER) ? "#e05555" : "#ccc" }}>♥ {post.likes.length}</span>
+                  <span style={{ fontSize: "11px", color: post.likes.includes(MY_USERNAME) ? "#e05555" : "#ccc" }}>♥ {post.likes.length}</span>
                   <span style={{ fontSize: "11px", color: "#ccc" }}>💬 {post.comments.length}</span>
                 </div>
               </div>
@@ -1548,7 +1549,7 @@ function HomePageContent() {
     return null;
   }
   if (detailPost) {
-    const liked = detailPost.likes.includes(MY_USER);
+    const liked = detailPost.likes.includes(MY_USERNAME);
     return (
       <main className="mobileRoot">
         <section className="phoneFrame">
@@ -1818,17 +1819,17 @@ function HomePageContent() {
                       <div className="avatar">{post.user.slice(0, 1).toUpperCase()}</div>
                       <div style={{ flex: 1, minWidth: 0 }}><p className="feedUser">{post.user}</p><p className="feedMeta">{timeAgo(post.createdAt)}</p></div>
                     </button>
-                    {post.user !== MY_USER && !chatRooms.some(r => r.friendName === post.user) && (
+                    {post.user !== MY_USERNAME && !chatRooms.some(r => r.friendName === post.user) && (
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); followUser(post.user); }}
                         style={{ border: "1px solid #1a2a7a", background: "#fff", color: "#1a2a7a", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
                       >+ 팔로우</button>
                     )}
-                    {post.user !== MY_USER && chatRooms.some(r => r.friendName === post.user) && (
+                    {post.user !== MY_USERNAME && chatRooms.some(r => r.friendName === post.user) && (
                       <span style={{ fontSize: "10px", color: "#aaa", marginRight: "8px" }}>팔로잉</span>
                     )}
-                    {post.user === MY_USER && (
+                    {post.user === MY_USERNAME && (
                       <div style={{ position: "relative" }}>
                         <button type="button" onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === post.id ? null : post.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px 6px", display: "flex", flexDirection: "column", gap: "3px", alignItems: "center" }}>
                           <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} /><span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} /><span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} />
@@ -1852,8 +1853,8 @@ function HomePageContent() {
                   {post.images.length > 0 && (<div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: "6px", marginBottom: "10px", overflowX: "auto" }}>{post.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "72px", height: "72px", objectFit: "cover", borderRadius: "6px", flexShrink: 0, cursor: "pointer" }} />)}</div>)}
                   <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: "14px" }}>
                     <button onClick={() => toggleLike(post.id)} style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", padding: 0 }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill={post.likes.includes(MY_USER) ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={post.likes.includes(MY_USER) ? "#e05555" : "#ccc"} strokeWidth="1.5"/></svg>
-                      <span style={{ fontSize: "12px", color: post.likes.includes(MY_USER) ? "#e05555" : "#ccc" }}>{post.likes.length}</span>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill={post.likes.includes(MY_USERNAME) ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={post.likes.includes(MY_USERNAME) ? "#e05555" : "#ccc"} strokeWidth="1.5"/></svg>
+                      <span style={{ fontSize: "12px", color: post.likes.includes(MY_USERNAME) ? "#e05555" : "#ccc" }}>{post.likes.length}</span>
                     </button>
                     <div style={{ display: "flex", alignItems: "center", gap: "5px", cursor: "pointer" }} onClick={() => { setDetailPostId(post.id); setScrollToComment(true); }}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="#ccc" strokeWidth="1.5" strokeLinecap="round"/></svg>
@@ -2309,7 +2310,7 @@ function HomePageContent() {
                     )}
                     <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#555", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>{post.comment}</p>
                     <div style={{ display: "flex", gap: "12px" }}>
-                      <span style={{ fontSize: "11px", color: post.likes.includes(MY_USER) ? "#e05555" : "#ccc" }}>♥ {post.likes.length}</span>
+                      <span style={{ fontSize: "11px", color: post.likes.includes(MY_USERNAME) ? "#e05555" : "#ccc" }}>♥ {post.likes.length}</span>
                       <span style={{ fontSize: "11px", color: "#ccc" }}>💬 {post.comments.length}</span>
                     </div>
                   </div>
