@@ -1611,7 +1611,7 @@ function HomePageContent() {
                       </button>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <span style={{ fontSize: "10px", color: "#bbb" }}>{timeAgo(c.createdAt)}</span>
-                        {c.user === MY_USER && <button onClick={(e) => { e.stopPropagation(); deleteComment(detailPost.id, c.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "13px", padding: 0, lineHeight: 1 }}>×</button>}
+                        {c.user === MY_USERNAME && <button onClick={(e) => { e.stopPropagation(); deleteComment(detailPost.id, c.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "13px", padding: 0, lineHeight: 1 }}>×</button>}
                       </div>
                     </div>
                     <p style={{ margin: 0, fontSize: "13px", color: "#444", lineHeight: 1.5 }}>{c.text}</p>
@@ -1621,7 +1621,7 @@ function HomePageContent() {
               {detailPost.comments.length === 0 && <p style={{ fontSize: "12px", color: "#ccc", textAlign: "center", padding: "10px 0" }}>첫 댓글을 남겨보세요 💬</p>}
             </div>
             <div ref={commentSectionRef} style={{ padding: "14px 20px 30px", display: "flex", gap: "8px" }}>
-              <input ref={commentInputRef} className="mapInput" placeholder="댓글을 입력하세요..." value={newComment} onChange={(e) => setNewComment(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addComment(detailPost.id)} style={{ flex: 1 }} />
+              <input ref={commentInputRef} className="mapInput" placeholder="댓글을 입력하세요..." value={newComment} onChange={(e) => setNewComment(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { addComment(detailPost.id); } }} style={{ flex: 1 }} />
               <button className="primaryButton" type="button" disabled={!newComment.trim()} onClick={() => addComment(detailPost.id)} style={{ padding: "0 16px", opacity: newComment.trim() ? 1 : 0.4 }}>등록</button>
             </div>
           </div>
