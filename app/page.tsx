@@ -558,7 +558,7 @@ function HomePageContent() {
     setSavedPlaces(prev => prev.filter(p => p.id !== id));
   };
   const submitPost = async (post: FeedPost) => {
-    await supabase.from("feed_posts").insert({ id: post.id, user_name: MY_USERNAME, title: post.title, place_name: post.placeName, address: post.address, category: post.category, comment: post.comment, images: post.images, likes: [], archived: false });
+    await supabase.from("feed_posts").insert({ id: post.id, user_id: user?.id || "", user_name: MY_USERNAME, title: post.title, place_name: post.placeName, address: post.address, category: post.category, comment: post.comment, images: post.images, likes: [], archived: false });
     setFeedPosts(prev => [post, ...prev]);
   };
   const deletePost = async (id: string) => {
@@ -586,7 +586,7 @@ function HomePageContent() {
   };
   const addComment = async (postId: string) => {
     if (!newComment.trim()) return;
-    const c = { id: Date.now().toString(), post_id: postId, user_name: MY_USERNAME, text: newComment.trim() };
+    const c = { id: Date.now().toString(), post_id: postId, user_id: user?.id || "", user_name: MY_USERNAME, text: newComment.trim() };
     await supabase.from("comments").insert(c);
     const newC: Comment = { id: c.id, user: MY_USERNAME, text: newComment.trim(), createdAt: new Date().toISOString() };
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...p.comments, newC] } : p));
