@@ -185,7 +185,7 @@ function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: userLoading } = useUser();
-  const MY_USER = user?.username || "";
+  const MY_USER = user?.id || "";
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>("map");
   const [instagramUrl, setInstagramUrl] = useState("");
