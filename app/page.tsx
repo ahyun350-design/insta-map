@@ -1547,7 +1547,7 @@ function HomePageContent() {
                 </button>
               );
             })()}
-            <button onClick={() => setSelectedPlace(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#bbb", fontSize: "20px", padding: 0, lineHeight: 1 }}>×</button>
+            <button onClick={() => { setSelectedPlace(null); setSelectedMapPlace(null); setMapExpanded(false); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#bbb", fontSize: "20px", padding: 0, lineHeight: 1 }}>×</button>
           </div>
         </div>
         <div style={{ padding: "12px 24px", display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -2484,7 +2484,7 @@ function HomePageContent() {
                 <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a1a2e", fontWeight: 400 }}>{selectedPlace.place_name}</p>
                 <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#888" }}>{selectedPlace.category_name}</p>
               </div>
-              <button onClick={() => setSelectedPlace(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#bbb", fontSize: "22px", padding: 0, lineHeight: 1 }}>×</button>
+              <button onClick={() => { setSelectedPlace(null); setSelectedMapPlace(null); setMapExpanded(false); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#bbb", fontSize: "22px", padding: 0, lineHeight: 1 }}>×</button>
             </div>
             <div style={{ padding: "12px 24px", display: "flex", flexDirection: "column", gap: "6px" }}>
               {selectedPlace.road_address_name && (<div style={{ display: "flex", gap: "8px" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>주소</span><span style={{ fontSize: "13px", color: "#444" }}>{selectedPlace.road_address_name}</span></div>)}
