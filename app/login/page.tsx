@@ -148,14 +148,15 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* 구분선 */}
+        {/*
+        비즈 앱 검수 전까지 카카오 로그인 비활성화 — 검수 후 이 블록 전체 주석 해제
+
         <div style={{ display: "flex", alignItems: "center", margin: "20px 0", gap: "10px" }}>
           <div style={{ flex: 1, height: "0.5px", background: "#e5e5e5" }} />
           <span style={{ fontSize: "11px", color: "#bbb", letterSpacing: "0.5px" }}>또는</span>
           <div style={{ flex: 1, height: "0.5px", background: "#e5e5e5" }} />
         </div>
 
-        {/* 카카오 로그인 */}
         <button
           type="button"
           onClick={handleKakaoLogin}
@@ -179,6 +180,7 @@ export default function LoginPage() {
           <span style={{ fontSize: "16px" }}>💬</span>
           카카오로 시작하기
         </button>
+        */}
 
         {/* 회원가입 링크 */}
         <p style={{ textAlign: "center", marginTop: "16px", fontSize: "12px", color: "#888" }}>
