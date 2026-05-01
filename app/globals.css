@@ -520,8 +520,20 @@ body {
     border-radius: 0 !important;
   }
 
+  html {
+    background: #fff !important;
+    overflow: hidden !important;
+  }
+
   body {
     background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    width: 100vw !important;
+    min-height: 100vh !important;
+    min-height: -webkit-fill-available !important;
   }
 }
 /* ── 스켈레톤 로딩 ── */
