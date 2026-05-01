@@ -1634,9 +1634,44 @@ function HomePageContent() {
   if (!user) {
     return null;
   }
+
+  const sharePostModalEl = sharePost && (
+    <div onClick={() => { if (!shareLoading) { setSharePost(null); setFriendRooms([]); } }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", maxHeight: "70vh", overflowY: "auto", boxSizing: "border-box" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+          <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>친구에게 공유</span>
+          <button type="button" onClick={() => { setSharePost(null); setFriendRooms([]); }} disabled={shareLoading} style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: shareLoading ? "wait" : "pointer" }}>×</button>
+        </div>
+        <div style={{ padding: "10px 12px", background: "#f8f8fc", borderRadius: "8px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 500 }}>{sharePost.title || sharePost.placeName}</p>
+          <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888" }}>{sharePost.placeName} · {sharePost.category}</p>
+        </div>
+        {friendRooms.length === 0 && (
+          <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", padding: "20px 0" }}>대화 중인 친구가 없어요. 먼저 메시지를 시작해보세요 💌</p>
+        )}
+        {friendRooms.map((room) => (
+          <button
+            key={room.id}
+            type="button"
+            onClick={() => sendShareToFriend(room)}
+            disabled={shareLoading}
+            style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", border: "0.5px solid #eee", borderRadius: "10px", background: "#fff", cursor: shareLoading ? "wait" : "pointer", fontFamily: "inherit", textAlign: "left", opacity: shareLoading ? 0.6 : 1 }}
+          >
+            <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", flexShrink: 0 }}>
+              {room.friendName.slice(0, 1).toUpperCase()}
+            </div>
+            <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{room.friendName}</span>
+            <span style={{ fontSize: "11px", color: "#1a2a7a", fontWeight: 500 }}>보내기 →</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   if (detailPost) {
     const liked = detailPost.likes.includes(MY_USERNAME);
     return (
+      <>
       <main className="mobileRoot">
         <section className="phoneFrame">
           <header style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
@@ -1776,44 +1811,15 @@ function HomePageContent() {
             </div>
           </div>
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
-          {sharePost && (
-            <div onClick={() => { if (!shareLoading) { setSharePost(null); setFriendRooms([]); } }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
-              <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", maxHeight: "70vh", overflowY: "auto", boxSizing: "border-box" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                  <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>친구에게 공유</span>
-                  <button type="button" onClick={() => { setSharePost(null); setFriendRooms([]); }} disabled={shareLoading} style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: shareLoading ? "wait" : "pointer" }}>×</button>
-                </div>
-                <div style={{ padding: "10px 12px", background: "#f8f8fc", borderRadius: "8px" }}>
-                  <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 500 }}>{sharePost.title || sharePost.placeName}</p>
-                  <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888" }}>{sharePost.placeName} · {sharePost.category}</p>
-                </div>
-                {friendRooms.length === 0 && (
-                  <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", padding: "20px 0" }}>대화 중인 친구가 없어요. 먼저 메시지를 시작해보세요 💌</p>
-                )}
-                {friendRooms.map((room) => (
-                  <button
-                    key={room.id}
-                    type="button"
-                    onClick={() => sendShareToFriend(room)}
-                    disabled={shareLoading}
-                    style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", border: "0.5px solid #eee", borderRadius: "10px", background: "#fff", cursor: shareLoading ? "wait" : "pointer", fontFamily: "inherit", textAlign: "left", opacity: shareLoading ? 0.6 : 1 }}
-                  >
-                    <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", flexShrink: 0 }}>
-                      {room.friendName.slice(0, 1).toUpperCase()}
-                    </div>
-                    <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{room.friendName}</span>
-                    <span style={{ fontSize: "11px", color: "#1a2a7a", fontWeight: 500 }}>보내기 →</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          {sharePostModalEl}
         </section>
       </main>
+      </>
     );
   }
 
   return (
+    <>
     <main className="mobileRoot">
       <section className="phoneFrame">
         <header className="appHeader">
@@ -2516,7 +2522,9 @@ function HomePageContent() {
             {(selectedPlace._feedPosts ?? []).length === 0 && (<div style={{ padding: "14px 24px 20px", textAlign: "center" }}><p style={{ margin: 0, fontSize: "12px", color: "#ccc" }}>아직 큐레이션이 없어요</p></div>)}
           </div>
         )}
+        {sharePostModalEl}
       </section>
     </main>
+    </>
   );
 }
