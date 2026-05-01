@@ -188,7 +188,24 @@ function HomePageContent() {
   const { user, loading: userLoading } = useUser();
   const MY_USER = user?.id || "";
   const MY_USERNAME = user?.username || "";
+  type Notification = {
+    id: string;
+    user_id: string;
+    type: "like" | "comment" | "follow" | "message";
+    actor_id: string;
+    actor_username: string;
+    target_id: string | null;
+    target_text: string | null;
+    read: boolean;
+    created_at: string;
+  };
   const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const unreadNotificationCount = useMemo(
+    () => notifications.filter((n) => !n.read).length,
+    [notifications],
+  );
   const [sharePost, setSharePost] = useState<FeedPost | null>(null);
   const [friendRooms, setFriendRooms] = useState<FriendRoom[]>([]);
   const [shareLoading, setShareLoading] = useState(false);
@@ -349,14 +366,16 @@ function HomePageContent() {
     setLoading(true);
     try {
       const uid = user?.id ?? "";
-      const [placesRes, postsRes, roomsRes, followsRes] = await Promise.all([
+      const [placesRes, postsRes, roomsRes, followsRes, notificationsRes] = await Promise.all([
         supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
         supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false }),
         supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`),
         supabase.from("follows").select("following_id").eq("follower_id", uid),
+        supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50),
       ]);
 
       setFollowingIds((followsRes.data || []).map((f: any) => f.following_id));
+      setNotifications((notificationsRes.data || []) as Notification[]);
 
       if (placesRes.data) {
         setSavedPlaces(placesRes.data.map((p) => ({ id: p.id, name: p.name, address: p.address, category: p.category as Category })));
@@ -592,6 +611,22 @@ function HomePageContent() {
     const newLikes = liked ? post.likes.filter(u => u !== MY_USERNAME) : [...post.likes, MY_USERNAME];
     await supabase.from("feed_posts").update({ likes: newLikes }).eq("id", postId);
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: newLikes } : p));
+
+    if (!liked && post.userId && post.userId !== user?.id && user) {
+      try {
+        await supabase.from("notifications").insert({
+          id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
+          user_id: post.userId,
+          type: "like",
+          actor_id: user.id,
+          actor_username: MY_USERNAME,
+          target_id: postId,
+          target_text: post.title || post.placeName,
+        });
+      } catch {
+        /* 알림 INSERT 실패 무시 */
+      }
+    }
   };
   const addComment = async (postId: string) => {
     if (!newComment.trim()) return;
@@ -599,6 +634,23 @@ function HomePageContent() {
     await supabase.from("comments").insert(c);
     const newC: Comment = { id: c.id, user: MY_USERNAME, text: newComment.trim(), createdAt: new Date().toISOString() };
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...p.comments, newC] } : p));
+
+    const post = feedPosts.find(p => p.id === postId);
+    if (post && post.userId && post.userId !== user?.id && user) {
+      try {
+        await supabase.from("notifications").insert({
+          id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
+          user_id: post.userId,
+          type: "comment",
+          actor_id: user.id,
+          actor_username: MY_USERNAME,
+          target_id: postId,
+          target_text: c.text.length > 30 ? c.text.slice(0, 30) + "..." : c.text,
+        });
+      } catch {
+        /* 알림 INSERT 실패 무시 */
+      }
+    }
     setNewComment("");
   };
   const deleteComment = async (postId: string, commentId: string) => {
@@ -663,6 +715,22 @@ function HomePageContent() {
     setMessages(prev => [...prev, { id, senderId: user.id, text, createdAt, read: false }]);
     setNewMessage("");
     await supabase.from("messages").insert({ id, room_id: activeChatRoom.id, sender_id: user.id, text, read: false });
+
+    if (activeChatRoom.friendId && activeChatRoom.friendId !== user.id) {
+      try {
+        await supabase.from("notifications").insert({
+          id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
+          user_id: activeChatRoom.friendId,
+          type: "message",
+          actor_id: user.id,
+          actor_username: MY_USERNAME,
+          target_id: activeChatRoom.id,
+          target_text: text.length > 30 ? text.slice(0, 30) + "..." : text,
+        });
+      } catch {
+        /* 알림 INSERT 실패 무시 */
+      }
+    }
   };
 
   // 저장 목록 장소 클릭 → 지도에서 보기
@@ -758,6 +826,23 @@ function HomePageContent() {
     });
     if (error) { showToast("팔로우 실패", "error"); return; }
     setFollowingIds(prev => [...prev, targetUser.id]);
+
+    if (user) {
+      try {
+        await supabase.from("notifications").insert({
+          id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
+          user_id: targetUser.id,
+          type: "follow",
+          actor_id: user.id,
+          actor_username: MY_USERNAME,
+          target_id: null,
+          target_text: null,
+        });
+      } catch {
+        /* 알림 INSERT 실패 무시 */
+      }
+    }
+
     showToast("팔로우 완료", "success");
   };
 
@@ -1719,6 +1804,153 @@ function HomePageContent() {
     </div>
   );
 
+  const getNotificationMessage = (n: Notification): string => {
+    switch (n.type) {
+      case "like":
+        return `${n.actor_username}님이 회원님의 글에 좋아요를 눌렀어요`;
+      case "comment":
+        return `${n.actor_username}님이 댓글을 남겼어요`;
+      case "follow":
+        return `${n.actor_username}님이 회원님을 팔로우했어요`;
+      case "message":
+        return `${n.actor_username}님이 메시지를 보냈어요`;
+      default:
+        return `${n.actor_username}님의 활동이 있어요`;
+    }
+  };
+
+  const handleNotificationClick = async (n: Notification) => {
+    if (!n.read) {
+      await supabase.from("notifications").update({ read: true }).eq("id", n.id);
+      setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+    }
+
+    setShowNotifications(false);
+
+    if (n.type === "like" || n.type === "comment") {
+      if (n.target_id) setDetailPostId(n.target_id);
+    } else if (n.type === "follow") {
+      router.push(`/profile/${encodeURIComponent(n.actor_username)}`);
+    } else if (n.type === "message") {
+      setActiveTab("messages");
+      if (n.target_id) {
+        const room = chatRooms.find(r => r.id === n.target_id);
+        if (room) setActiveChatRoom(room);
+      }
+    }
+  };
+
+  const markAllNotificationsRead = async () => {
+    if (!user) return;
+    await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  const notificationModalEl = showNotifications && (
+    <div style={{
+      position: "fixed",
+      top: 0, left: 0, right: 0, bottom: 0,
+      zIndex: 99999,
+      background: "#fff",
+      display: "flex",
+      flexDirection: "column",
+    }}>
+      <div style={{
+        padding: "14px 20px",
+        borderBottom: "0.5px solid #efefef",
+        display: "flex",
+        alignItems: "center",
+        gap: "12px",
+        flexShrink: 0,
+      }}>
+        <button
+          onClick={() => setShowNotifications(false)}
+          style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex" }}
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+        <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a", flex: 1 }}>알림</span>
+        {unreadNotificationCount > 0 && (
+          <button
+            onClick={markAllNotificationsRead}
+            style={{ border: "none", background: "transparent", color: "#1a2a7a", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            모두 읽음
+          </button>
+        )}
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 20px" }}>
+        {notifications.length === 0 && (
+          <div style={{ textAlign: "center", padding: "60px 20px", color: "#bbb" }}>
+            <p style={{ fontSize: "32px", margin: 0 }}>🔔</p>
+            <p style={{ fontSize: "13px", margin: "12px 0 0" }}>아직 알림이 없어요</p>
+          </div>
+        )}
+        {notifications.map((n) => (
+          <button
+            key={n.id}
+            type="button"
+            onClick={() => handleNotificationClick(n)}
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "10px",
+              padding: "14px 12px",
+              border: "none",
+              background: n.read ? "transparent" : "#f5f7ff",
+              borderRadius: "10px",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              textAlign: "left",
+              width: "100%",
+              marginBottom: "6px",
+            }}
+          >
+            <div style={{
+              width: "36px", height: "36px",
+              borderRadius: "50%",
+              background: "#1a2a7a",
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "13px",
+              flexShrink: 0,
+              fontWeight: 600,
+            }}>
+              {n.actor_username.slice(0, 1).toUpperCase()}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e", lineHeight: 1.4 }}>
+                {getNotificationMessage(n)}
+              </p>
+              {n.target_text && (
+                <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {n.target_text}
+                </p>
+              )}
+              <p style={{ margin: "4px 0 0", fontSize: "11px", color: "#aaa" }}>
+                {timeAgo(n.created_at)}
+              </p>
+            </div>
+            {!n.read && (
+              <span style={{
+                width: "8px", height: "8px",
+                borderRadius: "50%",
+                background: "#e53935",
+                flexShrink: 0,
+                marginTop: "6px",
+              }} />
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   if (detailPost) {
     const liked = detailPost.likes.includes(MY_USERNAME);
     return (
@@ -1863,6 +2095,7 @@ function HomePageContent() {
           </div>
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
           {sharePostModalEl}
+          {notificationModalEl}
         </section>
       </main>
       </>
@@ -1882,7 +2115,47 @@ function HomePageContent() {
   </svg>
   PindMap
 </h1>
-          {activeTab === "home" && <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => setShowNotifications(true)}
+              style={{
+                position: "relative",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              {unreadNotificationCount > 0 && (
+                <span style={{
+                  position: "absolute",
+                  top: "0px",
+                  right: "0px",
+                  background: "#e53935",
+                  color: "#fff",
+                  fontSize: "10px",
+                  fontWeight: 600,
+                  borderRadius: "10px",
+                  minWidth: "16px",
+                  height: "16px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "0 4px",
+                }}>
+                  {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+                </span>
+              )}
+            </button>
+            {activeTab === "home" && <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>}
+          </div>
         </header>
         <section className="appContent">
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
@@ -2574,6 +2847,7 @@ function HomePageContent() {
           </div>
         )}
         {sharePostModalEl}
+        {notificationModalEl}
       </section>
     </main>
     </>
