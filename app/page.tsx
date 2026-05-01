@@ -432,7 +432,6 @@ function HomePageContent() {
 
   useEffect(() => {
     if (!user?.id) return;
-    console.log("🔔 알림 채널 구독 시작:", user.id);
 
     const channel = supabase
       .channel(`notifications-${user.id}`)
@@ -445,17 +444,13 @@ function HomePageContent() {
           filter: `user_id=eq.${user.id}`
         },
         (payload) => {
-          console.log("🔔 새 알림 수신:", payload.new);
           const newNotification = payload.new as Notification;
           setNotifications(prev => [newNotification, ...prev]);
         }
       )
-      .subscribe((status) => {
-        console.log("🔔 알림 채널 상태:", status);
-      });
+      .subscribe();
 
     return () => {
-      console.log("🔔 알림 채널 구독 해제");
       supabase.removeChannel(channel);
     };
   }, [user?.id]);
