@@ -1503,14 +1503,14 @@ function HomePageContent() {
       expandedMapRef.current = new window.kakao.maps.Map(mapExpandedRef.current, { center: mapRef.current?.getCenter() ?? new window.kakao.maps.LatLng(37.5665, 126.978), level: mapRef.current?.getLevel() ?? 12 });
       addMyLocation(expandedMapRef.current);
       addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts);
-      addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts);
+      // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
     }, 100);
   }, [mapExpanded]);
 
   useEffect(() => {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
     addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts);
-    addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts);
+    // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
   }, [feedPosts, mapExpanded, savedPlaces]);
 
   useEffect(() => { if (!openMenuId) return; const handler = () => setOpenMenuId(null); document.addEventListener("click", handler); return () => document.removeEventListener("click", handler); }, [openMenuId]);
