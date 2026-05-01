@@ -17,6 +17,7 @@ type FeedPost = {
   category: Category; comment: string; images: string[]; createdAt: string;
   archived?: boolean; likes: string[]; comments: Comment[];
 };
+type FriendRoom = { id: string; friendId: string; friendName: string };
 type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; unreadCount: number; };
 type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; };
 type ExtractJobStatus = "pending" | "processing" | "completed" | "failed";
@@ -188,6 +189,9 @@ function HomePageContent() {
   const MY_USER = user?.id || "";
   const MY_USERNAME = user?.username || "";
   const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [sharePost, setSharePost] = useState<FeedPost | null>(null);
+  const [friendRooms, setFriendRooms] = useState<FriendRoom[]>([]);
+  const [shareLoading, setShareLoading] = useState(false);
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>("map");
   const [instagramUrl, setInstagramUrl] = useState("");
@@ -679,6 +683,21 @@ function HomePageContent() {
     }
   };
 
+  /** 큐레이션 상세 → 저장 목록 장소 매칭 후 지도(저장 클릭과 동일) */
+  const goToMapFromDetailPost = () => {
+    if (!detailPost) return;
+    const name = detailPost.placeName.trim();
+    const addr = detailPost.address.trim();
+    const matchedPlace = savedPlaces.find(
+      (p) => String(p.name).trim() === name && String(p.address).trim() === addr,
+    );
+    const placeForMap: Place =
+      matchedPlace ??
+      { id: `detail-post:${detailPost.id}`, name: detailPost.placeName, address: detailPost.address, category: detailPost.category };
+    handleSavedPlaceClick(placeForMap);
+    setDetailPostId(null);
+  };
+
   // 지도 탭의 작은 목록에서 장소 클릭 → 상세 카드만 띄움 (전체화면 X)
   const handleMiniListClick = (place: Place) => {
     const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
@@ -726,6 +745,57 @@ function HomePageContent() {
       .eq("following_id", targetUser.id);
     setFollowingIds(prev => prev.filter(id => id !== targetUser.id));
     showToast("언팔로우 완료", "success");
+  };
+
+  const openShareModal = async (post: FeedPost) => {
+    if (!user) return;
+    setSharePost(post);
+    const { data: roomsData } = await supabase
+      .from("chat_rooms")
+      .select("*")
+      .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`);
+    if (!roomsData) {
+      setFriendRooms([]);
+      return;
+    }
+    const rooms: FriendRoom[] = await Promise.all(
+      roomsData.map(async (r: any) => {
+        const friendId = r.user1_id === user.id ? r.user2_id : r.user1_id;
+        const { data: friendData } = await supabase
+          .from("users")
+          .select("username")
+          .eq("id", friendId)
+          .maybeSingle();
+        return {
+          id: r.id,
+          friendId,
+          friendName: friendData?.username ?? friendId,
+        };
+      }),
+    );
+    setFriendRooms(rooms);
+  };
+
+  const sendShareToFriend = async (room: FriendRoom) => {
+    if (!user || !sharePost || shareLoading) return;
+    setShareLoading(true);
+    try {
+      const shareText = `📍 ${sharePost.user}님의 큐레이션\n\n"${sharePost.title || sharePost.placeName}"\n${sharePost.placeName} · ${sharePost.category}\n\n${sharePost.comment.length > 80 ? `${sharePost.comment.slice(0, 80)}...` : sharePost.comment}\n\n👆 큐레이션 보러 가기 [share:${sharePost.id}]`;
+      const msgId = Date.now().toString();
+      await supabase.from("messages").insert({
+        id: msgId,
+        room_id: room.id,
+        sender_id: user.id,
+        text: shareText,
+        read: false,
+      });
+      setSharePost(null);
+      setFriendRooms([]);
+      setDetailPostId(null);
+      router.push(`/?openChatRoom=${room.id}`);
+    } finally {
+      setShareLoading(false);
+    }
   };
 
   // 코스 만들기 실행
@@ -1576,18 +1646,71 @@ function HomePageContent() {
             <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailPost.placeName}</span>
           </header>
           <div style={{ flex: 1, overflowY: "auto", background: "#fff" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "16px 20px 0" }}>
-              <div className="avatar">{detailPost.user.slice(0, 1).toUpperCase()}</div>
-              <div><p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#1a1a2e" }}>{detailPost.user}</p><p style={{ margin: 0, fontSize: "11px", color: "#aaa" }}>{timeAgo(detailPost.createdAt)}</p></div>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "16px 20px 0" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
+                <div className="avatar">{detailPost.user.slice(0, 1).toUpperCase()}</div>
+                <div><p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#1a1a2e" }}>{detailPost.user}</p><p style={{ margin: 0, fontSize: "11px", color: "#aaa" }}>{timeAgo(detailPost.createdAt)}</p></div>
+              </div>
+              <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+                {detailPost.user !== MY_USERNAME && detailPost.userId && !followingIds.includes(detailPost.userId) && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); followUser(detailPost.user); }}
+                    style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
+                  >+ 팔로우</button>
+                )}
+                {detailPost.user !== MY_USERNAME && detailPost.userId && followingIds.includes(detailPost.userId) && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); unfollowUser(detailPost.user); }}
+                    style={{ border: "1px solid #d0d4e0", background: "#fff", color: "#76809a", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 500, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
+                  >팔로잉</button>
+                )}
+                {detailPost.user === MY_USERNAME && (
+                  <div style={{ position: "relative" }}>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === detailPost.id ? null : detailPost.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px 6px", display: "flex", flexDirection: "column", gap: "3px", alignItems: "center" }}>
+                      <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} /><span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} /><span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} />
+                    </button>
+                    {openMenuId === detailPost.id && (
+                      <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: "28px", right: 0, background: "#fff", border: "0.5px solid #eee", borderRadius: "8px", boxShadow: "0 4px 16px rgba(0,0,0,0.1)", zIndex: 100, minWidth: "120px", overflow: "hidden" }}>
+                        <button type="button" onClick={() => openEdit(detailPost)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#333", cursor: "pointer", borderBottom: "0.5px solid #f5f5f5" }}>✏️ 수정</button>
+                        <button type="button" onClick={() => toggleArchive(detailPost.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#333", cursor: "pointer", borderBottom: "0.5px solid #f5f5f5" }}>📦 보관</button>
+                        <button type="button" onClick={() => { deletePost(detailPost.id); setDetailPostId(null); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#e07070", cursor: "pointer" }}>🗑️ 삭제</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div style={{ padding: "14px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p></div>
-            <div style={{ margin: "12px 20px 0", padding: "12px 14px", background: "#f8f8fc", borderRadius: "8px", display: "flex", alignItems: "center", gap: "10px" }}>
-              <span style={{ fontSize: "22px" }}>{CATEGORY_PIN[detailPost.category].emoji}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: 0, fontSize: "14px", fontFamily: "'Playfair Display', serif", color: "#1a1a2e" }}>{detailPost.placeName}</p>
-                <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.address}</p>
+            <div style={{ margin: "12px 20px 0", padding: "12px 14px", background: "#f8f8fc", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "22px" }}>{CATEGORY_PIN[detailPost.category].emoji}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: "14px", fontFamily: "'Playfair Display', serif", color: "#1a1a2e" }}>{detailPost.placeName}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.address}</p>
+                </div>
+                <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[detailPost.category], padding: "3px 8px", borderRadius: "10px", flexShrink: 0 }}>{detailPost.category}</span>
               </div>
-              <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[detailPost.category], padding: "3px 8px", borderRadius: "10px", flexShrink: 0 }}>{detailPost.category}</span>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); goToMapFromDetailPost(); }}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  borderRadius: "8px",
+                  background: "#3182F6",
+                  color: "#fff",
+                  padding: "11px 14px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  boxSizing: "border-box",
+                }}
+              >
+                📍 지도에서 보기
+              </button>
             </div>
             {detailPost.images.length > 0 && (
               <div style={{ display: "flex", gap: "6px", margin: "14px 20px 0", overflowX: "auto", paddingBottom: "4px" }}>
@@ -1596,7 +1719,7 @@ function HomePageContent() {
             )}
             <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontSize: "14px", color: "#333", lineHeight: 1.9 }}>{detailPost.comment}</p></div>
             <div style={{ padding: "16px 20px 0", display: "flex", alignItems: "center", gap: "14px", borderTop: "0.5px solid #f0f0f0", marginTop: "16px" }}>
-              <button onClick={() => toggleLike(detailPost.id)} style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", padding: 0 }}>
+              <button type="button" onClick={(e) => { e.stopPropagation(); void toggleLike(detailPost.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", padding: 0 }}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill={liked ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={liked ? "#e05555" : "#aaa"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 <span style={{ fontSize: "13px", color: liked ? "#e05555" : "#aaa" }}>{detailPost.likes.length}</span>
               </button>
@@ -1604,6 +1727,17 @@ function HomePageContent() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="#aaa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 <span style={{ fontSize: "13px", color: "#aaa" }}>{detailPost.comments.length}</span>
               </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void openShareModal(detailPost);
+                }}
+                style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: "5px" }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                <span style={{ fontSize: "13px", color: "#1a2a7a", fontWeight: 500 }}>공유</span>
+              </button>
             </div>
             <div style={{ padding: "14px 20px 0" }}>
               <p style={{ margin: "0 0 10px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>댓글 {detailPost.comments.length}</p>
@@ -1642,6 +1776,38 @@ function HomePageContent() {
             </div>
           </div>
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
+          {sharePost && (
+            <div onClick={() => { if (!shareLoading) { setSharePost(null); setFriendRooms([]); } }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
+              <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", maxHeight: "70vh", overflowY: "auto", boxSizing: "border-box" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                  <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>친구에게 공유</span>
+                  <button type="button" onClick={() => { setSharePost(null); setFriendRooms([]); }} disabled={shareLoading} style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: shareLoading ? "wait" : "pointer" }}>×</button>
+                </div>
+                <div style={{ padding: "10px 12px", background: "#f8f8fc", borderRadius: "8px" }}>
+                  <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 500 }}>{sharePost.title || sharePost.placeName}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888" }}>{sharePost.placeName} · {sharePost.category}</p>
+                </div>
+                {friendRooms.length === 0 && (
+                  <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", padding: "20px 0" }}>대화 중인 친구가 없어요. 먼저 메시지를 시작해보세요 💌</p>
+                )}
+                {friendRooms.map((room) => (
+                  <button
+                    key={room.id}
+                    type="button"
+                    onClick={() => sendShareToFriend(room)}
+                    disabled={shareLoading}
+                    style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", border: "0.5px solid #eee", borderRadius: "10px", background: "#fff", cursor: shareLoading ? "wait" : "pointer", fontFamily: "inherit", textAlign: "left", opacity: shareLoading ? 0.6 : 1 }}
+                  >
+                    <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", flexShrink: 0 }}>
+                      {room.friendName.slice(0, 1).toUpperCase()}
+                    </div>
+                    <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{room.friendName}</span>
+                    <span style={{ fontSize: "11px", color: "#1a2a7a", fontWeight: 500 }}>보내기 →</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       </main>
     );
