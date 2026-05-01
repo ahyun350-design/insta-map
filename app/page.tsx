@@ -258,6 +258,7 @@ function HomePageContent() {
   const geocoderRef = useRef<any>(null); const markersRef = useRef<any[]>([]);
   const expandedMarkersRef = useRef<any[]>([]); const feedMarkersRef = useRef<any[]>([]);
   const searchMarkersRef = useRef<any[]>([]); const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
+  const placePinsRunIdRef = useRef(0);
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
@@ -1149,15 +1150,30 @@ function HomePageContent() {
 
   const addPlacePins = (map: any, arr: any[], posts: FeedPost[]) => {
     if (!geocoderRef.current) return;
-    arr.forEach((m) => m.setMap(null)); arr.length = 0;
+    const myRunId = ++placePinsRunIdRef.current;
+    arr.forEach((m) => m.setMap(null));
+    arr.length = 0;
     savedPlaces.forEach((place) => {
       geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
+        if (myRunId !== placePinsRunIdRef.current) return;
         if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
-        const marker = new window.kakao.maps.Marker({ map, position: new window.kakao.maps.LatLng(result[0].y, result[0].x), image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)) });
+        const marker = new window.kakao.maps.Marker({
+          map,
+          position: new window.kakao.maps.LatLng(result[0].y, result[0].x),
+          image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
+        });
         window.kakao.maps.event.addListener(marker, "click", () => {
-          const relatedPosts = posts.filter(p => !p.archived && p.placeName === place.name);
+          const relatedPosts = posts.filter((p) => !p.archived && p.placeName === place.name);
           new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
-            const base = (st === window.kakao.maps.services.Status.OK && data[0]) ? data[0] : { place_name: place.name, category_name: place.category, road_address_name: place.address, phone: "", place_url: "" };
+            const base = (st === window.kakao.maps.services.Status.OK && data[0])
+              ? data[0]
+              : {
+                  place_name: place.name,
+                  category_name: place.category,
+                  road_address_name: place.address,
+                  phone: "",
+                  place_url: "",
+                };
             setSelectedPlace({ ...base, _feedPosts: relatedPosts });
           });
         });
