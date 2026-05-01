@@ -431,6 +431,36 @@ function HomePageContent() {
   }, [user, userLoading]);
 
   useEffect(() => {
+    if (!user?.id) return;
+    console.log("🔔 알림 채널 구독 시작:", user.id);
+
+    const channel = supabase
+      .channel(`notifications-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${user.id}`
+        },
+        (payload) => {
+          console.log("🔔 새 알림 수신:", payload.new);
+          const newNotification = payload.new as Notification;
+          setNotifications(prev => [newNotification, ...prev]);
+        }
+      )
+      .subscribe((status) => {
+        console.log("🔔 알림 채널 상태:", status);
+      });
+
+    return () => {
+      console.log("🔔 알림 채널 구독 해제");
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     try {
       const saved = window.localStorage.getItem(HIDDEN_PLACE_IDS_STORAGE_KEY);
