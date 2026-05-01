@@ -1407,6 +1407,18 @@ function HomePageContent() {
     return () => relayoutTimers.forEach(clearTimeout);
   }, [activeTab]);
 
+  // mapExpanded 닫힐 때 메인 지도 relayout
+  useEffect(() => {
+    if (mapExpanded) return;
+    if (!mapRef.current) return;
+    const timers = [100, 300, 600].map((delay) => setTimeout(() => {
+      if (mapRef.current) {
+        mapRef.current.relayout();
+      }
+    }, delay));
+    return () => timers.forEach(clearTimeout);
+  }, [mapExpanded]);
+
   // URL에 ?openChatRoom=xxx 있으면 자동으로 그 채팅방 열기
   useEffect(() => {
     const roomIdFromUrl = searchParams?.get("openChatRoom");
