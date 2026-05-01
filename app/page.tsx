@@ -1673,7 +1673,7 @@ function HomePageContent() {
                     </button>
                     {openMenuId === detailPost.id && (
                       <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: "28px", right: 0, background: "#fff", border: "0.5px solid #eee", borderRadius: "8px", boxShadow: "0 4px 16px rgba(0,0,0,0.1)", zIndex: 100, minWidth: "120px", overflow: "hidden" }}>
-                        <button type="button" onClick={() => openEdit(detailPost)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#333", cursor: "pointer", borderBottom: "0.5px solid #f5f5f5" }}>✏️ 수정</button>
+                        <button type="button" onClick={() => { setDetailPostId(null); openEdit(detailPost); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#333", cursor: "pointer", borderBottom: "0.5px solid #f5f5f5" }}>✏️ 수정</button>
                         <button type="button" onClick={() => toggleArchive(detailPost.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#333", cursor: "pointer", borderBottom: "0.5px solid #f5f5f5" }}>📦 보관</button>
                         <button type="button" onClick={() => { deletePost(detailPost.id); setDetailPostId(null); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#e07070", cursor: "pointer" }}>🗑️ 삭제</button>
                       </div>
@@ -2046,6 +2046,16 @@ function HomePageContent() {
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="#ccc" strokeWidth="1.5" strokeLinecap="round"/></svg>
                       <span style={{ fontSize: "12px", color: "#ccc" }}>{post.comments.length}</span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void openShareModal(post); }}
+                      style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", padding: 0 }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 4v12m0-12l-4 4m4-4l4 4M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3" stroke="#ccc" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      <span style={{ fontSize: "11px", color: "#ccc" }}>공유</span>
+                    </button>
                   </div>
                 </article>
               ))}
