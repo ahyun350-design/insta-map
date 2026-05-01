@@ -13,7 +13,7 @@ type Place = { id: string; name: string; address: string; category: Category };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
 type Comment = { id: string; user: string; text: string; createdAt: string };
 type FeedPost = {
-  id: string; user: string; title: string; placeName: string; address: string;
+  id: string; user: string; userId: string; title: string; placeName: string; address: string;
   category: Category; comment: string; images: string[]; createdAt: string;
   archived?: boolean; likes: string[]; comments: Comment[];
 };
@@ -187,6 +187,7 @@ function HomePageContent() {
   const { user, loading: userLoading } = useUser();
   const MY_USER = user?.id || "";
   const MY_USERNAME = user?.username || "";
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>("map");
   const [instagramUrl, setInstagramUrl] = useState("");
@@ -343,18 +344,21 @@ function HomePageContent() {
     setLoading(true);
     try {
       const uid = user?.id ?? "";
-      const [placesRes, postsRes, roomsRes] = await Promise.all([
+      const [placesRes, postsRes, roomsRes, followsRes] = await Promise.all([
         supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
         supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false }),
         supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`),
+        supabase.from("follows").select("following_id").eq("follower_id", uid),
       ]);
+
+      setFollowingIds((followsRes.data || []).map((f: any) => f.following_id));
 
       if (placesRes.data) {
         setSavedPlaces(placesRes.data.map((p) => ({ id: p.id, name: p.name, address: p.address, category: p.category as Category })));
       }
       if (postsRes.data) {
-        setFeedPosts(postsRes.data.map((p) => ({
-          id: p.id, user: p.user_name, title: p.title, placeName: p.place_name,
+        setFeedPosts(postsRes.data.map((p: any) => ({
+          id: p.id, user: p.user_name, userId: p.user_id ?? "", title: p.title, placeName: p.place_name,
           address: p.address, category: p.category as Category, comment: p.comment,
           images: p.images ?? [], createdAt: p.created_at, archived: p.archived,
           likes: p.likes ?? [],
@@ -696,20 +700,32 @@ function HomePageContent() {
 
   // 게시물에서 바로 팔로우
   const followUser = async (username: string) => {
-    if (username === MY_USER) return;
+    if (username === MY_USERNAME || !user) return;
+    // 유저 정보 가져오기
+    const { data: targetUser } = await supabase.from("users").select("id, username").eq("username", username).maybeSingle();
+    if (!targetUser) { showToast("유저를 찾을 수 없어요", "error"); return; }
     // 이미 팔로우 중이면 무시
-    if (chatRooms.some(r => r.friendName === username)) return;
-    const { data } = await supabase.from("users").select("*").eq("username", username).single();
-    if (!data) { showToast("유저를 찾을 수 없어요", "error"); return; }
-    const { data: existing } = await supabase.from("chat_rooms").select("*")
-      .or(`and(user1_id.eq.${MY_USER},user2_id.eq.${data.id}),and(user1_id.eq.${data.id},user2_id.eq.${MY_USER})`);
-    let roomId = existing?.[0]?.id;
-    if (!roomId) {
-      roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: data.id });
-    }
-    const newRoom: ChatRoom = { id: roomId, friendId: data.id, friendName: data.username, lastMessage: "", lastTime: new Date().toISOString(), unreadCount: 0 };
-    setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
+    if (followingIds.includes(targetUser.id)) return;
+    // follows 테이블에 INSERT
+    const { error } = await supabase.from("follows").insert({
+      follower_id: user.id,
+      following_id: targetUser.id,
+    });
+    if (error) { showToast("팔로우 실패", "error"); return; }
+    setFollowingIds(prev => [...prev, targetUser.id]);
+    showToast("팔로우 완료", "success");
+  };
+
+  const unfollowUser = async (username: string) => {
+    if (!user) return;
+    const { data: targetUser } = await supabase.from("users").select("id").eq("username", username).maybeSingle();
+    if (!targetUser) return;
+    await supabase.from("follows")
+      .delete()
+      .eq("follower_id", user.id)
+      .eq("following_id", targetUser.id);
+    setFollowingIds(prev => prev.filter(id => id !== targetUser.id));
+    showToast("언팔로우 완료", "success");
   };
 
   // 코스 만들기 실행
@@ -1008,7 +1024,7 @@ function HomePageContent() {
       showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
       return;
     }
-    const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USERNAME, title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
+    const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USERNAME, userId: user?.id || "", title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
     await submitPost(newPost);
     showToast("큐레이션이 등록됐어요 ✨", "success");
     setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]); setActiveTab("home");
@@ -1819,15 +1835,19 @@ function HomePageContent() {
                       <div className="avatar">{post.user.slice(0, 1).toUpperCase()}</div>
                       <div style={{ flex: 1, minWidth: 0 }}><p className="feedUser">{post.user}</p><p className="feedMeta">{timeAgo(post.createdAt)}</p></div>
                     </button>
-                    {post.user !== MY_USERNAME && !chatRooms.some(r => r.friendName === post.user) && (
+                    {post.user !== MY_USERNAME && post.userId && !followingIds.includes(post.userId) && (
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); followUser(post.user); }}
-                        style={{ border: "1px solid #1a2a7a", background: "#fff", color: "#1a2a7a", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
+                        style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
                       >+ 팔로우</button>
                     )}
-                    {post.user !== MY_USERNAME && chatRooms.some(r => r.friendName === post.user) && (
-                      <span style={{ fontSize: "10px", color: "#aaa", marginRight: "8px" }}>팔로잉</span>
+                    {post.user !== MY_USERNAME && post.userId && followingIds.includes(post.userId) && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); unfollowUser(post.user); }}
+                        style={{ border: "1px solid #d0d4e0", background: "#fff", color: "#76809a", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 500, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
+                      >팔로잉</button>
                     )}
                     {post.user === MY_USERNAME && (
                       <div style={{ position: "relative" }}>
