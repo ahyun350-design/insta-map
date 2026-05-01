@@ -1346,6 +1346,16 @@ function HomePageContent() {
     };
   }, [mapKey]);
 
+  // 확장 지도 닫히면 메인 지도 참조 무효화 → 아래 초기화 effect가 initMap 재호출
+  useEffect(() => {
+    if (mapExpanded) return;
+    if (!mapRef.current) return;
+    mapRef.current = null;
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
+    setCompactMapReady(false);
+  }, [mapExpanded]);
+
   // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 RAF·재시도로 해소
   useEffect(() => {
     if (kakaoStatus !== "ready" || activeTab !== "map") return;
@@ -1388,7 +1398,7 @@ function HomePageContent() {
       cancelled = true;
       timeouts.forEach((tid) => window.clearTimeout(tid));
     };
-  }, [kakaoStatus, activeTab, savedPlaces, feedPosts]);
+  }, [kakaoStatus, activeTab, savedPlaces, feedPosts, mapExpanded]);
 
   // 탭 전환 시 지도 relayout
   useEffect(() => {
@@ -1406,18 +1416,6 @@ function HomePageContent() {
     }, delay));
     return () => relayoutTimers.forEach(clearTimeout);
   }, [activeTab]);
-
-  // mapExpanded 닫힐 때 메인 지도 relayout
-  useEffect(() => {
-    if (mapExpanded) return;
-    if (!mapRef.current) return;
-    const timers = [100, 300, 600].map((delay) => setTimeout(() => {
-      if (mapRef.current) {
-        mapRef.current.relayout();
-      }
-    }, delay));
-    return () => timers.forEach(clearTimeout);
-  }, [mapExpanded]);
 
   // URL에 ?openChatRoom=xxx 있으면 자동으로 그 채팅방 열기
   useEffect(() => {
