@@ -489,14 +489,34 @@ body {
   font-weight: 500;
 }
 
-/* ── 반응형 ── */
-@media (max-width: 440px) {
+/* ── 반응형: 모바일 풀스크린 ── */
+@media (max-width: 768px) {
+  .mobileRoot {
+    padding: 0 !important;
+    place-items: stretch;
+  }
+
   .phoneFrame {
-    width: 100vw;
-    height: 100vh;
-    border-radius: 0;
-    border: 0;
-    box-shadow: none;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .phoneBezel {
+    border-radius: 0 !important;
+    border: none !important;
+  }
+
+  .phoneScreen {
+    border-radius: 0 !important;
+  }
+
+  body {
+    background: #fff !important;
   }
 }
 /* ── 스켈레톤 로딩 ── */
