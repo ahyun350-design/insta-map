@@ -683,7 +683,7 @@ function HomePageContent() {
     }
   };
 
-  /** 큐레이션 상세 → 저장 목록 장소 매칭 후 지도(저장 클릭과 동일) */
+  /** 큐레이션 상세 → 저장된 장소면 저장 클릭과 동일, 아니면 임시로 지도만 열고 빈 하트(미저장) */
   const goToMapFromDetailPost = () => {
     if (!detailPost) return;
     const name = detailPost.placeName.trim();
@@ -691,10 +691,35 @@ function HomePageContent() {
     const matchedPlace = savedPlaces.find(
       (p) => String(p.name).trim() === name && String(p.address).trim() === addr,
     );
-    const placeForMap: Place =
-      matchedPlace ??
-      { id: `detail-post:${detailPost.id}`, name: detailPost.placeName, address: detailPost.address, category: detailPost.category };
-    handleSavedPlaceClick(placeForMap);
+    if (matchedPlace) {
+      handleSavedPlaceClick(matchedPlace);
+      setDetailPostId(null);
+      return;
+    }
+
+    setActiveTab("map");
+    if (mapRef.current && geocoderRef.current) {
+      geocoderRef.current.addressSearch(detailPost.address, (result: any[], sv: string) => {
+        if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
+        mapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x));
+        mapRef.current.setLevel(4);
+        const relatedPosts = feedPosts.filter((p) => !p.archived && p.placeName === detailPost.placeName);
+        new window.kakao.maps.services.Places().keywordSearch(detailPost.placeName, (data: any[], st: string) => {
+          const base =
+            st === window.kakao.maps.services.Status.OK && data[0]
+              ? data[0]
+              : {
+                  place_name: detailPost.placeName,
+                  category_name: detailPost.category,
+                  road_address_name: detailPost.address,
+                  phone: "",
+                  place_url: "",
+                };
+          setSelectedPlace({ ...base, _feedPosts: relatedPosts });
+          setMapExpanded(true);
+        });
+      });
+    }
     setDetailPostId(null);
   };
 
