@@ -20,6 +20,13 @@ type FeedPost = {
 };
 type FriendRoom = { id: string; friendId: string; friendName: string };
 type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; unreadCount: number; };
+
+/** 마지막 메시지 시각(lastTime) 기준 최신순 — DM 앱과 동일 */
+function sortChatRoomsByRecency(rooms: ChatRoom[]): ChatRoom[] {
+  return [...rooms].sort(
+    (a, b) => new Date(b.lastTime).getTime() - new Date(a.lastTime).getTime(),
+  );
+}
 type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; };
 type ExtractJobStatus = "pending" | "processing" | "completed" | "failed";
 type ActiveExtractJob = {
@@ -415,7 +422,7 @@ function HomePageContent() {
             };
           }),
         );
-        setChatRooms(rooms);
+        setChatRooms(sortChatRoomsByRecency(rooms));
       } else {
         setChatRooms([]);
       }
@@ -708,7 +715,7 @@ function HomePageContent() {
       await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: friendSearchResult.id });
     }
     const newRoom: ChatRoom = { id: roomId, friendId: friendSearchResult.id, friendName: friendSearchResult.username, lastMessage: "", lastTime: new Date().toISOString(), unreadCount: 0 };
-    setChatRooms(prev => [newRoom, ...prev.filter(r => r.id !== roomId)]);
+    setChatRooms((prev) => sortChatRoomsByRecency([newRoom, ...prev.filter((r) => r.id !== roomId)]));
     setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null);
     setActiveChatRoom(newRoom);
   };
@@ -744,6 +751,13 @@ function HomePageContent() {
     chatStickToBottomRef.current = true;
     setMessages(prev => [...prev, { id, senderId: user.id, text, createdAt, read: false }]);
     setNewMessage("");
+    setChatRooms((prev) =>
+      sortChatRoomsByRecency(
+        prev.map((r) =>
+          r.id === activeChatRoom.id ? { ...r, lastMessage: text, lastTime: createdAt } : r,
+        ),
+      ),
+    );
     await supabase.from("messages").insert({ id, room_id: activeChatRoom.id, sender_id: user.id, text, read: false });
 
     if (activeChatRoom.friendId && activeChatRoom.friendId !== user.id) {
@@ -1578,7 +1592,11 @@ function HomePageContent() {
             unreadCount: 0,
           };
           // chatRooms에도 추가해두기
-          setChatRooms(prev => prev.some(r => r.id === targetRoom!.id) ? prev : [targetRoom!, ...prev]);
+          setChatRooms((prev) =>
+            sortChatRoomsByRecency(
+              prev.some((r) => r.id === targetRoom!.id) ? prev : [targetRoom!, ...prev],
+            ),
+          );
         }
       }
 
@@ -1605,7 +1623,7 @@ function HomePageContent() {
         const { count: unread } = await supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false);
         return { id: r.id, friendId, friendName: friendData?.username || friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at, unreadCount: unread ?? 0 };
       }));
-      setChatRooms(rooms);
+      setChatRooms(sortChatRoomsByRecency(rooms));
     };
     refreshRooms();
   }, [activeTab, activeChatRoom]);
@@ -1620,17 +1638,21 @@ function HomePageContent() {
         // 본인이 보낸 메시지면 무시
         if (m.sender_id === MY_USER) return;
         // 내가 속한 채팅방이 아니면 무시
-        setChatRooms(prev => {
-          const room = prev.find(r => r.id === m.room_id);
+        setChatRooms((prev) => {
+          const room = prev.find((r) => r.id === m.room_id);
           if (!room) return prev;
-          // 현재 그 채팅방을 보고 있으면 unread 증가시키지 않음
           const isViewing = activeChatRoom?.id === m.room_id;
-          return prev.map(r => r.id === m.room_id ? {
-            ...r,
-            lastMessage: m.text,
-            lastTime: m.created_at,
-            unreadCount: isViewing ? 0 : r.unreadCount + 1
-          } : r);
+          const next = prev.map((r) =>
+            r.id === m.room_id
+              ? {
+                  ...r,
+                  lastMessage: m.text,
+                  lastTime: m.created_at,
+                  unreadCount: isViewing ? 0 : r.unreadCount + 1,
+                }
+              : r,
+          );
+          return sortChatRoomsByRecency(next);
         });
       }
     ).subscribe();
