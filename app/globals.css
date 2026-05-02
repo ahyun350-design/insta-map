@@ -122,10 +122,13 @@ body {
   background: var(--white);
 }
 
-/* 탭 패널: 스크롤 영역 한 덩어리로 위부터 채움 */
+/* 탭 패널: 스크롤 영역 한 덩어리로 위부터 채움 — 가로 풀 너비 */
 .appContent > * {
   flex: 1 1 auto;
   min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   overflow-x: hidden;
   overflow-y: auto;
   align-content: flex-start;
@@ -133,10 +136,14 @@ body {
 
 .screen {
   display: grid;
+  /* 단일 열이 auto면 콘텐츠 폭만 차지해 우측 빈 공간 생김 → 1fr로 풀 너비 */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
-  /* 부모(.appContent > *)가 세로로 길어져도 행이 늘어나지 않게 → 상단 정렬 (stretch 금지) */
   align-content: start;
   justify-items: stretch;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* 홈 탭 피드 — 상단부터 쌓기, SNS 피드형 간격 */
@@ -620,6 +627,9 @@ body {
   .appContent > * {
     flex: 1 1 0% !important;
     min-height: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch !important;
@@ -628,9 +638,12 @@ body {
     align-content: flex-start !important;
   }
 
-  /* 그리드 탭 패널: 행을 위로 붙임 (세로 늘림 방지) */
+  /* 그리드 탭 패널: 행을 위로 붙임 + 열 풀 너비 */
   .appContent > .screen {
     align-content: start !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
   /* 홈 피드: 스크롤 영역은 채우되 내용은 위에서부터 (가운데 빈 공간 방지) */
@@ -638,6 +651,8 @@ body {
     justify-content: flex-start !important;
     align-items: stretch !important;
     align-content: flex-start !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
   /* 채팅방: 헤더·입력 고정, 목록만 스크롤 */
@@ -646,6 +661,8 @@ body {
     display: flex !important;
     flex-direction: column !important;
     justify-content: flex-start !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
   .appHeader {
