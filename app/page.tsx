@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser, logout } from "@/lib/useUser";
 import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
+import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소";
 type Place = { id: string; name: string; address: string; category: Category };
@@ -267,6 +268,9 @@ function HomePageContent() {
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
+  /** 사용자가 위로 스크롤해 과거 메시지를 보면 false — 새 수신 시 자동 스크롤 안 함 */
+  const chatStickToBottomRef = useRef(true);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
   const commentSectionRef = useRef<HTMLDivElement | null>(null);
   const [scrollToComment, setScrollToComment] = useState(false);
@@ -737,6 +741,7 @@ function HomePageContent() {
     const text = newMessage.trim();
     const id = Date.now().toString();
     const createdAt = new Date().toISOString();
+    chatStickToBottomRef.current = true;
     setMessages(prev => [...prev, { id, senderId: user.id, text, createdAt, read: false }]);
     setNewMessage("");
     await supabase.from("messages").insert({ id, room_id: activeChatRoom.id, sender_id: user.id, text, read: false });
@@ -1176,32 +1181,50 @@ function HomePageContent() {
 
     for (const file of files) {
       try {
-        // 파일 이름을 고유하게 만들기 (시간 + 랜덤)
-        const ext = file.name.split('.').pop() || 'jpg';
-        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${ext}`;
+        console.log("[handleImageUpload] 원본", {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+        });
 
-        // Supabase Storage에 업로드
+        const prepared = await prepareImageForUpload(file);
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}.jpg`;
+
         const { error: uploadError } = await supabase.storage
-          .from('post-images')
-          .upload(fileName, file);
+          .from("post-images")
+          .upload(fileName, prepared, {
+            contentType: "image/jpeg",
+            cacheControl: "3600",
+            upsert: false,
+          });
 
         if (uploadError) {
-          console.error("업로드 실패:", uploadError);
-          showToast("사진 업로드에 실패했어요", "error");
+          console.error("[handleImageUpload] Storage 오류", uploadError);
+          showToast(`사진 업로드 실패: ${uploadError.message}`, "error");
           continue;
         }
 
-        // 업로드된 사진의 공개 URL 가져오기
         const { data: { publicUrl } } = supabase.storage
-          .from('post-images')
+          .from("post-images")
           .getPublicUrl(fileName);
 
-        setPostImages(prev => [...prev, publicUrl]);
+        console.log("[handleImageUpload] 완료", publicUrl);
+        setPostImages((prev) => [...prev, publicUrl]);
       } catch (err) {
-        console.error("업로드 에러:", err);
-        showToast("사진 업로드 중 오류가 발생했어요", "error");
+        console.error("[handleImageUpload] 예외", err);
+        showToast(
+          err instanceof Error ? err.message : "사진 처리 중 오류가 발생했어요",
+          "error",
+        );
       }
     }
+  };
+
+  const handleChatMessagesScroll = () => {
+    const el = chatMessagesContainerRef.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    chatStickToBottomRef.current = gap < 80;
   };
   const handlePostSearch = () => {
     if (!postSearchQuery.trim() || !window.kakao?.maps?.services) return;
@@ -1613,6 +1636,17 @@ function HomePageContent() {
     ).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [activeChatRoom]);
+
+  useEffect(() => {
+    chatStickToBottomRef.current = true;
+  }, [activeChatRoom?.id]);
+
+  useLayoutEffect(() => {
+    if (!activeChatRoom || !chatStickToBottomRef.current) return;
+    const el = chatMessagesContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, activeChatRoom?.id]);
 
   useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
 
@@ -2432,7 +2466,11 @@ function HomePageContent() {
           </button>
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{activeChatRoom.friendName}</span>
         </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 20px" }}>
+        <div
+          ref={chatMessagesContainerRef}
+          onScroll={handleChatMessagesScroll}
+          style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 20px" }}
+        >
           {messages.map(m => {
             const isMine = m.senderId === MY_USER;
             return (
