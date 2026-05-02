@@ -176,7 +176,7 @@ function shufflePick<T>(items: T[], count: number): T[] {
 
 export default function HomePage() {
   return (
-    <Suspense fallback={<main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}><p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p></main>}>
+    <Suspense fallback={<main style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}><p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p></main>}>
       <HomePageContent />
     </Suspense>
   );
@@ -1774,14 +1774,14 @@ function HomePageContent() {
   if (userLoading) {
     return (
       <main className="mobileRoot">
-        <section className="phoneFrame" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#fafafa" }}>
+        <section className="phoneFrame" style={{ display: "flex", flexDirection: "column", background: "#fafafa" }}>
           <header className="appHeader" style={{ opacity: 0.85 }}>
             <h1 className="appTitle" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span className="skeleton" style={{ width: 22, height: 22, borderRadius: 6, display: "inline-block" }} />
               <span className="skeleton" style={{ width: 88, height: 18, borderRadius: 4, display: "inline-block" }} />
             </h1>
           </header>
-          <section className="appContent" style={{ flex: 1, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <section className="appContent" style={{ flex: 1, minHeight: 0, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="skeleton" style={{ width: "40%", height: 14, borderRadius: 4 }} />
             <div className="skeleton" style={{ width: "100%", height: 220, borderRadius: 12 }} />
             <div className="skeleton" style={{ width: "100%", height: 44, borderRadius: 8 }} />
@@ -1880,14 +1880,16 @@ function HomePageContent() {
       display: "flex",
       flexDirection: "column",
     }}>
-      <div style={{
-        padding: "14px 20px",
+      <div
+        className="fullscreenOverlayTop"
+        style={{
         borderBottom: "0.5px solid #efefef",
         display: "flex",
         alignItems: "center",
         gap: "12px",
         flexShrink: 0,
-      }}>
+      }}
+      >
         <button
           onClick={() => setShowNotifications(false)}
           style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex" }}
@@ -1907,7 +1909,7 @@ function HomePageContent() {
         )}
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 20px" }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 20px" }}>
         {notifications.length === 0 && (
           <div style={{ textAlign: "center", padding: "60px 20px", color: "#bbb" }}>
             <p style={{ fontSize: "32px", margin: 0 }}>🔔</p>
@@ -1982,13 +1984,13 @@ function HomePageContent() {
       <>
       <main className="mobileRoot">
         <section className="phoneFrame">
-          <header style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
+          <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
             <button onClick={() => setDetailPostId(null)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
             <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailPost.placeName}</span>
           </header>
-          <div style={{ flex: 1, overflowY: "auto", background: "#fff" }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "16px 20px 0" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
                 <div className="avatar">{detailPost.user.slice(0, 1).toUpperCase()}</div>
@@ -2418,7 +2420,10 @@ function HomePageContent() {
           )}
 
           {activeTab === "messages" && (
-  <div className="screen" style={activeChatRoom ? { display: "flex", flexDirection: "column", height: "100%", padding: 0 } : undefined}>
+  <div
+    className={activeChatRoom ? "screen messagesChatShell" : "screen"}
+    style={activeChatRoom ? { display: "flex", flexDirection: "column", padding: 0, minHeight: 0 } : undefined}
+  >
     {activeChatRoom ? (
       <>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px 20px 14px", borderBottom: "0.5px solid #f0f0f0", flexShrink: 0 }}>
@@ -2427,7 +2432,7 @@ function HomePageContent() {
           </button>
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{activeChatRoom.friendName}</span>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 20px" }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 20px" }}>
           {messages.map(m => {
             const isMine = m.senderId === MY_USER;
             return (
@@ -2483,7 +2488,7 @@ function HomePageContent() {
           })}
           {messages.length === 0 && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", marginTop: "40px" }}>첫 메시지를 보내보세요 💬</p>}
         </div>
-        <div style={{ flexShrink: 0, padding: "10px 16px", background: "#fff", borderTop: "0.5px solid #efefef", display: "flex", gap: "8px" }}>
+        <div style={{ flexShrink: 0, padding: "10px 16px", paddingBottom: "calc(10px + env(safe-area-inset-bottom, 0px))", background: "#fff", borderTop: "0.5px solid #efefef", display: "flex", gap: "8px" }}>
           <input className="mapInput" placeholder="메시지 입력..." value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { sendMessage(); } }} style={{ flex: 1, minWidth: 0 }} />
           <button className="primaryButton" onClick={sendMessage} disabled={!newMessage.trim()} style={{ padding: "0 16px", flexShrink: 0, opacity: newMessage.trim() ? 1 : 0.4 }}>전송</button>
         </div>
@@ -2635,8 +2640,22 @@ function HomePageContent() {
                 />
               </div>
               {mapExpanded && (
-                <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, background: "#fff", display: "flex", flexDirection: "column" }}>
-                  <div style={{ padding: "14px 20px", borderBottom: "0.5px solid #efefef", display: "flex", justifyContent: "center", alignItems: "center", background: "#fff", position: "relative" }}>
+                <div
+                  style={{
+                    position: "fixed",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    zIndex: 9999,
+                    background: "#fff",
+                    display: "flex",
+                    flexDirection: "column",
+                    paddingTop: "env(safe-area-inset-top, 0px)",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <div className="fullscreenMapHeaderRow" style={{ borderBottom: "0.5px solid #efefef", display: "flex", justifyContent: "center", alignItems: "center", background: "#fff", position: "relative" }}>
                     <button onClick={() => { setMapExpanded(false); setSelectedPlace(null); }} style={{ position: "absolute", left: "20px", border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", padding: 0 }}>
                       <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </button>
@@ -2648,7 +2667,7 @@ function HomePageContent() {
                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.5" stroke="white" strokeWidth="1.3"/><line x1="9.5" y1="9.5" x2="13" y2="13" stroke="white" strokeWidth="1.3" strokeLinecap="round"/></svg>
                     </button>
                   </div>
-                  <div style={{ flex: 1, position: "relative" }}>
+                  <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                     <div ref={mapExpandedRef} style={{ width: "100%", height: "100%" }} />
                     {selectedPlace && renderPlaceCard()}
                   </div>

@@ -250,7 +250,7 @@ export default function ProfilePage() {
 
   if (userLoading || loadingProfile) {
     return (
-      <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}>
+      <main style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}>
         <p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p>
       </main>
     );
@@ -261,14 +261,14 @@ export default function ProfilePage() {
   return (
     <main className="mobileRoot">
       <section className="phoneFrame">
-        <header style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
+        <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
           <button onClick={() => router.back()} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>프로필</span>
         </header>
 
-        <div style={{ flex: 1, overflowY: "auto", background: "#fff", padding: "20px" }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff", padding: "20px" }}>
           {notFound && (
             <div style={{ textAlign: "center", padding: "50px 0" }}>
               <p style={{ margin: 0, fontSize: "13px", color: "#aaa" }}>유저를 찾을 수 없어요</p>
