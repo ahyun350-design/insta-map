@@ -11,7 +11,7 @@ export default function FeedSkeleton() {
             border: "0.5px solid #e5e5e5",
             borderRadius: "16px",
             padding: "16px",
-            marginBottom: "14px",
+            flexShrink: 0,
           }}
         >
           {/* 프로필 영역 */}

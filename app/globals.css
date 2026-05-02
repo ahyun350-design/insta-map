@@ -123,6 +123,22 @@ body {
   gap: 14px;
 }
 
+/* 홈 탭 피드 — 상단부터 쌓기, SNS 피드형 간격 */
+.homeFeed {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 18px;
+  width: 100%;
+  box-sizing: border-box;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+}
+
+.homeFeed .feedCard {
+  flex-shrink: 0;
+}
+
 .screenTitle {
   margin: 0 0 4px;
   font-family: 'Playfair Display', serif;
@@ -588,6 +604,13 @@ body {
     overflow-x: hidden !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* 홈 피드: 스크롤 영역은 채우되 내용은 위에서부터 (가운데 빈 공간 방지) */
+  .appContent > .homeFeed {
+    justify-content: flex-start !important;
+    align-items: stretch !important;
+    align-content: flex-start !important;
   }
 
   /* 채팅방: 헤더·입력 고정, 목록만 스크롤 */

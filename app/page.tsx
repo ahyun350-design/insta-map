@@ -1701,7 +1701,11 @@ function HomePageContent() {
     }
   }, [detailPostId, scrollToComment]);
 
-  const visibleFeedPosts = feedPosts.filter(p => !p.archived);
+  const visibleFeedPosts = useMemo(() => {
+    return feedPosts
+      .filter((p) => !p.archived)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [feedPosts]);
 
   const renderPlaceCard = () => {
     if (!selectedPlace) return null;
@@ -2392,17 +2396,17 @@ function HomePageContent() {
           )}
 
           {activeTab === "home" && (
-            <div className="screen">
-              <p className="screenTitle">홈 피드</p>
+            <div className="screen homeFeed">
               {loading && <FeedSkeleton />}
               {!loading && visibleFeedPosts.length === 0 && (
-  <EmptyState
-    icon="✍️"
-    title="아직 큐레이션이 없어요"
-    description="오른쪽 위 + 버튼을 눌러 첫 번째 장소를 추가해보세요"
-    action={{ label: "큐레이션 작성하기", onClick: () => setShowPostModal(true) }}
-  />
-)}
+                <EmptyState
+                  variant="feed"
+                  icon="✍️"
+                  title="아직 큐레이션이 없어요"
+                  description="오른쪽 위 + 버튼을 눌러 첫 번째 장소를 추가해보세요"
+                  action={{ label: "큐레이션 작성하기", onClick: () => setShowPostModal(true) }}
+                />
+              )}
               {visibleFeedPosts.map((post) => (
                 <article key={post.id} className="feedCard" style={{ position: "relative", cursor: "pointer", overflow: "hidden" }} onClick={() => setDetailPostId(post.id)}>
                   <div className="feedTop">

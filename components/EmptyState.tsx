@@ -4,21 +4,26 @@ type EmptyStateProps = {
   icon?: string;
   title: string;
   description?: string;
+  /** feed: 상단 정렬 (홈 피드 빈 상태 등) */
+  variant?: "default" | "feed";
   action?: {
     label: string;
     onClick: () => void;
   };
 };
 
-export default function EmptyState({ icon = "✨", title, description, action }: EmptyStateProps) {
+export default function EmptyState({ icon = "✨", title, description, action, variant = "default" }: EmptyStateProps) {
+  const isFeed = variant === "feed";
   return (
     <div style={{
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
-      justifyContent: "center",
-      padding: "60px 20px",
+      justifyContent: isFeed ? "flex-start" : "center",
+      padding: isFeed ? "24px 16px 40px" : "60px 20px",
       textAlign: "center",
+      width: "100%",
+      boxSizing: "border-box",
     }}>
       <div style={{
         fontSize: "56px",
