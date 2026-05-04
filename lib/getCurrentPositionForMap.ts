@@ -3,21 +3,30 @@ import { Geolocation } from "@capacitor/geolocation";
 
 export type MapLatLng = { latitude: number; longitude: number };
 
-/** WebView(Capacitor 네이티브)에서는 Capacitor Geolocation, 브라우저에서는 navigator.geolocation */
+/** 권한 허가(또는 iOS 대략적 위치)일 때만 위치 조회 — 먼저 requestPermissions 호출 */
+function isLocationPermissionOk(location: string): boolean {
+  return location === "granted" || location === "limited";
+}
+
+/** WebView(Capacitor 네이티브)는 @capacitor/geolocation, 브라우저는 navigator.geolocation */
 export async function getCurrentPositionForMap(): Promise<MapLatLng> {
   if (Capacitor.isNativePlatform()) {
-    const perm = await Geolocation.requestPermissions();
-    if (perm.location === "denied") {
-      const err = new Error("permission_denied");
-      throw err;
+    const permResult = await Geolocation.requestPermissions();
+
+    if (!isLocationPermissionOk(permResult.location)) {
+      throw new Error(
+        permResult.location === "denied" ? "permission_denied" : "permission_not_granted",
+      );
     }
-    const pos = await Geolocation.getCurrentPosition({
+
+    const position = await Geolocation.getCurrentPosition({
       enableHighAccuracy: true,
-      timeout: 15000,
+      timeout: 20000,
     });
+
     return {
-      latitude: pos.coords.latitude,
-      longitude: pos.coords.longitude,
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
     };
   }
 
@@ -34,13 +43,17 @@ export async function getCurrentPositionForMap(): Promise<MapLatLng> {
         });
       },
       reject,
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
     );
   });
 }
 
 export function isGeolocationPermissionDenied(err: unknown): boolean {
-  if (err instanceof Error && err.message === "permission_denied") return true;
+  if (err instanceof Error) {
+    if (err.message === "permission_denied" || err.message === "permission_not_granted") {
+      return true;
+    }
+  }
   if (err && typeof err === "object" && "code" in err) {
     return (err as GeolocationPositionError).code === 1;
   }

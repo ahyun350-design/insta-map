@@ -48,6 +48,6 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>현재 위치를 지도에 표시하기 위해 위치 권한이 필요합니다</string>
+	<string>주변 장소를 지도에 표시하기 위해 위치 권한이 필요합니다</string>
 </dict>
 </plist>

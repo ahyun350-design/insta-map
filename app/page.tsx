@@ -1281,9 +1281,12 @@ function HomePageContent() {
     void (async () => {
       try {
         const { latitude, longitude } = await getCurrentPositionForMap();
+        const latlng = new window.kakao.maps.LatLng(latitude, longitude);
+        map.setCenter(latlng);
+        map.setLevel(9);
         new window.kakao.maps.Marker({
           map,
-          position: new window.kakao.maps.LatLng(latitude, longitude),
+          position: latlng,
           image: new window.kakao.maps.MarkerImage(makeMyLocationImage(), new window.kakao.maps.Size(24, 24), { offset: new window.kakao.maps.Point(12, 12) }),
         });
       } catch (err) {
@@ -1300,7 +1303,7 @@ function HomePageContent() {
   const initMap = (places: Place[], posts: FeedPost[]) => {
     if (!mapContainerRef.current || mapRef.current) return;
     const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
-    mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 12 });
+    mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 9 });
     mapRef.current.setMapTypeId && mapRef.current.setMapTypeId(mapTypeId);
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current);
@@ -1689,7 +1692,10 @@ function HomePageContent() {
     if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return;
     setTimeout(() => {
       if (!mapExpandedRef.current) return;
-      expandedMapRef.current = new window.kakao.maps.Map(mapExpandedRef.current, { center: mapRef.current?.getCenter() ?? new window.kakao.maps.LatLng(37.5665, 126.978), level: mapRef.current?.getLevel() ?? 12 });
+      expandedMapRef.current = new window.kakao.maps.Map(mapExpandedRef.current, {
+        center: mapRef.current?.getCenter() ?? new window.kakao.maps.LatLng(37.5665, 126.978),
+        level: mapRef.current?.getLevel() ?? 9,
+      });
       addMyLocation(expandedMapRef.current);
       addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts);
       // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
