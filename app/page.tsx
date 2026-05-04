@@ -8,6 +8,7 @@ import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
+import { getCurrentPositionForMap, isGeolocationPermissionDenied } from "@/lib/getCurrentPositionForMap";
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소";
 type Place = { id: string; name: string; address: string; category: Category };
@@ -1277,10 +1278,22 @@ function HomePageContent() {
   };
 
   const addMyLocation = (map: any) => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition((pos) => {
-      new window.kakao.maps.Marker({ map, position: new window.kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude), image: new window.kakao.maps.MarkerImage(makeMyLocationImage(), new window.kakao.maps.Size(24, 24), { offset: new window.kakao.maps.Point(12, 12) }) });
-    });
+    void (async () => {
+      try {
+        const { latitude, longitude } = await getCurrentPositionForMap();
+        new window.kakao.maps.Marker({
+          map,
+          position: new window.kakao.maps.LatLng(latitude, longitude),
+          image: new window.kakao.maps.MarkerImage(makeMyLocationImage(), new window.kakao.maps.Size(24, 24), { offset: new window.kakao.maps.Point(12, 12) }),
+        });
+      } catch (err) {
+        const denied = isGeolocationPermissionDenied(err);
+        showToast(
+          denied ? "위치 권한이 필요해요. 설정에서 위치를 허용해 주세요." : "현재 위치를 가져오지 못했어요.",
+          "info",
+        );
+      }
+    })();
   };
 
   // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
