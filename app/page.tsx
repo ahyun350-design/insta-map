@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser, logout } from "@/lib/useUser";
@@ -46,6 +46,41 @@ type ExtractStatusResponse = {
 type LatLng = { lat: number; lng: number };
 
 declare global { interface Window { kakao: any; } }
+
+/**
+ * 확장 지도 검색 결과(파란 핀 근처) 탭 처리용.
+ * WKWebView에서 마커 click이 불안정할 때 지도 투영 픽셀 거리로 동일 장소를 찾기 위함.
+ */
+function pickNearestExpandedSearchPlaceByPixel(map: any, lat: number, lng: number, candidates: any[], maxPx: number): any | null {
+  const k = typeof window !== "undefined" ? window.kakao : undefined;
+  const proj = map?.getProjection?.();
+  if (!k?.maps?.LatLng || !proj?.pointFromCoords) return null;
+  let origin: { x: number; y: number };
+  try {
+    origin = proj.pointFromCoords(new k.maps.LatLng(lat, lng));
+  } catch {
+    return null;
+  }
+  let best: any | null = null;
+  let bestPx = Infinity;
+  for (const p of candidates) {
+    const py = parseFloat(p.y);
+    const px = parseFloat(p.x);
+    if (Number.isNaN(py) || Number.isNaN(px)) continue;
+    let pt: { x: number; y: number };
+    try {
+      pt = proj.pointFromCoords(new k.maps.LatLng(py, px));
+    } catch {
+      continue;
+    }
+    const d = Math.hypot(pt.x - origin.x, pt.y - origin.y);
+    if (d < bestPx) {
+      bestPx = d;
+      best = p;
+    }
+  }
+  return bestPx <= maxPx ? best : null;
+}
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: "home", label: "홈", icon: "🏠" },
@@ -288,6 +323,14 @@ function HomePageContent() {
   const expandedMarkersRef = useRef<any[]>([]); const feedMarkersRef = useRef<any[]>([]);
   const searchMarkersRef = useRef<any[]>([]); const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
   const placePinsRunIdRef = useRef(0);
+  /** 터치/클릭 디듀프 — 같은 장소 카드 반복 오픈 방지 */
+  const expandedSearchOpenDedupeRef = useRef<{ t: number; key: string }>({ t: 0, key: "" });
+  /** 확장 지도 최근 검색 결과 좌표(픽셀 근접 매칭·마커 click 보조) */
+  const lastExpandedSearchPlacesRef = useRef<any[]>([]);
+  /** effect 정리 시 DOM/카카오 리스너 제거 */
+  const expandedMapInteractionCleanupRef = useRef<(() => void) | null>(null);
+  const feedPostsRef = useRef<FeedPost[]>(feedPosts);
+  feedPostsRef.current = feedPosts;
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
@@ -1415,26 +1458,76 @@ function HomePageContent() {
     });
   };
 
+  /** 전체 지도(확장) 검색 핀 카드 공통 처리 — places 저장만 허용, feed에는 넣지 않음 */
+  const openExpandedSearchPlaceCard = useCallback((place: any, source: string) => {
+    const key = `${String(place.place_name ?? "")}:${place.y}:${place.x}`;
+    const now = Date.now();
+    if (expandedSearchOpenDedupeRef.current.key === key && now - expandedSearchOpenDedupeRef.current.t < 450) {
+      console.log("[PindMap:expandedMap] dedupe skip same place", source, key);
+      return;
+    }
+    expandedSearchOpenDedupeRef.current = { t: now, key };
+    console.log("[PindMap:expandedMap] open place card", source, place.place_name, { y: place.y, x: place.x });
+    setSelectedPlace({
+      ...place,
+      _feedPosts: feedPostsRef.current.filter((p) => !p.archived && p.placeName === place.place_name),
+    });
+  }, []);
+
   const handleSearch = () => {
     if (!searchQuery.trim() || !expandedMapRef.current || !window.kakao?.maps) return;
     const ps = new window.kakao.maps.services.Places(); const geocoder = new window.kakao.maps.services.Geocoder();
+    const trimmed = searchQuery.trim();
     const doSearch = (data: any[], st: string) => {
       if (st !== window.kakao.maps.services.Status.OK) { showToast("검색 결과가 없어요", "info"); return; }
+      console.log("[PindMap:expandedMap] keywordSearch ok count=", data?.length ?? 0);
       searchMarkersRef.current.forEach((m) => m.setMap(null)); searchMarkersRef.current = [];
+      lastExpandedSearchPlacesRef.current = data.slice();
       const bounds = new window.kakao.maps.LatLngBounds();
       data.forEach((place) => {
-        const marker = new window.kakao.maps.Marker({ map: expandedMapRef.current, position: new window.kakao.maps.LatLng(place.y, place.x) });
-        window.kakao.maps.event.addListener(marker, "click", () => setSelectedPlace({ ...place, _feedPosts: feedPosts.filter(p => !p.archived && p.placeName === place.place_name) }));
+        const marker = new window.kakao.maps.Marker({
+          map: expandedMapRef.current,
+          position: new window.kakao.maps.LatLng(place.y, place.x),
+          clickable: true,
+        });
+        if (marker.setClickable) marker.setClickable(true);
+        window.kakao.maps.event.addListener(marker, "click", () =>
+          openExpandedSearchPlaceCard(place, "marker-keyword-click"),
+        );
         searchMarkersRef.current.push(marker); bounds.extend(new window.kakao.maps.LatLng(place.y, place.x));
       });
       expandedMapRef.current.setBounds(bounds); setSearchQuery("");
     };
-    geocoder.addressSearch(searchQuery.trim(), (result: any[], st: string) => {
+    geocoder.addressSearch(trimmed, (result: any[], st: string) => {
       if (st === window.kakao.maps.services.Status.OK && result[0]) {
+        const addr = result[0];
         searchMarkersRef.current.forEach((m) => m.setMap(null)); searchMarkersRef.current = [];
-        const marker = new window.kakao.maps.Marker({ map: expandedMapRef.current, position: new window.kakao.maps.LatLng(result[0].y, result[0].x) });
-        searchMarkersRef.current.push(marker); expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x)); expandedMapRef.current.setLevel(3); setSearchQuery("");
-      } else ps.keywordSearch(searchQuery.trim(), doSearch);
+        const placeObj = {
+          place_name: trimmed || addr.place_name || addr.address_name || "위치",
+          category_name: "장소",
+          road_address_name: addr.road_address?.address_name ?? addr.address?.address_name ?? addr.address_name ?? "",
+          phone: "",
+          place_url: "",
+          y: addr.y,
+          x: addr.x,
+        };
+        lastExpandedSearchPlacesRef.current = [placeObj];
+        console.log("[PindMap:expandedMap] addressSearch marker", placeObj.place_name);
+        const marker = new window.kakao.maps.Marker({
+          map: expandedMapRef.current,
+          position: new window.kakao.maps.LatLng(addr.y, addr.x),
+          clickable: true,
+        });
+        if (marker.setClickable) marker.setClickable(true);
+        window.kakao.maps.event.addListener(marker, "click", () =>
+          openExpandedSearchPlaceCard(placeObj, "marker-address-click"),
+        );
+        searchMarkersRef.current.push(marker);
+        expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(addr.y, addr.x)); expandedMapRef.current.setLevel(3); setSearchQuery("");
+      } else {
+        console.log("[PindMap:expandedMap] addressSearch fallback to keyword:", trimmed);
+        ps.keywordSearch(trimmed, doSearch);
+      }
     });
   };
 
@@ -1689,18 +1782,116 @@ function HomePageContent() {
   useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
 
   useEffect(() => {
-    if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return;
-    setTimeout(() => {
-      if (!mapExpandedRef.current) return;
-      expandedMapRef.current = new window.kakao.maps.Map(mapExpandedRef.current, {
+    if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return undefined;
+
+    let cancelled = false;
+    const tid = window.setTimeout(() => {
+      if (cancelled || !mapExpandedRef.current) return;
+      const mapContainerEl = mapExpandedRef.current;
+      expandedMapRef.current = new window.kakao.maps.Map(mapContainerEl, {
         center: mapRef.current?.getCenter() ?? new window.kakao.maps.LatLng(37.5665, 126.978),
         level: mapRef.current?.getLevel() ?? 9,
       });
-      addMyLocation(expandedMapRef.current);
-      addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts);
-      // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
+      const map = expandedMapRef.current;
+      console.log("[PindMap:expandedMap] Map instance ready, wiring kakao click + DOM touch fallback");
+
+      addMyLocation(map);
+      addPlacePins(map, expandedMarkersRef.current, feedPosts);
+
+      const hitFromLatLng = (lat: number, lng: number, source: string): boolean => {
+        const candidates = lastExpandedSearchPlacesRef.current;
+        if (!candidates.length) {
+          console.log("[PindMap:expandedMap] geo tap skipped (no keyword/address pins in memory)", source);
+          return false;
+        }
+        const picked = pickNearestExpandedSearchPlaceByPixel(map, lat, lng, candidates, 56);
+        if (!picked) {
+          console.log("[PindMap:expandedMap] geo tap no marker within px threshold", source, { lat, lng, nearCount: candidates.length });
+          return false;
+        }
+        openExpandedSearchPlaceCard(picked, source);
+        return true;
+      };
+
+      const listenerClick = window.kakao.maps.event.addListener(map, "click", (me: any) => {
+        const ll = me?.latLng;
+        if (!ll) {
+          console.log("[PindMap:expandedMap] kakao map click without latLng");
+          return;
+        }
+        const lat = ll.getLat();
+        const lng = ll.getLng();
+        console.log("[PindMap:expandedMap] kakao maps map.click", lat, lng);
+        hitFromLatLng(lat, lng, "kakao-map-click+pixels");
+      });
+
+      const fingerStartRef = { x: 0, y: 0 };
+
+      const onTouchStart = (e: TouchEvent) => {
+        if (e.touches.length !== 1) return;
+        const tc = e.touches[0];
+        fingerStartRef.x = tc.clientX;
+        fingerStartRef.y = tc.clientY;
+        console.log("[PindMap:expandedMap] DOM touchstart", tc.clientX, tc.clientY);
+      };
+
+      const onTouchEnd = (e: TouchEvent) => {
+        if (e.changedTouches.length !== 1) return;
+        const tc = e.changedTouches[0];
+        const dx = tc.clientX - fingerStartRef.x;
+        const dy = tc.clientY - fingerStartRef.y;
+        if (Math.hypot(dx, dy) > 22) {
+          console.log("[PindMap:expandedMap] DOM touchend ignored (drag-like)", dx, dy);
+          return;
+        }
+        const proj = map.getProjection?.();
+        if (!proj?.coordsFromContainerPoint) {
+          console.warn("[PindMap:expandedMap] touchend: no coordsFromContainerPoint");
+          return;
+        }
+        const rect = mapContainerEl.getBoundingClientRect();
+        const px = tc.clientX - rect.left;
+        const pyTouch = tc.clientY - rect.top;
+        console.log("[PindMap:expandedMap] DOM touchend → container px", px, pyTouch);
+        const latlng = proj.coordsFromContainerPoint(new window.kakao.maps.Point(px, pyTouch));
+        if (!latlng) {
+          console.log("[PindMap:expandedMap] touchend coordsFromContainerPoint returned null");
+          return;
+        }
+        hitFromLatLng(latlng.getLat(), latlng.getLng(), "dom-touchend+pixels");
+      };
+
+      mapContainerEl.addEventListener("touchstart", onTouchStart, { passive: true });
+      mapContainerEl.addEventListener("touchend", onTouchEnd, { passive: true });
+
+      expandedMapInteractionCleanupRef.current = () => {
+        try {
+          window.kakao.maps.event.removeListener(listenerClick);
+        } catch (err) {
+          console.log("[PindMap:expandedMap] removeListener error", err);
+        }
+        mapContainerEl.removeEventListener("touchstart", onTouchStart);
+        mapContainerEl.removeEventListener("touchend", onTouchEnd);
+        expandedMapInteractionCleanupRef.current = null;
+        console.log("[PindMap:expandedMap] teardown map click + touch listeners");
+      };
     }, 100);
-  }, [mapExpanded]);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(tid);
+      expandedMapInteractionCleanupRef.current?.();
+      lastExpandedSearchPlacesRef.current = [];
+      searchMarkersRef.current.forEach((m) => {
+        try {
+          m.setMap(null);
+        } catch {
+          /* noop */
+        }
+      });
+      searchMarkersRef.current = [];
+    };
+  }, [mapExpanded, openExpandedSearchPlaceCard]);
 
   useEffect(() => {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
@@ -2751,7 +2942,7 @@ function HomePageContent() {
                     </button>
                   </div>
                   <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-                    <div ref={mapExpandedRef} style={{ width: "100%", height: "100%" }} />
+                    <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
                     {selectedPlace && renderPlaceCard()}
                   </div>
                 </div>
