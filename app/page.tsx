@@ -253,6 +253,9 @@ function HomePageContent() {
   const [sharePost, setSharePost] = useState<FeedPost | null>(null);
   const [friendRooms, setFriendRooms] = useState<FriendRoom[]>([]);
   const [shareLoading, setShareLoading] = useState(false);
+  const [showProfileEditModal, setShowProfileEditModal] = useState(false);
+  const [profileEditName, setProfileEditName] = useState("");
+  const [profileEditSaving, setProfileEditSaving] = useState(false);
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>("map");
   const [instagramUrl, setInstagramUrl] = useState("");
@@ -296,6 +299,7 @@ function HomePageContent() {
   const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
   const [directionsMode, setDirectionsMode] = useState<"car" | "walk">("car");
   const [savedSearchQuery, setSavedSearchQuery] = useState("");
+  const isIOSLike = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   // 코스 만들기 관련 state
   const [showCourseModal, setShowCourseModal] = useState(false);
@@ -668,6 +672,79 @@ function HomePageContent() {
   const submitPost = async (post: FeedPost) => {
     await supabase.from("feed_posts").insert({ id: post.id, user_id: user?.id || "", user_name: MY_USERNAME, title: post.title, place_name: post.placeName, address: post.address, category: post.category, comment: post.comment, images: post.images, likes: [], archived: false });
     setFeedPosts(prev => [post, ...prev]);
+  };
+  const openAppleMapsPlace = (placeName?: string, address?: string, latRaw?: string | number, lngRaw?: string | number) => {
+    const lat = Number(latRaw);
+    const lng = Number(lngRaw);
+    const hasCoord = Number.isFinite(lat) && Number.isFinite(lng);
+    const label = (placeName || address || "장소").trim();
+    const mapsSchemeUrl = hasCoord
+      ? `maps://?ll=${lat},${lng}&q=${encodeURIComponent(label)}`
+      : `maps://?q=${encodeURIComponent(label)}`;
+    const webUrl = hasCoord
+      ? `https://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(label)}`
+      : `https://maps.apple.com/?q=${encodeURIComponent(label)}`;
+    console.log("[PindMap:apple-maps] open place", { label, lat, lng, hasCoord, isIOSLike });
+    if (isIOSLike) {
+      window.location.href = mapsSchemeUrl;
+      window.setTimeout(() => {
+        window.open(webUrl, "_blank");
+      }, 700);
+      return;
+    }
+    window.open(webUrl, "_blank");
+  };
+
+  const openAppleMapsCourseRoute = () => {
+    if (!courseResult || courseResult.length === 0) return;
+    const coordChain = courseResult
+      .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+      .map((p) => `${p.lat},${p.lng}`);
+    if (coordChain.length === 0) return;
+    const daddr = coordChain.join("+to:");
+    const mapsSchemeUrl = `maps://?daddr=${encodeURIComponent(daddr)}&dirflg=d`;
+    const webUrl = `https://maps.apple.com/?daddr=${encodeURIComponent(daddr)}&dirflg=d`;
+    console.log("[PindMap:apple-maps] open course route", { stops: coordChain.length, isIOSLike });
+    if (isIOSLike) {
+      window.location.href = mapsSchemeUrl;
+      window.setTimeout(() => {
+        window.open(webUrl, "_blank");
+      }, 700);
+      return;
+    }
+    window.open(webUrl, "_blank");
+  };
+
+  const openProfileEdit = () => {
+    console.log("[PindMap:mypage] profile edit button clicked", { uid: user?.id, username: user?.username });
+    setProfileEditName(user?.username ?? "");
+    setShowProfileEditModal(true);
+  };
+
+  const saveProfileEdit = async () => {
+    const nextName = profileEditName.trim();
+    if (!user?.id) return;
+    if (!nextName) {
+      showToast("이름을 입력해 주세요", "info");
+      return;
+    }
+    console.log("[PindMap:mypage] saving profile", { uid: user.id, nextName });
+    setProfileEditSaving(true);
+    try {
+      const { error: updateError } = await supabase
+        .from("users")
+        .update({ username: nextName })
+        .eq("id", user.id);
+      if (updateError) throw updateError;
+      showToast("프로필이 저장되었어요", "success");
+      setShowProfileEditModal(false);
+      window.location.reload();
+    } catch (err) {
+      console.log("[PindMap:mypage] save profile failed", err);
+      showToast("프로필 저장에 실패했어요", "error");
+    } finally {
+      setProfileEditSaving(false);
+    }
   };
   const deletePost = async (id: string) => {
     await supabase.from("feed_posts").delete().eq("id", id);
@@ -1960,6 +2037,13 @@ function HomePageContent() {
           {selectedPlace.road_address_name && (<div style={{ display: "flex", gap: "8px" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>주소</span><span style={{ fontSize: "13px", color: "#444" }}>{selectedPlace.road_address_name}</span></div>)}
           {selectedPlace.phone && (<div style={{ display: "flex", gap: "8px", alignItems: "center" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 }}>전화</span><a href={"tel:" + String(selectedPlace.phone)} style={{ fontSize: "13px", color: "#1a2a7a", textDecoration: "none" }}>{String(selectedPlace.phone)}</a></div>)}
           {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px" }}>카카오맵에서 영업시간 보기</a>)}
+          <button
+            type="button"
+            onClick={() => openAppleMapsPlace(selectedPlace.place_name, selectedPlace.road_address_name || selectedPlace.address_name, selectedPlace.y, selectedPlace.x)}
+            style={{ fontSize: "12px", color: "#1a2a7a", background: "#fff", padding: "8px 16px", letterSpacing: "0.4px", textDecoration: "none", display: "inline-block", marginTop: "4px", border: "1px solid #d6ddf2", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+          >
+            🗺 Apple 지도에서 열기
+          </button>
           {selectedPlace.y && selectedPlace.x && (
             <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
               {/* 모드 토글 */}
@@ -2562,6 +2646,13 @@ function HomePageContent() {
                       <button type="button" onClick={() => { void generateCourse(); }} disabled={courseLoading} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: "13px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading ? 0.6 : 1 }}>{courseLoading ? "다시 짜는 중..." : "다시 만들기"}</button>
                       <button type="button" onClick={showCourseOnMap} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
                     </div>
+                    <button
+                      type="button"
+                      onClick={openAppleMapsCourseRoute}
+                      style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #d6ddf2", background: "#fff", color: "#1a2a7a", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      🗺 Apple 지도에서 경로 보기
+                    </button>
                   </>
                 )}
               </div>
@@ -3073,7 +3164,7 @@ function HomePageContent() {
   </div>
 )}
 
-          {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">{(user?.username || "").slice(0,1).toUpperCase()}</div><div><p className="profileName">{user?.username || ""}</p><p className="profileHandle">@{user?.username || ""}_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem">프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem" onClick={() => { if (confirm("정말 로그아웃하시겠어요?")) logout(); }}>로그아웃</button></div></div>)}
+          {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">{(user?.username || "").slice(0,1).toUpperCase()}</div><div><p className="profileName">{user?.username || ""}</p><p className="profileHandle">@{user?.username || ""}_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem" onClick={openProfileEdit}>프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem" onClick={() => { if (confirm("정말 로그아웃하시겠어요?")) logout(); }}>로그아웃</button></div></div>)}
         </section>
         <nav className="tabBar">
           {TABS.map((tab) => {
@@ -3107,6 +3198,13 @@ function HomePageContent() {
               {selectedPlace.road_address_name && (<div style={{ display: "flex", gap: "8px" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>주소</span><span style={{ fontSize: "13px", color: "#444" }}>{selectedPlace.road_address_name}</span></div>)}
               {selectedPlace.phone && (<div style={{ display: "flex", gap: "8px", alignItems: "center" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 }}>전화</span><a href={"tel:" + String(selectedPlace.phone)} style={{ fontSize: "13px", color: "#1a2a7a", textDecoration: "none" }}>{String(selectedPlace.phone)}</a></div>)}
               {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px", textAlign: "center", borderRadius: "6px" }}>카카오맵에서 영업시간 보기</a>)}
+              <button
+                type="button"
+                onClick={() => openAppleMapsPlace(selectedPlace.place_name, selectedPlace.road_address_name || selectedPlace.address_name, selectedPlace.y, selectedPlace.x)}
+                style={{ fontSize: "12px", color: "#1a2a7a", background: "#fff", padding: "8px 16px", letterSpacing: "0.4px", textDecoration: "none", display: "inline-block", marginTop: "4px", textAlign: "center", borderRadius: "6px", border: "1px solid #d6ddf2", cursor: "pointer", fontFamily: "inherit" }}
+              >
+                🗺 Apple 지도에서 열기
+              </button>
               {selectedPlace.y && selectedPlace.x && (
                 <div style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
                   <button
@@ -3166,6 +3264,24 @@ function HomePageContent() {
         )}
         {sharePostModalEl}
         {notificationModalEl}
+        {showProfileEditModal && (
+          <div onClick={() => { if (!profileEditSaving) setShowProfileEditModal(false); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", boxSizing: "border-box" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>프로필 편집</span>
+                <button type="button" onClick={() => setShowProfileEditModal(false)} disabled={profileEditSaving} style={{ border: "none", background: "transparent", color: "#bbb", fontSize: "20px", cursor: profileEditSaving ? "wait" : "pointer" }}>×</button>
+              </div>
+              <p style={{ margin: 0, fontSize: "11px", color: "#8b90a3" }}>App Review 대응: 버튼 반응 및 편집 플로우 점검 로그가 콘솔에 기록됩니다.</p>
+              <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>닉네임</span>
+                <input className="mapInput" value={profileEditName} onChange={(e) => setProfileEditName(e.target.value)} placeholder="닉네임 입력" />
+              </label>
+              <button type="button" onClick={saveProfileEdit} disabled={profileEditSaving} className="primaryButton" style={{ width: "100%", opacity: profileEditSaving ? 0.7 : 1 }}>
+                {profileEditSaving ? "저장 중..." : "저장"}
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </main>
     </>
