@@ -256,6 +256,10 @@ function HomePageContent() {
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [profileEditName, setProfileEditName] = useState("");
   const [profileEditSaving, setProfileEditSaving] = useState(false);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [showDeleteAccountFinalModal, setShowDeleteAccountFinalModal] = useState(false);
+  const [deleteAccountPhraseInput, setDeleteAccountPhraseInput] = useState("");
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>("map");
   const [instagramUrl, setInstagramUrl] = useState("");
@@ -719,6 +723,65 @@ function HomePageContent() {
     console.log("[PindMap:mypage] profile edit button clicked", { uid: user?.id, username: user?.username });
     setProfileEditName(user?.username ?? "");
     setShowProfileEditModal(true);
+  };
+
+  const openDeleteAccountModal = () => {
+    console.log("[PindMap:account] 계정 삭제 버튼 클릭");
+    setShowDeleteAccountModal(true);
+  };
+
+  const closeDeleteAccountFlow = () => {
+    setShowDeleteAccountModal(false);
+    setShowDeleteAccountFinalModal(false);
+    setDeleteAccountPhraseInput("");
+    setDeleteAccountLoading(false);
+  };
+
+  const goToFinalDeleteConfirmation = () => {
+    console.log("[PindMap:account] 1차 확인 — 삭제 진행");
+    setShowDeleteAccountModal(false);
+    setDeleteAccountPhraseInput("");
+    setShowDeleteAccountFinalModal(true);
+  };
+
+  const executePermanentAccountDeletion = async () => {
+    if (deleteAccountPhraseInput.trim() !== "삭제") {
+      console.log("[PindMap:account] 확인 문구 불일치", deleteAccountPhraseInput);
+      return;
+    }
+    console.log("[PindMap:account] 영구 삭제 API 호출");
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      showToast("세션이 만료되었어요. 다시 로그인해 주세요", "error");
+      return;
+    }
+    setDeleteAccountLoading(true);
+    try {
+      const res = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        console.error("[PindMap:account] API 오류", res.status, body);
+        showToast(body.error || "계정 삭제에 실패했어요", "error");
+        return;
+      }
+      closeDeleteAccountFlow();
+      await supabase.auth.signOut();
+      showToast("계정이 성공적으로 삭제되었습니다", "success");
+      window.setTimeout(() => {
+        window.location.href = "/";
+      }, 400);
+    } catch (e) {
+      console.error("[PindMap:account] 영구 삭제 예외", e);
+      showToast("계정 삭제 중 오류가 발생했어요", "error");
+    } finally {
+      setDeleteAccountLoading(false);
+    }
   };
 
   const saveProfileEdit = async () => {
@@ -3164,7 +3227,32 @@ function HomePageContent() {
   </div>
 )}
 
-          {activeTab === "mypage" && (<div className="screen"><p className="screenTitle">마이페이지</p><article className="profileCard"><div className="profileAvatar">{(user?.username || "").slice(0,1).toUpperCase()}</div><div><p className="profileName">{user?.username || ""}</p><p className="profileHandle">@{user?.username || ""}_travelnote</p></div></article><div className="settingList"><button type="button" className="settingItem" onClick={openProfileEdit}>프로필 편집</button><button type="button" className="settingItem">알림 설정</button><button type="button" className="settingItem">공개 범위 설정</button><button type="button" className="settingItem" onClick={() => { if (confirm("정말 로그아웃하시겠어요?")) logout(); }}>로그아웃</button></div></div>)}
+          {activeTab === "mypage" && (
+            <div className="screen">
+              <p className="screenTitle">마이페이지</p>
+              <article className="profileCard">
+                <div className="profileAvatar">{(user?.username || "").slice(0, 1).toUpperCase()}</div>
+                <div>
+                  <p className="profileName">{user?.username || ""}</p>
+                  <p className="profileHandle">@{user?.username || ""}_travelnote</p>
+                </div>
+              </article>
+              <div className="settingList">
+                <button type="button" className="settingItem" onClick={openProfileEdit}>프로필 편집</button>
+                <button type="button" className="settingItem">알림 설정</button>
+                <button type="button" className="settingItem">공개 범위 설정</button>
+                <button
+                  type="button"
+                  className="settingItem"
+                  onClick={openDeleteAccountModal}
+                  style={{ color: "#d32f2f", fontWeight: 600 }}
+                >
+                  계정 삭제
+                </button>
+                <button type="button" className="settingItem" onClick={() => { if (confirm("정말 로그아웃하시겠어요?")) logout(); }}>로그아웃</button>
+              </div>
+            </div>
+          )}
         </section>
         <nav className="tabBar">
           {TABS.map((tab) => {
@@ -3279,6 +3367,59 @@ function HomePageContent() {
               <button type="button" onClick={saveProfileEdit} disabled={profileEditSaving} className="primaryButton" style={{ width: "100%", opacity: profileEditSaving ? 0.7 : 1 }}>
                 {profileEditSaving ? "저장 중..." : "저장"}
               </button>
+            </div>
+          </div>
+        )}
+        {showDeleteAccountModal && (
+          <div onClick={closeDeleteAccountFlow} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", maxWidth: "400px", borderRadius: "16px", padding: "24px 20px", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "14px" }}>
+              <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a1a2e" }}>정말 계정을 삭제하시겠습니까?</p>
+              <p style={{ margin: 0, fontSize: "13px", color: "#555", lineHeight: 1.65, whiteSpace: "pre-line" }}>
+                {`계정을 삭제하면 다음 데이터가 영구적으로 삭제됩니다:\n• 저장한 모든 핀\n• 만든 코스\n• 프로필 정보\n• 활동 기록\n이 작업은 되돌릴 수 없습니다.`}
+              </p>
+              <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+                <button type="button" onClick={closeDeleteAccountFlow} style={{ flex: 1, padding: "12px", borderRadius: "10px", border: "1px solid #ddd", background: "#f5f5f5", color: "#666", fontSize: "14px", cursor: "pointer", fontFamily: "inherit" }}>
+                  취소
+                </button>
+                <button type="button" onClick={goToFinalDeleteConfirmation} style={{ flex: 1, padding: "12px", borderRadius: "10px", border: "none", background: "#d32f2f", color: "#fff", fontSize: "14px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                  삭제
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showDeleteAccountFinalModal && (
+          <div onClick={() => { if (!deleteAccountLoading) closeDeleteAccountFlow(); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", maxWidth: "400px", borderRadius: "16px", padding: "24px 20px", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "14px" }}>
+              <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a1a2e" }}>최종 확인</p>
+              <label style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <span style={{ fontSize: "13px", color: "#444" }}>계정을 삭제하려면 &apos;삭제&apos;를 입력하세요</span>
+                <input className="mapInput" value={deleteAccountPhraseInput} onChange={(e) => setDeleteAccountPhraseInput(e.target.value)} placeholder="삭제" autoComplete="off" disabled={deleteAccountLoading} />
+              </label>
+              <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+                <button type="button" onClick={closeDeleteAccountFlow} disabled={deleteAccountLoading} style={{ flex: 1, padding: "12px", borderRadius: "10px", border: "1px solid #ddd", background: "#f5f5f5", color: "#666", fontSize: "14px", cursor: deleteAccountLoading ? "wait" : "pointer", fontFamily: "inherit" }}>
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void executePermanentAccountDeletion()}
+                  disabled={deleteAccountLoading || deleteAccountPhraseInput.trim() !== "삭제"}
+                  style={{
+                    flex: 1,
+                    padding: "12px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: deleteAccountPhraseInput.trim() !== "삭제" || deleteAccountLoading ? "#e57373" : "#b71c1c",
+                    color: "#fff",
+                    fontSize: "14px",
+                    cursor: deleteAccountLoading || deleteAccountPhraseInput.trim() !== "삭제" ? "not-allowed" : "pointer",
+                    fontFamily: "inherit",
+                    fontWeight: 600,
+                  }}
+                >
+                  {deleteAccountLoading ? "처리 중..." : "계정 영구 삭제"}
+                </button>
+              </div>
             </div>
           </div>
         )}
