@@ -267,6 +267,8 @@ function HomePageContent() {
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
   const [status, setStatus] = useState(""); const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [homeLoadError, setHomeLoadError] = useState<string | null>(null);
+  const [homeRetrying, setHomeRetrying] = useState(false);
   const [kakaoStatus, setKakaoStatus] = useState<KakaoStatus>("idle");
   /** 카카오맵 JS SDK 객체 사용 가능 (`kakao.maps.load` 콜백 이후 true) */
   const [isKakaoMapLoaded, setIsKakaoMapLoaded] = useState(false);
@@ -331,6 +333,7 @@ function HomePageContent() {
   const expandedMarkersRef = useRef<any[]>([]); const feedMarkersRef = useRef<any[]>([]);
   const searchMarkersRef = useRef<any[]>([]); const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
   const placePinsRunIdRef = useRef(0);
+  const homeAutoRetryCountRef = useRef(0);
   /** 터치/클릭 디듀프 — 같은 장소 카드 반복 오픈 방지 */
   const expandedSearchOpenDedupeRef = useRef<{ t: number; key: string }>({ t: 0, key: "" });
   /** 확장 지도 최근 검색 결과 좌표(픽셀 근접 매칭·마커 click 보조) */
@@ -425,17 +428,28 @@ function HomePageContent() {
     };
   }, [showCourseModal, courseOriginMode, savedPlaces, coursePlaceCoords]);
 
-  const loadData = async () => {
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T> => {
+    return await Promise.race<T>([
+      promise,
+      new Promise<T>((_, reject) => {
+        window.setTimeout(() => reject(new Error("timeout")), ms);
+      }),
+    ]);
+  };
+
+  const loadData = async (isRetry = false) => {
+    console.log("[PindMap:home] 로딩 시작", { isRetry });
     setLoading(true);
+    setHomeLoadError(null);
     try {
       const uid = user?.id ?? "";
-      const [placesRes, postsRes, roomsRes, followsRes, notificationsRes] = await Promise.all([
+      const [placesRes, postsRes, roomsRes, followsRes, notificationsRes] = await withTimeout(Promise.all([
         supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
         supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false }),
         supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`),
         supabase.from("follows").select("following_id").eq("follower_id", uid),
         supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50),
-      ]);
+      ]), 8000);
 
       setFollowingIds((followsRes.data || []).map((f: any) => f.following_id));
       setNotifications((notificationsRes.data || []) as Notification[]);
@@ -455,7 +469,7 @@ function HomePageContent() {
 
       const roomsData = roomsRes.data;
       if (roomsData && roomsData.length > 0) {
-        const rooms: ChatRoom[] = await Promise.all(
+        const rooms: ChatRoom[] = await withTimeout(Promise.all(
           roomsData.map(async (r: any) => {
             const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
             const { data: friendData } = await supabase.from("users").select("username").eq("id", friendId).maybeSingle();
@@ -473,14 +487,33 @@ function HomePageContent() {
               unreadCount: unread,
             };
           }),
-        );
+        ), 8000);
         setChatRooms(sortChatRoomsByRecency(rooms));
       } else {
         setChatRooms([]);
       }
+      homeAutoRetryCountRef.current = 0;
+      console.log("[PindMap:home] 로딩 완료");
+    } catch (err) {
+      console.error("[PindMap:home] 로딩 실패", err);
+      const friendlyMessage = "연결이 불안정해요. 다시 시도해주세요 🌐";
+      setHomeLoadError(friendlyMessage);
+      if (!isRetry && homeAutoRetryCountRef.current < 1) {
+        homeAutoRetryCountRef.current += 1;
+        console.log("[PindMap:home] 자동 재시도 시작 (1회)");
+        setHomeRetrying(true);
+        window.setTimeout(() => {
+          void loadData(true).finally(() => setHomeRetrying(false));
+        }, 350);
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const retryHomeLoad = () => {
+    setHomeRetrying(true);
+    void loadData(true).finally(() => setHomeRetrying(false));
   };
 
   useEffect(() => {
@@ -489,9 +522,21 @@ function HomePageContent() {
       return;
     }
     if (user) {
-      loadData();
+      void loadData();
     }
   }, [user, userLoading]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!user || userLoading) return;
+      if (!homeLoadError) return;
+      console.log("[PindMap:home] 포그라운드 복귀 - 자동 재시도");
+      void loadData(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [homeLoadError, user, userLoading]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -2761,8 +2806,21 @@ function HomePageContent() {
 
           {activeTab === "home" && (
             <div className="screen homeFeed">
+              {homeLoadError && !loading && (
+                <div style={{ minHeight: "45vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "12px", padding: "14px 10px" }}>
+                  <p style={{ margin: 0, fontSize: "14px", color: "#56607a", textAlign: "center", lineHeight: 1.6 }}>{homeLoadError}</p>
+                  <button
+                    type="button"
+                    onClick={retryHomeLoad}
+                    disabled={homeRetrying}
+                    style={{ minWidth: "190px", padding: "13px 18px", borderRadius: "12px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "14px", fontWeight: 600, cursor: homeRetrying ? "wait" : "pointer", fontFamily: "inherit", boxShadow: "0 8px 20px rgba(26,42,122,0.24)", opacity: homeRetrying ? 0.8 : 1 }}
+                  >
+                    {homeRetrying ? "다시 연결 중..." : "다시 시도"}
+                  </button>
+                </div>
+              )}
               {loading && <FeedSkeleton />}
-              {!loading && visibleFeedPosts.length === 0 && (
+              {!loading && !homeLoadError && visibleFeedPosts.length === 0 && (
                 <EmptyState
                   variant="feed"
                   icon="✍️"

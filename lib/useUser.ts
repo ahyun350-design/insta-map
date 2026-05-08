@@ -15,6 +15,25 @@ export function useUser() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let timeoutId: number | null = null;
+    let timeoutTriggered = false;
+    const AUTH_TIMEOUT_MS = 8000;
+
+    const startAuthWatchdog = () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        timeoutTriggered = true;
+        console.warn("[PindMap:home][auth] timeout - loading forced off");
+        setLoading(false);
+      }, AUTH_TIMEOUT_MS);
+    };
+    const stopAuthWatchdog = () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
     const ensureUserExists = async (userId: string, email?: string, preferredUsername?: string) => {
       console.log("users 테이블 체크 시작", { userId });
       const { data: existing, error: selectError } = await supabase
@@ -51,50 +70,12 @@ export function useUser() {
 
     // 1) 페이지 처음 로드시 현재 세션 확인
     const loadUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.user) {
-        setUser(null);
-        setLoading(false);
-        return;
-      }
-
-      await ensureUserExists(
-        session.user.id,
-        session.user.email,
-        session.user.user_metadata?.username || session.user.user_metadata?.name
-      );
-
-      // users 테이블에서 username 가져오기
-      const { data } = await supabase
-        .from("users")
-        .select("username")
-        .eq("id", session.user.id)
-        .single();
-
-      const username =
-        data?.username ||
-        session.user.user_metadata?.username ||
-        session.user.user_metadata?.name ||
-        session.user.email?.split("@")[0] ||
-        "user";
-
-      setUser({
-        id: session.user.id,
-        username,
-        email: session.user.email,
-      });
-      setLoading(false);
-    };
-
-    loadUser();
-
-    // 2) 로그인/로그아웃 변화 감지 (실시간)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      console.log("[PindMap:home][auth] loadUser start");
+      startAuthWatchdog();
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user) {
           setUser(null);
-          setLoading(false);
           return;
         }
 
@@ -104,6 +85,7 @@ export function useUser() {
           session.user.user_metadata?.username || session.user.user_metadata?.name
         );
 
+        // users 테이블에서 username 가져오기
         const { data } = await supabase
           .from("users")
           .select("username")
@@ -122,11 +104,69 @@ export function useUser() {
           username,
           email: session.user.email,
         });
+        console.log("[PindMap:home][auth] loadUser done");
+      } catch (err) {
+        console.error("[PindMap:home][auth] loadUser failed", err);
+        setUser(null);
+      } finally {
+        stopAuthWatchdog();
         setLoading(false);
+        if (timeoutTriggered) {
+          console.warn("[PindMap:home][auth] resumed after timeout fallback");
+        }
+      }
+    };
+
+    void loadUser();
+
+    // 2) 로그인/로그아웃 변화 감지 (실시간)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        console.log("[PindMap:home][auth] onAuthStateChange start");
+        startAuthWatchdog();
+        try {
+          if (!session?.user) {
+            setUser(null);
+            return;
+          }
+
+          await ensureUserExists(
+            session.user.id,
+            session.user.email,
+            session.user.user_metadata?.username || session.user.user_metadata?.name
+          );
+
+          const { data } = await supabase
+            .from("users")
+            .select("username")
+            .eq("id", session.user.id)
+            .single();
+
+          const username =
+            data?.username ||
+            session.user.user_metadata?.username ||
+            session.user.user_metadata?.name ||
+            session.user.email?.split("@")[0] ||
+            "user";
+
+          setUser({
+            id: session.user.id,
+            username,
+            email: session.user.email,
+          });
+          console.log("[PindMap:home][auth] onAuthStateChange done");
+        } catch (err) {
+          console.error("[PindMap:home][auth] onAuthStateChange failed", err);
+          setUser(null);
+        } finally {
+          stopAuthWatchdog();
+          setLoading(false);
+        }
       }
     );
 
     return () => {
+      stopAuthWatchdog();
       subscription.unsubscribe();
     };
   }, []);
