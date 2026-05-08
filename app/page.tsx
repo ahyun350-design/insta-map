@@ -368,6 +368,9 @@ function HomePageContent() {
   const initialPinTriggeredRef = useRef(false);
   const prevSavedPlacesKeyRef = useRef("");
   const relayoutTriggeredRef = useRef(false);
+  const mapInstanceIdRef = useRef(0);
+  const orchestratorSuccessKeyRef = useRef("");
+  const orchestratorCycleRef = useRef(0);
   /** 터치/클릭 디듀프 — 같은 장소 카드 반복 오픈 방지 */
   const expandedSearchOpenDedupeRef = useRef<{ t: number; key: string }>({ t: 0, key: "" });
   /** 확장 지도 최근 검색 결과 좌표(픽셀 근접 매칭·마커 click 보조) */
@@ -748,6 +751,9 @@ function HomePageContent() {
 
       const attempts = (pollAttemptsRef.current[jobId] ?? 0) + 1;
       pollAttemptsRef.current[jobId] = attempts;
+      if (attempts === 15 || attempts === 25) {
+        console.log("[PindMap:url] active job still pending", { jobId, attempts });
+      }
       if (attempts > 30) {
         showToast("작업 상태 확인 시간이 초과되어 자동 중단했어요.", "info");
         removeJob(jobId);
@@ -1570,6 +1576,10 @@ function HomePageContent() {
       showToast("로그인이 필요합니다.", "error");
       return;
     }
+    const pendingJobs = activeJobs.filter((job) => job.status === "pending" || job.status === "processing").length;
+    if (pendingJobs > 0) {
+      console.log("[PindMap:url] activeJobs pending before extraction start", { pendingJobs });
+    }
     const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
     const controller = new AbortController();
     console.log("[PindMap:url] extraction start", { url: trimmedUrl });
@@ -1739,6 +1749,7 @@ function HomePageContent() {
     if (!mapContainerRef.current || mapRef.current) return;
     const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
     mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 9 });
+    mapInstanceIdRef.current += 1;
     mapRef.current.setMapTypeId && mapRef.current.setMapTypeId(mapTypeId);
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current, "main");
@@ -2058,6 +2069,7 @@ function HomePageContent() {
     if (mapExpanded) return;
     if (!mapRef.current) return;
     mapRef.current = null;
+    mapInstanceIdRef.current += 1;
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
     setCompactMapReady(false);
@@ -2292,29 +2304,63 @@ function HomePageContent() {
     }
 
     const savedPlacesKey = savedPlaces.map((p) => `${p.id}:${p.name}:${p.address}`).join("|");
-    if (initialPinTriggeredRef.current && prevSavedPlacesKeyRef.current === savedPlacesKey) {
-      console.log("[PindMap:pin] orchestrator skipped - reason: same_saved_places");
+    const cycleKey = `${mapInstanceIdRef.current}::${savedPlacesKey}`;
+    if (orchestratorSuccessKeyRef.current === cycleKey) {
+      console.log("[PindMap:pin] orchestrator cycle skipped - same key");
       return;
     }
 
     initialPinTriggeredRef.current = true;
     prevSavedPlacesKeyRef.current = savedPlacesKey;
-    map.relayout?.();
-    console.log("[PindMap:pin] orchestrator: relayout done");
+    const cycleId = ++orchestratorCycleRef.current;
+    console.log("[PindMap:pin] orchestrator cycle %d started", cycleId);
 
     let cancelled = false;
-    const rafId = window.requestAnimationFrame(() => {
-      if (cancelled) return;
-      console.log("[PindMap:pin] orchestrator: rAF done");
-      addPlacePins(map, markersRef.current, feedPosts, savedPlaces, "main");
-      console.log("[PindMap:pin] orchestrator: addPlacePins done with %d places", savedPlaces.length);
-    });
+    let pendingTimer: number | null = null;
+    let pendingRaf: number | null = null;
 
+    const visiblePlacesCount = savedPlaces.filter((p) => !hiddenIds.has(p.id)).length;
+    const runAttempt = (attempt: 1 | 2 | 3) => {
+      if (cancelled) return;
+      console.log("[PindMap:pin] orchestrator cycle %d attempt %d/3", cycleId, attempt);
+      map.relayout?.();
+      console.log("[PindMap:pin] orchestrator: relayout done");
+      pendingRaf = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        console.log("[PindMap:pin] orchestrator: rAF done");
+        addPlacePins(map, markersRef.current, feedPosts, savedPlaces, "main");
+        console.log("[PindMap:pin] orchestrator: addPlacePins done with %d places", savedPlaces.length);
+        pendingTimer = window.setTimeout(() => {
+          if (cancelled) return;
+          const markerCount = markersRef.current.length;
+          const success = visiblePlacesCount === 0 || markerCount > 0;
+          if (success) {
+            orchestratorSuccessKeyRef.current = cycleKey;
+            console.log("[PindMap:pin] orchestrator cycle %d success at attempt %d (markers: %d)", cycleId, attempt, markerCount);
+            return;
+          }
+          if (attempt === 1) {
+            runAttempt(2);
+            return;
+          }
+          if (attempt === 2) {
+            pendingTimer = window.setTimeout(() => {
+              runAttempt(3);
+            }, 500);
+            return;
+          }
+          console.log("[PindMap:pin] orchestrator cycle %d failed after 3 attempts (markers: %d, places: %d)", cycleId, markerCount, visiblePlacesCount);
+        }, 100);
+      });
+    };
+
+    runAttempt(1);
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(rafId);
+      if (pendingRaf !== null) window.cancelAnimationFrame(pendingRaf);
+      if (pendingTimer !== null) window.clearTimeout(pendingTimer);
     };
-  }, [activeTab, kakaoStatus, compactMapReady, savedPlaces, feedPosts]);
+  }, [activeTab, kakaoStatus, compactMapReady, savedPlaces, feedPosts, hiddenIds]);
 
   useEffect(() => {
     if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return undefined;
