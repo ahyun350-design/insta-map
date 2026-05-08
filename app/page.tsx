@@ -28,7 +28,7 @@ function sortChatRoomsByRecency(rooms: ChatRoom[]): ChatRoom[] {
     (a, b) => new Date(b.lastTime).getTime() - new Date(a.lastTime).getTime(),
   );
 }
-type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; };
+type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; status?: "pending" | "sent" | "failed"; };
 type ExtractJobStatus = "pending" | "processing" | "completed" | "failed";
 type ActiveExtractJob = {
   jobId: string;
@@ -364,6 +364,8 @@ function HomePageContent() {
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
+  const initialPinTriggeredRef = useRef(false);
+  const prevSavedPlacesKeyRef = useRef("");
   /** 터치/클릭 디듀프 — 같은 장소 카드 반복 오픈 방지 */
   const expandedSearchOpenDedupeRef = useRef<{ t: number; key: string }>({ t: 0, key: "" });
   /** 확장 지도 최근 검색 결과 좌표(픽셀 근접 매칭·마커 click 보조) */
@@ -372,6 +374,9 @@ function HomePageContent() {
   const expandedMapInteractionCleanupRef = useRef<(() => void) | null>(null);
   const feedPostsRef = useRef<FeedPost[]>(feedPosts);
   feedPostsRef.current = feedPosts;
+  const roomChannelRef = useRef<any>(null);
+  const openChatRequestRef = useRef(0);
+  const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
   const resetHiddenPlaces = () => {
@@ -1016,11 +1021,44 @@ function HomePageContent() {
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: p.comments.filter(c => c.id !== commentId) } : p));
   };
 
+  const unmountRoomSubscription = useCallback((reason: string) => {
+    if (!roomChannelRef.current) return;
+    console.log("[PindMap:message] subscription unmounted", reason);
+    supabase.removeChannel(roomChannelRef.current);
+    roomChannelRef.current = null;
+  }, []);
+
+  const mountRoomSubscription = useCallback((roomId: string) => {
+    unmountRoomSubscription("replace");
+    const channel = supabase
+      .channel(`room-${roomId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` }, async (payload: any) => {
+        const m = payload.new;
+        setMessages(prev => prev.some(msg => msg.id === m.id) ? prev : [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read, status: "sent" }]);
+        if (m.sender_id !== MY_USER) {
+          await supabase.from("messages").update({ read: true }).eq("id", m.id);
+        }
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` }, (payload: any) => {
+        const m = payload.new;
+        setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, read: m.read } : msg));
+      })
+      .subscribe();
+    roomChannelRef.current = channel;
+    console.log("[PindMap:message] subscription mounted", roomId);
+  }, [unmountRoomSubscription]);
+
   const searchFriend = async () => {
     if (!friendSearch.trim()) return;
     setFriendSearchError("");
     setFriendSearchResult(null);
-    const { data } = await supabase.from("users").select("*").eq("username", friendSearch.trim()).single();
+    const { data } = await supabase
+      .from("users")
+      .select("*")
+      .eq("username", friendSearch.trim())
+      .neq("id", MY_USER)
+      .single();
+    console.log("[PindMap:message] search filter (self excluded)", friendSearch.trim(), !!data);
     if (!data) { setFriendSearchError("유저를 찾을 수 없어요."); return; }
     if (data.username === MY_USER) { setFriendSearchError("나 자신은 추가할 수 없어요."); return; }
     setFriendSearchResult(data);
@@ -1043,60 +1081,94 @@ function HomePageContent() {
   };
 
   const openChat = async (room: ChatRoom) => {
+    const fromId = activeChatRoom?.id ?? null;
+    const reqId = ++openChatRequestRef.current;
+    console.log("[PindMap:message] chatroom switched", { from: fromId, to: room.id });
+    unmountRoomSubscription("openChat");
+    setMessages([]);
     setActiveChatRoom(room);
-    // 채팅방 들어가면 자기 앞으로 온 메시지를 모두 읽음 처리
     await supabase.from("messages").update({ read: true }).eq("room_id", room.id).neq("sender_id", MY_USER).eq("read", false);
+    if (reqId !== openChatRequestRef.current) return;
     setChatRooms(prev => prev.map(r => r.id === room.id ? { ...r, unreadCount: 0 } : r));
     const { data } = await supabase.from("messages").select("*").eq("room_id", room.id).order("created_at", { ascending: true });
-    if (data) setMessages(data.map((m: any) => ({ id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read })));
-    // Realtime 구독
-    supabase.channel(`room-${room.id}`).on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, async (payload: any) => {
-      const m = payload.new;
-      // 이미 화면에 있는 메시지면 무시 (본인이 보낸 메시지가 다시 돌아올 때)
-      setMessages(prev => prev.some(msg => msg.id === m.id) ? prev : [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read }]);
-      // 받은 메시지면 즉시 읽음 처리 (채팅방 열려있으니까)
-      if (m.sender_id !== MY_USER) {
-        await supabase.from("messages").update({ read: true }).eq("id", m.id);
-      }
-    }).on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages", filter: `room_id=eq.${room.id}` }, (payload: any) => {
-      // 메시지 read 상태 변경 시 화면에 반영
-      const m = payload.new;
-      setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, read: m.read } : msg));
-    }).subscribe();
+    if (reqId !== openChatRequestRef.current) return;
+    if (data) setMessages(data.map((m: any) => ({ id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read, status: "sent" })));
+    mountRoomSubscription(room.id);
   };
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !activeChatRoom || !user) return;
+    const roomId = activeChatRoom.id;
+    const friendId = activeChatRoom.friendId;
     const text = newMessage.trim();
     const id = Date.now().toString();
     const createdAt = new Date().toISOString();
+    console.log("[PindMap:message] send start", { id, roomId });
     chatStickToBottomRef.current = true;
-    setMessages(prev => [...prev, { id, senderId: user.id, text, createdAt, read: false }]);
+    setMessages(prev => [...prev, { id, senderId: user.id, text, createdAt, read: false, status: "pending" }]);
     setNewMessage("");
     setChatRooms((prev) =>
       sortChatRoomsByRecency(
         prev.map((r) =>
-          r.id === activeChatRoom.id ? { ...r, lastMessage: text, lastTime: createdAt } : r,
+          r.id === roomId ? { ...r, lastMessage: text, lastTime: createdAt } : r,
         ),
       ),
     );
-    await supabase.from("messages").insert({ id, room_id: activeChatRoom.id, sender_id: user.id, text, read: false });
-
-    if (activeChatRoom.friendId && activeChatRoom.friendId !== user.id) {
+    const performSend = async () => {
       try {
-        await supabase.from("notifications").insert({
-          id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
-          user_id: activeChatRoom.friendId,
-          type: "message",
-          actor_id: user.id,
-          actor_username: MY_USERNAME,
-          target_id: activeChatRoom.id,
-          target_text: text.length > 30 ? text.slice(0, 30) + "..." : text,
-        });
-      } catch {
-        /* 알림 INSERT 실패 무시 */
+        await supabase.from("messages").insert({ id, room_id: roomId, sender_id: user.id, text, read: false });
+        setMessages(prev => prev.map((m) => m.id === id ? { ...m, status: "sent" } : m));
+        console.log("[PindMap:message] send success", { id, roomId });
+        if (friendId && friendId !== user.id) {
+          try {
+            await supabase.from("notifications").insert({
+              id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
+              user_id: friendId,
+              type: "message",
+              actor_id: user.id,
+              actor_username: MY_USERNAME,
+              target_id: roomId,
+              target_text: text.length > 30 ? text.slice(0, 30) + "..." : text,
+            });
+          } catch {
+            /* 알림 INSERT 실패 무시 */
+          }
+        }
+      } catch (err) {
+        console.error("[PindMap:message] send failed", { id, roomId, err });
+        setMessages(prev => prev.map((m) => m.id === id ? { ...m, status: "failed" } : m));
+        showToast("메시지 전송에 실패했어요. 재전송해 주세요.", "error");
       }
-    }
+    };
+    sendQueueRef.current = sendQueueRef.current.then(performSend);
+    await sendQueueRef.current;
+  };
+
+  const resendFailedMessage = async (failedMessage: Message) => {
+    if (!activeChatRoom || !user) return;
+    if (failedMessage.status !== "failed") return;
+    const roomId = activeChatRoom.id;
+    console.log("[PindMap:message] resend start", { id: failedMessage.id, roomId });
+    setMessages(prev => prev.map((m) => m.id === failedMessage.id ? { ...m, status: "pending" } : m));
+    const performResend = async () => {
+      try {
+        await supabase.from("messages").insert({
+          id: failedMessage.id,
+          room_id: roomId,
+          sender_id: user.id,
+          text: failedMessage.text,
+          read: false,
+        });
+        setMessages(prev => prev.map((m) => m.id === failedMessage.id ? { ...m, status: "sent" } : m));
+        console.log("[PindMap:message] resend success", { id: failedMessage.id, roomId });
+      } catch (err) {
+        console.error("[PindMap:message] resend failed", { id: failedMessage.id, roomId, err });
+        setMessages(prev => prev.map((m) => m.id === failedMessage.id ? { ...m, status: "failed" } : m));
+        showToast("재전송에 실패했어요.", "error");
+      }
+    };
+    sendQueueRef.current = sendQueueRef.current.then(performResend);
+    await sendQueueRef.current;
   };
 
   // 저장 목록 장소 클릭 → 지도에서 보기
@@ -1900,6 +1972,8 @@ function HomePageContent() {
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
     setCompactMapReady(false);
+    initialPinTriggeredRef.current = false;
+    prevSavedPlacesKeyRef.current = "";
   }, [mapExpanded]);
 
   // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 RAF·재시도로 해소
@@ -2062,6 +2136,22 @@ function HomePageContent() {
     chatStickToBottomRef.current = true;
   }, [activeChatRoom?.id]);
 
+  useEffect(() => {
+    if (activeTab === "messages") return;
+    unmountRoomSubscription("leave-messages-tab");
+  }, [activeTab, unmountRoomSubscription]);
+
+  useEffect(() => {
+    if (activeChatRoom) return;
+    unmountRoomSubscription("chatroom-closed");
+  }, [activeChatRoom, unmountRoomSubscription]);
+
+  useEffect(() => {
+    return () => {
+      unmountRoomSubscription("component-unmount");
+    };
+  }, [unmountRoomSubscription]);
+
   useLayoutEffect(() => {
     if (!activeChatRoom || !chatStickToBottomRef.current) return;
     const el = chatMessagesContainerRef.current;
@@ -2069,7 +2159,25 @@ function HomePageContent() {
     el.scrollTop = el.scrollHeight;
   }, [messages, activeChatRoom?.id]);
 
-  useEffect(() => { if (kakaoStatus !== "ready" || !mapRef.current) return; addPlacePins(mapRef.current, markersRef.current, feedPosts); }, [savedPlaces, kakaoStatus, feedPosts]);
+  useEffect(() => {
+    if (kakaoStatus !== "ready") return;
+    if (!mapRef.current || !compactMapReady) {
+      console.log("[PindMap:pin] race guard - waiting for map", { ready: kakaoStatus === "ready", compactMapReady, hasMap: !!mapRef.current });
+      return;
+    }
+    const savedPlacesKey = savedPlaces.map((p) => `${p.id}:${p.name}:${p.address}`).join("|");
+    if (!initialPinTriggeredRef.current) {
+      console.log("[PindMap:pin] initial pin trigger (mount)", { savedCount: savedPlaces.length });
+      addPlacePins(mapRef.current, markersRef.current, feedPosts);
+      initialPinTriggeredRef.current = true;
+      prevSavedPlacesKeyRef.current = savedPlacesKey;
+      return;
+    }
+    if (prevSavedPlacesKeyRef.current === savedPlacesKey) return;
+    console.log("[PindMap:pin] pin trigger (savedPlaces changed)", { savedCount: savedPlaces.length });
+    addPlacePins(mapRef.current, markersRef.current, feedPosts);
+    prevSavedPlacesKeyRef.current = savedPlacesKey;
+  }, [savedPlaces, kakaoStatus, feedPosts, compactMapReady]);
 
   useEffect(() => {
     if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return undefined;
@@ -3026,10 +3134,12 @@ function HomePageContent() {
                 {isMine && (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", fontSize: "10px", color: "#bbb", lineHeight: 1.3 }}>
                     {!m.read && <span style={{ color: "#1a2a7a", fontWeight: 600 }}>1</span>}
+                    {m.status === "pending" && <span style={{ color: "#9aa1bc" }}>전송 중...</span>}
+                    {m.status === "failed" && <span style={{ color: "#e07070", fontWeight: 600 }}>전송 실패</span>}
                     <span>{formatTime(m.createdAt)}</span>
                   </div>
                 )}
-                <div style={{ maxWidth: "70%", padding: "8px 12px", borderRadius: isMine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: isMine ? "#1a2a7a" : "#f0f0f5", color: isMine ? "#fff" : "#333", fontSize: "13px", lineHeight: 1.5, whiteSpace: "pre-wrap" as any }}>
+                <div style={{ maxWidth: "70%", padding: "8px 12px", borderRadius: isMine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: isMine ? "#1a2a7a" : "#f0f0f5", color: isMine ? "#fff" : "#333", fontSize: "13px", lineHeight: 1.5, whiteSpace: "pre-wrap" as any, opacity: m.status === "pending" ? 0.75 : 1 }}>
                   {(() => {
                     const shareMatch = m.text.match(/\[share:([^\]]+)\]/);
                     if (shareMatch) {
@@ -3065,6 +3175,15 @@ function HomePageContent() {
                     }
                     return m.text;
                   })()}
+                  {isMine && m.status === "failed" && (
+                    <button
+                      type="button"
+                      onClick={() => { void resendFailedMessage(m); }}
+                      style={{ display: "block", marginTop: "8px", padding: "4px 8px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.5)", background: "rgba(255,255,255,0.2)", color: "#fff", fontSize: "11px", fontFamily: "inherit", cursor: "pointer" }}
+                    >
+                      재전송
+                    </button>
+                  )}
                 </div>
                 {!isMine && (
                   <span style={{ fontSize: "10px", color: "#bbb", lineHeight: 1.3 }}>{formatTime(m.createdAt)}</span>
