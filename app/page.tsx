@@ -1580,6 +1580,7 @@ function HomePageContent() {
     let timeout: number | undefined;
     try {
       timeout = window.setTimeout(() => controller.abort(), 10000);
+      console.log("[PindMap:url] /api/extract/start request", { url: trimmedUrl, userId: user.id });
       const response = await fetch("/api/extract/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1589,7 +1590,11 @@ function HomePageContent() {
       });
       window.clearTimeout(timeout);
       const data = await response.json() as { jobId?: string; error?: string };
-      if (!response.ok || !data.jobId) throw new Error(data.error ?? "분석 작업 시작에 실패했습니다.");
+      console.log("[PindMap:url] /api/extract/start response status:", response.status, "body:", data);
+      if (!response.ok || !data.jobId) {
+        console.log("[PindMap:url] /api/extract/start failed - status:", response.status, "error:", data?.error ?? "missing_job_id");
+      }
+      if (!response.ok || !data.jobId) throw new Error(`[status:${response.status}] ${data.error ?? "분석 작업 시작에 실패했습니다."}`);
       const newJob: ActiveExtractJob = {
         jobId: data.jobId,
         instagramUrl: trimmedUrl,
