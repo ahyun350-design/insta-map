@@ -379,10 +379,8 @@ function HomePageContent() {
   const roomChannelRef = useRef<any>(null);
   const openChatRequestRef = useRef(0);
   const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const extractionControllerRef = useRef<AbortController | null>(null);
-  const extractionRequestIdRef = useRef(0);
-  const isExtractingRef = useRef(false);
   const placeExtractionToastTimerRef = useRef<number | null>(null);
+  const statusAutoHideTimerRef = useRef<number | null>(null);
   const [showPlaceExtractionToast, setShowPlaceExtractionToast] = useState(false);
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
@@ -728,11 +726,30 @@ function HomePageContent() {
   }, [activeJobs]);
 
   useEffect(() => {
+    if (!status) return;
+    if (statusAutoHideTimerRef.current) {
+      window.clearTimeout(statusAutoHideTimerRef.current);
+    }
+    statusAutoHideTimerRef.current = window.setTimeout(() => {
+      console.log("[PindMap:url] extraction message hidden (timeout)");
+      setStatus("");
+      statusAutoHideTimerRef.current = null;
+    }, 8000);
+    return () => {
+      if (statusAutoHideTimerRef.current) {
+        window.clearTimeout(statusAutoHideTimerRef.current);
+      }
+    };
+  }, [status]);
+
+  useEffect(() => {
     return () => {
       if (placeExtractionToastTimerRef.current) {
         window.clearTimeout(placeExtractionToastTimerRef.current);
       }
-      extractionControllerRef.current?.abort();
+      if (statusAutoHideTimerRef.current) {
+        window.clearTimeout(statusAutoHideTimerRef.current);
+      }
     };
   }, []);
 
@@ -781,6 +798,7 @@ function HomePageContent() {
             showPlaceExtractionGuideToast();
             showToast("장소를 찾지 못했어요.", "info");
             setStatus("");
+            console.log("[PindMap:url] extraction message hidden (failed)");
             setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
             return;
           }
@@ -813,7 +831,8 @@ function HomePageContent() {
             ]);
           }
           showToast(`✨ ${rows.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
-          setStatus(`${rows.length}개 장소를 지도에 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}.`);
+          setStatus("");
+          console.log("[PindMap:url] extraction message hidden (success)");
           return;
         }
 
@@ -821,6 +840,8 @@ function HomePageContent() {
           const message = data.error_message || "장소 분석 작업에 실패했어요.";
           showToast(message, "error");
           showPlaceExtractionGuideToast();
+          setStatus("");
+          console.log("[PindMap:url] extraction message hidden (failed)");
           setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
           removeJob(jobId);
         }
@@ -828,6 +849,8 @@ function HomePageContent() {
         const message = err instanceof Error ? err.message : "작업 상태 확인 중 오류가 발생했어요.";
         showToast(message, "error");
         showPlaceExtractionGuideToast();
+        setStatus("");
+        console.log("[PindMap:url] extraction message hidden (failed)");
         removeJob(jobId);
       } finally {
         pollInFlightRef.current.delete(jobId);
@@ -1569,12 +1592,8 @@ function HomePageContent() {
       return;
     }
     const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
-    const requestId = ++extractionRequestIdRef.current;
-    extractionControllerRef.current?.abort();
     const controller = new AbortController();
-    extractionControllerRef.current = controller;
-    isExtractingRef.current = true;
-    console.log("[PindMap:url] extraction start", { requestId, url: trimmedUrl });
+    console.log("[PindMap:url] extraction start", { url: trimmedUrl });
     setIsSubmitting(true); setStatus(""); setError("");
     let timeout: number | undefined;
     try {
@@ -1598,31 +1617,25 @@ function HomePageContent() {
       setActiveJobs((prev) => [newJob, ...prev.filter((job) => job.jobId !== newJob.jobId)]);
       setInstagramUrl("");
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
+      console.log("[PindMap:url] extraction message shown");
       showToast("분석 작업을 백그라운드에서 시작했어요", "success");
-      console.log("[PindMap:url] extraction success", { requestId, jobId: data.jobId });
+      console.log("[PindMap:url] extraction success", { jobId: data.jobId });
     } catch (e) {
       const isTimeout = e instanceof Error && e.name === "AbortError";
-      console.log(`[PindMap:url] extraction ${isTimeout ? "timeout" : "failed"}`, { requestId, error: e });
+      console.log(`[PindMap:url] extraction ${isTimeout ? "timeout" : "failed"}`, { error: e });
       const message = e instanceof Error && e.name === "AbortError"
         ? "요청이 지연되고 있어요. 잠시 후 다시 시도해주세요."
         : e instanceof Error
           ? e.message
           : "요청 처리 중 오류가 발생했습니다.";
       setStatus("");
+      console.log(`[PindMap:url] extraction message hidden (${isTimeout ? "timeout" : "failed"})`);
       setError(message);
     }
     finally {
       if (typeof timeout === "number") window.clearTimeout(timeout);
-      if (extractionRequestIdRef.current === requestId) {
-        extractionControllerRef.current = null;
-      }
-      isExtractingRef.current = false;
       setIsSubmitting(false);
-      console.log("[PindMap:url] state reset (finally)", {
-        requestId,
-        isSubmitting: false,
-        isExtracting: isExtractingRef.current,
-      });
+      console.log("[PindMap:url] state reset (finally)", { isSubmitting: false });
     }
   };
 
@@ -1923,14 +1936,19 @@ function HomePageContent() {
   }, []);
 
   const handleSearch = () => {
-    console.log("[PindMap:search] state check before search", {
-      isSubmitting,
-      isExtracting: isExtractingRef.current,
-      hasExpandedMap: !!expandedMapRef.current,
-      queryLength: searchQuery.trim().length,
-    });
-    if (!searchQuery.trim() || !expandedMapRef.current || !window.kakao?.maps) return;
-    console.log("[PindMap:search] search start", { query: searchQuery.trim() });
+    console.log("[PindMap:search] search invoked", { query: searchQuery.trim() });
+    if (!searchQuery.trim()) {
+      console.log("[PindMap:search] search blocked - reason: empty_query");
+      return;
+    }
+    if (!expandedMapRef.current) {
+      console.log("[PindMap:search] search blocked - reason: expanded_map_not_ready");
+      return;
+    }
+    if (!window.kakao?.maps) {
+      console.log("[PindMap:search] search blocked - reason: kakao_not_ready");
+      return;
+    }
     const ps = new window.kakao.maps.services.Places(); const geocoder = new window.kakao.maps.services.Geocoder();
     const trimmed = searchQuery.trim();
     const doSearch = (data: any[], st: string) => {
