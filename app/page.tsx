@@ -751,9 +751,6 @@ function HomePageContent() {
 
       const attempts = (pollAttemptsRef.current[jobId] ?? 0) + 1;
       pollAttemptsRef.current[jobId] = attempts;
-      if (attempts === 15 || attempts === 25) {
-        console.log("[PindMap:url] active job still pending", { jobId, attempts });
-      }
       if (attempts > 30) {
         showToast("작업 상태 확인 시간이 초과되어 자동 중단했어요.", "info");
         removeJob(jobId);
@@ -1575,10 +1572,6 @@ function HomePageContent() {
     if (!user?.id) {
       showToast("로그인이 필요합니다.", "error");
       return;
-    }
-    const pendingJobs = activeJobs.filter((job) => job.status === "pending" || job.status === "processing").length;
-    if (pendingJobs > 0) {
-      console.log("[PindMap:url] activeJobs pending before extraction start", { pendingJobs });
     }
     const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
     const controller = new AbortController();
