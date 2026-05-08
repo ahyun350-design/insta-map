@@ -360,7 +360,8 @@ function HomePageContent() {
   const geocoderRef = useRef<any>(null); const markersRef = useRef<any[]>([]);
   const expandedMarkersRef = useRef<any[]>([]); const feedMarkersRef = useRef<any[]>([]);
   const searchMarkersRef = useRef<any[]>([]); const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
-  const placePinsRunIdRef = useRef(0);
+  const placePinsRunIdRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
+  const locationRenderTokenRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
@@ -383,8 +384,8 @@ function HomePageContent() {
   const resetHiddenPlaces = () => {
     console.log("[PindMap:pin] reset hidden places");
     setHiddenIds(new Set());
-    if (mapRef.current) addPlacePins(mapRef.current, markersRef.current, feedPostsRef.current);
-    if (mapExpanded && expandedMapRef.current) addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPostsRef.current);
+    if (mapRef.current) addPlacePins(mapRef.current, markersRef.current, feedPostsRef.current, savedPlaces, "main");
+    if (mapExpanded && expandedMapRef.current) addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPostsRef.current, savedPlaces, "expanded");
   };
   const toSelectedFromSavedPlace = useCallback((place: Place, relatedPosts: FeedPost[], lat?: number, lng?: number) => ({
     place_name: place.name,
@@ -1661,10 +1662,16 @@ function HomePageContent() {
     setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]); setPostSearchQuery(""); setPostSearchResults([]);
   };
 
-  const addMyLocation = (map: any) => {
+  const addMyLocation = (map: any, scope: "main" | "expanded" = "main") => {
+    const token = ++locationRenderTokenRef.current[scope];
     void (async () => {
       try {
         const { latitude, longitude } = await getCurrentPositionForMap();
+        const currentMap = scope === "main" ? mapRef.current : expandedMapRef.current;
+        if (currentMap !== map || token !== locationRenderTokenRef.current[scope]) {
+          console.log("[PindMap:location] map identity changed, retry on new map", { scope });
+          return;
+        }
         const latlng = new window.kakao.maps.LatLng(latitude, longitude);
         map.setCenter(latlng);
         map.setLevel(9);
@@ -1673,6 +1680,7 @@ function HomePageContent() {
           position: latlng,
           image: new window.kakao.maps.MarkerImage(makeMyLocationImage(), new window.kakao.maps.Size(24, 24), { offset: new window.kakao.maps.Point(12, 12) }),
         });
+        console.log("[PindMap:location] my location render with coords", latitude, longitude);
       } catch (err) {
         const denied = isGeolocationPermissionDenied(err);
         showToast(
@@ -1690,21 +1698,45 @@ function HomePageContent() {
     mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 9 });
     mapRef.current.setMapTypeId && mapRef.current.setMapTypeId(mapTypeId);
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
-    addMyLocation(mapRef.current);
+    addMyLocation(mapRef.current, "main");
     setCompactMapReady(true);
-    setTimeout(() => { addPlacePins(mapRef.current, markersRef.current, posts); }, 300);
+    setTimeout(() => { addPlacePins(mapRef.current, markersRef.current, posts, places, "main"); }, 300);
   };
 
-  const addPlacePins = (map: any, arr: any[], posts: FeedPost[]) => {
+  const addPlacePins = (map: any, arr: any[], posts: FeedPost[], places: Place[], scope: "main" | "expanded" = "main") => {
     if (!geocoderRef.current) return;
-    const myRunId = ++placePinsRunIdRef.current;
+    const myRunId = ++placePinsRunIdRef.current[scope];
+    console.log("[PindMap:pin] addPlacePins called with savedCount:", places.length);
     arr.forEach((m) => m.setMap(null));
     arr.length = 0;
-    savedPlaces.forEach((place) => {
+    if (places.length === 0) {
+      console.log(`[PindMap:pin] runId ${myRunId} completed successfully`);
+      return;
+    }
+    let cancellationLogged = false;
+    let completed = 0;
+    const done = () => {
+      completed += 1;
+      if (completed === places.length) {
+        if (myRunId === placePinsRunIdRef.current[scope]) {
+          console.log(`[PindMap:pin] runId ${myRunId} completed successfully`);
+        }
+      }
+    };
+    places.forEach((place) => {
       geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
         try {
-          if (myRunId !== placePinsRunIdRef.current) return;
-          if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
+          if (myRunId !== placePinsRunIdRef.current[scope]) {
+            if (!cancellationLogged) {
+              cancellationLogged = true;
+              console.log(`[PindMap:pin] runId ${myRunId} cancelled (newer run started)`);
+            }
+            return;
+          }
+          if (sv !== window.kakao.maps.services.Status.OK || !result[0]) {
+            done();
+            return;
+          }
           const marker = new window.kakao.maps.Marker({
             map,
             position: new window.kakao.maps.LatLng(result[0].y, result[0].x),
@@ -1744,8 +1776,10 @@ function HomePageContent() {
             });
           });
           arr.push(marker);
+          done();
         } catch (err) {
           console.error("[PindMap:pin] addPlacePins marker setup failed", place?.name, err);
+          done();
         }
       });
     });
@@ -2051,7 +2085,7 @@ function HomePageContent() {
       if (!map) return;
       map.relayout?.();
       console.log("[PindMap:pin] relayout completed");
-      addPlacePins(map, markersRef.current, feedPostsRef.current);
+      addPlacePins(map, markersRef.current, feedPostsRef.current, savedPlaces, "main");
       console.log("[PindMap:pin] pin repaint after relayout");
     };
 
@@ -2059,7 +2093,7 @@ function HomePageContent() {
     return () => {
       timers.forEach((t) => window.clearTimeout(t));
     };
-  }, [activeTab, compactMapReady]);
+  }, [activeTab, compactMapReady, savedPlaces]);
 
   // URL에 ?openChatRoom=xxx 있으면 자동으로 그 채팅방 열기
   useEffect(() => {
@@ -2192,14 +2226,14 @@ function HomePageContent() {
     const savedPlacesKey = savedPlaces.map((p) => `${p.id}:${p.name}:${p.address}`).join("|");
     if (!initialPinTriggeredRef.current) {
       console.log("[PindMap:pin] initial pin trigger (mount)", { savedCount: savedPlaces.length });
-      addPlacePins(mapRef.current, markersRef.current, feedPosts);
+      addPlacePins(mapRef.current, markersRef.current, feedPosts, savedPlaces, "main");
       initialPinTriggeredRef.current = true;
       prevSavedPlacesKeyRef.current = savedPlacesKey;
       return;
     }
     if (prevSavedPlacesKeyRef.current === savedPlacesKey) return;
     console.log("[PindMap:pin] pin trigger (savedPlaces changed)", { savedCount: savedPlaces.length });
-    addPlacePins(mapRef.current, markersRef.current, feedPosts);
+    addPlacePins(mapRef.current, markersRef.current, feedPosts, savedPlaces, "main");
     prevSavedPlacesKeyRef.current = savedPlacesKey;
   }, [savedPlaces, kakaoStatus, feedPosts, compactMapReady]);
 
@@ -2217,8 +2251,8 @@ function HomePageContent() {
       const map = expandedMapRef.current;
       console.log("[PindMap:expandedMap] Map instance ready, wiring kakao click + DOM touch fallback");
 
-      addMyLocation(map);
-      addPlacePins(map, expandedMarkersRef.current, feedPosts);
+      addMyLocation(map, "expanded");
+      addPlacePins(map, expandedMarkersRef.current, feedPosts, savedPlaces, "expanded");
 
       const hitFromLatLng = (lat: number, lng: number, source: string): boolean => {
         const candidates = lastExpandedSearchPlacesRef.current;
@@ -2313,11 +2347,11 @@ function HomePageContent() {
       });
       searchMarkersRef.current = [];
     };
-  }, [mapExpanded, openExpandedSearchPlaceCard]);
+  }, [mapExpanded, openExpandedSearchPlaceCard, feedPosts, savedPlaces]);
 
   useEffect(() => {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
-    addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts);
+    addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts, savedPlaces, "expanded");
     // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
   }, [feedPosts, mapExpanded, savedPlaces]);
 
