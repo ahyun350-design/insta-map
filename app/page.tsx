@@ -380,7 +380,6 @@ function HomePageContent() {
   const openChatRequestRef = useRef(0);
   const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
   const placeExtractionToastTimerRef = useRef<number | null>(null);
-  const statusAutoHideTimerRef = useRef<number | null>(null);
   const [showPlaceExtractionToast, setShowPlaceExtractionToast] = useState(false);
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
@@ -726,29 +725,9 @@ function HomePageContent() {
   }, [activeJobs]);
 
   useEffect(() => {
-    if (!status) return;
-    if (statusAutoHideTimerRef.current) {
-      window.clearTimeout(statusAutoHideTimerRef.current);
-    }
-    statusAutoHideTimerRef.current = window.setTimeout(() => {
-      console.log("[PindMap:url] extraction message hidden (timeout)");
-      setStatus("");
-      statusAutoHideTimerRef.current = null;
-    }, 8000);
-    return () => {
-      if (statusAutoHideTimerRef.current) {
-        window.clearTimeout(statusAutoHideTimerRef.current);
-      }
-    };
-  }, [status]);
-
-  useEffect(() => {
     return () => {
       if (placeExtractionToastTimerRef.current) {
         window.clearTimeout(placeExtractionToastTimerRef.current);
-      }
-      if (statusAutoHideTimerRef.current) {
-        window.clearTimeout(statusAutoHideTimerRef.current);
       }
     };
   }, []);
