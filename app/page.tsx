@@ -1743,7 +1743,6 @@ function HomePageContent() {
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current, "main");
     setCompactMapReady(true);
-    setTimeout(() => { addPlacePins(mapRef.current, markersRef.current, posts, places, "main"); }, 300);
   };
 
   const addPlacePins = (map: any, arr: any[], posts: FeedPost[], places: Place[], scope: "main" | "expanded" = "main") => {
@@ -2140,8 +2139,6 @@ function HomePageContent() {
       if (!map) return;
       map.relayout?.();
       console.log("[PindMap:pin] relayout completed");
-      addPlacePins(map, markersRef.current, feedPostsRef.current, savedPlaces, "main");
-      console.log("[PindMap:pin] pin repaint after relayout");
     };
 
     const timers = [200, 500].map((delay) => window.setTimeout(runRelayoutAndRepaint, delay));
@@ -2273,24 +2270,51 @@ function HomePageContent() {
   }, [messages, activeChatRoom?.id]);
 
   useEffect(() => {
-    if (kakaoStatus !== "ready") return;
-    if (!mapRef.current || !compactMapReady) {
-      console.log("[PindMap:pin] race guard - waiting for map", { ready: kakaoStatus === "ready", compactMapReady, hasMap: !!mapRef.current });
+    const hasMap = !!mapRef.current;
+    console.log("[PindMap:pin] orchestrator triggered");
+    console.log("[PindMap:pin] orchestrator conditions: kakao=%s, map=%s, ready=%s, places=%d", kakaoStatus, hasMap, compactMapReady, savedPlaces.length);
+    if (activeTab !== "map") {
+      console.log("[PindMap:pin] orchestrator skipped - reason: inactive_tab");
       return;
     }
+    if (kakaoStatus !== "ready") {
+      console.log("[PindMap:pin] orchestrator skipped - reason: kakao_not_ready");
+      return;
+    }
+    const map = mapRef.current;
+    if (!map) {
+      console.log("[PindMap:pin] orchestrator skipped - reason: map_missing");
+      return;
+    }
+    if (!compactMapReady) {
+      console.log("[PindMap:pin] orchestrator skipped - reason: compact_map_not_ready");
+      return;
+    }
+
     const savedPlacesKey = savedPlaces.map((p) => `${p.id}:${p.name}:${p.address}`).join("|");
-    if (!initialPinTriggeredRef.current) {
-      console.log("[PindMap:pin] initial pin trigger (mount)", { savedCount: savedPlaces.length });
-      addPlacePins(mapRef.current, markersRef.current, feedPosts, savedPlaces, "main");
-      initialPinTriggeredRef.current = true;
-      prevSavedPlacesKeyRef.current = savedPlacesKey;
+    if (initialPinTriggeredRef.current && prevSavedPlacesKeyRef.current === savedPlacesKey) {
+      console.log("[PindMap:pin] orchestrator skipped - reason: same_saved_places");
       return;
     }
-    if (prevSavedPlacesKeyRef.current === savedPlacesKey) return;
-    console.log("[PindMap:pin] pin trigger (savedPlaces changed)", { savedCount: savedPlaces.length });
-    addPlacePins(mapRef.current, markersRef.current, feedPosts, savedPlaces, "main");
+
+    initialPinTriggeredRef.current = true;
     prevSavedPlacesKeyRef.current = savedPlacesKey;
-  }, [savedPlaces, kakaoStatus, feedPosts, compactMapReady]);
+    map.relayout?.();
+    console.log("[PindMap:pin] orchestrator: relayout done");
+
+    let cancelled = false;
+    const rafId = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      console.log("[PindMap:pin] orchestrator: rAF done");
+      addPlacePins(map, markersRef.current, feedPosts, savedPlaces, "main");
+      console.log("[PindMap:pin] orchestrator: addPlacePins done with %d places", savedPlaces.length);
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [activeTab, kakaoStatus, compactMapReady, savedPlaces, feedPosts]);
 
   useEffect(() => {
     if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return undefined;
