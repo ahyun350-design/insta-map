@@ -45,6 +45,34 @@ type ExtractStatusResponse = {
 };
 type LatLng = { lat: number; lng: number };
 
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/서울특별시|서울시|부산광역시|인천광역시|대구광역시|대전광역시|광주광역시|울산광역시|세종특별자치시/g, "")
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+function normalizeAddress(value: string): string {
+  return normalizeText(value);
+}
+
+function namesAreSimilar(a: string, b: string): boolean {
+  const na = normalizeText(a);
+  const nb = normalizeText(b);
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 declare global { interface Window { kakao: any; } }
 
 /**
@@ -333,6 +361,8 @@ function HomePageContent() {
   const expandedMarkersRef = useRef<any[]>([]); const feedMarkersRef = useRef<any[]>([]);
   const searchMarkersRef = useRef<any[]>([]); const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
   const placePinsRunIdRef = useRef(0);
+  const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
+  const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
   /** 터치/클릭 디듀프 — 같은 장소 카드 반복 오픈 방지 */
   const expandedSearchOpenDedupeRef = useRef<{ t: number; key: string }>({ t: 0, key: "" });
@@ -344,6 +374,51 @@ function HomePageContent() {
   feedPostsRef.current = feedPosts;
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
+  const toSelectedFromSavedPlace = useCallback((place: Place, relatedPosts: FeedPost[], lat?: number, lng?: number) => ({
+    place_name: place.name,
+    category_name: place.category,
+    road_address_name: place.address,
+    address_name: place.address,
+    phone: "",
+    place_url: "",
+    y: typeof lat === "number" ? String(lat) : undefined,
+    x: typeof lng === "number" ? String(lng) : undefined,
+    _feedPosts: relatedPosts,
+    _savedPlaceId: place.id,
+  }), []);
+
+  const resolveSavedMatch = useCallback((candidate: any): Place | undefined => {
+    if (!candidate) return undefined;
+    const candidateId = String(candidate._savedPlaceId || "").trim();
+    if (candidateId) {
+      const byId = savedPlaces.find((p) => p.id === candidateId);
+      if (byId) return byId;
+    }
+    const cy = Number(candidate.y);
+    const cx = Number(candidate.x);
+    if (Number.isFinite(cy) && Number.isFinite(cx)) {
+      const byDistance = savedPlaces.find((p) => {
+        const c = savedPlaceCoordsRef.current[p.id];
+        if (!c) return false;
+        if (!namesAreSimilar(p.name, String(candidate.place_name ?? ""))) return false;
+        return distanceMeters(c.lat, c.lng, cy, cx) <= 50;
+      });
+      if (byDistance) return byDistance;
+    }
+    const candName = String(candidate.place_name ?? "");
+    const candRoad = String(candidate.road_address_name ?? "");
+    const candAddr = String(candidate.address_name ?? "");
+    const nRoad = normalizeAddress(candRoad);
+    const nAddr = normalizeAddress(candAddr);
+    return savedPlaces.find((p) => {
+      if (!namesAreSimilar(p.name, candName)) return false;
+      const np = normalizeAddress(p.address);
+      if (!np) return true;
+      if (!nRoad && !nAddr) return true;
+      return np === nRoad || np === nAddr || np.includes(nRoad) || nRoad.includes(np) || np.includes(nAddr) || nAddr.includes(np);
+    });
+  }, [savedPlaces]);
+
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
   const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImages.length > 0;
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
@@ -1013,14 +1088,13 @@ function HomePageContent() {
     if (mapRef.current && geocoderRef.current) {
       geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
         if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
+        const markerLat = parseFloat(result[0].y);
+        const markerLng = parseFloat(result[0].x);
         mapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x));
         mapRef.current.setLevel(4);
         const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
-        new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
-          const base = (st === window.kakao.maps.services.Status.OK && data[0]) ? data[0] : { place_name: place.name, category_name: place.category, road_address_name: place.address, phone: "", place_url: "" };
-          setSelectedPlace({ ...base, _feedPosts: relatedPosts });
-          setMapExpanded(true);
-        });
+        setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
+        setMapExpanded(true);
       });
     }
   };
@@ -1069,19 +1143,10 @@ function HomePageContent() {
   const handleMiniListClick = (place: Place) => {
     const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
     if (!window.kakao?.maps?.services) {
-      setSelectedPlace({
-        place_name: place.name, category_name: place.category,
-        road_address_name: place.address, phone: "", place_url: "",
-        _feedPosts: relatedPosts,
-      });
+      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
       return;
     }
-    new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
-      const base = (st === window.kakao.maps.services.Status.OK && data[0])
-        ? data[0]
-        : { place_name: place.name, category_name: place.category, road_address_name: place.address, phone: "", place_url: "" };
-      setSelectedPlace({ ...base, _feedPosts: relatedPosts });
-    });
+    setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
   };
 
   // 게시물에서 바로 팔로우
@@ -1553,19 +1618,37 @@ function HomePageContent() {
           position: new window.kakao.maps.LatLng(result[0].y, result[0].x),
           image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
         });
+        const markerLat = parseFloat(result[0].y);
+        const markerLng = parseFloat(result[0].x);
+        savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
         window.kakao.maps.event.addListener(marker, "click", () => {
+          const clickToken = Date.now();
+          selectedPlaceTokenRef.current = clickToken;
           const relatedPosts = posts.filter((p) => !p.archived && p.placeName === place.name);
+          // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
+          setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
           new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
-            const base = (st === window.kakao.maps.services.Status.OK && data[0])
-              ? data[0]
-              : {
-                  place_name: place.name,
-                  category_name: place.category,
-                  road_address_name: place.address,
-                  phone: "",
-                  place_url: "",
-                };
-            setSelectedPlace({ ...base, _feedPosts: relatedPosts });
+            if (selectedPlaceTokenRef.current !== clickToken) return;
+            if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
+            const nearest = data
+              .map((it) => {
+                const y = parseFloat(it.y);
+                const x = parseFloat(it.x);
+                if (!Number.isFinite(y) || !Number.isFinite(x)) return null;
+                return { place: it, meters: distanceMeters(markerLat, markerLng, y, x) };
+              })
+              .filter((v): v is { place: any; meters: number } => Boolean(v))
+              .sort((a, b) => a.meters - b.meters)[0];
+            if (!nearest || nearest.meters > 100) {
+              console.log("[PindMap:pin] keywordSearch fallback keep saved data", place.name, nearest?.meters);
+              return;
+            }
+            setSelectedPlace({
+              ...toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng),
+              ...nearest.place,
+              _feedPosts: relatedPosts,
+              _savedPlaceId: place.id,
+            });
           });
         });
         arr.push(marker);
@@ -2114,12 +2197,7 @@ function HomePageContent() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             {(() => {
-              const searchAddr = (selectedPlace.road_address_name || selectedPlace.address_name || "").trim();
-              const saved = savedPlaces.find((p) => {
-                if (p.name.trim() !== selectedPlace.place_name.trim()) return false;
-                if (!searchAddr) return true;
-                return p.address.trim() === searchAddr;
-              });
+              const saved = resolveSavedMatch(selectedPlace);
               const heartFill = saved ? "#e53935" : "none";
               const heartStroke = saved ? "#e53935" : "#1a2a7a";
               return (
