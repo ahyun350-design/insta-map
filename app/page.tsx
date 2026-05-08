@@ -288,7 +288,6 @@ function HomePageContent() {
   const [showDeleteAccountFinalModal, setShowDeleteAccountFinalModal] = useState(false);
   const [deleteAccountPhraseInput, setDeleteAccountPhraseInput] = useState("");
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
-  const [urlDebugState, setUrlDebugState] = useState<{ hidden: boolean; logs: string[] }>({ hidden: false, logs: [] });
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>("map");
   const [instagramUrl, setInstagramUrl] = useState("");
@@ -387,14 +386,6 @@ function HomePageContent() {
   const [showPlaceExtractionToast, setShowPlaceExtractionToast] = useState(false);
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
-  const pushUrlDebugLog = useCallback((message: string) => {
-    const hhmmss = new Date().toLocaleTimeString("ko-KR", { hour12: false });
-    setUrlDebugState((prev) => {
-      if (prev.hidden) return prev;
-      const nextLogs = [...prev.logs, `${hhmmss} ${message}`];
-      return { ...prev, logs: nextLogs.slice(-5) };
-    });
-  }, []);
   const showPlaceExtractionGuideToast = useCallback(() => {
     if (placeExtractionToastTimerRef.current) {
       window.clearTimeout(placeExtractionToastTimerRef.current);
@@ -1590,7 +1581,6 @@ function HomePageContent() {
     try {
       timeout = window.setTimeout(() => controller.abort(), 10000);
       console.log("[PindMap:url] /api/extract/start request", { url: trimmedUrl, userId: user.id });
-      pushUrlDebugLog(`REQ: url=${trimmedUrl}`);
       const response = await fetch("/api/extract/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1601,11 +1591,8 @@ function HomePageContent() {
       window.clearTimeout(timeout);
       const data = await response.json() as { jobId?: string; error?: string };
       console.log("[PindMap:url] /api/extract/start response status:", response.status, "body:", data);
-      pushUrlDebugLog(`RES: status=${response.status}, jobId=${data.jobId ?? "-"}`);
-      if (data?.error) pushUrlDebugLog(`BODY: error=${data.error}`);
       if (!response.ok || !data.jobId) {
         console.log("[PindMap:url] /api/extract/start failed - status:", response.status, "error:", data?.error ?? "missing_job_id");
-        pushUrlDebugLog(`FAIL: status=${response.status}, error=${data?.error ?? "missing_job_id"}`);
       }
       if (!response.ok || !data.jobId) throw new Error(`[status:${response.status}] ${data.error ?? "분석 작업 시작에 실패했습니다."}`);
       const newJob: ActiveExtractJob = {
@@ -1623,7 +1610,6 @@ function HomePageContent() {
     } catch (e) {
       const isTimeout = e instanceof Error && e.name === "AbortError";
       console.log(`[PindMap:url] extraction ${isTimeout ? "timeout" : "failed"}`, { error: e });
-      pushUrlDebugLog(`FAIL: ${isTimeout ? "timeout" : (e instanceof Error ? e.message : "unknown_error")}`);
       const message = e instanceof Error && e.name === "AbortError"
         ? "요청이 지연되고 있어요. 잠시 후 다시 시도해주세요."
         : e instanceof Error
@@ -2847,42 +2833,6 @@ function HomePageContent() {
     const liked = detailPost.likes.includes(MY_USERNAME);
     return (
       <>
-    {!urlDebugState.hidden && urlDebugState.logs.length > 0 && (
-      <div
-        style={{
-          position: "fixed",
-          left: "10px",
-          right: "10px",
-          bottom: "calc(env(safe-area-inset-bottom, 0px) + 62px)",
-          zIndex: 100002,
-          background: "rgba(0,0,0,0.78)",
-          color: "#fff",
-          borderRadius: "10px",
-          padding: "8px 10px",
-          fontSize: "11px",
-          lineHeight: 1.4,
-          maxHeight: "120px",
-          overflowY: "auto",
-          boxSizing: "border-box",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-          <span style={{ opacity: 0.85 }}>URL Debug</span>
-          <button
-            type="button"
-            onClick={() => setUrlDebugState((prev) => ({ ...prev, hidden: true }))}
-            style={{ border: "none", background: "transparent", color: "#fff", cursor: "pointer", fontSize: "12px", padding: 0, lineHeight: 1 }}
-          >
-            ×
-          </button>
-        </div>
-        {urlDebugState.logs.map((line, idx) => (
-          <div key={`${idx}-${line}`} style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", opacity: 0.95 }}>
-            {line}
-          </div>
-        ))}
-      </div>
-    )}
       <main className="mobileRoot">
         <section className="phoneFrame">
           <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
