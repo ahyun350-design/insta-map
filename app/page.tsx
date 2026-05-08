@@ -379,8 +379,23 @@ function HomePageContent() {
   const roomChannelRef = useRef<any>(null);
   const openChatRequestRef = useRef(0);
   const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const extractionControllerRef = useRef<AbortController | null>(null);
+  const extractionRequestIdRef = useRef(0);
+  const isExtractingRef = useRef(false);
+  const placeExtractionToastTimerRef = useRef<number | null>(null);
+  const [showPlaceExtractionToast, setShowPlaceExtractionToast] = useState(false);
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
+  const showPlaceExtractionGuideToast = useCallback(() => {
+    if (placeExtractionToastTimerRef.current) {
+      window.clearTimeout(placeExtractionToastTimerRef.current);
+    }
+    setShowPlaceExtractionToast(true);
+    placeExtractionToastTimerRef.current = window.setTimeout(() => {
+      setShowPlaceExtractionToast(false);
+      placeExtractionToastTimerRef.current = null;
+    }, 4000);
+  }, []);
   const resetHiddenPlaces = () => {
     console.log("[PindMap:pin] reset hidden places");
     setHiddenIds(new Set());
@@ -713,6 +728,15 @@ function HomePageContent() {
   }, [activeJobs]);
 
   useEffect(() => {
+    return () => {
+      if (placeExtractionToastTimerRef.current) {
+        window.clearTimeout(placeExtractionToastTimerRef.current);
+      }
+      extractionControllerRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!user?.id) return;
     const pollingTargets = activeJobs.filter((job) => job.status === "pending" || job.status === "processing");
     if (pollingTargets.length === 0) return;
@@ -753,6 +777,13 @@ function HomePageContent() {
         if (shouldHandleCompleted) {
           removeJob(jobId);
           const places = data.result_places ?? [];
+          if (places.length === 0) {
+            showPlaceExtractionGuideToast();
+            showToast("장소를 찾지 못했어요.", "info");
+            setStatus("");
+            setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
+            return;
+          }
           const { data: existingPlaces } = await supabase
             .from("places")
             .select("name,address")
@@ -789,11 +820,14 @@ function HomePageContent() {
         if (nextStatus === "failed") {
           const message = data.error_message || "장소 분석 작업에 실패했어요.";
           showToast(message, "error");
+          showPlaceExtractionGuideToast();
+          setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
           removeJob(jobId);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : "작업 상태 확인 중 오류가 발생했어요.";
         showToast(message, "error");
+        showPlaceExtractionGuideToast();
         removeJob(jobId);
       } finally {
         pollInFlightRef.current.delete(jobId);
@@ -807,7 +841,7 @@ function HomePageContent() {
     pollingTargets.forEach((job) => { void pollJob(job.jobId); });
 
     return () => window.clearInterval(interval);
-  }, [activeJobs, user?.id]);
+  }, [activeJobs, user?.id, showPlaceExtractionGuideToast, showToast]);
 
   const addPlace = async (place: Place) => {
     if (!user?.id) return;
@@ -1535,10 +1569,15 @@ function HomePageContent() {
       return;
     }
     const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
+    const requestId = ++extractionRequestIdRef.current;
+    extractionControllerRef.current?.abort();
+    const controller = new AbortController();
+    extractionControllerRef.current = controller;
+    isExtractingRef.current = true;
+    console.log("[PindMap:url] extraction start", { requestId, url: trimmedUrl });
     setIsSubmitting(true); setStatus(""); setError("");
     let timeout: number | undefined;
     try {
-      const controller = new AbortController();
       timeout = window.setTimeout(() => controller.abort(), 10000);
       const response = await fetch("/api/extract/start", {
         method: "POST",
@@ -1560,7 +1599,10 @@ function HomePageContent() {
       setInstagramUrl("");
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
       showToast("분석 작업을 백그라운드에서 시작했어요", "success");
+      console.log("[PindMap:url] extraction success", { requestId, jobId: data.jobId });
     } catch (e) {
+      const isTimeout = e instanceof Error && e.name === "AbortError";
+      console.log(`[PindMap:url] extraction ${isTimeout ? "timeout" : "failed"}`, { requestId, error: e });
       const message = e instanceof Error && e.name === "AbortError"
         ? "요청이 지연되고 있어요. 잠시 후 다시 시도해주세요."
         : e instanceof Error
@@ -1571,7 +1613,16 @@ function HomePageContent() {
     }
     finally {
       if (typeof timeout === "number") window.clearTimeout(timeout);
+      if (extractionRequestIdRef.current === requestId) {
+        extractionControllerRef.current = null;
+      }
+      isExtractingRef.current = false;
       setIsSubmitting(false);
+      console.log("[PindMap:url] state reset (finally)", {
+        requestId,
+        isSubmitting: false,
+        isExtracting: isExtractingRef.current,
+      });
     }
   };
 
@@ -1872,7 +1923,14 @@ function HomePageContent() {
   }, []);
 
   const handleSearch = () => {
+    console.log("[PindMap:search] state check before search", {
+      isSubmitting,
+      isExtracting: isExtractingRef.current,
+      hasExpandedMap: !!expandedMapRef.current,
+      queryLength: searchQuery.trim().length,
+    });
     if (!searchQuery.trim() || !expandedMapRef.current || !window.kakao?.maps) return;
+    console.log("[PindMap:search] search start", { query: searchQuery.trim() });
     const ps = new window.kakao.maps.services.Places(); const geocoder = new window.kakao.maps.services.Geocoder();
     const trimmed = searchQuery.trim();
     const doSearch = (data: any[], st: string) => {
@@ -2859,6 +2917,37 @@ function HomePageContent() {
 
   return (
     <>
+    {showPlaceExtractionToast && (
+      <div
+        style={{
+          position: "fixed",
+          top: "calc(env(safe-area-inset-top, 0px) + 12px)",
+          left: "16px",
+          right: "16px",
+          zIndex: 100001,
+          display: "flex",
+          justifyContent: "center",
+          pointerEvents: "none",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: "560px",
+            width: "100%",
+            background: "rgba(26, 42, 122, 0.96)",
+            color: "#fff",
+            borderRadius: "14px",
+            boxShadow: "0 10px 28px rgba(17, 24, 39, 0.28)",
+            padding: "12px 14px",
+            fontSize: "13px",
+            lineHeight: 1.45,
+            letterSpacing: "0.1px",
+          }}
+        >
+          📍 릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요
+        </div>
+      </div>
+    )}
     <main className="mobileRoot">
       <section className="phoneFrame">
         <header className="appHeader">
