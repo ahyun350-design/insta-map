@@ -374,6 +374,12 @@ function HomePageContent() {
   feedPostsRef.current = feedPosts;
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
+  const resetHiddenPlaces = () => {
+    console.log("[PindMap:pin] reset hidden places");
+    setHiddenIds(new Set());
+    if (mapRef.current) addPlacePins(mapRef.current, markersRef.current, feedPostsRef.current);
+    if (mapExpanded && expandedMapRef.current) addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPostsRef.current);
+  };
   const toSelectedFromSavedPlace = useCallback((place: Place, relatedPosts: FeedPost[], lat?: number, lng?: number) => ({
     place_name: place.name,
     category_name: place.category,
@@ -655,6 +661,18 @@ function HomePageContent() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(HIDDEN_PLACE_IDS_STORAGE_KEY, JSON.stringify([...hiddenIds]));
   }, [hiddenIds]);
+
+  useEffect(() => {
+    if (savedPlaces.length === 0) return;
+    setHiddenIds((prev) => {
+      const valid = new Set(savedPlaces.map((p) => p.id));
+      const next = [...prev].filter((id) => valid.has(id));
+      if (next.length !== prev.size) {
+        console.log("[PindMap:pin] pruned stale hidden ids", { before: prev.size, after: next.length });
+      }
+      return new Set(next);
+    });
+  }, [savedPlaces]);
 
   useEffect(() => {
     if (typeof window === "undefined" || userLoading || !user) return;
@@ -1611,47 +1629,51 @@ function HomePageContent() {
     arr.length = 0;
     savedPlaces.forEach((place) => {
       geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
-        if (myRunId !== placePinsRunIdRef.current) return;
-        if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
-        const marker = new window.kakao.maps.Marker({
-          map,
-          position: new window.kakao.maps.LatLng(result[0].y, result[0].x),
-          image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
-        });
-        const markerLat = parseFloat(result[0].y);
-        const markerLng = parseFloat(result[0].x);
-        savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
-        window.kakao.maps.event.addListener(marker, "click", () => {
-          const clickToken = Date.now();
-          selectedPlaceTokenRef.current = clickToken;
-          const relatedPosts = posts.filter((p) => !p.archived && p.placeName === place.name);
-          // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
-          setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
-          new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
-            if (selectedPlaceTokenRef.current !== clickToken) return;
-            if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
-            const nearest = data
-              .map((it) => {
-                const y = parseFloat(it.y);
-                const x = parseFloat(it.x);
-                if (!Number.isFinite(y) || !Number.isFinite(x)) return null;
-                return { place: it, meters: distanceMeters(markerLat, markerLng, y, x) };
-              })
-              .filter((v): v is { place: any; meters: number } => Boolean(v))
-              .sort((a, b) => a.meters - b.meters)[0];
-            if (!nearest || nearest.meters > 100) {
-              console.log("[PindMap:pin] keywordSearch fallback keep saved data", place.name, nearest?.meters);
-              return;
-            }
-            setSelectedPlace({
-              ...toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng),
-              ...nearest.place,
-              _feedPosts: relatedPosts,
-              _savedPlaceId: place.id,
+        try {
+          if (myRunId !== placePinsRunIdRef.current) return;
+          if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
+          const marker = new window.kakao.maps.Marker({
+            map,
+            position: new window.kakao.maps.LatLng(result[0].y, result[0].x),
+            image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
+          });
+          const markerLat = parseFloat(result[0].y);
+          const markerLng = parseFloat(result[0].x);
+          savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
+          window.kakao.maps.event.addListener(marker, "click", () => {
+            const clickToken = Date.now();
+            selectedPlaceTokenRef.current = clickToken;
+            const relatedPosts = posts.filter((p) => !p.archived && p.placeName === place.name);
+            // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
+            setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
+            new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
+              if (selectedPlaceTokenRef.current !== clickToken) return;
+              if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
+              const nearest = data
+                .map((it) => {
+                  const y = parseFloat(it.y);
+                  const x = parseFloat(it.x);
+                  if (!Number.isFinite(y) || !Number.isFinite(x)) return null;
+                  return { place: it, meters: distanceMeters(markerLat, markerLng, y, x) };
+                })
+                .filter((v): v is { place: any; meters: number } => Boolean(v))
+                .sort((a, b) => a.meters - b.meters)[0];
+              if (!nearest || nearest.meters > 100) {
+                console.log("[PindMap:pin] keywordSearch fallback keep saved data", place.name, nearest?.meters);
+                return;
+              }
+              setSelectedPlace({
+                ...toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng),
+                ...nearest.place,
+                _feedPosts: relatedPosts,
+                _savedPlaceId: place.id,
+              });
             });
           });
-        });
-        arr.push(marker);
+          arr.push(marker);
+        } catch (err) {
+          console.error("[PindMap:pin] addPlacePins marker setup failed", place?.name, err);
+        }
       });
     });
   };
@@ -3245,7 +3267,7 @@ function HomePageContent() {
                     <button onClick={(e) => { e.stopPropagation(); hideFromMap(place.id); }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
                   </article>
                 ))}
-                {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={() => setHiddenIds(new Set())} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
+                {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={resetHiddenPlaces} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
                 {savedPlaces.length === 0 && <p className="emptyText">아직 핀이 없습니다. URL을 입력해 시작해보세요.</p>}
               </div>
           </div>
