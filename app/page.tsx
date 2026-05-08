@@ -366,6 +366,7 @@ function HomePageContent() {
   const homeAutoRetryCountRef = useRef(0);
   const initialPinTriggeredRef = useRef(false);
   const prevSavedPlacesKeyRef = useRef("");
+  const relayoutTriggeredRef = useRef(false);
   /** 터치/클릭 디듀프 — 같은 장소 카드 반복 오픈 방지 */
   const expandedSearchOpenDedupeRef = useRef<{ t: number; key: string }>({ t: 0, key: "" });
   /** 확장 지도 최근 검색 결과 좌표(픽셀 근접 매칭·마커 click 보조) */
@@ -1974,6 +1975,7 @@ function HomePageContent() {
     setCompactMapReady(false);
     initialPinTriggeredRef.current = false;
     prevSavedPlacesKeyRef.current = "";
+    relayoutTriggeredRef.current = false;
   }, [mapExpanded]);
 
   // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 RAF·재시도로 해소
@@ -2036,6 +2038,28 @@ function HomePageContent() {
     }, delay));
     return () => relayoutTimers.forEach(clearTimeout);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "map") return;
+    if (!compactMapReady || !mapRef.current) return;
+    if (relayoutTriggeredRef.current) return;
+    relayoutTriggeredRef.current = true;
+    console.log("[PindMap:pin] relayout trigger (initial)");
+
+    const runRelayoutAndRepaint = () => {
+      const map = mapRef.current;
+      if (!map) return;
+      map.relayout?.();
+      console.log("[PindMap:pin] relayout completed");
+      addPlacePins(map, markersRef.current, feedPostsRef.current);
+      console.log("[PindMap:pin] pin repaint after relayout");
+    };
+
+    const timers = [200, 500].map((delay) => window.setTimeout(runRelayoutAndRepaint, delay));
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+    };
+  }, [activeTab, compactMapReady]);
 
   // URL에 ?openChatRoom=xxx 있으면 자동으로 그 채팅방 열기
   useEffect(() => {
