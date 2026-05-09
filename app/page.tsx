@@ -753,6 +753,7 @@ function HomePageContent() {
       pollAttemptsRef.current[jobId] = attempts;
       if (attempts > 30) {
         showToast("작업 상태 확인 시간이 초과되어 자동 중단했어요.", "info");
+        setStatus("");
         removeJob(jobId);
         return;
       }
