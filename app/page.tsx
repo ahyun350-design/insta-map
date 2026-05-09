@@ -1579,6 +1579,7 @@ function HomePageContent() {
     console.log("[PindMap:url] extraction start", { url: trimmedUrl });
     setIsSubmitting(true); setStatus(""); setError("");
     orchestratorSuccessKeyRef.current = "";
+    window.localStorage.removeItem(ACTIVE_JOBS_STORAGE_KEY);
     let timeout: number | undefined;
     try {
       timeout = window.setTimeout(() => controller.abort(), 10000);
