@@ -1578,6 +1578,7 @@ function HomePageContent() {
     const controller = new AbortController();
     console.log("[PindMap:url] extraction start", { url: trimmedUrl });
     setIsSubmitting(true); setStatus(""); setError("");
+    orchestratorSuccessKeyRef.current = "";
     let timeout: number | undefined;
     try {
       timeout = window.setTimeout(() => controller.abort(), 10000);
