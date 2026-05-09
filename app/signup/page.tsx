@@ -63,10 +63,11 @@ export default function SignupPage() {
         }, { onConflict: "id" });
       if (insertError) {
         console.error("users INSERT 실패:", insertError);
+        console.error("DETAIL:", JSON.stringify(insertError, null, 2));
         const msg = insertError.message ?? "";
         const isUsernameUniqueViolation =
           insertError.code === "23505" &&
-          (msg.includes("username") || msg.includes("users_username_unique"));
+          msg.toLowerCase().includes("username");
         if (isUsernameUniqueViolation) {
           setError("이미 사용 중인 닉네임이에요. 다른 닉네임을 선택해주세요");
           return;
