@@ -63,8 +63,18 @@ export default function SignupPage() {
         }, { onConflict: "id" });
       if (insertError) {
         console.error("users INSERT 실패:", insertError);
-        setError("회원가입은 완료됐지만 프로필 생성에 실패했어요. 로그인 후 다시 시도해주세요.");
-        window.alert("회원가입은 완료됐지만 프로필 생성에 실패했어요. 로그인 후 다시 시도해주세요.");
+        const msg = insertError.message ?? "";
+        const isUsernameUniqueViolation =
+          insertError.code === "23505" &&
+          (msg.includes("username") || msg.includes("users_username_unique"));
+        if (isUsernameUniqueViolation) {
+          setError("이미 사용 중인 닉네임이에요. 다른 닉네임을 선택해주세요");
+          return;
+        } else {
+          setError("회원가입은 완료됐지만 프로필 생성에 실패했어요. 로그인 후 다시 시도해주세요.");
+          window.alert("회원가입은 완료됐지만 프로필 생성에 실패했어요. 로그인 후 다시 시도해주세요.");
+          return;
+        }
       } else {
         console.log("users INSERT 성공:", finalUsername);
       }
