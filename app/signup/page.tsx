@@ -44,6 +44,7 @@ export default function SignupPage() {
     setLoading(false);
 
     if (signupError) {
+      console.error("SIGNUP ERROR DETAIL:", JSON.stringify(signupError, null, 2));
       if (signupError.message.includes("already registered")) {
         setError("이미 가입된 이메일이에요.");
       } else {
@@ -63,7 +64,6 @@ export default function SignupPage() {
         }, { onConflict: "id" });
       if (insertError) {
         console.error("users INSERT 실패:", insertError);
-        console.error("DETAIL:", JSON.stringify(insertError, null, 2));
         const msg = insertError.message ?? "";
         const isUsernameUniqueViolation =
           insertError.code === "23505" &&
