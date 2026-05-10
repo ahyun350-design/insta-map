@@ -2030,7 +2030,7 @@ function HomePageContent() {
   const addPlacePins = (map: any, arr: any[], posts: FeedPost[], places: Place[], scope: "main" | "expanded" = "main") => {
     if (!geocoderRef.current) return;
     const myRunId = ++placePinsRunIdRef.current[scope];
-    console.log("[PindMap:pin] addPlacePins called with savedCount:", places.length);
+    console.log("[addPlacePins]", scope, "places:", places.length, "runId:", myRunId);
     arr.forEach((m) => m.setMap(null));
     arr.length = 0;
     if (places.length === 0) {
@@ -2048,9 +2048,12 @@ function HomePageContent() {
       }
     };
     places.forEach((place) => {
+      console.log("[addPlacePins:start]", place.name, "address:", place.address);
       geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
         try {
+          console.log("[addPlacePins:geocode]", place.name, "ok:", sv === window.kakao.maps.services.Status.OK);
           if (myRunId !== placePinsRunIdRef.current[scope]) {
+            console.log("[addPlacePins:cancelled]", place.name, "myRun:", myRunId, "current:", placePinsRunIdRef.current[scope]);
             if (!cancellationLogged) {
               cancellationLogged = true;
               console.log(`[PindMap:pin] runId ${myRunId} cancelled (newer run started)`);
@@ -2068,15 +2071,22 @@ function HomePageContent() {
           });
           const markerLat = parseFloat(result[0].y);
           const markerLng = parseFloat(result[0].x);
+          console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng);
           savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
           window.kakao.maps.event.addListener(marker, "click", () => {
             const clickToken = Date.now();
+            console.log("[place click]", place.name, "token:", clickToken);
             selectedPlaceTokenRef.current = clickToken;
             const relatedPosts = posts.filter((p) => !p.archived && p.placeName === place.name);
             // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
+            console.log("[place click:setSelected1]", place.name);
             setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
             new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
-              if (selectedPlaceTokenRef.current !== clickToken) return;
+              console.log("[place click:keywordSearch]", place.name, "status:", st, "data.length:", data?.length ?? 0);
+              if (selectedPlaceTokenRef.current !== clickToken) {
+                console.log("[place click:tokenMismatch]", "expected:", clickToken, "current:", selectedPlaceTokenRef.current);
+                return;
+              }
               if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
               const nearest = data
                 .map((it) => {
@@ -2103,6 +2113,7 @@ function HomePageContent() {
               }
               mergedSafely._feedPosts = relatedPosts;
               mergedSafely._savedPlaceId = place.id;
+              console.log("[place click:setSelected2]", place.name, "merged keys:", Object.keys(mergedSafely));
               setSelectedPlace(mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string });
             });
           });
@@ -2777,7 +2788,9 @@ function HomePageContent() {
   }, [mapExpanded, openExpandedSearchPlaceCard, feedPosts, savedPlaces]);
 
   useEffect(() => {
+    console.log("[expanded effect]", "tick:", expandedMapPinsTick, "savedPlaces.length:", savedPlaces.length);
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
+    console.log("[expanded effect:addPlacePins]");
     addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts, savedPlaces, "expanded");
     // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
   }, [feedPosts, mapExpanded, savedPlaces, expandedMapPinsTick]);
@@ -2801,6 +2814,7 @@ function HomePageContent() {
   }, [feedPosts]);
 
   const renderPlaceCard = () => {
+    console.log("[renderCard]", selectedPlace?.place_name, "savedId:", selectedPlace?._savedPlaceId);
     if (!selectedPlace) return null;
     const relatedPosts: FeedPost[] = selectedPlace._feedPosts ?? [];
     return (
