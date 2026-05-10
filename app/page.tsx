@@ -788,28 +788,8 @@ function HomePageContent() {
             return;
           }
           showToast(`[DEBUG] dedupe 직전 - places: ${places.length}, savedPlaces: ${savedPlaces.length}`, "info");
-          showToast(`[DEBUG] supabase select 시작 - user.id: ${user?.id?.slice(0, 8) ?? "?"}`, "info");
-          let existingPlaces: { name: string; address: string }[] | null = null;
-          let selectError: { message?: string } | null = null;
-          try {
-            const sel = await supabase
-              .from("places")
-              .select("name,address")
-              .eq("user_id", user.id);
-            existingPlaces = sel.data ?? null;
-            selectError = sel.error ?? null;
-          } catch (selectErr) {
-            const msg = selectErr instanceof Error ? selectErr.message : String(selectErr);
-            showToast(`[DEBUG] supabase select 예외: ${msg.slice(0, 60)}`, "error");
-            return;
-          }
-          showToast(`[DEBUG] supabase select 끝 - existing: ${existingPlaces?.length ?? "null"}, error: ${selectError ? "Y" : "N"}`, "info");
-          if (selectError) {
-            showToast(`[DEBUG] supabase select error: ${String(selectError.message ?? selectError).slice(0, 60)}`, "error");
-            return;
-          }
           const existingSet = new Set(
-            (existingPlaces ?? []).map((p) => `${String(p.name).trim()}::${String(p.address).trim()}`),
+            savedPlaces.map((p) => `${String(p.name).trim()}::${String(p.address).trim()}`),
           );
           showToast(`[DEBUG] existingSet 크기: ${existingSet.size}`, "info");
           showToast("[DEBUG] uniquePlaces filter 시작", "info");
