@@ -1650,6 +1650,13 @@ function HomePageContent() {
     const files = Array.from(e.target.files ?? []).slice(0, 6 - postImages.length);
     e.target.value = "";
 
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      showToast("로그인이 필요합니다.", "error");
+      return;
+    }
+    const accessToken = session.access_token;
+
     for (const file of files) {
       try {
         console.log("[handleImageUpload] 원본", {
@@ -1662,34 +1669,34 @@ function HomePageContent() {
         const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}.jpg`;
         console.log("[handleImageUpload] 압축 완료, 업로드 시작", { fileName, size: prepared.size });
 
-        const uploadPromise = supabase.storage
-          .from("post-images")
-          .upload(fileName, prepared, {
-            contentType: "image/jpeg",
-            cacheControl: "3600",
-            upsert: false,
-          });
+        const formData = new FormData();
+        formData.append("file", prepared, fileName);
+        formData.append("fileName", fileName);
+
+        const fetchPromise = fetch("/api/upload/image", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: formData,
+          credentials: "include",
+        });
 
         const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error("업로드 시간이 너무 오래 걸려요. 다시 시도해주세요.")), 10000);
         });
 
-        const { error: uploadError } = (await Promise.race([uploadPromise, timeoutPromise])) as Awaited<
-          typeof uploadPromise
-        >;
+        const res = await Promise.race([fetchPromise, timeoutPromise]);
 
-        console.log("[handleImageUpload] Storage upload 응답", { hasError: !!uploadError });
+        const body = (await res.json().catch(() => ({}))) as { publicUrl?: string; error?: string };
+        const uploadFailed = !res.ok || !body.publicUrl;
+        console.log("[handleImageUpload] Storage upload 응답", { ok: res.ok, status: res.status, hasError: uploadFailed });
 
-        if (uploadError) {
-          console.error("[handleImageUpload] Storage 오류", uploadError);
-          showToast(`사진 업로드 실패: ${uploadError.message}`, "error");
+        if (uploadFailed) {
+          console.error("[handleImageUpload] API 업로드 실패", body);
+          showToast(body.error || `사진 업로드 실패 (${res.status})`, "error");
           continue;
         }
 
-        const { data: { publicUrl } } = supabase.storage
-          .from("post-images")
-          .getPublicUrl(fileName);
-
+        const publicUrl = body.publicUrl;
         console.log("[handleImageUpload] publicUrl 생성", publicUrl);
         console.log("[handleImageUpload] 완료", publicUrl);
         setPostImages((prev) => {
