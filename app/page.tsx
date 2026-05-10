@@ -809,14 +809,24 @@ function HomePageContent() {
             category: p.category,
           }));
           if (rows.length > 0) {
-            const { error: insertError } = await supabase.from("places").insert(rows).select();
-            if (insertError) {
-              showToast(`[DEBUG] supabase 응답 - error: ${String(insertError.message ?? insertError).slice(0, 60)}`, "error");
+            showToast(`[DEBUG] supabase insert 시작 - rows: ${rows.length}`, "info");
+            try {
+              const { data: insertReturned, error: insertError } = await supabase.from("places").insert(rows).select();
+              if (insertError) {
+                showToast(`[DEBUG] supabase 응답 - error: ${String(insertError.message ?? insertError).slice(0, 60)}`, "error");
+              } else {
+                showToast(`[DEBUG] supabase insert 끝 - returned: ${insertReturned?.length ?? 0}`, "info");
+              }
+              setSavedPlaces((prev) => [
+                ...rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category })),
+                ...prev.filter((p) => !rows.some((r) => r.id === p.id)),
+              ]);
+              showToast("[DEBUG] setSavedPlaces 완료", "info");
+            } catch (insertErr) {
+              const msg = insertErr instanceof Error ? insertErr.message : String(insertErr);
+              showToast(`[DEBUG] supabase insert 예외: ${msg.slice(0, 80)}`, "error");
+              throw insertErr;
             }
-            setSavedPlaces((prev) => [
-              ...rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category })),
-              ...prev.filter((p) => !rows.some((r) => r.id === p.id)),
-            ]);
           } else {
             showToast("[DEBUG] rows 0개라서 insert 스킵", "info");
           }
@@ -2317,6 +2327,7 @@ function HomePageContent() {
       return;
     }
 
+    showToast("[DEBUG] 오케스트레이터 진입", "info");
     const savedPlacesKey = savedPlaces.map((p) => `${p.id}:${p.name}:${p.address}`).join("|");
     const cycleKey = `${mapInstanceIdRef.current}::${savedPlacesKey}`;
     if (orchestratorSuccessKeyRef.current === cycleKey) {
