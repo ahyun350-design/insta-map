@@ -507,7 +507,12 @@ function HomePageContent() {
   const debugAddPlacePinsCallCountRef = useRef(0);
   const debugInitMapCallCountRef = useRef(0);
   const debugRafCancelCountRef = useRef(0);
-  const debugMarkersAttachedCountRef = useRef(0);
+  const debugAttachedMainRef = useRef(0);
+  const debugAttachedExpandedRef = useRef(0);
+  const debugArrPushMainRef = useRef(0);
+  const debugArrPushExpandedRef = useRef(0);
+  const debugSetMapMainRef = useRef(0);
+  const debugSetMapExpandedRef = useRef(0);
   const debugLastInitMapResultRef = useRef("none");
   const feedPostsRef = useRef<FeedPost[]>(feedPosts);
   feedPostsRef.current = feedPosts;
@@ -2124,7 +2129,13 @@ function HomePageContent() {
         }
       }
     };
-    const attachSavedPlaceMarkerAtLatLng = (place: Place, markerLat: number, markerLng: number, source: "cache" | "geocode") => {
+    const attachSavedPlaceMarkerAtLatLng = (
+      place: Place,
+      markerLat: number,
+      markerLng: number,
+      source: "cache" | "geocode",
+      pinScope: "main" | "expanded",
+    ) => {
       if (myRunId !== placePinsRunIdRef.current[scope]) {
         console.log("[addPlacePins:cancelled]", place.name, "myRun:", myRunId, "current:", placePinsRunIdRef.current[scope]);
         if (!cancellationLogged) {
@@ -2133,13 +2144,35 @@ function HomePageContent() {
         }
         return;
       }
+      const liveMap = pinScope === "main" ? mapRef.current : expandedMapRef.current;
+      const liveArr = pinScope === "main" ? markersRef.current : expandedMarkersRef.current;
+      if (!liveMap) {
+        console.log("[addPlacePins:noLiveMap]", place.name, "scope:", pinScope);
+        done();
+        return;
+      }
+      if (myRunId !== placePinsRunIdRef.current[scope]) {
+        console.log("[addPlacePins:cancelled]", place.name, "myRun:", myRunId, "current:", placePinsRunIdRef.current[scope]);
+        if (!cancellationLogged) {
+          cancellationLogged = true;
+          console.log(`[PindMap:pin] runId ${myRunId} cancelled (newer run started)`);
+        }
+        return;
+      }
+      let marker: any;
       try {
-        const marker = new window.kakao.maps.Marker({
-          map,
+        marker = new window.kakao.maps.Marker({
           position: new window.kakao.maps.LatLng(markerLat, markerLng),
           image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
         });
-        debugMarkersAttachedCountRef.current += 1;
+        marker.setMap(liveMap);
+        if (pinScope === "main") {
+          debugSetMapMainRef.current += 1;
+          debugAttachedMainRef.current += 1;
+        } else {
+          debugSetMapExpandedRef.current += 1;
+          debugAttachedExpandedRef.current += 1;
+        }
         if (source === "cache") {
           console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng, "(cached coords)");
         } else {
@@ -2190,10 +2223,19 @@ function HomePageContent() {
             setSelectedPlace(mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string });
           });
         });
-        arr.push(marker);
+        liveArr.push(marker);
+        if (pinScope === "main") debugArrPushMainRef.current += 1;
+        else debugArrPushExpandedRef.current += 1;
         done();
       } catch (err) {
         console.error("[PindMap:pin] addPlacePins marker setup failed", place?.name, err);
+        if (marker) {
+          try {
+            marker.setMap(null);
+          } catch {
+            /* noop */
+          }
+        }
         done();
       }
     };
@@ -2207,7 +2249,7 @@ function HomePageContent() {
         Number.isFinite(cached.lat) &&
         Number.isFinite(cached.lng)
       ) {
-        attachSavedPlaceMarkerAtLatLng(place, cached.lat, cached.lng, "cache");
+        attachSavedPlaceMarkerAtLatLng(place, cached.lat, cached.lng, "cache", scope);
         return;
       }
       geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
@@ -2227,7 +2269,7 @@ function HomePageContent() {
           }
           const markerLat = parseFloat(result[0].y);
           const markerLng = parseFloat(result[0].x);
-          attachSavedPlaceMarkerAtLatLng(place, markerLat, markerLng, "geocode");
+          attachSavedPlaceMarkerAtLatLng(place, markerLat, markerLng, "geocode", scope);
         } catch (err) {
           console.error("[PindMap:pin] addPlacePins marker setup failed", place?.name, err);
           done();
@@ -4023,7 +4065,10 @@ function HomePageContent() {
                   <div>skip: {debugLastSkipRef.current}</div>
                   <div>rafCancel: {debugRafCancelCountRef.current}</div>
                   <div>markers: {markersRef.current?.length ?? 0}</div>
-                  <div>attached: {debugMarkersAttachedCountRef.current}</div>
+                  <div>attM: {debugAttachedMainRef.current} attE: {debugAttachedExpandedRef.current}</div>
+                  <div>setMapM: {debugSetMapMainRef.current} setMapE: {debugSetMapExpandedRef.current}</div>
+                  <div>pushM: {debugArrPushMainRef.current} pushE: {debugArrPushExpandedRef.current}</div>
+                  <div>expMrk: {expandedMarkersRef.current?.length ?? 0}</div>
                   <div>saved: {savedPlaces?.length ?? 0}</div>
                   <div>hidden: {hiddenIds?.size ?? 0}</div>
                   <div>mapInst: {mapInstanceIdRef.current}</div>
