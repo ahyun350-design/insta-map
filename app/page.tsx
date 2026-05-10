@@ -2339,10 +2339,22 @@ function HomePageContent() {
     let cancelled = false;
     let pendingTimer: number | null = null;
     let pendingRaf: number | null = null;
+    let pollIntervalId: number | null = null;
+
+    const MARKER_POLL_INTERVAL_MS = 80;
+    const MARKER_POLL_MAX_MS = 950;
+
+    const clearMarkerPoll = () => {
+      if (pollIntervalId !== null) {
+        window.clearInterval(pollIntervalId);
+        pollIntervalId = null;
+      }
+    };
 
     const visiblePlacesCount = savedPlaces.filter((p) => !hiddenIds.has(p.id)).length;
     const runAttempt = (attempt: 1 | 2 | 3) => {
       if (cancelled) return;
+      clearMarkerPoll();
       console.log("[PindMap:pin] orchestrator cycle %d attempt %d/3", cycleId, attempt);
       map.relayout?.();
       console.log("[PindMap:pin] orchestrator: relayout done");
@@ -2351,27 +2363,38 @@ function HomePageContent() {
         console.log("[PindMap:pin] orchestrator: rAF done");
         addPlacePins(map, markersRef.current, feedPosts, savedPlaces, "main");
         console.log("[PindMap:pin] orchestrator: addPlacePins done with %d places", savedPlaces.length);
-        pendingTimer = window.setTimeout(() => {
-          if (cancelled) return;
+        const pollStartedAt = Date.now();
+        const pollTick = () => {
+          if (cancelled) {
+            clearMarkerPoll();
+            return;
+          }
           const markerCount = markersRef.current.length;
           const success = visiblePlacesCount === 0 || markerCount > 0;
           if (success) {
+            clearMarkerPoll();
             orchestratorSuccessKeyRef.current = cycleKey;
             console.log("[PindMap:pin] orchestrator cycle %d success at attempt %d (markers: %d)", cycleId, attempt, markerCount);
             return;
           }
-          if (attempt === 1) {
-            runAttempt(2);
-            return;
+          if (Date.now() - pollStartedAt >= MARKER_POLL_MAX_MS) {
+            clearMarkerPoll();
+            const markerCountFinal = markersRef.current.length;
+            if (attempt === 1) {
+              runAttempt(2);
+              return;
+            }
+            if (attempt === 2) {
+              pendingTimer = window.setTimeout(() => {
+                runAttempt(3);
+              }, 500);
+              return;
+            }
+            console.log("[PindMap:pin] orchestrator cycle %d failed after 3 attempts (markers: %d, places: %d)", cycleId, markerCountFinal, visiblePlacesCount);
           }
-          if (attempt === 2) {
-            pendingTimer = window.setTimeout(() => {
-              runAttempt(3);
-            }, 500);
-            return;
-          }
-          console.log("[PindMap:pin] orchestrator cycle %d failed after 3 attempts (markers: %d, places: %d)", cycleId, markerCount, visiblePlacesCount);
-        }, 100);
+        };
+        pollIntervalId = window.setInterval(pollTick, MARKER_POLL_INTERVAL_MS);
+        pollTick();
       });
     };
 
@@ -2380,6 +2403,7 @@ function HomePageContent() {
       cancelled = true;
       if (pendingRaf !== null) window.cancelAnimationFrame(pendingRaf);
       if (pendingTimer !== null) window.clearTimeout(pendingTimer);
+      clearMarkerPoll();
     };
   }, [activeTab, kakaoStatus, compactMapReady, savedPlaces, feedPosts, hiddenIds]);
 
