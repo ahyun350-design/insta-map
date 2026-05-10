@@ -5,7 +5,7 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const CATEGORIES = new Set(["맛집", "카페", "쇼핑", "숙소"]);
+const CATEGORIES = new Set(["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"]);
 const MAX_ROWS = 50;
 
 type InsertRow = {
@@ -68,7 +68,11 @@ export async function POST(req: Request) {
       if (user_id !== authUser.id) {
         return NextResponse.json({ error: "본인 계정의 장소만 저장할 수 있습니다." }, { status: 403 });
       }
-      if (!CATEGORIES.has(category as "맛집" | "카페" | "쇼핑" | "숙소")) {
+      if (
+        !CATEGORIES.has(
+          category as "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지",
+        )
+      ) {
         return NextResponse.json({ error: "유효하지 않은 카테고리가 포함되어 있습니다." }, { status: 400 });
       }
       rows.push({ id, user_id, name, address, category });

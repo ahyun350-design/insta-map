@@ -11,7 +11,40 @@ import { useToast } from "@/components/Toast";
 import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 import { getCurrentPositionForMap, isGeolocationPermissionDenied } from "@/lib/getCurrentPositionForMap";
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
-type Category = "맛집" | "카페" | "쇼핑" | "숙소";
+type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
+
+/** 큐레이션·저장 탭 카테고리 나열 순 */
+const CATEGORY_MAIN_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"];
+const CATEGORY_COURSE_MODAL_ORDER: Category[] = ["카페", "맛집", "쇼핑", "숙소", "놀거리", "여행지"];
+
+/** 카카오/검색 `category_name` 기반 자동 카테고리 */
+function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): Category {
+  const n = categoryName ?? "";
+  if (n.includes("카페")) return "카페";
+  if (n.includes("음식") || n.includes("맛집")) return "맛집";
+  if (n.includes("숙박") || n.includes("호텔")) return "숙소";
+  if (
+    n.includes("문화") ||
+    n.includes("관광") ||
+    n.includes("여행") ||
+    n.includes("자연") ||
+    n.includes("명소")
+  ) {
+    return "여행지";
+  }
+  if (
+    n.includes("게임") ||
+    n.includes("오락") ||
+    n.includes("노래방") ||
+    n.includes("볼링") ||
+    n.includes("영화") ||
+    n.includes("PC방") ||
+    n.includes("스포츠")
+  ) {
+    return "놀거리";
+  }
+  return "쇼핑";
+}
 type Place = { id: string; name: string; address: string; category: Category };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
 type Comment = { id: string; user: string; text: string; createdAt: string };
@@ -133,12 +166,30 @@ const CHAT_LIST = [
   { id: "3", name: "여행메이트", preview: "부산 맛집 리스트 공유했어", time: "어제" },
 ];
 
-const CATEGORY_CLASS: Record<Category, string> = { 맛집: "restaurant", 카페: "cafe", 쇼핑: "shopping", 숙소: "stay" };
-const CATEGORY_PIN: Record<Category, { color: string; emoji: string }> = {
-  맛집: { color: "#513229", emoji: "🍽️" }, 카페: { color: "#FCE6B7", emoji: "☕" },
-  쇼핑: { color: "#D8EBF9", emoji: "🛍️" }, 숙소: { color: "#D7D4B1", emoji: "🏠" },
+const CATEGORY_CLASS: Record<Category, string> = {
+  맛집: "restaurant",
+  카페: "cafe",
+  쇼핑: "shopping",
+  숙소: "stay",
+  놀거리: "fun",
+  여행지: "travel",
 };
-const CATEGORY_COLORS: Record<Category, string> = { 맛집: "#513229", 카페: "#b08d57", 쇼핑: "#4a7fa5", 숙소: "#7a7a50" };
+const CATEGORY_PIN: Record<Category, { color: string; emoji: string }> = {
+  맛집: { color: "#513229", emoji: "🍽️" },
+  카페: { color: "#FCE6B7", emoji: "☕" },
+  쇼핑: { color: "#D8EBF9", emoji: "🛍️" },
+  숙소: { color: "#D7D4B1", emoji: "🏠" },
+  놀거리: { color: "#c4b5fd", emoji: "🎮" },
+  여행지: { color: "#99e9f2", emoji: "🗺️" },
+};
+const CATEGORY_COLORS: Record<Category, string> = {
+  맛집: "#513229",
+  카페: "#b08d57",
+  쇼핑: "#4a7fa5",
+  숙소: "#7a7a50",
+  놀거리: "#6d4bd6",
+  여행지: "#1b9aad",
+};
 const ACTIVE_JOBS_STORAGE_KEY = "pindmap_active_extract_jobs";
 const HIDDEN_PLACE_IDS_STORAGE_KEY = "pindmap_hidden_place_ids";
 
@@ -356,7 +407,14 @@ function HomePageContent() {
 
   // 코스 만들기 관련 state
   const [showCourseModal, setShowCourseModal] = useState(false);
-  const [courseCounts, setCourseCounts] = useState({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0 });
+  const [courseCounts, setCourseCounts] = useState<Record<Category, number>>({
+    카페: 0,
+    맛집: 0,
+    쇼핑: 0,
+    숙소: 0,
+    놀거리: 0,
+    여행지: 0,
+  });
   const [courseOriginMode, setCourseOriginMode] = useState<"current" | "manual">("current");
   const [courseOriginAddress, setCourseOriginAddress] = useState("");
   const [courseLoading, setCourseLoading] = useState(false);
@@ -499,6 +557,8 @@ function HomePageContent() {
       맛집: courseBasePlaces.filter((p) => p.category === "맛집").length,
       쇼핑: courseBasePlaces.filter((p) => p.category === "쇼핑").length,
       숙소: courseBasePlaces.filter((p) => p.category === "숙소").length,
+      놀거리: courseBasePlaces.filter((p) => p.category === "놀거리").length,
+      여행지: courseBasePlaces.filter((p) => p.category === "여행지").length,
     }),
     [courseBasePlaces],
   );
@@ -1477,7 +1537,7 @@ function HomePageContent() {
       showToast("지도가 아직 준비되지 않았어요. 지도 탭을 한 번 열어주세요.", "info");
       return;
     }
-    const totalCount = courseCounts.카페 + courseCounts.맛집 + courseCounts.쇼핑 + courseCounts.숙소;
+    const totalCount = CATEGORY_COURSE_MODAL_ORDER.reduce((sum, c) => sum + courseCounts[c], 0);
     if (totalCount === 0) {
       showToast("최소 한 개 이상 선택해주세요", "info");
       return;
@@ -1537,44 +1597,52 @@ function HomePageContent() {
       );
 
       // 3. 카테고리별로 분류
-      const candidates = {
+      const candidates: Record<Category, CoursePlace[]> = {
         카페: placesWithCoords.filter((p) => p.category === "카페"),
         맛집: placesWithCoords.filter((p) => p.category === "맛집"),
         쇼핑: placesWithCoords.filter((p) => p.category === "쇼핑"),
         숙소: placesWithCoords.filter((p) => p.category === "숙소"),
+        놀거리: placesWithCoords.filter((p) => p.category === "놀거리"),
+        여행지: placesWithCoords.filter((p) => p.category === "여행지"),
       };
 
       // 4. 요청한 개수가 가능한지 체크 (쇼핑은 중복 OK라고 했지만, 일단 같은 장소 2번은 X 정책으로 갔으니 후보가 부족하면 가능한 만큼만)
-      const adjustedCounts = {
+      const adjustedCounts: Record<Category, number> = {
         카페: Math.min(courseCounts.카페, candidates.카페.length),
         맛집: Math.min(courseCounts.맛집, candidates.맛집.length),
         쇼핑: Math.min(courseCounts.쇼핑, candidates.쇼핑.length),
         숙소: Math.min(courseCounts.숙소, candidates.숙소.length),
+        놀거리: Math.min(courseCounts.놀거리, candidates.놀거리.length),
+        여행지: Math.min(courseCounts.여행지, candidates.여행지.length),
       };
 
       if (courseOriginMode === "manual" && courseRegionKeyword) {
-        const labels: Record<Category, string> = { 카페: "카페", 맛집: "맛집", 쇼핑: "쇼핑", 숙소: "숙소" };
-        (["카페", "맛집", "쇼핑", "숙소"] as Category[]).forEach((cat) => {
+        const labels: Record<Category, string> = {
+          카페: "카페",
+          맛집: "맛집",
+          쇼핑: "쇼핑",
+          숙소: "숙소",
+          놀거리: "놀거리",
+          여행지: "여행지",
+        };
+        CATEGORY_COURSE_MODAL_ORDER.forEach((cat) => {
           if (courseCounts[cat] > adjustedCounts[cat]) {
             showToast(`${courseRegionKeyword}에 ${labels[cat]}가 ${adjustedCounts[cat]}개뿐이에요`, "info");
           }
         });
       }
 
-      const selectedPools = {
+      const selectedPools: Record<Category, CoursePlace[]> = {
         카페: shufflePick(candidates.카페, adjustedCounts.카페),
         맛집: shufflePick(candidates.맛집, adjustedCounts.맛집),
         쇼핑: shufflePick(candidates.쇼핑, adjustedCounts.쇼핑),
         숙소: shufflePick(candidates.숙소, adjustedCounts.숙소),
+        놀거리: shufflePick(candidates.놀거리, adjustedCounts.놀거리),
+        여행지: shufflePick(candidates.여행지, adjustedCounts.여행지),
       };
-      const mergedCandidates: CoursePlace[] = [
-        ...selectedPools.카페,
-        ...selectedPools.맛집,
-        ...selectedPools.쇼핑,
-        ...selectedPools.숙소,
-      ];
+      const mergedCandidates: CoursePlace[] = CATEGORY_COURSE_MODAL_ORDER.flatMap((c) => selectedPools[c]);
 
-      const selectedCategorySlots = (["카페", "맛집", "쇼핑", "숙소"] as const).filter((c) => courseCounts[c] > 0).length;
+      const selectedCategorySlots = CATEGORY_COURSE_MODAL_ORDER.filter((c) => courseCounts[c] > 0).length;
       const enforceNoConsecutiveSameExceptShopping = selectedCategorySlots >= 2;
 
       // 5. 알고리즘 실행
@@ -1591,7 +1659,7 @@ function HomePageContent() {
       setCourseResult(course);
 
       // 부족했으면 안내
-      const requested = courseCounts.카페 + courseCounts.맛집 + courseCounts.쇼핑 + courseCounts.숙소;
+      const requested = CATEGORY_COURSE_MODAL_ORDER.reduce((sum, c) => sum + courseCounts[c], 0);
       if (course.length < requested) {
         showToast(`저장된 장소가 부족해서 ${course.length}곳으로 코스를 만들었어요`, "info");
       }
@@ -1869,7 +1937,7 @@ function HomePageContent() {
   };
   const handleSelectPostPlace = (place: any) => {
     setPostPlaceName(place.place_name); setPostAddress(place.road_address_name || place.address_name || "");
-    const cat: Category = place.category_name?.includes("카페") ? "카페" : place.category_name?.includes("음식") || place.category_name?.includes("맛집") ? "맛집" : place.category_name?.includes("숙박") || place.category_name?.includes("호텔") ? "숙소" : "쇼핑";
+    const cat = inferCategoryFromKakaoCategoryName(place.category_name);
     setPostCategory(cat); setPostSearchResults([]); setPostSearchQuery("");
   };
   const handleSubmitPost = async () => {
@@ -2744,7 +2812,7 @@ function HomePageContent() {
                     await deletePlace(saved.id);
                     showToast("저장이 취소되었어요", "info");
                   } else {
-                    const category: Category = selectedPlace.category_name?.includes("카페") ? "카페" : selectedPlace.category_name?.includes("음식") || selectedPlace.category_name?.includes("맛집") ? "맛집" : selectedPlace.category_name?.includes("숙박") || selectedPlace.category_name?.includes("호텔") ? "숙소" : "쇼핑";
+                    const category = inferCategoryFromKakaoCategoryName(selectedPlace.category_name);
                     await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), name: selectedPlace.place_name, address: selectedPlace.road_address_name || selectedPlace.address_name || "", category });
                   }
                 }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}>
@@ -3347,7 +3415,7 @@ function HomePageContent() {
 
                     <div>
                       <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "10px", marginTop: 0 }}>몇 곳을 방문할까요?</p>
-                      {(["카페", "맛집", "쇼핑", "숙소"] as Category[]).map((cat) => {
+                      {CATEGORY_COURSE_MODAL_ORDER.map((cat) => {
                         const available = courseAvailableByCategory[cat];
                         const max = available;
                         return (
@@ -3436,7 +3504,7 @@ function HomePageContent() {
                     </div>
                   ) : <p style={{ fontSize: "11px", color: "#bbb", marginTop: "6px" }}>장소를 검색하고 선택해주세요</p>}
                 </div>
-                <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>카테고리</p><div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>{(["맛집", "카페", "쇼핑", "숙소"] as Category[]).map((cat) => (<button key={cat} type="button" onClick={() => setPostCategory(cat)} style={{ padding: "6px 14px", borderRadius: "20px", border: `1px solid ${postCategory === cat ? CATEGORY_COLORS[cat] : "#eee"}`, background: postCategory === cat ? CATEGORY_COLORS[cat] : "transparent", color: postCategory === cat ? "#fff" : "#888", fontSize: "12px", cursor: "pointer" }}>{CATEGORY_PIN[cat].emoji} {cat}</button>))}</div></div>
+                <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>카테고리</p><div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "8px" }}>{CATEGORY_MAIN_ORDER.map((cat) => (<button key={cat} type="button" onClick={() => setPostCategory(cat)} style={{ padding: "8px 6px", borderRadius: "12px", border: `1px solid ${postCategory === cat ? CATEGORY_COLORS[cat] : "#eee"}`, background: postCategory === cat ? CATEGORY_COLORS[cat] : "transparent", color: postCategory === cat ? "#fff" : "#888", fontSize: "11px", cursor: "pointer", textAlign: "center", fontFamily: "inherit", lineHeight: 1.25 }}>{CATEGORY_PIN[cat].emoji} {cat}</button>))}</div></div>
                 <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>사진 추가 (최대 6장)</p>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                     {postImages.map((img) => {
@@ -3961,7 +4029,7 @@ function HomePageContent() {
         onClick={() => {
           setShowCourseModal(true);
           setCourseResult(null);
-          setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0 });
+          setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
         }}
         style={{
           border: "1px solid #1a2a7a",
@@ -4025,7 +4093,6 @@ function HomePageContent() {
         regions.get(region)!.push(p);
       });
       const sorted = Array.from(regions.entries()).sort((a, b) => a[0].localeCompare(b[0], "ko"));
-      const CATEGORY_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소"];
       return sorted.map(([region, regionPlaces]) => (
         <div key={region} style={{ marginBottom: "28px" }}>
           {/* 지역 헤더 */}
@@ -4035,7 +4102,7 @@ function HomePageContent() {
             <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{regionPlaces.length}</span>
           </div>
           {/* 2차: 지역 안에서 카테고리별 소그룹 */}
-          {CATEGORY_ORDER.map(cat => {
+          {CATEGORY_MAIN_ORDER.map(cat => {
             const places = regionPlaces.filter(p => p.category === cat);
             if (places.length === 0) return null;
             return (

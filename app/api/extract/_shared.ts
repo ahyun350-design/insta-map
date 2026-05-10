@@ -1,6 +1,6 @@
 export const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_APIFY_ACTOR_ID = "apify~instagram-post-scraper";
-export type ClaudeCategory = "맛집" | "카페" | "쇼핑" | "숙소";
+export type ClaudeCategory = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 export type Place = { name: string; address: string; category: ClaudeCategory };
 export type RawPlace = { name?: unknown; address?: unknown; category?: unknown; hint?: unknown };
 
@@ -38,11 +38,22 @@ function parseClaudeJsonSafely(rawText: string): unknown {
   throw new Error("Claude 응답 JSON 파싱에 실패했습니다.");
 }
 export function normalizeCategory(raw: unknown): ClaudeCategory | null {
-  if (raw === "맛집" || raw === "카페" || raw === "쇼핑" || raw === "숙소") return raw;
+  if (
+    raw === "맛집" ||
+    raw === "카페" ||
+    raw === "쇼핑" ||
+    raw === "숙소" ||
+    raw === "놀거리" ||
+    raw === "여행지"
+  ) {
+    return raw;
+  }
   if (raw === "restaurant") return "맛집";
   if (raw === "cafe") return "카페";
   if (raw === "shopping") return "쇼핑";
   if (raw === "stay" || raw === "hotel") return "숙소";
+  if (raw === "fun" || raw === "leisure") return "놀거리";
+  if (raw === "travel" || raw === "sightseeing") return "여행지";
   return null;
 }
 function parseClaudePlacesSafely(rawText: string): RawPlace[] {
@@ -125,11 +136,14 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
   const prompt = [
     "아래 인스타그램 캡션에서 언급된 모든 장소를 추출하세요.",
     "장소가 여러 개면 모두 포함하고, 없으면 빈 배열을 반환하세요.",
-    '반드시 JSON 배열만 반환하세요. 형식: [{"name":"장소명","hint":"동네명또는역이름","category":"맛집|카페|쇼핑|숙소"}]',
+    '반드시 JSON 배열만 반환하세요. 형식: [{"name":"장소명","hint":"동네명또는역이름","category":"맛집|카페|쇼핑|숙소|놀거리|여행지"}]',
     "hint는 반드시 캡션에 직접 언급된 동네명, 역이름, 구명 중 가장 구체적인 것 하나만 넣으세요.",
     "예: 망원동, 합정, 성수, 용산역 처럼 짧고 구체적인 지역명 하나만.",
     "절대로 서울, 한국 같은 넓은 지역명은 쓰지 마세요. 구체적인 동네명이 없으면 빈 문자열.",
-    'category는 반드시 "맛집", "카페", "쇼핑", "숙소" 중 하나만 사용하세요.',
+    'category는 반드시 "맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지" 중 하나만 사용하세요.',
+    "여행지: 관광, 명소, 전망대, 박물관, 미술관, 사찰·성당, 역사유적지, 테마파크(관람 위주), 공원·산림, 해변·바다, 자연 명소 등.",
+    "놀거리: 노래방, 코인노래방, 볼링장, 영화관, 오락실, 방탈출 카페, PC방·게임랜드, 액티비티·실내체험장, 카트·낚시·승마 체험, 스포츠·클라이밍 체험 등.",
+    '쇼핑은 순수 매장 중심(백화점·패션·쇼핑몰)일 때 선택하세요. 애매하면 "여행지" 또는 "맛집/카페"에 더 가까운 것을 선택하세요.',
     "",
     `caption: ${caption}`,
   ].join("\n");
@@ -141,7 +155,8 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
       model: "claude-sonnet-4-5",
       max_tokens: 2000,
       temperature: 0,
-      system: 'You must return only pure JSON array. Output format: [{"name":"...","hint":"...","category":"카페"}]. Do not include markdown, code fences, explanations, or any extra text.',
+      system:
+        'You must return only pure JSON array. Output format: [{"name":"...","hint":"...","category":"카페"}]. category must be exactly one of: 맛집, 카페, 쇼핑, 숙소, 놀거리, 여행지 (Korean strings). Do not include markdown, code fences, explanations, or any extra text.',
       messages: [{ role: "user", content: prompt }],
     }),
   });
