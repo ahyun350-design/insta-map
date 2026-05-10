@@ -2411,31 +2411,21 @@ function HomePageContent() {
     };
   }, [mapKey]);
 
-  // 확장 지도 닫힐 때: WKWebView는 컨테이너 0×0 타이밍이 잦아 즉시 파기하면 compactMapReady가 오래 false로 남을 수 있음 → 짧은 지연 후 파기
+  // 확장 지도 닫히면 메인 지도 참조 무효화 → 아래 초기화 effect가 initMap 재호출
   useEffect(() => {
     if (mapExpanded) return;
     if (!mapRef.current) return;
-
-    let cancelled = false;
-    const timerId = window.setTimeout(() => {
-      if (cancelled || !mapRef.current) return;
-      mapRef.current = null;
-      mapInstanceIdRef.current += 1;
-      markersRef.current.forEach((m) => m.setMap(null));
-      markersRef.current = [];
-      setCompactMapReady(false);
-      initialPinTriggeredRef.current = false;
-      prevSavedPlacesKeyRef.current = "";
-      relayoutTriggeredRef.current = false;
-    }, 90);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timerId);
-    };
+    mapRef.current = null;
+    mapInstanceIdRef.current += 1;
+    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current = [];
+    setCompactMapReady(false);
+    initialPinTriggeredRef.current = false;
+    prevSavedPlacesKeyRef.current = "";
+    relayoutTriggeredRef.current = false;
   }, [mapExpanded]);
 
-  // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 RAF·재시도로 해소
+  // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 재시도로 해소
   useEffect(() => {
     if (kakaoStatus !== "ready" || activeTab !== "map") return;
     if (mapRef.current) return;
@@ -2456,26 +2446,18 @@ function HomePageContent() {
         }
         return;
       }
-      const rect0 = container.getBoundingClientRect();
-      if (rect0.width > 0 && rect0.height > 0) {
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
         initMap(savedPlaces, feedPosts);
         return;
       }
-      window.requestAnimationFrame(() => {
-        if (cancelled || mapRef.current) return;
-        const rect1 = container.getBoundingClientRect();
-        if (rect1.width > 0 && rect1.height > 0) {
-          initMap(savedPlaces, feedPosts);
-          return;
-        }
-        if (attempt < maxAttempts) {
-          attempt += 1;
-          const t = window.setTimeout(tryInit, 100);
-          timeouts.push(t);
-        } else {
-          initMap(savedPlaces, feedPosts);
-        }
-      });
+      if (attempt < maxAttempts) {
+        attempt += 1;
+        const t = window.setTimeout(tryInit, 100);
+        timeouts.push(t);
+      } else {
+        initMap(savedPlaces, feedPosts);
+      }
     };
 
     const tStart = window.setTimeout(tryInit, 0);
