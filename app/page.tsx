@@ -1803,6 +1803,7 @@ function HomePageContent() {
             if (!cancellationLogged) {
               cancellationLogged = true;
               console.log(`[PindMap:pin] runId ${myRunId} cancelled (newer run started)`);
+              showToast("[DEBUG] 핀 cancel - runId 변경됨", "info");
             }
             return;
           }
@@ -2375,6 +2376,7 @@ function HomePageContent() {
             clearMarkerPoll();
             orchestratorSuccessKeyRef.current = cycleKey;
             console.log("[PindMap:pin] orchestrator cycle %d success at attempt %d (markers: %d)", cycleId, attempt, markerCount);
+            showToast(`[DEBUG] 핀 성공 attempt: ${attempt}, markers: ${markerCount}`, "info");
             return;
           }
           if (Date.now() - pollStartedAt >= MARKER_POLL_MAX_MS) {
@@ -2391,6 +2393,7 @@ function HomePageContent() {
               return;
             }
             console.log("[PindMap:pin] orchestrator cycle %d failed after 3 attempts (markers: %d, places: %d)", cycleId, markerCountFinal, visiblePlacesCount);
+            showToast(`[DEBUG] 핀 실패 - markers: ${markerCountFinal}, places: ${visiblePlacesCount}`, "info");
           }
         };
         pollIntervalId = window.setInterval(pollTick, MARKER_POLL_INTERVAL_MS);
