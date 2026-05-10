@@ -47,7 +47,8 @@ type ActiveExtractJob = {
 type ExtractStatusResponse = {
   status: ExtractJobStatus;
   progress_step?: string;
-  result_places?: Array<Omit<Place, "id">>;
+  /** 서버가 DB insert 후 id 포함해 반환 (클라이언트 insert 불필요) */
+  result_places?: Array<Omit<Place, "id"> & { id?: string }>;
   error_message?: string | null;
   error?: string;
 };
@@ -802,11 +803,15 @@ function HomePageContent() {
           removeJob(jobId);
           const places = data.result_places ?? [];
           if (places.length === 0) {
-            showPlaceExtractionGuideToast();
-            showToast("장소를 찾지 못했어요.", "info");
+            if (nextStep.includes("all_saved_already")) {
+              showToast("이미 저장된 장소만 추출됐어요", "info");
+            } else {
+              showPlaceExtractionGuideToast();
+              showToast("장소를 찾지 못했어요.", "info");
+              setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
+            }
             setStatus("");
             console.log("[PindMap:url] extraction message hidden (failed)");
-            setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
             return;
           }
           const existingSet = new Set(
@@ -819,42 +824,27 @@ function HomePageContent() {
             return true;
           });
           const duplicateCount = places.length - uniquePlaces.length;
-          const rows = uniquePlaces.map((p) => ({
-            id: Math.random().toString(36).substring(2) + Date.now().toString(36),
-            user_id: user.id,
+          if (uniquePlaces.length === 0) {
+            showToast(
+              places.length > 0 ? "추출된 장소는 이미 저장 목록에 있어요" : "추가할 새 장소가 없어요",
+              "info",
+            );
+            setStatus("");
+            console.log("[PindMap:url] extraction completed — all duplicates vs savedPlaces");
+            return;
+          }
+          const merged: Place[] = uniquePlaces.map((p) => ({
+            id:
+              typeof p.id === "string" && p.id.trim().length > 0
+                ? p.id.trim()
+                : `${Math.random().toString(36).substring(2)}${Date.now().toString(36)}`,
             name: p.name,
             address: p.address,
-            category: p.category,
+            category: p.category as Category,
           }));
-          if (rows.length > 0) {
-            try {
-              const { data: { session: insertSession } } = await supabase.auth.getSession();
-              if (!insertSession?.access_token) {
-                throw new Error("장소 저장에 실패했어요. 다시 시도해주세요.");
-              }
-              const insertRes = await fetch("/api/places/insert-many", {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${insertSession.access_token}`,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ rows }),
-              });
-              const insertBody = (await insertRes.json().catch(() => ({}))) as { error?: string };
-              if (!insertRes.ok) {
-                throw new Error(insertBody.error || "장소 저장에 실패했어요. 다시 시도해주세요.");
-              }
-              setSavedPlaces((prev) => [
-                ...rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category })),
-                ...prev.filter((p) => !rows.some((r) => r.id === p.id)),
-              ]);
-            } catch (insertErr) {
-              const msg = insertErr instanceof Error ? insertErr.message : "장소 저장에 실패했어요. 다시 시도해주세요.";
-              showToast(msg, "error");
-              throw insertErr;
-            }
-          }
-          showToast(`✨ ${rows.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
+          const mergedIds = new Set(merged.map((m) => m.id));
+          setSavedPlaces((prev) => [...merged, ...prev.filter((p) => !mergedIds.has(p.id))]);
+          showToast(`✨ ${uniquePlaces.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
           setStatus("");
           console.log("[PindMap:url] extraction message hidden (success)");
           return;
