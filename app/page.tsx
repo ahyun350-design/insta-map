@@ -1686,18 +1686,25 @@ function HomePageContent() {
 
         const res = await Promise.race([fetchPromise, timeoutPromise]);
 
-        const body = (await res.json().catch(() => ({}))) as { publicUrl?: string; error?: string };
-        const uploadFailed = !res.ok || !body.publicUrl;
+        const data = (await res.json().catch(() => ({}))) as { publicUrl?: string; error?: string };
+        const publicUrlRaw: string | undefined = data?.publicUrl;
+        const uploadFailed = !res.ok || !publicUrlRaw || typeof publicUrlRaw !== "string";
         console.log("[handleImageUpload] Storage upload 응답", { ok: res.ok, status: res.status, hasError: uploadFailed });
 
-        if (uploadFailed) {
-          console.error("[handleImageUpload] API 업로드 실패", body);
-          showToast(body.error || `사진 업로드 실패 (${res.status})`, "error");
+        if (!res.ok) {
+          console.error("[handleImageUpload] API 업로드 실패", data);
+          showToast(data.error || `사진 업로드 실패 (${res.status})`, "error");
           continue;
         }
 
-        const publicUrl = body.publicUrl;
-        console.log("[handleImageUpload] publicUrl 생성", publicUrl);
+        console.log("[handleImageUpload] publicUrl 생성", publicUrlRaw);
+        if (!publicUrlRaw || typeof publicUrlRaw !== "string") {
+          console.error("[handleImageUpload] publicUrl 누락", data);
+          showToast("사진 업로드 응답이 올바르지 않아요. 다시 시도해주세요.", "error");
+          continue;
+        }
+
+        const publicUrl = publicUrlRaw;
         console.log("[handleImageUpload] 완료", publicUrl);
         setPostImages((prev) => {
           const next = [...prev, publicUrl];
