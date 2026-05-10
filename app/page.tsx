@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser, logout } from "@/lib/useUser";
@@ -3839,40 +3840,104 @@ function HomePageContent() {
                   style={{ position: "relative", zIndex: 1 }}
                 />
               </div>
-              {mapExpanded && (
-                <div
-                  style={{
-                    position: "fixed",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    zIndex: 9999,
-                    background: "#fff",
-                    display: "flex",
-                    flexDirection: "column",
-                    paddingTop: "env(safe-area-inset-top, 0px)",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  <div className="fullscreenMapHeaderRow" style={{ borderBottom: "0.5px solid #efefef", display: "flex", justifyContent: "center", alignItems: "center", background: "#fff", position: "relative" }}>
-                    <button onClick={() => { setMapExpanded(false); setSelectedPlace(null); }} style={{ position: "absolute", left: "20px", border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", padding: 0 }}>
-                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                    </button>
-                    <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
-                  </div>
-                  <div style={{ padding: "10px 20px", borderBottom: "0.5px solid #efefef", display: "flex", gap: "8px", background: "#fff" }}>
-                    <input className="mapInput" placeholder="장소명으로 검색" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSearch()} style={{ flex: 1 }} />
-                    <button className="primaryButton" onClick={handleSearch} type="button" disabled={!searchQuery.trim()} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "0 16px" }}>
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.5" stroke="white" strokeWidth="1.3"/><line x1="9.5" y1="9.5" x2="13" y2="13" stroke="white" strokeWidth="1.3" strokeLinecap="round"/></svg>
-                    </button>
-                  </div>
-                  <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-                    <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
-                    {selectedPlace && renderPlaceCard()}
-                  </div>
-                </div>
-              )}
+              {mapExpanded &&
+                typeof document !== "undefined" &&
+                createPortal(
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="전체 지도"
+                    style={{
+                      position: "fixed",
+                      inset: 0,
+                      zIndex: 200000,
+                      background: "#fff",
+                      display: "flex",
+                      flexDirection: "column",
+                      boxSizing: "border-box",
+                      paddingTop: "env(safe-area-inset-top, 0px)",
+                      paddingBottom: "env(safe-area-inset-bottom, 0px)",
+                      paddingLeft: "env(safe-area-inset-left, 0px)",
+                      paddingRight: "env(safe-area-inset-right, 0px)",
+                    }}
+                  >
+                    <div
+                      className="fullscreenMapHeaderRow"
+                      style={{
+                        borderBottom: "0.5px solid #efefef",
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        background: "#fff",
+                        position: "relative",
+                        flexShrink: 0,
+                        minHeight: 48,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        aria-label="전체 지도 닫기"
+                        onClick={() => {
+                          setMapExpanded(false);
+                          setSelectedPlace(null);
+                        }}
+                        style={{
+                          position: "absolute",
+                          left: "max(12px, env(safe-area-inset-left, 0px))",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          border: "none",
+                          background: "transparent",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          minWidth: 44,
+                          minHeight: 44,
+                          padding: 0,
+                          WebkitTapHighlightColor: "transparent",
+                        }}
+                      >
+                        <svg width="22" height="22" viewBox="0 0 20 20" fill="none" aria-hidden>
+                          <path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                      <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
+                    </div>
+                    <div
+                      style={{
+                        padding: "12px 20px",
+                        paddingLeft: "max(20px, env(safe-area-inset-left, 0px))",
+                        paddingRight: "max(20px, env(safe-area-inset-right, 0px))",
+                        borderBottom: "0.5px solid #efefef",
+                        display: "flex",
+                        gap: "8px",
+                        background: "#fff",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <input
+                        className="mapInput"
+                        placeholder="장소명으로 검색"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                        style={{ flex: 1 }}
+                      />
+                      <button className="primaryButton" onClick={handleSearch} type="button" disabled={!searchQuery.trim()} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "0 16px" }}>
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                          <circle cx="6" cy="6" r="4.5" stroke="white" strokeWidth="1.3" />
+                          <line x1="9.5" y1="9.5" x2="13" y2="13" stroke="white" strokeWidth="1.3" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+                      <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
+                      {selectedPlace && renderPlaceCard()}
+                    </div>
+                  </div>,
+                  document.body,
+                )}
               <div className="miniList">
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).map((place) => (
                   <article key={place.id} className="miniItem" onClick={() => handleMiniListClick(place)} style={{ cursor: "pointer" }}>
