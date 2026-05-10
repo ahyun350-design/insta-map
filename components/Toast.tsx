@@ -27,6 +27,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const showToast = (message: string, type: ToastType = "info") => {
     const id = Date.now();
+    const perf = typeof performance !== "undefined" ? performance.now().toFixed(3) : "?";
+    console.log("[Toast:diag] showToast", { id, perf, type, messagePreview: message.slice(0, 80) });
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
