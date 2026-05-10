@@ -781,10 +781,24 @@ function HomePageContent() {
 
       pollInFlightRef.current.add(jobId);
       try {
-        const res = await fetch(`/api/extract/status?jobId=${encodeURIComponent(jobId)}&userId=${encodeURIComponent(user.id)}`, {
-          credentials: "include",
-        });
+        const cacheBust = Date.now();
+        const res = await fetch(
+          `/api/extract/status?jobId=${encodeURIComponent(jobId)}&userId=${encodeURIComponent(user.id)}&_t=${cacheBust}`,
+          {
+            credentials: "include",
+            cache: "no-store",
+            headers: {
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+              Pragma: "no-cache",
+            },
+          },
+        );
         const data = await res.json() as ExtractStatusResponse;
+        console.log("[poll]", jobId.slice(0, 8), {
+          status: data.status,
+          step: data.progress_step,
+          placesCount: data.result_places?.length ?? "no_array",
+        });
         if (!res.ok) {
           throw new Error(data.error || data.error_message || "작업 상태를 확인할 수 없어요.");
         }

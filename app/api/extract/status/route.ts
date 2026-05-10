@@ -51,12 +51,21 @@ export async function GET(req: Request) {
     if (error) throw error;
     if (!data) return NextResponse.json({ error: "작업을 찾을 수 없어요." }, { status: 404 });
 
-    return NextResponse.json({
-      status: data.status,
-      progress_step: data.progress_step ?? "",
-      result_places: data.result_places ?? [],
-      error_message: data.error_message,
-    });
+    return NextResponse.json(
+      {
+        status: data.status,
+        progress_step: data.progress_step ?? "",
+        result_places: data.result_places ?? [],
+        error_message: data.error_message,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "상태 조회 중 오류가 발생했습니다.";
     return NextResponse.json({ error: message }, { status: 500 });
