@@ -349,6 +349,7 @@ function HomePageContent() {
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const handleAddSubmittingRef = useRef(false);
+  const completedJobIdsRef = useRef<Set<string>>(new Set());
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
   /** 사용자가 위로 스크롤해 과거 메시지를 보면 false — 새 수신 시 자동 스크롤 안 함 */
@@ -776,6 +777,11 @@ function HomePageContent() {
         const shouldHandleCompleted = nextStatus === "completed"
           || (!!nextStep && nextStep.includes("완료") && Array.isArray(data.result_places));
         if (shouldHandleCompleted) {
+          if (completedJobIdsRef.current.has(jobId)) {
+            showToast(`[DEBUG] completed 스킵 - 이미 처리됨: ${jobId.slice(0, 8)}`, "info");
+            return;
+          }
+          completedJobIdsRef.current.add(jobId);
           showToast(`[DEBUG] completed 처리 진입 - jobId: ${jobId.slice(0, 8)}, places: ${Array.isArray(data.result_places) ? data.result_places.length : 0}`, "info");
           removeJob(jobId);
           const places = data.result_places ?? [];
@@ -1600,6 +1606,7 @@ function HomePageContent() {
     setIsSubmitting(true); setStatus(""); setError("");
     orchestratorSuccessKeyRef.current = "";
     window.localStorage.removeItem(ACTIVE_JOBS_STORAGE_KEY);
+    completedJobIdsRef.current.clear();
     let timeout: number | undefined;
     try {
       timeout = window.setTimeout(() => controller.abort(), 10000);
