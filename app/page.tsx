@@ -153,6 +153,46 @@ function pickNearestExpandedSearchPlaceByPixel(map: any, lat: number, lng: numbe
   return bestPx <= maxPx ? best : null;
 }
 
+/** WKWebView: 저장 핀 마커 click 불안정 시 touchend→픽셀 매칭(검색 핀 헬퍼와 동일 56px) */
+function pickNearestSavedPlaceByPixel(
+  map: any,
+  tapLat: number,
+  tapLng: number,
+  places: Place[],
+  coordsById: Record<string, LatLng>,
+  hiddenPlaceIds: Set<string>,
+  maxPx: number,
+): Place | null {
+  const k = typeof window !== "undefined" ? window.kakao : undefined;
+  const proj = map?.getProjection?.();
+  if (!k?.maps?.LatLng || !proj?.pointFromCoords) return null;
+  let origin: { x: number; y: number };
+  try {
+    origin = proj.pointFromCoords(new k.maps.LatLng(tapLat, tapLng));
+  } catch {
+    return null;
+  }
+  let bestPlace: Place | null = null;
+  let bestPx = Infinity;
+  for (const p of places) {
+    if (hiddenPlaceIds.has(p.id)) continue;
+    const c = coordsById[p.id];
+    if (!c || typeof c.lat !== "number" || typeof c.lng !== "number") continue;
+    let pt: { x: number; y: number };
+    try {
+      pt = proj.pointFromCoords(new k.maps.LatLng(c.lat, c.lng));
+    } catch {
+      continue;
+    }
+    const d = Math.hypot(pt.x - origin.x, pt.y - origin.y);
+    if (d < bestPx) {
+      bestPx = d;
+      bestPlace = p;
+    }
+  }
+  return bestPx <= maxPx ? bestPlace : null;
+}
+
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: "home", label: "홈", icon: "🏠" },
   { id: "messages", label: "메시지", icon: "💬" },
@@ -369,6 +409,8 @@ function HomePageContent() {
   const [showJobsModal, setShowJobsModal] = useState(false);
   const [activeJobs, setActiveJobs] = useState<ActiveExtractJob[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
+  const selectedPlaceRef = useRef<any>(null);
+  selectedPlaceRef.current = selectedPlace;
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
@@ -454,6 +496,8 @@ function HomePageContent() {
   const orchestratorCycleRef = useRef(0);
   /** 터치/클릭 디듀프 — 같은 장소 카드 반복 오픈 방지 */
   const expandedSearchOpenDedupeRef = useRef<{ t: number; key: string }>({ t: 0, key: "" });
+  /** 확장 지도 저장 핀 touchend 보조 — 중복 touchend만 억제(마커 click과는 별도) */
+  const expandedSavedTouchAssistDedupeRef = useRef<{ t: number; id: string }>({ t: 0, id: "" });
   /** 확장 지도 최근 검색 결과 좌표(픽셀 근접 매칭·마커 click 보조) */
   const lastExpandedSearchPlacesRef = useRef<any[]>([]);
   /** effect 정리 시 DOM/카카오 리스너 제거 */
@@ -2367,18 +2411,28 @@ function HomePageContent() {
     };
   }, [mapKey]);
 
-  // 확장 지도 닫히면 메인 지도 참조 무효화 → 아래 초기화 effect가 initMap 재호출
+  // 확장 지도 닫힐 때: WKWebView는 컨테이너 0×0 타이밍이 잦아 즉시 파기하면 compactMapReady가 오래 false로 남을 수 있음 → 짧은 지연 후 파기
   useEffect(() => {
     if (mapExpanded) return;
     if (!mapRef.current) return;
-    mapRef.current = null;
-    mapInstanceIdRef.current += 1;
-    markersRef.current.forEach((m) => m.setMap(null));
-    markersRef.current = [];
-    setCompactMapReady(false);
-    initialPinTriggeredRef.current = false;
-    prevSavedPlacesKeyRef.current = "";
-    relayoutTriggeredRef.current = false;
+
+    let cancelled = false;
+    const timerId = window.setTimeout(() => {
+      if (cancelled || !mapRef.current) return;
+      mapRef.current = null;
+      mapInstanceIdRef.current += 1;
+      markersRef.current.forEach((m) => m.setMap(null));
+      markersRef.current = [];
+      setCompactMapReady(false);
+      initialPinTriggeredRef.current = false;
+      prevSavedPlacesKeyRef.current = "";
+      relayoutTriggeredRef.current = false;
+    }, 90);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
   }, [mapExpanded]);
 
   // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 RAF·재시도로 해소
@@ -2402,18 +2456,26 @@ function HomePageContent() {
         }
         return;
       }
-      const rect = container.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
+      const rect0 = container.getBoundingClientRect();
+      if (rect0.width > 0 && rect0.height > 0) {
         initMap(savedPlaces, feedPosts);
         return;
       }
-      if (attempt < maxAttempts) {
-        attempt += 1;
-        const t = window.setTimeout(tryInit, 100);
-        timeouts.push(t);
-      } else {
-        initMap(savedPlaces, feedPosts);
-      }
+      window.requestAnimationFrame(() => {
+        if (cancelled || mapRef.current) return;
+        const rect1 = container.getBoundingClientRect();
+        if (rect1.width > 0 && rect1.height > 0) {
+          initMap(savedPlaces, feedPosts);
+          return;
+        }
+        if (attempt < maxAttempts) {
+          attempt += 1;
+          const t = window.setTimeout(tryInit, 100);
+          timeouts.push(t);
+        } else {
+          initMap(savedPlaces, feedPosts);
+        }
+      });
     };
 
     const tStart = window.setTimeout(tryInit, 0);
@@ -2766,7 +2828,36 @@ function HomePageContent() {
           console.log("[PindMap:expandedMap] touchend coordsFromContainerPoint returned null");
           return;
         }
-        hitFromLatLng(latlng.getLat(), latlng.getLng(), "dom-touchend+pixels");
+        const latTap = latlng.getLat();
+        const lngTap = latlng.getLng();
+        if (hitFromLatLng(latTap, lngTap, "dom-touchend+pixels")) return;
+        const pickedSaved = pickNearestSavedPlaceByPixel(
+          map,
+          latTap,
+          lngTap,
+          savedPlaces,
+          savedPlaceCoordsRef.current,
+          hiddenIds,
+          56,
+        );
+        if (!pickedSaved) return;
+        const curId = String(selectedPlaceRef.current?._savedPlaceId || "").trim();
+        if (curId === pickedSaved.id) {
+          console.log("[PindMap:expandedMap] saved-pin touch assist skip (card already open)", pickedSaved.id);
+          return;
+        }
+        const now = Date.now();
+        const d = expandedSavedTouchAssistDedupeRef.current;
+        if (d.id === pickedSaved.id && now - d.t < 280) {
+          console.log("[PindMap:expandedMap] saved-pin touch assist deduped", pickedSaved.id);
+          return;
+        }
+        expandedSavedTouchAssistDedupeRef.current = { t: now, id: pickedSaved.id };
+        const c = savedPlaceCoordsRef.current[pickedSaved.id];
+        if (!c) return;
+        const relatedPosts = feedPosts.filter((p) => !p.archived && p.placeName === pickedSaved.name);
+        console.log("[PindMap:expandedMap] saved-pin touch assist", pickedSaved.name);
+        setSelectedPlace(toSelectedFromSavedPlace(pickedSaved, relatedPosts, c.lat, c.lng));
       };
 
       mapContainerEl.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -2799,7 +2890,7 @@ function HomePageContent() {
       });
       searchMarkersRef.current = [];
     };
-  }, [mapExpanded, openExpandedSearchPlaceCard, feedPosts, savedPlaces]);
+  }, [mapExpanded, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace]);
 
   useEffect(() => {
     console.log("[expanded effect]", "tick:", expandedMapPinsTick, "savedPlaces.length:", savedPlaces.length);
