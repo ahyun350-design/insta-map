@@ -2105,8 +2105,91 @@ function HomePageContent() {
         }
       }
     };
+    const attachSavedPlaceMarkerAtLatLng = (place: Place, markerLat: number, markerLng: number, source: "cache" | "geocode") => {
+      if (myRunId !== placePinsRunIdRef.current[scope]) {
+        console.log("[addPlacePins:cancelled]", place.name, "myRun:", myRunId, "current:", placePinsRunIdRef.current[scope]);
+        if (!cancellationLogged) {
+          cancellationLogged = true;
+          console.log(`[PindMap:pin] runId ${myRunId} cancelled (newer run started)`);
+        }
+        return;
+      }
+      try {
+        const marker = new window.kakao.maps.Marker({
+          map,
+          position: new window.kakao.maps.LatLng(markerLat, markerLng),
+          image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
+        });
+        if (source === "cache") {
+          console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng, "(cached coords)");
+        } else {
+          console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng);
+        }
+        savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
+        window.kakao.maps.event.addListener(marker, "click", () => {
+          const clickToken = Date.now();
+          console.log("[place click]", place.name, "token:", clickToken);
+          selectedPlaceTokenRef.current = clickToken;
+          const relatedPosts = posts.filter((p) => !p.archived && p.placeName === place.name);
+          // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
+          console.log("[place click:setSelected1]", place.name);
+          setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
+          new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
+            console.log("[place click:keywordSearch]", place.name, "status:", st, "data.length:", data?.length ?? 0);
+            if (selectedPlaceTokenRef.current !== clickToken) {
+              console.log("[place click:tokenMismatch]", "expected:", clickToken, "current:", selectedPlaceTokenRef.current);
+              return;
+            }
+            if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
+            const nearest = data
+              .map((it) => {
+                const y = parseFloat(it.y);
+                const x = parseFloat(it.x);
+                if (!Number.isFinite(y) || !Number.isFinite(x)) return null;
+                return { place: it, meters: distanceMeters(markerLat, markerLng, y, x) };
+              })
+              .filter((v): v is { place: any; meters: number } => Boolean(v))
+              .sort((a, b) => a.meters - b.meters)[0];
+            if (!nearest || nearest.meters > 100) {
+              console.log("[PindMap:pin] keywordSearch fallback keep saved data", place.name, nearest?.meters);
+              return;
+            }
+            const baseSelected = toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng);
+            const safeNearest =
+              nearest.place && typeof nearest.place === "object" ? nearest.place as Record<string, unknown> : {};
+            const mergedSafely: Record<string, unknown> = { ...baseSelected };
+            for (const key of Object.keys(safeNearest)) {
+              const v = safeNearest[key];
+              if (v !== undefined && v !== null && v !== "") {
+                mergedSafely[key] = v;
+              }
+            }
+            mergedSafely._feedPosts = relatedPosts;
+            mergedSafely._savedPlaceId = place.id;
+            console.log("[place click:setSelected2]", place.name, "merged keys:", Object.keys(mergedSafely));
+            setSelectedPlace(mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string });
+          });
+        });
+        arr.push(marker);
+        done();
+      } catch (err) {
+        console.error("[PindMap:pin] addPlacePins marker setup failed", place?.name, err);
+        done();
+      }
+    };
     places.forEach((place) => {
       console.log("[addPlacePins:start]", place.name, "address:", place.address);
+      const cached = savedPlaceCoordsRef.current[place.id];
+      if (
+        cached &&
+        typeof cached.lat === "number" &&
+        typeof cached.lng === "number" &&
+        Number.isFinite(cached.lat) &&
+        Number.isFinite(cached.lng)
+      ) {
+        attachSavedPlaceMarkerAtLatLng(place, cached.lat, cached.lng, "cache");
+        return;
+      }
       geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
         try {
           console.log("[addPlacePins:geocode]", place.name, "ok:", sv === window.kakao.maps.services.Status.OK);
@@ -2122,61 +2205,9 @@ function HomePageContent() {
             done();
             return;
           }
-          const marker = new window.kakao.maps.Marker({
-            map,
-            position: new window.kakao.maps.LatLng(result[0].y, result[0].x),
-            image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
-          });
           const markerLat = parseFloat(result[0].y);
           const markerLng = parseFloat(result[0].x);
-          console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng);
-          savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
-          window.kakao.maps.event.addListener(marker, "click", () => {
-            const clickToken = Date.now();
-            console.log("[place click]", place.name, "token:", clickToken);
-            selectedPlaceTokenRef.current = clickToken;
-            const relatedPosts = posts.filter((p) => !p.archived && p.placeName === place.name);
-            // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
-            console.log("[place click:setSelected1]", place.name);
-            setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
-            new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
-              console.log("[place click:keywordSearch]", place.name, "status:", st, "data.length:", data?.length ?? 0);
-              if (selectedPlaceTokenRef.current !== clickToken) {
-                console.log("[place click:tokenMismatch]", "expected:", clickToken, "current:", selectedPlaceTokenRef.current);
-                return;
-              }
-              if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
-              const nearest = data
-                .map((it) => {
-                  const y = parseFloat(it.y);
-                  const x = parseFloat(it.x);
-                  if (!Number.isFinite(y) || !Number.isFinite(x)) return null;
-                  return { place: it, meters: distanceMeters(markerLat, markerLng, y, x) };
-                })
-                .filter((v): v is { place: any; meters: number } => Boolean(v))
-                .sort((a, b) => a.meters - b.meters)[0];
-              if (!nearest || nearest.meters > 100) {
-                console.log("[PindMap:pin] keywordSearch fallback keep saved data", place.name, nearest?.meters);
-                return;
-              }
-              const baseSelected = toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng);
-              const safeNearest =
-                nearest.place && typeof nearest.place === "object" ? nearest.place as Record<string, unknown> : {};
-              const mergedSafely: Record<string, unknown> = { ...baseSelected };
-              for (const key of Object.keys(safeNearest)) {
-                const v = safeNearest[key];
-                if (v !== undefined && v !== null && v !== "") {
-                  mergedSafely[key] = v;
-                }
-              }
-              mergedSafely._feedPosts = relatedPosts;
-              mergedSafely._savedPlaceId = place.id;
-              console.log("[place click:setSelected2]", place.name, "merged keys:", Object.keys(mergedSafely));
-              setSelectedPlace(mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string });
-            });
-          });
-          arr.push(marker);
-          done();
+          attachSavedPlaceMarkerAtLatLng(place, markerLat, markerLng, "geocode");
         } catch (err) {
           console.error("[PindMap:pin] addPlacePins marker setup failed", place?.name, err);
           done();
