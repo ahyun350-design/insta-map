@@ -2423,7 +2423,6 @@ function HomePageContent() {
     initialPinTriggeredRef.current = false;
     prevSavedPlacesKeyRef.current = "";
     relayoutTriggeredRef.current = false;
-    orchestratorSuccessKeyRef.current = "";
   }, [mapExpanded]);
 
   // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 재시도로 해소
