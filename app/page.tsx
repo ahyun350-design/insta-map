@@ -350,6 +350,7 @@ function HomePageContent() {
   const pollInFlightRef = useRef<Set<string>>(new Set());
   /** DEBUG: 폴링 status 토스트 중복 방지 (임시) */
   const pollDebugLastStatusRef = useRef<Record<string, string>>({});
+  const handleAddSubmittingRef = useRef(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
   /** 사용자가 위로 스크롤해 과거 메시지를 보면 false — 새 수신 시 자동 스크롤 안 함 */
@@ -1584,6 +1585,9 @@ function HomePageContent() {
       showToast("로그인이 필요합니다.", "error");
       return;
     }
+    if (handleAddSubmittingRef.current) return;
+    handleAddSubmittingRef.current = true;
+    try {
     const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
     const controller = new AbortController();
     console.log("[PindMap:url] extraction start", { url: trimmedUrl });
@@ -1638,6 +1642,9 @@ function HomePageContent() {
       if (typeof timeout === "number") window.clearTimeout(timeout);
       setIsSubmitting(false);
       console.log("[PindMap:url] state reset (finally)", { isSubmitting: false });
+    }
+    } finally {
+      handleAddSubmittingRef.current = false;
     }
   };
 
