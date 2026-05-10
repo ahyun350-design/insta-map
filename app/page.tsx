@@ -348,8 +348,6 @@ function HomePageContent() {
   const [coursePlaceCoords, setCoursePlaceCoords] = useState<Record<string, LatLng>>({});
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const pollInFlightRef = useRef<Set<string>>(new Set());
-  /** DEBUG: 폴링 status 토스트 중복 방지 (임시) */
-  const pollDebugLastStatusRef = useRef<Record<string, string>>({});
   const handleAddSubmittingRef = useRef(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -744,7 +742,6 @@ function HomePageContent() {
     if (pollingTargets.length === 0) return;
 
     const removeJob = (jobId: string) => {
-      showToast(`[DEBUG] removeJob 호출 - jobId: ${jobId.slice(0, 8)}`, "info");
       delete pollAttemptsRef.current[jobId];
       pollInFlightRef.current.delete(jobId);
       setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
@@ -774,12 +771,6 @@ function HomePageContent() {
 
         const nextStatus = data.status;
         const nextStep = data.progress_step ?? "";
-        const prevDbgStatus = pollDebugLastStatusRef.current[jobId];
-        if (prevDbgStatus !== nextStatus) {
-          pollDebugLastStatusRef.current[jobId] = nextStatus;
-          const placesDbgLen = Array.isArray(data.result_places) ? data.result_places.length : 0;
-          showToast(`[DEBUG] 상태: ${nextStatus}, places: ${placesDbgLen}`, "info");
-        }
         setActiveJobs((prev) => prev.map((job) => job.jobId === jobId ? { ...job, status: nextStatus, progressStep: nextStep } : job));
 
         const shouldHandleCompleted = nextStatus === "completed"
@@ -819,24 +810,19 @@ function HomePageContent() {
             address: p.address,
             category: p.category,
           }));
-          showToast(`[DEBUG] rows 생성 - rows.length: ${rows.length}, 첫 id: ${rows[0]?.id?.slice(0, 12) ?? "(없음)"}`, "info");
           if (rows.length > 0) {
-            showToast(`[DEBUG] supabase insert 시도 - rows: ${rows.length}`, "info");
-            const { data: insertedData, error: insertError } = await supabase.from("places").insert(rows).select();
-            showToast(`[DEBUG] supabase 응답 - error: ${insertError ? String(insertError.message ?? insertError).slice(0, 30) : "OK"}, returned: ${insertedData?.length ?? 0}`, "info");
-            showToast(`[DEBUG] setSavedPlaces 직전 - 추가: ${rows.length}, 함수형 updater`, "info");
-            setSavedPlaces((prev) => {
-              const mapped = rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category }));
-              const next = [...mapped, ...prev.filter((p) => !rows.some((r) => r.id === p.id))];
-              showToast(`[DEBUG] updater 실행 - prev: ${prev.length}, new: ${next.length}`, "info");
-              return next;
-            });
+            const { error: insertError } = await supabase.from("places").insert(rows).select();
+            if (insertError) {
+              showToast(`[DEBUG] supabase 응답 - error: ${String(insertError.message ?? insertError).slice(0, 60)}`, "error");
+            }
+            setSavedPlaces((prev) => [
+              ...rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category })),
+              ...prev.filter((p) => !rows.some((r) => r.id === p.id)),
+            ]);
           } else {
             showToast("[DEBUG] rows 0개라서 insert 스킵", "info");
           }
-          showToast(`[DEBUG] 성공 토스트 직전 - rows: ${rows.length}, places: ${places.length}`, "info");
           showToast(`✨ ${rows.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
-          showToast(`[DEBUG] 완료 - 새 places: ${rows.length}, 총 savedPlaces: ${savedPlaces.length}`, "info");
           setStatus("");
           console.log("[PindMap:url] extraction message hidden (success)");
           return;
@@ -1603,7 +1589,6 @@ function HomePageContent() {
     const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
     const controller = new AbortController();
     console.log("[PindMap:url] extraction start", { url: trimmedUrl });
-    showToast(`[DEBUG] 새 추출 시작 - activeJobs: ${activeJobs.length}`, "info");
     setIsSubmitting(true); setStatus(""); setError("");
     orchestratorSuccessKeyRef.current = "";
     window.localStorage.removeItem(ACTIVE_JOBS_STORAGE_KEY);
@@ -1631,7 +1616,6 @@ function HomePageContent() {
         status: "pending",
         progressStep: "대기 중",
       };
-      showToast(`[DEBUG] start 성공 - jobId: ${data.jobId.slice(0, 8)}, 기존 jobs: ${activeJobs.length}`, "info");
       setActiveJobs((prev) => [newJob, ...prev.filter((job) => job.jobId !== newJob.jobId)]);
       setInstagramUrl("");
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
@@ -1815,7 +1799,6 @@ function HomePageContent() {
             if (!cancellationLogged) {
               cancellationLogged = true;
               console.log(`[PindMap:pin] runId ${myRunId} cancelled (newer run started)`);
-              showToast("[DEBUG] 핀 cancel - runId 변경됨", "info");
             }
             return;
           }
@@ -2340,7 +2323,6 @@ function HomePageContent() {
     const cycleKey = `${mapInstanceIdRef.current}::${savedPlacesKey}`;
     if (orchestratorSuccessKeyRef.current === cycleKey) {
       console.log("[PindMap:pin] orchestrator cycle skipped - same key");
-      showToast("[DEBUG] 오케스트레이터 스킵 - same key", "info");
       return;
     }
 
@@ -2388,7 +2370,6 @@ function HomePageContent() {
             clearMarkerPoll();
             orchestratorSuccessKeyRef.current = cycleKey;
             console.log("[PindMap:pin] orchestrator cycle %d success at attempt %d (markers: %d)", cycleId, attempt, markerCount);
-            showToast(`[DEBUG] 핀 성공 attempt: ${attempt}, markers: ${markerCount}`, "info");
             return;
           }
           if (Date.now() - pollStartedAt >= MARKER_POLL_MAX_MS) {
