@@ -364,6 +364,8 @@ function HomePageContent() {
   /** 지도 탭 작은 지도 패널에 Map 인스턴스 생성까지 완료 */
   const [compactMapReady, setCompactMapReady] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
+  /** 확장 지도 인스턴스가 생길 때마다 증가 — 핀만 별도 effect에서 단일 경로로 그리기 */
+  const [expandedMapPinsTick, setExpandedMapPinsTick] = useState(0);
   const [showJobsModal, setShowJobsModal] = useState(false);
   const [activeJobs, setActiveJobs] = useState<ActiveExtractJob[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
@@ -2089,12 +2091,19 @@ function HomePageContent() {
                 console.log("[PindMap:pin] keywordSearch fallback keep saved data", place.name, nearest?.meters);
                 return;
               }
-              setSelectedPlace({
-                ...toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng),
-                ...nearest.place,
-                _feedPosts: relatedPosts,
-                _savedPlaceId: place.id,
-              });
+              const baseSelected = toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng);
+              const safeNearest =
+                nearest.place && typeof nearest.place === "object" ? nearest.place as Record<string, unknown> : {};
+              const mergedSafely: Record<string, unknown> = { ...baseSelected };
+              for (const key of Object.keys(safeNearest)) {
+                const v = safeNearest[key];
+                if (v !== undefined && v !== null && v !== "") {
+                  mergedSafely[key] = v;
+                }
+              }
+              mergedSafely._feedPosts = relatedPosts;
+              mergedSafely._savedPlaceId = place.id;
+              setSelectedPlace(mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string });
             });
           });
           arr.push(marker);
@@ -2670,7 +2679,7 @@ function HomePageContent() {
       console.log("[PindMap:expandedMap] Map instance ready, wiring kakao click + DOM touch fallback");
 
       addMyLocation(map, "expanded");
-      addPlacePins(map, expandedMarkersRef.current, feedPosts, savedPlaces, "expanded");
+      setExpandedMapPinsTick((n) => n + 1);
 
       const hitFromLatLng = (lat: number, lng: number, source: string): boolean => {
         const candidates = lastExpandedSearchPlacesRef.current;
@@ -2771,7 +2780,7 @@ function HomePageContent() {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
     addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts, savedPlaces, "expanded");
     // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
-  }, [feedPosts, mapExpanded, savedPlaces]);
+  }, [feedPosts, mapExpanded, savedPlaces, expandedMapPinsTick]);
 
   useEffect(() => { if (!openMenuId) return; const handler = () => setOpenMenuId(null); document.addEventListener("click", handler); return () => document.removeEventListener("click", handler); }, [openMenuId]);
 
@@ -2795,7 +2804,7 @@ function HomePageContent() {
     if (!selectedPlace) return null;
     const relatedPosts: FeedPost[] = selectedPlace._feedPosts ?? [];
     return (
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: "0.5px solid #efefef", borderRadius: "16px 16px 0 0", boxShadow: "0 -4px 20px rgba(0,0,0,0.08)", zIndex: 10, maxHeight: "60vh", overflowY: "auto" }}>
+      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: "0.5px solid #efefef", borderRadius: "16px 16px 0 0", boxShadow: "0 -4px 20px rgba(0,0,0,0.08)", zIndex: 1000, isolation: "isolate", pointerEvents: "auto", maxHeight: "60vh", overflowY: "auto" }}>
         <div style={{ padding: "20px 24px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "0.5px solid #f0f0f0" }}>
           <div style={{ flex: 1 }}>
             <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a1a2e", fontWeight: 400 }}>{selectedPlace.place_name}</p>
