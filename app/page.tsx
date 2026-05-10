@@ -19,6 +19,14 @@ type FeedPost = {
   category: Category; comment: string; images: string[]; createdAt: string;
   archived?: boolean; likes: string[]; comments: Comment[];
 };
+type PostImageItem = {
+  id: string;
+  previewUrl: string;
+  publicUrl?: string;
+  status: "uploading" | "uploaded" | "failed";
+  file?: File;
+  error?: string;
+};
 type FriendRoom = { id: string; friendId: string; friendName: string };
 type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; unreadCount: number; };
 
@@ -318,7 +326,16 @@ function HomePageContent() {
   const [postTitle, setPostTitle] = useState(""); const [postPlaceName, setPostPlaceName] = useState("");
   const [postAddress, setPostAddress] = useState(""); const [postCategory, setPostCategory] = useState<Category>("카페");
   const [postComment, setPostComment] = useState(""); const [postSearchQuery, setPostSearchQuery] = useState("");
-  const [postSearchResults, setPostSearchResults] = useState<any[]>([]); const [postImages, setPostImages] = useState<string[]>([]);
+  const [postSearchResults, setPostSearchResults] = useState<any[]>([]); const [postImages, setPostImages] = useState<PostImageItem[]>([]);
+  const postImagesRef = useRef<PostImageItem[]>([]);
+  postImagesRef.current = postImages;
+  useEffect(() => {
+    return () => {
+      postImagesRef.current.forEach((img) => {
+        if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
+      });
+    };
+  }, []);
   const [loading, setLoading] = useState(true);
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
   const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
@@ -450,7 +467,8 @@ function HomePageContent() {
   }, [savedPlaces]);
 
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
-  const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImages.length > 0;
+  const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
+  const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImagesAllUploaded;
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
   const isAnalyzing = activeJobs.length > 0;
   const analyzingMainText = isAnalyzing
@@ -1646,9 +1664,91 @@ function HomePageContent() {
     }
   };
 
+  const uploadPostImageToServer = async (file: File, accessToken: string): Promise<string> => {
+    console.log("[handleImageUpload] 원본", {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    });
+    const prepared = await prepareImageForUpload(file);
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}-${Math.random().toString(36).substring(2, 11)}.jpg`;
+    console.log("[handleImageUpload] 압축 완료, 업로드 시작", { fileName, size: prepared.size });
+
+    const formData = new FormData();
+    formData.append("file", prepared, fileName);
+    formData.append("fileName", fileName);
+
+    const fetchPromise = fetch("/api/upload/image", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: formData,
+      credentials: "include",
+    });
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("업로드 시간이 너무 오래 걸려요. 다시 시도해주세요.")), 10000);
+    });
+
+    const res = await Promise.race([fetchPromise, timeoutPromise]);
+
+    const data = (await res.json().catch(() => ({}))) as { publicUrl?: string; error?: string };
+    const publicUrlRaw: string | undefined = data?.publicUrl;
+    const uploadFailed = !res.ok || !publicUrlRaw || typeof publicUrlRaw !== "string";
+    console.log("[handleImageUpload] Storage upload 응답", { ok: res.ok, status: res.status, hasError: uploadFailed });
+
+    if (!res.ok) {
+      console.error("[handleImageUpload] API 업로드 실패", data);
+      throw new Error(data.error || `사진 업로드 실패 (${res.status})`);
+    }
+
+    console.log("[handleImageUpload] publicUrl 생성", publicUrlRaw);
+    if (!publicUrlRaw || typeof publicUrlRaw !== "string") {
+      console.error("[handleImageUpload] publicUrl 누락", data);
+      throw new Error("사진 업로드 응답이 올바르지 않아요. 다시 시도해주세요.");
+    }
+
+    const publicUrl = publicUrlRaw;
+    console.log("[handleImageUpload] 완료", publicUrl);
+    return publicUrl;
+  };
+
+  const retryPostImageUpload = (item: PostImageItem) => {
+    if (item.status !== "failed" || !item.file) return;
+    const { id, file } = item;
+    void (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        showToast("로그인이 필요합니다.", "error");
+        return;
+      }
+      setPostImages((prev) =>
+        prev.map((img) => (img.id === id ? { ...img, status: "uploading" as const, error: undefined } : img)),
+      );
+      try {
+        const publicUrl = await uploadPostImageToServer(file, session.access_token);
+        setPostImages((prev) => {
+          const next = prev.map((img) => {
+            if (img.id !== id) return img;
+            if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
+            return { id: img.id, previewUrl: "", publicUrl, status: "uploaded" as const };
+          });
+          console.log("[handleImageUpload] state 추가 완료, 총 이미지:", next.length);
+          return next;
+        });
+      } catch (err) {
+        console.error("[handleImageUpload] 재시도 예외", err);
+        setPostImages((prev) =>
+          prev.map((img) => (img.id === id ? { ...img, status: "failed" as const, error: err instanceof Error ? err.message : "오류", file } : img)),
+        );
+        showToast("사진 업로드에 실패했어요. 다시 시도해주세요", "error");
+      }
+    })();
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []).slice(0, 6 - postImages.length);
     e.target.value = "";
+    if (files.length === 0) return;
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
@@ -1658,71 +1758,36 @@ function HomePageContent() {
     const accessToken = session.access_token;
 
     for (const file of files) {
-      try {
-        console.log("[handleImageUpload] 원본", {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-        });
+      const id =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      const previewUrl = URL.createObjectURL(file);
+      setPostImages((prev) => [...prev, { id, previewUrl, status: "uploading", file }]);
 
-        const prepared = await prepareImageForUpload(file);
-        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}.jpg`;
-        console.log("[handleImageUpload] 압축 완료, 업로드 시작", { fileName, size: prepared.size });
-
-        const formData = new FormData();
-        formData.append("file", prepared, fileName);
-        formData.append("fileName", fileName);
-
-        const fetchPromise = fetch("/api/upload/image", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}` },
-          body: formData,
-          credentials: "include",
-        });
-
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("업로드 시간이 너무 오래 걸려요. 다시 시도해주세요.")), 10000);
-        });
-
-        const res = await Promise.race([fetchPromise, timeoutPromise]);
-
-        const data = (await res.json().catch(() => ({}))) as { publicUrl?: string; error?: string };
-        const publicUrlRaw: string | undefined = data?.publicUrl;
-        const uploadFailed = !res.ok || !publicUrlRaw || typeof publicUrlRaw !== "string";
-        console.log("[handleImageUpload] Storage upload 응답", { ok: res.ok, status: res.status, hasError: uploadFailed });
-
-        if (!res.ok) {
-          console.error("[handleImageUpload] API 업로드 실패", data);
-          showToast(data.error || `사진 업로드 실패 (${res.status})`, "error");
-          continue;
-        }
-
-        console.log("[handleImageUpload] publicUrl 생성", publicUrlRaw);
-        if (!publicUrlRaw || typeof publicUrlRaw !== "string") {
-          console.error("[handleImageUpload] publicUrl 누락", data);
-          showToast("사진 업로드 응답이 올바르지 않아요. 다시 시도해주세요.", "error");
-          continue;
-        }
-
-        const publicUrl = publicUrlRaw;
-        console.log("[handleImageUpload] 완료", publicUrl);
-        setPostImages((prev) => {
-          const next = [...prev, publicUrl];
-          console.log("[handleImageUpload] state 추가 완료, 총 이미지:", next.length);
-          return next;
-        });
-      } catch (err) {
-        console.error("[handleImageUpload] 예외", err);
-        const msg = err instanceof Error ? err.message : "";
-        if (msg === "업로드 시간이 너무 오래 걸려요. 다시 시도해주세요.") {
-          showToast("사진 업로드가 10초 안에 끝나지 않았어요. 네트워크를 확인한 뒤 다시 시도해주세요.", "error");
-        } else {
-          showToast(
-            err instanceof Error ? err.message : "사진 처리 중 오류가 발생했어요",
-            "error",
+      void (async () => {
+        try {
+          const publicUrl = await uploadPostImageToServer(file, accessToken);
+          setPostImages((prev) => {
+            const next = prev.map((img) => {
+              if (img.id !== id) return img;
+              if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
+              return { id: img.id, previewUrl: "", publicUrl, status: "uploaded" as const };
+            });
+            console.log("[handleImageUpload] state 추가 완료, 총 이미지:", next.length);
+            return next;
+          });
+        } catch (err) {
+          console.error("[handleImageUpload] 예외", err);
+          const msg = err instanceof Error ? err.message : "알 수 없는 오류";
+          setPostImages((prev) =>
+            prev.map((img) =>
+              img.id === id ? { ...img, status: "failed" as const, error: msg, file } : img,
+            ),
           );
+          showToast(`${file.name}: 업로드 실패. 재시도해주세요`, "error");
         }
-      }
+      })();
     }
   };
 
@@ -1759,13 +1824,32 @@ function HomePageContent() {
       showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
       return;
     }
-    const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USERNAME, userId: user?.id || "", title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: postImages, createdAt: new Date().toISOString(), likes: [], comments: [] };
+    const imageUrls = postImages
+      .filter((img): img is PostImageItem & { publicUrl: string; status: "uploaded" } =>
+        img.status === "uploaded" && typeof img.publicUrl === "string",
+      )
+      .map((img) => img.publicUrl);
+    const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USERNAME, userId: user?.id || "", title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: imageUrls, createdAt: new Date().toISOString(), likes: [], comments: [] };
     await submitPost(newPost);
     showToast("큐레이션이 등록됐어요 ✨", "success");
-    setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]); setActiveTab("home");
+    setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페");
+    setPostImages((prev) => {
+      prev.forEach((img) => {
+        if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
+      });
+      return [];
+    });
+    setActiveTab("home");
   };
   const resetModal = () => {
-    setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페"); setPostImages([]); setPostSearchQuery(""); setPostSearchResults([]);
+    setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페");
+    setPostImages((prev) => {
+      prev.forEach((img) => {
+        if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
+      });
+      return [];
+    });
+    setPostSearchQuery(""); setPostSearchResults([]);
   };
 
   const addMyLocation = (map: any, scope: "main" | "expanded" = "main") => {
@@ -3291,13 +3375,70 @@ function HomePageContent() {
                 <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>카테고리</p><div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>{(["맛집", "카페", "쇼핑", "숙소"] as Category[]).map((cat) => (<button key={cat} type="button" onClick={() => setPostCategory(cat)} style={{ padding: "6px 14px", borderRadius: "20px", border: `1px solid ${postCategory === cat ? CATEGORY_COLORS[cat] : "#eee"}`, background: postCategory === cat ? CATEGORY_COLORS[cat] : "transparent", color: postCategory === cat ? "#fff" : "#888", fontSize: "12px", cursor: "pointer" }}>{CATEGORY_PIN[cat].emoji} {cat}</button>))}</div></div>
                 <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>사진 추가 (최대 6장)</p>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                    {postImages.map((img, i) => (<div key={i} style={{ position: "relative", width: "72px", height: "72px" }}><img src={img} style={{ width: "72px", height: "72px", objectFit: "cover", borderRadius: "6px" }} /><button onClick={() => setPostImages(prev => prev.filter((_, idx) => idx !== i))} style={{ position: "absolute", top: "-6px", right: "-6px", width: "18px", height: "18px", borderRadius: "50%", background: "#333", border: "none", color: "#fff", fontSize: "11px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button></div>))}
+                    {postImages.map((img) => {
+                      const thumbSrc = img.status === "uploaded" && img.publicUrl ? img.publicUrl : img.previewUrl;
+                      return (
+                        <div key={img.id} style={{ position: "relative", width: "72px", height: "72px" }}>
+                          <img src={thumbSrc} alt="" style={{ width: "72px", height: "72px", objectFit: "cover", borderRadius: "6px", opacity: img.status === "uploading" ? 0.65 : 1 }} />
+                          {img.status === "uploading" && (
+                            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", borderRadius: "6px", background: "rgba(255,255,255,0.35)" }}>
+                              <span style={{ fontSize: "18px" }} aria-hidden>⏳</span>
+                            </div>
+                          )}
+                          {img.status === "failed" && (
+                            <div style={{ position: "absolute", inset: 0, borderRadius: "6px", background: "rgba(224,112,112,0.35)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px", padding: "4px" }}>
+                              <span style={{ fontSize: "13px", color: "#a03030", fontWeight: 700 }} aria-hidden>✕</span>
+                              <button
+                                type="button"
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  retryPostImageUpload(img);
+                                }}
+                                style={{ fontSize: "9px", padding: "3px 6px", borderRadius: "4px", border: "none", background: "#fff", cursor: "pointer", color: "#1a2a7a", fontFamily: "inherit" }}
+                              >
+                                재시도
+                              </button>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setPostImages((prev) => {
+                                const removed = prev.find((x) => x.id === img.id);
+                                if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+                                return prev.filter((x) => x.id !== img.id);
+                              });
+                            }}
+                            style={{ position: "absolute", top: "-6px", right: "-6px", width: "18px", height: "18px", borderRadius: "50%", background: "#333", border: "none", color: "#fff", fontSize: "11px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
                     {postImages.length < 6 && (<button type="button" onClick={() => imageInputRef.current?.click()} style={{ width: "72px", height: "72px", border: "1px dashed #ccc", borderRadius: "6px", background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px", color: "#bbb" }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#bbb" strokeWidth="2" strokeLinecap="round"/></svg><span style={{ fontSize: "10px" }}>사진 추가</span></button>)}
                   </div>
                   <input ref={imageInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImageUpload} />
                 </div>
                 <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "6px", marginTop: 0 }}>코멘트</p><textarea placeholder="이 장소에 대한 느낌을 자유롭게 적어주세요 ✍️" value={postComment} onChange={(e) => setPostComment(e.target.value)} rows={4} style={{ width: "100%", border: "0.5px solid #ddd", borderRadius: "4px", padding: "10px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", outline: "none", boxSizing: "border-box", color: "#333" }} /></div>
-                {!canPost && <p style={{ fontSize: "11px", color: "#e07070", margin: 0, textAlign: "center" }}>{!postTitle ? "제목을 입력해주세요" : !postPlaceName ? "장소를 검색하고 선택해주세요" : postImages.length === 0 ? "사진을 최소 1장 추가해주세요" : "코멘트를 입력해주세요"}</p>}
+                {!canPost && (
+                  <p style={{ fontSize: "11px", color: "#e07070", margin: 0, textAlign: "center" }}>
+                    {!postTitle.trim()
+                      ? "제목을 입력해주세요"
+                      : !postPlaceName.trim()
+                        ? "장소를 검색하고 선택해주세요"
+                        : postImages.length === 0
+                          ? "사진을 최소 1장 추가해주세요"
+                          : postImages.some((i) => i.status === "uploading")
+                            ? "사진 업로드가 완료될 때까지 기다려주세요"
+                            : postImages.some((i) => i.status === "failed")
+                              ? "실패한 사진을 제거하거나 재시도해주세요"
+                              : !postComment.trim()
+                                ? "코멘트를 입력해주세요"
+                                : "모든 사진 업로드가 끝나야 등록할 수 있어요"}
+                  </p>
+                )}
                 <button className="primaryButton" type="button" disabled={!canPost} onClick={handleSubmitPost} style={{ width: "100%", padding: "14px", fontSize: "14px", letterSpacing: "1px", opacity: canPost ? 1 : 0.4 }}>올리기</button>
               </div>
             </div>
