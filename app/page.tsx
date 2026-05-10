@@ -1660,14 +1660,25 @@ function HomePageContent() {
 
         const prepared = await prepareImageForUpload(file);
         const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}.jpg`;
+        console.log("[handleImageUpload] 압축 완료, 업로드 시작", { fileName, size: prepared.size });
 
-        const { error: uploadError } = await supabase.storage
+        const uploadPromise = supabase.storage
           .from("post-images")
           .upload(fileName, prepared, {
             contentType: "image/jpeg",
             cacheControl: "3600",
             upsert: false,
           });
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("업로드 시간이 너무 오래 걸려요. 다시 시도해주세요.")), 10000);
+        });
+
+        const { error: uploadError } = (await Promise.race([uploadPromise, timeoutPromise])) as Awaited<
+          typeof uploadPromise
+        >;
+
+        console.log("[handleImageUpload] Storage upload 응답", { hasError: !!uploadError });
 
         if (uploadError) {
           console.error("[handleImageUpload] Storage 오류", uploadError);
@@ -1679,14 +1690,24 @@ function HomePageContent() {
           .from("post-images")
           .getPublicUrl(fileName);
 
+        console.log("[handleImageUpload] publicUrl 생성", publicUrl);
         console.log("[handleImageUpload] 완료", publicUrl);
-        setPostImages((prev) => [...prev, publicUrl]);
+        setPostImages((prev) => {
+          const next = [...prev, publicUrl];
+          console.log("[handleImageUpload] state 추가 완료, 총 이미지:", next.length);
+          return next;
+        });
       } catch (err) {
         console.error("[handleImageUpload] 예외", err);
-        showToast(
-          err instanceof Error ? err.message : "사진 처리 중 오류가 발생했어요",
-          "error",
-        );
+        const msg = err instanceof Error ? err.message : "";
+        if (msg === "업로드 시간이 너무 오래 걸려요. 다시 시도해주세요.") {
+          showToast("사진 업로드가 10초 안에 끝나지 않았어요. 네트워크를 확인한 뒤 다시 시도해주세요.", "error");
+        } else {
+          showToast(
+            err instanceof Error ? err.message : "사진 처리 중 오류가 발생했어요",
+            "error",
+          );
+        }
       }
     }
   };
