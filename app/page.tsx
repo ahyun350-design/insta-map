@@ -828,16 +828,29 @@ function HomePageContent() {
           }));
           if (rows.length > 0) {
             try {
-              const { error: insertError } = await supabase.from("places").insert(rows).select();
-              if (insertError) {
-                showToast("장소 저장에 실패했어요. 다시 시도해주세요.", "error");
+              const { data: { session: insertSession } } = await supabase.auth.getSession();
+              if (!insertSession?.access_token) {
+                throw new Error("장소 저장에 실패했어요. 다시 시도해주세요.");
+              }
+              const insertRes = await fetch("/api/places/insert-many", {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${insertSession.access_token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ rows }),
+              });
+              const insertBody = (await insertRes.json().catch(() => ({}))) as { error?: string };
+              if (!insertRes.ok) {
+                throw new Error(insertBody.error || "장소 저장에 실패했어요. 다시 시도해주세요.");
               }
               setSavedPlaces((prev) => [
                 ...rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category })),
                 ...prev.filter((p) => !rows.some((r) => r.id === p.id)),
               ]);
             } catch (insertErr) {
-              showToast("장소 저장에 실패했어요. 다시 시도해주세요.", "error");
+              const msg = insertErr instanceof Error ? insertErr.message : "장소 저장에 실패했어요. 다시 시도해주세요.";
+              showToast(msg, "error");
               throw insertErr;
             }
           }
@@ -878,13 +891,59 @@ function HomePageContent() {
   }, [activeJobs, user?.id, showPlaceExtractionGuideToast, showToast]);
 
   const addPlace = async (place: Place) => {
-    if (!user?.id) return;
-    await supabase.from("places").upsert({ id: place.id, user_id: user.id, name: place.name, address: place.address, category: place.category });
-    setSavedPlaces(prev => [place, ...prev.filter(p => p.id !== place.id)]);
+    if (!user?.id) {
+      showToast("로그인 후 이용해주세요", "info");
+      return;
+    }
+
+    const optimisticPlace = { ...place };
+    setSavedPlaces((prev) => [optimisticPlace, ...prev.filter((p) => p.id !== place.id)]);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("세션 만료");
+
+      const res = await fetch("/api/places/upsert", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(place),
+      });
+
+      if (!res.ok) {
+        setSavedPlaces((prev) => prev.filter((p) => p.id !== place.id));
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || `저장 실패 (${res.status})`);
+      }
+    } catch (err) {
+      setSavedPlaces((prev) => prev.filter((p) => p.id !== place.id));
+      showToast(err instanceof Error ? err.message : "저장에 실패했어요", "error");
+    }
   };
   const deletePlace = async (id: string) => {
-    await supabase.from("places").delete().eq("id", id);
-    setSavedPlaces(prev => prev.filter(p => p.id !== id));
+    const previous = savedPlaces.slice();
+    setSavedPlaces((prev) => prev.filter((p) => p.id !== id));
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("세션 만료");
+
+      const res = await fetch(`/api/places/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+
+      if (!res.ok) {
+        setSavedPlaces(previous);
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || `삭제 실패 (${res.status})`);
+      }
+    } catch (err) {
+      setSavedPlaces(previous);
+      showToast(err instanceof Error ? err.message : "삭제에 실패했어요", "error");
+    }
   };
   const submitPost = async (post: FeedPost) => {
     await supabase.from("feed_posts").insert({ id: post.id, user_id: user?.id || "", user_name: MY_USERNAME, title: post.title, place_name: post.placeName, address: post.address, category: post.category, comment: post.comment, images: post.images, likes: [], archived: false });
