@@ -502,6 +502,13 @@ function HomePageContent() {
   const lastExpandedSearchPlacesRef = useRef<any[]>([]);
   /** effect 정리 시 DOM/카카오 리스너 제거 */
   const expandedMapInteractionCleanupRef = useRef<(() => void) | null>(null);
+  /** 진단용 임시 (WK 핀 회귀) — 원인 파악 후 제거 */
+  const debugLastSkipRef = useRef("init");
+  const debugAddPlacePinsCallCountRef = useRef(0);
+  const debugInitMapCallCountRef = useRef(0);
+  const debugRafCancelCountRef = useRef(0);
+  const debugMarkersAttachedCountRef = useRef(0);
+  const debugLastInitMapResultRef = useRef("none");
   const feedPostsRef = useRef<FeedPost[]>(feedPosts);
   feedPostsRef.current = feedPosts;
   const roomChannelRef = useRef<any>(null);
@@ -509,6 +516,13 @@ function HomePageContent() {
   const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
   const placeExtractionToastTimerRef = useRef<number | null>(null);
   const [showPlaceExtractionToast, setShowPlaceExtractionToast] = useState(false);
+  const [debugTick, setDebugTick] = useState(0);
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setDebugTick((n) => n + 1);
+    }, 500);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
   const showPlaceExtractionGuideToast = useCallback(() => {
@@ -2075,7 +2089,11 @@ function HomePageContent() {
 
   // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
   const initMap = (places: Place[], posts: FeedPost[]) => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    debugInitMapCallCountRef.current += 1;
+    if (!mapContainerRef.current || mapRef.current) {
+      debugLastInitMapResultRef.current = `silent_return_container=${!!mapContainerRef.current}_map=${!!mapRef.current}`;
+      return;
+    }
     const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
     mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 9 });
     mapInstanceIdRef.current += 1;
@@ -2083,6 +2101,7 @@ function HomePageContent() {
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current, "main");
     setCompactMapReady(true);
+    debugLastInitMapResultRef.current = "success";
   };
 
   const addPlacePins = (map: any, arr: any[], posts: FeedPost[], places: Place[], scope: "main" | "expanded" = "main") => {
@@ -2120,6 +2139,7 @@ function HomePageContent() {
           position: new window.kakao.maps.LatLng(markerLat, markerLng),
           image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
         });
+        debugMarkersAttachedCountRef.current += 1;
         if (source === "cache") {
           console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng, "(cached coords)");
         } else {
@@ -2665,19 +2685,23 @@ function HomePageContent() {
     console.log("[PindMap:pin] orchestrator triggered");
     console.log("[PindMap:pin] orchestrator conditions: kakao=%s, map=%s, ready=%s, places=%d", kakaoStatus, hasMap, compactMapReady, savedPlaces.length);
     if (activeTab !== "map") {
+      debugLastSkipRef.current = "inactive_tab";
       console.log("[PindMap:pin] orchestrator skipped - reason: inactive_tab");
       return;
     }
     if (kakaoStatus !== "ready") {
+      debugLastSkipRef.current = "kakao_not_ready";
       console.log("[PindMap:pin] orchestrator skipped - reason: kakao_not_ready");
       return;
     }
     const map = mapRef.current;
     if (!map) {
+      debugLastSkipRef.current = "map_missing";
       console.log("[PindMap:pin] orchestrator skipped - reason: map_missing");
       return;
     }
     if (!compactMapReady) {
+      debugLastSkipRef.current = "compact_not_ready";
       console.log("[PindMap:pin] orchestrator skipped - reason: compact_map_not_ready");
       return;
     }
@@ -2685,6 +2709,7 @@ function HomePageContent() {
     const savedPlacesKey = savedPlaces.map((p) => `${p.id}:${p.name}:${p.address}`).join("|");
     const cycleKey = `${mapInstanceIdRef.current}::${savedPlacesKey}`;
     if (orchestratorSuccessKeyRef.current === cycleKey) {
+      debugLastSkipRef.current = "same_key";
       console.log("[PindMap:pin] orchestrator cycle skipped - same key");
       return;
     }
@@ -2716,9 +2741,12 @@ function HomePageContent() {
       console.log("[PindMap:pin] orchestrator cycle %d attempt %d/3", cycleId, attempt);
       map.relayout?.();
       console.log("[PindMap:pin] orchestrator: relayout done");
+      debugLastSkipRef.current = "raf_scheduled";
       pendingRaf = window.requestAnimationFrame(() => {
         if (cancelled) return;
         console.log("[PindMap:pin] orchestrator: rAF done");
+        debugAddPlacePinsCallCountRef.current += 1;
+        debugLastSkipRef.current = "addPlacePins_called";
         addPlacePins(map, markersRef.current, feedPosts, savedPlaces, "main");
         console.log("[PindMap:pin] orchestrator: addPlacePins done with %d places", savedPlaces.length);
         const pollStartedAt = Date.now();
@@ -2759,7 +2787,10 @@ function HomePageContent() {
     runAttempt(1);
     return () => {
       cancelled = true;
-      if (pendingRaf !== null) window.cancelAnimationFrame(pendingRaf);
+      if (pendingRaf !== null) {
+        window.cancelAnimationFrame(pendingRaf);
+        debugRafCancelCountRef.current += 1;
+      }
       if (pendingTimer !== null) window.clearTimeout(pendingTimer);
       clearMarkerPoll();
     };
@@ -3963,6 +3994,42 @@ function HomePageContent() {
 )}
 
           <div className="screen" style={{ display: activeTab === "map" ? "flex" : "none", flexDirection: "column" }}>
+              {activeTab === "map" && (
+                <div
+                  style={{
+                    position: "fixed",
+                    top: "70px",
+                    right: "8px",
+                    background: "rgba(0,0,0,0.9)",
+                    color: "white",
+                    fontSize: "9px",
+                    padding: "8px",
+                    borderRadius: "4px",
+                    fontFamily: "monospace",
+                    zIndex: 99999,
+                    pointerEvents: "none",
+                    maxWidth: "180px",
+                    lineHeight: "1.4",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <div>map: {mapRef.current ? "Y" : "N"}</div>
+                  <div>ready: {compactMapReady ? "Y" : "N"}</div>
+                  <div>kakao: {kakaoStatus}</div>
+                  <div>expanded: {mapExpanded ? "Y" : "N"}</div>
+                  <div>initMap: {debugInitMapCallCountRef.current}</div>
+                  <div>initRes: {debugLastInitMapResultRef.current}</div>
+                  <div>pins: {debugAddPlacePinsCallCountRef.current}</div>
+                  <div>skip: {debugLastSkipRef.current}</div>
+                  <div>rafCancel: {debugRafCancelCountRef.current}</div>
+                  <div>markers: {markersRef.current?.length ?? 0}</div>
+                  <div>attached: {debugMarkersAttachedCountRef.current}</div>
+                  <div>saved: {savedPlaces?.length ?? 0}</div>
+                  <div>hidden: {hiddenIds?.size ?? 0}</div>
+                  <div>mapInst: {mapInstanceIdRef.current}</div>
+                  <div>t: {debugTick}</div>
+                </div>
+              )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <p className="screenTitle" style={{ marginBottom: 0 }}>지도</p>
                 {activeJobs.length > 0 && (
