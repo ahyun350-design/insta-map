@@ -778,11 +778,9 @@ function HomePageContent() {
           || (!!nextStep && nextStep.includes("완료") && Array.isArray(data.result_places));
         if (shouldHandleCompleted) {
           if (completedJobIdsRef.current.has(jobId)) {
-            showToast(`[DEBUG] completed 스킵 - 이미 처리됨: ${jobId.slice(0, 8)}`, "info");
             return;
           }
           completedJobIdsRef.current.add(jobId);
-          showToast(`[DEBUG] completed 처리 진입 - jobId: ${jobId.slice(0, 8)}, places: ${Array.isArray(data.result_places) ? data.result_places.length : 0}`, "info");
           removeJob(jobId);
           const places = data.result_places ?? [];
           if (places.length === 0) {
@@ -793,19 +791,15 @@ function HomePageContent() {
             setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
             return;
           }
-          showToast(`[DEBUG] dedupe 직전 - places: ${places.length}, savedPlaces: ${savedPlaces.length}`, "info");
           const existingSet = new Set(
             savedPlaces.map((p) => `${String(p.name).trim()}::${String(p.address).trim()}`),
           );
-          showToast(`[DEBUG] existingSet 크기: ${existingSet.size}`, "info");
-          showToast("[DEBUG] uniquePlaces filter 시작", "info");
           const uniquePlaces = places.filter((p) => {
             const key = `${p.name.trim()}::${p.address.trim()}`;
             if (existingSet.has(key)) return false;
             existingSet.add(key);
             return true;
           });
-          showToast(`[DEBUG] uniquePlaces filter 끝 - unique: ${uniquePlaces.length}`, "info");
           const duplicateCount = places.length - uniquePlaces.length;
           const rows = uniquePlaces.map((p) => ({
             id: Math.random().toString(36).substring(2) + Date.now().toString(36),
@@ -815,26 +809,19 @@ function HomePageContent() {
             category: p.category,
           }));
           if (rows.length > 0) {
-            showToast(`[DEBUG] supabase insert 시작 - rows: ${rows.length}`, "info");
             try {
-              const { data: insertReturned, error: insertError } = await supabase.from("places").insert(rows).select();
+              const { error: insertError } = await supabase.from("places").insert(rows).select();
               if (insertError) {
-                showToast(`[DEBUG] supabase 응답 - error: ${String(insertError.message ?? insertError).slice(0, 60)}`, "error");
-              } else {
-                showToast(`[DEBUG] supabase insert 끝 - returned: ${insertReturned?.length ?? 0}`, "info");
+                showToast("장소 저장에 실패했어요. 다시 시도해주세요.", "error");
               }
               setSavedPlaces((prev) => [
                 ...rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category })),
                 ...prev.filter((p) => !rows.some((r) => r.id === p.id)),
               ]);
-              showToast("[DEBUG] setSavedPlaces 완료", "info");
             } catch (insertErr) {
-              const msg = insertErr instanceof Error ? insertErr.message : String(insertErr);
-              showToast(`[DEBUG] supabase insert 예외: ${msg.slice(0, 80)}`, "error");
+              showToast("장소 저장에 실패했어요. 다시 시도해주세요.", "error");
               throw insertErr;
             }
-          } else {
-            showToast("[DEBUG] rows 0개라서 insert 스킵", "info");
           }
           showToast(`✨ ${rows.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
           setStatus("");
@@ -2334,7 +2321,6 @@ function HomePageContent() {
       return;
     }
 
-    showToast("[DEBUG] 오케스트레이터 진입", "info");
     const savedPlacesKey = savedPlaces.map((p) => `${p.id}:${p.name}:${p.address}`).join("|");
     const cycleKey = `${mapInstanceIdRef.current}::${savedPlacesKey}`;
     if (orchestratorSuccessKeyRef.current === cycleKey) {
@@ -2402,7 +2388,6 @@ function HomePageContent() {
               return;
             }
             console.log("[PindMap:pin] orchestrator cycle %d failed after 3 attempts (markers: %d, places: %d)", cycleId, markerCountFinal, visiblePlacesCount);
-            showToast(`[DEBUG] 핀 실패 - markers: ${markerCountFinal}, places: ${visiblePlacesCount}`, "info");
           }
         };
         pollIntervalId = window.setInterval(pollTick, MARKER_POLL_INTERVAL_MS);
