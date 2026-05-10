@@ -785,6 +785,7 @@ function HomePageContent() {
         const shouldHandleCompleted = nextStatus === "completed"
           || (!!nextStep && nextStep.includes("완료") && Array.isArray(data.result_places));
         if (shouldHandleCompleted) {
+          showToast(`[DEBUG] completed 처리 진입 - jobId: ${jobId.slice(0, 8)}, places: ${Array.isArray(data.result_places) ? data.result_places.length : 0}`, "info");
           removeJob(jobId);
           const places = data.result_places ?? [];
           if (places.length === 0) {
@@ -817,11 +818,16 @@ function HomePageContent() {
             category: p.category,
           }));
           if (rows.length > 0) {
-            await supabase.from("places").insert(rows);
-            setSavedPlaces((prev) => [
-              ...rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category })),
-              ...prev.filter((p) => !rows.some((r) => r.id === p.id)),
-            ]);
+            showToast(`[DEBUG] supabase insert 시도 - rows: ${rows.length}`, "info");
+            const { data: insertedData, error: insertError } = await supabase.from("places").insert(rows).select();
+            showToast(`[DEBUG] supabase 응답 - error: ${insertError ? String(insertError.message ?? insertError).slice(0, 30) : "OK"}, returned: ${insertedData?.length ?? 0}`, "info");
+            showToast(`[DEBUG] setSavedPlaces 직전 - 추가: ${rows.length}, 함수형 updater`, "info");
+            setSavedPlaces((prev) => {
+              const mapped = rows.map((r) => ({ id: r.id, name: r.name, address: r.address, category: r.category as Category }));
+              const next = [...mapped, ...prev.filter((p) => !rows.some((r) => r.id === p.id))];
+              showToast(`[DEBUG] updater 실행 - prev: ${prev.length}, new: ${next.length}`, "info");
+              return next;
+            });
           }
           showToast(`✨ ${rows.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
           showToast(`[DEBUG] 완료 - 새 places: ${rows.length}, 총 savedPlaces: ${savedPlaces.length}`, "info");
