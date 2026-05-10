@@ -796,6 +796,7 @@ function HomePageContent() {
             setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
             return;
           }
+          showToast(`[DEBUG] dedupe 직전 - places: ${places.length}, savedPlaces: ${savedPlaces.length}`, "info");
           const { data: existingPlaces } = await supabase
             .from("places")
             .select("name,address")
@@ -810,6 +811,7 @@ function HomePageContent() {
             return true;
           });
           const duplicateCount = places.length - uniquePlaces.length;
+          showToast(`[DEBUG] dedupe 결과 - unique: ${uniquePlaces.length}`, "info");
           const rows = uniquePlaces.map((p) => ({
             id: Math.random().toString(36).substring(2) + Date.now().toString(36),
             user_id: user.id,
@@ -817,6 +819,7 @@ function HomePageContent() {
             address: p.address,
             category: p.category,
           }));
+          showToast(`[DEBUG] rows 생성 - rows.length: ${rows.length}, 첫 id: ${rows[0]?.id?.slice(0, 12) ?? "(없음)"}`, "info");
           if (rows.length > 0) {
             showToast(`[DEBUG] supabase insert 시도 - rows: ${rows.length}`, "info");
             const { data: insertedData, error: insertError } = await supabase.from("places").insert(rows).select();
@@ -828,7 +831,10 @@ function HomePageContent() {
               showToast(`[DEBUG] updater 실행 - prev: ${prev.length}, new: ${next.length}`, "info");
               return next;
             });
+          } else {
+            showToast("[DEBUG] rows 0개라서 insert 스킵", "info");
           }
+          showToast(`[DEBUG] 성공 토스트 직전 - rows: ${rows.length}, places: ${places.length}`, "info");
           showToast(`✨ ${rows.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
           showToast(`[DEBUG] 완료 - 새 places: ${rows.length}, 총 savedPlaces: ${savedPlaces.length}`, "info");
           setStatus("");
