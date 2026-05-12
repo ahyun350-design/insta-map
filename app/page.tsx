@@ -809,6 +809,45 @@ function HomePageContent() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (!detailPostId || !user) return;
+    void (async () => {
+      try {
+        await supabase
+          .from("notifications")
+          .update({ read: true })
+          .eq("user_id", user.id)
+          .in("type", ["like", "comment"])
+          .eq("target_id", detailPostId)
+          .eq("read", false);
+        setNotifications((prev) =>
+          prev.map((n) =>
+            (n.type === "like" || n.type === "comment") && n.target_id === detailPostId ? { ...n, read: true } : n,
+          ),
+        );
+      } catch (err) {
+        console.error("[PindMap:notify] mark like/comment notifications read failed", err);
+      }
+    })();
+  }, [detailPostId, user]);
+
+  useEffect(() => {
+    if (!showNotifications || !user) return;
+    void (async () => {
+      try {
+        await supabase
+          .from("notifications")
+          .update({ read: true })
+          .eq("user_id", user.id)
+          .eq("type", "follow")
+          .eq("read", false);
+        setNotifications((prev) => prev.map((n) => (n.type === "follow" ? { ...n, read: true } : n)));
+      } catch (err) {
+        console.error("[PindMap:notify] mark follow notifications read failed", err);
+      }
+    })();
+  }, [showNotifications, user]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     try {
       const saved = window.localStorage.getItem(HIDDEN_PLACE_IDS_STORAGE_KEY);
@@ -1342,6 +1381,23 @@ function HomePageContent() {
     setMessages([]);
     setActiveChatRoom(room);
     await supabase.from("messages").update({ read: true }).eq("room_id", room.id).neq("sender_id", MY_USER).eq("read", false);
+    const me = user?.id;
+    if (me && room?.id) {
+      try {
+        await supabase
+          .from("notifications")
+          .update({ read: true })
+          .eq("user_id", me)
+          .eq("type", "message")
+          .eq("target_id", room.id)
+          .eq("read", false);
+        setNotifications((prev) =>
+          prev.map((n) => (n.type === "message" && n.target_id === room.id ? { ...n, read: true } : n)),
+        );
+      } catch (err) {
+        console.error("[PindMap:notify] mark message notifications read failed", err);
+      }
+    }
     if (reqId !== openChatRequestRef.current) return;
     setChatRooms(prev => prev.map(r => r.id === room.id ? { ...r, unreadCount: 0 } : r));
     const { data } = await supabase.from("messages").select("*").eq("room_id", room.id).order("created_at", { ascending: true });
