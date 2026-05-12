@@ -358,7 +358,7 @@ export default function HomePage() {
 function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, loading: userLoading } = useUser();
+  const { user, loading: userLoading, sessionChecked } = useUser();
   const MY_USER = user?.id || "";
   const MY_USERNAME = user?.username || "";
   type Notification = {
@@ -762,26 +762,26 @@ function HomePageContent() {
   };
 
   useEffect(() => {
-    if (!userLoading && !user) {
+    if (!sessionChecked) return;
+    if (userLoading) return;
+    if (!user) {
       router.push("/login");
       return;
     }
-    if (user) {
-      void loadData();
-    }
-  }, [user, userLoading]);
+    void loadData();
+  }, [user, userLoading, sessionChecked]);
 
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (!user || userLoading) return;
+      if (!user || userLoading || !sessionChecked) return;
       if (!homeLoadError) return;
       console.log("[PindMap:home] 포그라운드 복귀 - 자동 재시도");
       void loadData(true);
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [homeLoadError, user, userLoading]);
+  }, [homeLoadError, user, userLoading, sessionChecked]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -839,7 +839,7 @@ function HomePageContent() {
   }, [savedPlaces]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || userLoading || !user) return;
+    if (typeof window === "undefined" || !sessionChecked || userLoading || !user) return;
     try {
       const raw = window.localStorage.getItem(ACTIVE_JOBS_STORAGE_KEY);
       if (!raw) return;
@@ -857,7 +857,7 @@ function HomePageContent() {
     } catch {
       // ignore invalid storage value
     }
-  }, [user, userLoading]);
+  }, [user, userLoading, sessionChecked]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -3089,7 +3089,7 @@ function HomePageContent() {
       </div>
     );
   };
-  if (userLoading) {
+  if (userLoading || !sessionChecked) {
     return (
       <main className="mobileRoot">
         <section className="phoneFrame" style={{ display: "flex", flexDirection: "column", background: "#fafafa" }}>

@@ -42,7 +42,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const params = useParams<{ username: string }>();
   const routeUsername = useMemo(() => decodeURIComponent(params?.username ?? ""), [params?.username]);
-  const { user, loading: userLoading } = useUser();
+  const { user, loading: userLoading, sessionChecked } = useUser();
 
   const [profile, setProfile] = useState<ProfileUser | null>(null);
   const [posts, setPosts] = useState<ProfilePost[]>([]);
@@ -64,10 +64,12 @@ export default function ProfilePage() {
   const isOwnProfile = !!user && !!profile && user.id === profile.id;
 
   useEffect(() => {
-    if (!userLoading && !user) {
+    if (!sessionChecked) return;
+    if (userLoading) return;
+    if (!user) {
       router.push("/login");
     }
-  }, [user, userLoading, router]);
+  }, [user, userLoading, sessionChecked, router]);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -149,10 +151,9 @@ export default function ProfilePage() {
       setLoadingProfile(false);
     };
 
-    if (!userLoading && user) {
-      void loadProfile();
-    }
-  }, [user, userLoading, routeUsername]);
+    if (!sessionChecked || userLoading || !user) return;
+    void loadProfile();
+  }, [user, userLoading, sessionChecked, routeUsername]);
 
   const toggleFollow = async () => {
     if (!user || !profile || user.id === profile.id || followLoading) return;
@@ -248,7 +249,7 @@ export default function ProfilePage() {
     }
   };
 
-  if (userLoading || loadingProfile) {
+  if (userLoading || loadingProfile || !sessionChecked) {
     return (
       <main style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}>
         <p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p>

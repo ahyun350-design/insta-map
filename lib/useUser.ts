@@ -13,8 +13,19 @@ export type AppUser = {
 export function useUser() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   useEffect(() => {
+    setSessionChecked(false);
+    const loadFinishedRef = { current: false };
+    const listenerFiredRef = { current: false };
+
+    const tryMarkSessionChecked = () => {
+      if (loadFinishedRef.current && listenerFiredRef.current) {
+        setSessionChecked(true);
+      }
+    };
+
     let timeoutId: number | null = null;
     let timeoutTriggered = false;
     const AUTH_TIMEOUT_MS = 8000;
@@ -25,6 +36,7 @@ export function useUser() {
         timeoutTriggered = true;
         console.warn("[PindMap:home][auth] timeout - loading forced off");
         setLoading(false);
+        setSessionChecked(true);
       }, AUTH_TIMEOUT_MS);
     };
     const stopAuthWatchdog = () => {
@@ -72,12 +84,15 @@ export function useUser() {
     const loadUser = async () => {
       console.log("[PindMap:home][auth] loadUser start");
       startAuthWatchdog();
+      /** getSession에서 user가 확인되면 리스너 대기 없이 sessionChecked (로딩 단축). null 세션만 리스너+워치독 게이트 유지 (N-1 WK). */
+      let loadUserHadAuthUser = false;
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user) {
           setUser(null);
           return;
         }
+        loadUserHadAuthUser = true;
 
         await ensureUserExists(
           session.user.id,
@@ -109,6 +124,12 @@ export function useUser() {
         console.error("[PindMap:home][auth] loadUser failed", err);
         setUser(null);
       } finally {
+        loadFinishedRef.current = true;
+        if (loadUserHadAuthUser) {
+          setSessionChecked(true);
+        } else {
+          tryMarkSessionChecked();
+        }
         stopAuthWatchdog();
         setLoading(false);
         if (timeoutTriggered) {
@@ -122,6 +143,10 @@ export function useUser() {
     // 2) 로그인/로그아웃 변화 감지 (실시간)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
+        if (!listenerFiredRef.current) {
+          listenerFiredRef.current = true;
+          tryMarkSessionChecked();
+        }
         console.log("[PindMap:home][auth] onAuthStateChange start");
         startAuthWatchdog();
         try {
@@ -171,7 +196,7 @@ export function useUser() {
     };
   }, []);
 
-  return { user, loading };
+  return { user, loading, sessionChecked };
 }
 
 // 로그아웃 함수
