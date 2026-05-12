@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser, logout } from "@/lib/useUser";
+import { usePushNotifications } from "@/lib/usePushNotifications";
 import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
@@ -359,6 +360,7 @@ function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: userLoading, sessionChecked } = useUser();
+  usePushNotifications(user?.id);
   const MY_USER = user?.id || "";
   const MY_USERNAME = user?.username || "";
   const userIdRef = useRef<string>("");
