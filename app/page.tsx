@@ -505,6 +505,8 @@ function HomePageContent() {
   const feedPostsRef = useRef<FeedPost[]>(feedPosts);
   feedPostsRef.current = feedPosts;
   const roomChannelRef = useRef<any>(null);
+  /** Realtime INSERT 시 read 처리: 이 방을 실제로 보고 있을 때만 true (구독만 붙은 백그라운드와 구분) */
+  const activeChatRoomIdRef = useRef<string | null>(null);
   const openChatRequestRef = useRef(0);
   const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
   const placeExtractionToastTimerRef = useRef<number | null>(null);
@@ -1315,6 +1317,7 @@ function HomePageContent() {
   };
 
   const unmountRoomSubscription = useCallback((reason: string) => {
+    activeChatRoomIdRef.current = null;
     if (!roomChannelRef.current) return;
     console.log("[PindMap:message] subscription unmounted", reason);
     supabase.removeChannel(roomChannelRef.current);
@@ -1328,7 +1331,7 @@ function HomePageContent() {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` }, async (payload: any) => {
         const m = payload.new;
         setMessages(prev => prev.some(msg => msg.id === m.id) ? prev : [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read, status: "sent" }]);
-        if (m.sender_id !== MY_USER) {
+        if (m.sender_id !== MY_USER && activeChatRoomIdRef.current === roomId) {
           await supabase.from("messages").update({ read: true }).eq("id", m.id);
         }
       })
@@ -1338,6 +1341,7 @@ function HomePageContent() {
       })
       .subscribe();
     roomChannelRef.current = channel;
+    activeChatRoomIdRef.current = roomId;
     console.log("[PindMap:message] subscription mounted", roomId);
   }, [unmountRoomSubscription]);
 
