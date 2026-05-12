@@ -28,13 +28,15 @@ export function useUser() {
 
     let timeoutId: number | null = null;
     let timeoutTriggered = false;
-    const AUTH_TIMEOUT_MS = 8000;
+    /** loadUser 시작 시점 기준 단발 데드라인 — onAuthStateChange마다 리셋하지 않음(starvation 방지) */
+    const AUTH_TIMEOUT_MS = 5000;
 
-    const startAuthWatchdog = () => {
-      if (timeoutId) window.clearTimeout(timeoutId);
+    const startAuthWatchdogOnce = () => {
+      if (timeoutId !== null) return;
       timeoutId = window.setTimeout(() => {
+        timeoutId = null;
         timeoutTriggered = true;
-        console.warn("[PindMap:home][auth] timeout - loading forced off");
+        console.warn("[PindMap:home][auth] auth watchdog fired - loading forced off");
         setLoading(false);
         setSessionChecked(true);
       }, AUTH_TIMEOUT_MS);
@@ -83,7 +85,7 @@ export function useUser() {
     // 1) 페이지 처음 로드시 현재 세션 확인
     const loadUser = async () => {
       console.log("[PindMap:home][auth] loadUser start");
-      startAuthWatchdog();
+      startAuthWatchdogOnce();
       /** getSession에서 user가 확인되면 리스너 대기 없이 sessionChecked (로딩 단축). null 세션만 리스너+워치독 게이트 유지 (N-1 WK). */
       let loadUserHadAuthUser = false;
       try {
@@ -148,7 +150,6 @@ export function useUser() {
           tryMarkSessionChecked();
         }
         console.log("[PindMap:home][auth] onAuthStateChange start");
-        startAuthWatchdog();
         try {
           if (!session?.user) {
             setUser(null);
