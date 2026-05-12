@@ -361,6 +361,8 @@ function HomePageContent() {
   const { user, loading: userLoading, sessionChecked } = useUser();
   const MY_USER = user?.id || "";
   const MY_USERNAME = user?.username || "";
+  const userIdRef = useRef<string>("");
+  userIdRef.current = user?.id || "";
   type Notification = {
     id: string;
     user_id: string;
@@ -1331,7 +1333,8 @@ function HomePageContent() {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` }, async (payload: any) => {
         const m = payload.new;
         setMessages(prev => prev.some(msg => msg.id === m.id) ? prev : [...prev, { id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read, status: "sent" }]);
-        if (m.sender_id !== MY_USER && activeChatRoomIdRef.current === roomId) {
+        const currentUserId = userIdRef.current;
+        if (currentUserId && m.sender_id !== currentUserId && activeChatRoomIdRef.current === roomId) {
           await supabase.from("messages").update({ read: true }).eq("id", m.id);
         }
       })
