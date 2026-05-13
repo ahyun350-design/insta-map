@@ -1,5 +1,6 @@
 "use client";
 
+import { App } from "@capacitor/app";
 import { FirebaseMessaging } from "@capacitor-firebase/messaging";
 import { Capacitor } from "@capacitor/core";
 import { useEffect } from "react";
@@ -14,6 +15,14 @@ async function saveFcmToken(userId: string, token: string) {
   }
 }
 
+async function clearDeliveredNotificationsQuietly() {
+  try {
+    await FirebaseMessaging.removeAllDeliveredNotifications();
+  } catch {
+    /* 알림 센터/배지 정리 실패 무시 */
+  }
+}
+
 export function usePushNotifications(userId: string | undefined) {
   useEffect(() => {
     if (!userId) return;
@@ -22,6 +31,8 @@ export function usePushNotifications(userId: string | undefined) {
     let tokenReceivedListener: { remove: () => void } | undefined;
     let notificationReceivedListener: { remove: () => void } | undefined;
     let notificationActionListener: { remove: () => void } | undefined;
+    let appStateListener: { remove: () => void } | undefined;
+    let appListenerCancelled = false;
 
     const init = async () => {
       try {
@@ -62,14 +73,33 @@ export function usePushNotifications(userId: string | undefined) {
       } catch (e) {
         console.error("[push] 초기화 실패", e);
       }
+
+      try {
+        await FirebaseMessaging.removeAllDeliveredNotifications();
+      } catch {
+        /* 앱 최초 진입 시 배지/전달 알림 정리 실패 무시 */
+      }
     };
 
     void init();
 
+    void (async () => {
+      const handle = await App.addListener("appStateChange", ({ isActive }) => {
+        if (isActive) void clearDeliveredNotificationsQuietly();
+      });
+      if (appListenerCancelled) {
+        handle.remove();
+        return;
+      }
+      appStateListener = handle;
+    })();
+
     return () => {
+      appListenerCancelled = true;
       tokenReceivedListener?.remove();
       notificationReceivedListener?.remove();
       notificationActionListener?.remove();
+      appStateListener?.remove();
     };
   }, [userId]);
 }
