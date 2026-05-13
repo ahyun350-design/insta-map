@@ -2,6 +2,7 @@ import UIKit
 import Capacitor
 import FirebaseCore
 import FirebaseMessaging
+import UserNotifications
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -28,6 +29,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive.
+        DispatchQueue.main.async {
+            if #available(iOS 17.0, *) {
+                UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
+            } else {
+                UIApplication.shared.applicationIconBadgeNumber = 0
+            }
+        }
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
