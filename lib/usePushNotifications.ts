@@ -1,56 +1,56 @@
 "use client";
 
-import { PushNotifications } from "@capacitor/push-notifications";
+import { FirebaseMessaging } from "@capacitor-firebase/messaging";
 import { Capacitor } from "@capacitor/core";
 import { useEffect } from "react";
 import { supabase } from "./supabase";
+
+async function saveFcmToken(userId: string, token: string) {
+  try {
+    const { error } = await supabase.from("users").update({ fcm_token: token }).eq("id", userId);
+    if (error) console.error("[push] token 저장 실패", error);
+  } catch (e) {
+    console.error("[push] token 저장 실패", e);
+  }
+}
 
 export function usePushNotifications(userId: string | undefined) {
   useEffect(() => {
     if (!userId) return;
     if (!Capacitor.isNativePlatform()) return;
 
-    let registrationListener: any = null;
-    let errorListener: any = null;
-    let receivedListener: any = null;
-    let actionListener: any = null;
+    let tokenReceivedListener: { remove: () => void } | undefined;
+    let notificationReceivedListener: { remove: () => void } | undefined;
+    let notificationActionListener: { remove: () => void } | undefined;
 
     const init = async () => {
       try {
-        let permStatus = await PushNotifications.checkPermissions();
-        if (permStatus.receive === "prompt") {
-          permStatus = await PushNotifications.requestPermissions();
-        }
-        if (permStatus.receive !== "granted") {
+        const perm = await FirebaseMessaging.requestPermissions();
+        if (perm.receive !== "granted") {
           console.log("[push] 권한 거부됨");
           return;
         }
 
-        await PushNotifications.register();
+        const { token } = await FirebaseMessaging.getToken();
+        if (token) {
+          console.log("[push] FCM token 받음");
+          await saveFcmToken(userId, token);
+        }
 
-        registrationListener = await PushNotifications.addListener(
-          "registration",
-          async (token) => {
-            console.log("[push] device token 받음");
-            try {
-              await supabase.from("users").update({ fcm_token: token.value }).eq("id", userId);
-            } catch (e) {
-              console.error("[push] token 저장 실패", e);
-            }
-          },
-        );
-
-        errorListener = await PushNotifications.addListener("registrationError", (err) => {
-          console.error("[push] 등록 에러", err);
+        tokenReceivedListener = await FirebaseMessaging.addListener("tokenReceived", async (event) => {
+          console.log("[push] FCM token 갱신", event.token);
+          if (event.token) await saveFcmToken(userId, event.token);
         });
 
-        receivedListener = await PushNotifications.addListener("pushNotificationReceived", (notification) => {
-          console.log("[push] 도착", notification);
+        notificationReceivedListener = await FirebaseMessaging.addListener("notificationReceived", (event) => {
+          console.log("[push] 도착", event.notification);
         });
 
-        actionListener = await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-          console.log("[push] 클릭", action.notification.data);
-          const data = action.notification.data as { type?: string; room_id?: string; post_id?: string; actor_username?: string };
+        notificationActionListener = await FirebaseMessaging.addListener("notificationActionPerformed", (event) => {
+          console.log("[push] 클릭", event.notification?.data);
+          const data = event.notification?.data as
+            | { type?: string; room_id?: string; post_id?: string; actor_username?: string }
+            | undefined;
           if (data?.type === "message" && data?.room_id) {
             window.location.href = `/?openChatRoom=${encodeURIComponent(data.room_id)}`;
           } else if ((data?.type === "like" || data?.type === "comment") && data?.post_id) {
@@ -67,10 +67,9 @@ export function usePushNotifications(userId: string | undefined) {
     void init();
 
     return () => {
-      registrationListener?.remove?.();
-      errorListener?.remove?.();
-      receivedListener?.remove?.();
-      actionListener?.remove?.();
+      tokenReceivedListener?.remove();
+      notificationReceivedListener?.remove();
+      notificationActionListener?.remove();
     };
   }, [userId]);
 }
