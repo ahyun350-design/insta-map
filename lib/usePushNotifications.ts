@@ -6,6 +6,11 @@ import { Capacitor } from "@capacitor/core";
 import { useEffect } from "react";
 import { supabase } from "./supabase";
 
+/** 배지 API — 네이티브 플러그인에 포함, 일부 배포의 .d.ts에는 아직 없을 수 있음 */
+type FirebaseMessagingWithBadge = typeof FirebaseMessaging & {
+  setBadgeCount(options: { badgeCount: number }): Promise<void>;
+};
+
 async function saveFcmToken(userId: string, token: string) {
   try {
     const { error } = await supabase.from("users").update({ fcm_token: token }).eq("id", userId);
@@ -16,10 +21,12 @@ async function saveFcmToken(userId: string, token: string) {
 }
 
 async function clearDeliveredNotificationsQuietly() {
+  const fcm = FirebaseMessaging as FirebaseMessagingWithBadge;
   try {
-    await FirebaseMessaging.removeAllDeliveredNotifications();
+    await fcm.removeAllDeliveredNotifications();
+    await fcm.setBadgeCount({ badgeCount: 0 });
   } catch {
-    /* 알림 센터/배지 정리 실패 무시 */
+    /* 알림 센터 / 앱 아이콘 배지 정리 실패 무시 */
   }
 }
 
@@ -75,7 +82,9 @@ export function usePushNotifications(userId: string | undefined) {
       }
 
       try {
-        await FirebaseMessaging.removeAllDeliveredNotifications();
+        const fcm = FirebaseMessaging as FirebaseMessagingWithBadge;
+        await fcm.removeAllDeliveredNotifications();
+        await fcm.setBadgeCount({ badgeCount: 0 });
       } catch {
         /* 앱 최초 진입 시 배지/전달 알림 정리 실패 무시 */
       }
