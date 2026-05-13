@@ -87,7 +87,7 @@ export default function SignupPage() {
     const marketingChecked = agreeMarketing;
 
     // Supabase에 회원가입 요청
-    const { data, error: signupError } = await supabase.auth.signUp({
+    const { error: signupError } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -111,39 +111,6 @@ export default function SignupPage() {
         setError("회원가입에 실패했어요. 다시 시도해주세요.");
       }
       return;
-    }
-
-    // users 테이블에도 추가
-    if (data.user) {
-      const finalUsername = username.trim() || email.split("@")[0] || "user";
-      const now = new Date().toISOString();
-      const { error: insertError } = await supabase.from("users").upsert(
-        {
-          id: data.user.id,
-          username: finalUsername,
-          terms_agreed_at: now,
-          privacy_agreed_at: now,
-          is_adult: true,
-          marketing_agreed_at: marketingChecked ? now : null,
-        },
-        { onConflict: "id" },
-      );
-      if (insertError) {
-        console.error("users INSERT 실패:", insertError);
-        const msg = insertError.message ?? "";
-        const isUsernameUniqueViolation =
-          insertError.code === "23505" && msg.toLowerCase().includes("username");
-        if (isUsernameUniqueViolation) {
-          setError("이미 사용 중인 닉네임이에요. 다른 닉네임을 선택해주세요");
-          return;
-        } else {
-          setError("회원가입은 완료됐지만 프로필 생성에 실패했어요. 로그인 후 다시 시도해주세요.");
-          window.alert("회원가입은 완료됐지만 프로필 생성에 실패했어요. 로그인 후 다시 시도해주세요.");
-          return;
-        }
-      } else {
-        console.log("users INSERT 성공:", finalUsername);
-      }
     }
 
     setSuccess(true);
