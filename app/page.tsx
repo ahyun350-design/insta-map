@@ -488,6 +488,8 @@ function HomePageContent() {
   const completedJobIdsRef = useRef<Set<string>>(new Set());
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
+  /** 채팅방 나가기/탭 전환 시 blur로 키보드·visualViewport 복구 유도 */
+  const chatComposerInputRef = useRef<HTMLInputElement | null>(null);
   /** 사용자가 위로 스크롤해 과거 메시지를 보면 false — 새 수신 시 자동 스크롤 안 함 */
   const chatStickToBottomRef = useRef(true);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
@@ -525,6 +527,32 @@ function HomePageContent() {
   hiddenIdsRef.current = hiddenIds;
   const activeTabRef = useRef<TabId>(activeTab);
   activeTabRef.current = activeTab;
+
+  /** 키보드 dismiss 후 WKWebView에 남는 상단 오프셋·스크롤 잔여 제거 + overlap 리셋 */
+  const resetViewportAfterChatKeyboard = useCallback(() => {
+    setChatKeyboardOverlap(0);
+    if (typeof window === "undefined") return;
+    const hardScrollReset = () => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+    hardScrollReset();
+    window.requestAnimationFrame(() => {
+      setChatKeyboardOverlap(0);
+      hardScrollReset();
+    });
+    window.setTimeout(() => {
+      setChatKeyboardOverlap(0);
+      hardScrollReset();
+    }, 120);
+  }, []);
+
+  const closeChatRoom = useCallback(() => {
+    chatComposerInputRef.current?.blur();
+    resetViewportAfterChatKeyboard();
+    setActiveChatRoom(null);
+  }, [resetViewportAfterChatKeyboard]);
   /** M-1: 오케스트레이터 3회 실패 후 지연 재시도 (WKWebView 지오코딩 지연) */
   const mainPinFallbackTimerRef = useRef<number | null>(null);
   const mainPinFallbackVerifyIntervalRef = useRef<number | null>(null);
@@ -2841,11 +2869,14 @@ function HomePageContent() {
 
   useEffect(() => {
     if (activeTab !== "messages" || !activeChatRoom) {
-      setChatKeyboardOverlap(0);
+      resetViewportAfterChatKeyboard();
       return;
     }
     const vv = window.visualViewport;
-    if (!vv) return;
+    if (!vv) {
+      resetViewportAfterChatKeyboard();
+      return;
+    }
     const update = () => {
       setChatKeyboardOverlap(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
     };
@@ -2855,9 +2886,14 @@ function HomePageContent() {
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
-      setChatKeyboardOverlap(0);
+      resetViewportAfterChatKeyboard();
     };
-  }, [activeTab, activeChatRoom?.id]);
+  }, [activeTab, activeChatRoom?.id, resetViewportAfterChatKeyboard]);
+
+  useEffect(() => {
+    if (activeTab === "messages") return;
+    resetViewportAfterChatKeyboard();
+  }, [activeTab, resetViewportAfterChatKeyboard]);
 
   useEffect(() => {
     const hasMap = !!mapRef.current;
@@ -4073,7 +4109,7 @@ function HomePageContent() {
     {activeChatRoom ? (
       <>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px 20px 14px", borderBottom: "0.5px solid #f0f0f0", flexShrink: 0 }}>
-          <button onClick={() => setActiveChatRoom(null)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
+          <button type="button" onClick={closeChatRoom} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{activeChatRoom.friendName}</span>
@@ -4116,7 +4152,7 @@ function HomePageContent() {
                           <button
                             type="button"
                             onClick={() => {
-                              setActiveChatRoom(null);
+                              closeChatRoom();
                               setDetailPostId(sharedPostId);
                             }}
                             style={{
@@ -4178,6 +4214,7 @@ function HomePageContent() {
           }}
         >
           <input
+            ref={chatComposerInputRef}
             placeholder="메시지 입력..."
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
