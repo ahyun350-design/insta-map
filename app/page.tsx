@@ -2928,7 +2928,6 @@ function HomePageContent() {
     runAttempt(1);
     return () => {
       cancelled = true;
-      clearMainPinFallbackTimer();
       if (pendingRaf !== null) window.cancelAnimationFrame(pendingRaf);
       if (pendingTimer !== null) window.clearTimeout(pendingTimer);
       clearMarkerPoll();
