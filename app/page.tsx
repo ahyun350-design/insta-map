@@ -442,6 +442,8 @@ function HomePageContent() {
   const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
+  /** iOS/WKWebView 키보드와 하단 입력줄 사이 여백 보정 (visualViewport) */
+  const [chatKeyboardOverlap, setChatKeyboardOverlap] = useState(0);
   const [friendSearch, setFriendSearch] = useState("");
   const [friendSearchResult, setFriendSearchResult] = useState<{id: string; username: string} | null>(null);
   const [friendSearchError, setFriendSearchError] = useState("");
@@ -2829,6 +2831,26 @@ function HomePageContent() {
   }, [messages, activeChatRoom?.id]);
 
   useEffect(() => {
+    if (activeTab !== "messages" || !activeChatRoom) {
+      setChatKeyboardOverlap(0);
+      return;
+    }
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      setChatKeyboardOverlap(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      setChatKeyboardOverlap(0);
+    };
+  }, [activeTab, activeChatRoom?.id]);
+
+  useEffect(() => {
     const hasMap = !!mapRef.current;
     console.log("[PindMap:pin] orchestrator triggered");
     console.log("[PindMap:pin] orchestrator conditions: kakao=%s, map=%s, ready=%s, places=%d", kakaoStatus, hasMap, compactMapReady, savedPlaces.length);
@@ -4020,7 +4042,16 @@ function HomePageContent() {
         <div
           ref={chatMessagesContainerRef}
           onScroll={handleChatMessagesScroll}
-          style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 20px" }}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px",
+            padding: "8px 16px",
+            paddingBottom: "calc(8px + 52px + env(safe-area-inset-bottom, 0px))",
+          }}
         >
           {messages.map(m => {
             const isMine = m.senderId === MY_USER;
@@ -4088,9 +4119,75 @@ function HomePageContent() {
           })}
           {messages.length === 0 && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", marginTop: "40px" }}>첫 메시지를 보내보세요 💬</p>}
         </div>
-        <div style={{ flexShrink: 0, padding: "10px 16px", paddingBottom: "calc(10px + env(safe-area-inset-bottom, 0px))", background: "#fff", borderTop: "0.5px solid #efefef", display: "flex", gap: "8px" }}>
-          <input className="mapInput" placeholder="메시지 입력..." value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { sendMessage(); } }} style={{ flex: 1, minWidth: 0 }} />
-          <button className="primaryButton" onClick={sendMessage} disabled={!newMessage.trim()} style={{ padding: "0 16px", flexShrink: 0, opacity: newMessage.trim() ? 1 : 0.4 }}>전송</button>
+        <div
+          style={{
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: chatKeyboardOverlap,
+            zIndex: 80,
+            boxSizing: "border-box",
+            paddingLeft: "max(12px, env(safe-area-inset-left, 0px))",
+            paddingRight: "max(12px, env(safe-area-inset-right, 0px))",
+            paddingTop: 6,
+            paddingBottom: chatKeyboardOverlap > 0 ? 8 : "max(8px, env(safe-area-inset-bottom, 0px))",
+            background: "#eceef2",
+            borderTop: "0.5px solid #dfe2e8",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <input
+            placeholder="메시지 입력..."
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) sendMessage();
+            }}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              minHeight: 40,
+              maxHeight: 120,
+              padding: "10px 16px",
+              borderRadius: 22,
+              border: "none",
+              background: "#f5f6f8",
+              fontSize: "15px",
+              outline: "none",
+              fontFamily: "inherit",
+              color: "#1a1a1a",
+              boxSizing: "border-box",
+            }}
+          />
+          <button
+            type="button"
+            onClick={sendMessage}
+            disabled={!newMessage.trim()}
+            aria-label="전송"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              border: "none",
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: newMessage.trim() ? "pointer" : "not-allowed",
+              background: newMessage.trim() ? "#3182F6" : "#c9ccd4",
+              color: "#fff",
+              fontSize: "17px",
+              fontWeight: 600,
+              lineHeight: 1,
+              padding: 0,
+              fontFamily: "inherit",
+              opacity: newMessage.trim() ? 1 : 0.85,
+            }}
+          >
+            ↑
+          </button>
         </div>
       </>
     ) : (
