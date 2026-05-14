@@ -521,6 +521,17 @@ body {
   grid-template-columns: repeat(5, 1fr);
 }
 
+/* 메시지 채팅방 진입 시 하단 탭 숨김 — 모바일 .tabBar display:!important 대응 */
+.tabBar.tabBarHidden {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+}
+
 /* 서브 화면 헤더(뒤로가기 56px) — 모바일에서 인라인 height를 덮어 노치 대응 */
 .subpageHeader {
   box-sizing: border-box;

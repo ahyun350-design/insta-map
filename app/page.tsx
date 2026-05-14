@@ -4007,7 +4007,7 @@ function HomePageContent() {
           {activeTab === "messages" && (
   <div
     className={activeChatRoom ? "screen messagesChatShell" : "screen"}
-    style={activeChatRoom ? { display: "flex", flexDirection: "column", padding: 0, minHeight: 0 } : undefined}
+    style={activeChatRoom ? { display: "flex", flexDirection: "column", padding: 0, minHeight: 0, flex: 1 } : undefined}
   >
     {activeChatRoom ? (
       <>
@@ -4489,7 +4489,10 @@ function HomePageContent() {
             </div>
           )}
         </section>
-        <nav className="tabBar">
+        <nav
+          className={`tabBar${activeTab === "messages" && activeChatRoom ? " tabBarHidden" : ""}`}
+          aria-hidden={activeTab === "messages" && activeChatRoom ? true : undefined}
+        >
           {TABS.map((tab) => {
             const totalUnread = chatRooms.reduce((sum, r) => sum + (r.unreadCount ?? 0), 0);
             const showBadge = tab.id === "messages" && totalUnread > 0;
