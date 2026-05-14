@@ -2381,7 +2381,7 @@ function HomePageContent() {
     mainPinFallbackTimerRef.current = window.setTimeout(() => {
       mainPinFallbackTimerRef.current = null;
       runMainPinFallbackOnce(`delayed-after-failure: ${reason} cycle=${cycleId}`);
-    }, 5000);
+    }, 1000);
   };
 
   const addFeedPins = (map: any, arr: any[], posts: FeedPost[]) => {
