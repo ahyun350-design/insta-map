@@ -508,6 +508,29 @@ function HomePageContent() {
   const expandedMapInteractionCleanupRef = useRef<(() => void) | null>(null);
   const feedPostsRef = useRef<FeedPost[]>(feedPosts);
   feedPostsRef.current = feedPosts;
+  const savedPlacesRef = useRef<Place[]>(savedPlaces);
+  savedPlacesRef.current = savedPlaces;
+  const hiddenIdsRef = useRef<Set<string>>(hiddenIds);
+  hiddenIdsRef.current = hiddenIds;
+  const activeTabRef = useRef<TabId>(activeTab);
+  activeTabRef.current = activeTab;
+  /** M-1: 오케스트레이터 3회 실패 후 지연 재시도 (WKWebView 지오코딩 지연) */
+  const mainPinFallbackTimerRef = useRef<number | null>(null);
+  const mainPinFallbackVerifyIntervalRef = useRef<number | null>(null);
+  const prevMapExpandedForFallbackRef = useRef<boolean | null>(null);
+  const clearMainPinFallbackVerify = () => {
+    if (mainPinFallbackVerifyIntervalRef.current !== null) {
+      window.clearInterval(mainPinFallbackVerifyIntervalRef.current);
+      mainPinFallbackVerifyIntervalRef.current = null;
+    }
+  };
+  const clearMainPinFallbackTimer = () => {
+    if (mainPinFallbackTimerRef.current !== null) {
+      window.clearTimeout(mainPinFallbackTimerRef.current);
+      mainPinFallbackTimerRef.current = null;
+    }
+    clearMainPinFallbackVerify();
+  };
   const roomChannelRef = useRef<any>(null);
   /** Realtime INSERT 시 read 처리: 이 방을 실제로 보고 있을 때만 true (구독만 붙은 백그라운드와 구분) */
   const activeChatRoomIdRef = useRef<string | null>(null);
@@ -2310,6 +2333,57 @@ function HomePageContent() {
     });
   };
 
+  /** M-1 최후 안전망: 메인 지도에 보일 장소가 있는데 마커가 없을 때 한 번 더 addPlacePins */
+  const runMainPinFallbackOnce = (source: string) => {
+    if (activeTabRef.current !== "map") {
+      console.log("[PindMap:pin] mainPinFallback skipped — inactive tab (%s)", source);
+      return;
+    }
+    const mapNow = mapRef.current;
+    if (!mapNow || !geocoderRef.current) {
+      console.log("[PindMap:pin] mainPinFallback skipped — no map/geocoder (%s)", source);
+      return;
+    }
+    const places = savedPlacesRef.current;
+    const hidden = hiddenIdsRef.current;
+    const visibleCount = places.filter((p) => !hidden.has(p.id)).length;
+    if (visibleCount === 0) {
+      console.log("[PindMap:pin] mainPinFallback skipped — no visible places (%s)", source);
+      return;
+    }
+    if (markersRef.current.length > 0) {
+      console.log("[PindMap:pin] mainPinFallback skipped — markers already present (%s, n=%d)", source, markersRef.current.length);
+      return;
+    }
+    console.log("[PindMap:pin] mainPinFallback running addPlacePins (%s)", source);
+    mapNow.relayout?.();
+    addPlacePins(mapNow, markersRef.current, feedPostsRef.current, places, "main");
+
+    clearMainPinFallbackVerify();
+    let ticks = 0;
+    mainPinFallbackVerifyIntervalRef.current = window.setInterval(() => {
+      ticks += 1;
+      if (markersRef.current.length > 0) {
+        console.log("[PindMap:pin] mainPinFallback verify ok (markers=%d, ticks=%d)", markersRef.current.length, ticks);
+        clearMainPinFallbackVerify();
+        return;
+      }
+      if (ticks >= 40) {
+        console.log("[PindMap:pin] mainPinFallback verify gave up after ~6s (%s)", source);
+        clearMainPinFallbackVerify();
+      }
+    }, 150);
+  };
+
+  const scheduleMainPinOrchestratorFallback = (reason: string, cycleId: number) => {
+    clearMainPinFallbackTimer();
+    console.log("[PindMap:pin] mainPinFallback scheduled in 5000ms (%s, cycle %d)", reason, cycleId);
+    mainPinFallbackTimerRef.current = window.setTimeout(() => {
+      mainPinFallbackTimerRef.current = null;
+      runMainPinFallbackOnce(`delayed-after-failure: ${reason} cycle=${cycleId}`);
+    }, 5000);
+  };
+
   const addFeedPins = (map: any, arr: any[], posts: FeedPost[]) => {
     if (!geocoderRef.current) return;
     arr.forEach((m) => m.setMap(null)); arr.length = 0;
@@ -2843,6 +2917,7 @@ function HomePageContent() {
               return;
             }
             console.log("[PindMap:pin] orchestrator cycle %d failed after 3 attempts (markers: %d, places: %d)", cycleId, markerCountFinal, visiblePlacesCount);
+            scheduleMainPinOrchestratorFallback("orchestrator-3-attempts-exhausted", cycleId);
           }
         };
         pollIntervalId = window.setInterval(pollTick, MARKER_POLL_INTERVAL_MS);
@@ -2853,11 +2928,31 @@ function HomePageContent() {
     runAttempt(1);
     return () => {
       cancelled = true;
+      clearMainPinFallbackTimer();
       if (pendingRaf !== null) window.cancelAnimationFrame(pendingRaf);
       if (pendingTimer !== null) window.clearTimeout(pendingTimer);
       clearMarkerPoll();
     };
   }, [activeTab, kakaoStatus, compactMapReady, savedPlaces, feedPosts, hiddenIds]);
+
+  /** M-1: 전체 지도 닫힘(true→false) 시 지연 핀 재시도 예약, 확장 중에는 취소 */
+  useEffect(() => {
+    if (mapExpanded) {
+      clearMainPinFallbackTimer();
+      prevMapExpandedForFallbackRef.current = true;
+      return () => {
+        clearMainPinFallbackTimer();
+      };
+    }
+    const wasExpanded = prevMapExpandedForFallbackRef.current === true;
+    prevMapExpandedForFallbackRef.current = false;
+    if (wasExpanded) {
+      scheduleMainPinOrchestratorFallback("map-collapsed", 0);
+    }
+    return () => {
+      clearMainPinFallbackTimer();
+    };
+  }, [mapExpanded]);
 
   useEffect(() => {
     if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return undefined;
