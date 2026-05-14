@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 
 export type AppUser = {
@@ -15,6 +15,15 @@ export function useUser() {
   const [loading, setLoading] = useState(true);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  const authUiRef = useRef({
+    user: null as AppUser | null,
+    sessionChecked: false,
+    loggingOut: false,
+  });
+  useEffect(() => {
+    authUiRef.current = { user, sessionChecked, loggingOut };
+  }, [user, sessionChecked, loggingOut]);
 
   const logout = useCallback(async () => {
     setLoggingOut(true);
@@ -104,12 +113,15 @@ export function useUser() {
       startAuthWatchdogOnce();
       /** getSession에서 user가 확인되면 리스너 대기 없이 sessionChecked (로딩 단축). null 세션만 리스너+워치독 게이트 유지 (N-1 WK). */
       let loadUserHadAuthUser = false;
+      /** getSession까지 성공했고 session.user가 있었는데 이후 단계가 실패한 경우 — 세션은 유지되므로 user를 비우지 않음(P0). */
+      let hadAuthedSessionFromGet = false;
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user) {
           setUser(null);
           return;
         }
+        hadAuthedSessionFromGet = true;
         loadUserHadAuthUser = true;
 
         await ensureUserExists(
@@ -140,7 +152,9 @@ export function useUser() {
         console.log("[PindMap:home][auth] loadUser done");
       } catch (err) {
         console.error("[PindMap:home][auth] loadUser failed", err);
-        setUser(null);
+        if (!hadAuthedSessionFromGet) {
+          setUser(null);
+        }
       } finally {
         loadFinishedRef.current = true;
         if (loadUserHadAuthUser) {
@@ -199,7 +213,20 @@ export function useUser() {
           console.log("[PindMap:home][auth] onAuthStateChange done");
         } catch (err) {
           console.error("[PindMap:home][auth] onAuthStateChange failed", err);
-          setUser(null);
+          if (!session?.user) {
+            setUser(null);
+          } else {
+            const su = session.user;
+            setUser({
+              id: su.id,
+              username:
+                su.user_metadata?.username ||
+                su.user_metadata?.name ||
+                su.email?.split("@")[0] ||
+                "user",
+              email: su.email,
+            });
+          }
         } finally {
           stopAuthWatchdog();
           setLoading(false);
@@ -207,7 +234,59 @@ export function useUser() {
       }
     );
 
+    /** 포그라운드 복귀 시 세션·user 불일치 회복 및 주기적 재검증 (N-1 워치독·sessionChecked 게이트 로직은 변경 없음) */
+    const FOREGROUND_AUTH_DEBOUNCE_MS = 1000;
+    const FOREGROUND_PERIODIC_MS = 5 * 60 * 1000;
+    const FOREGROUND_RECOVERY_COOLDOWN_MS = 15_000;
+    let foregroundDebounceTimer: number | null = null;
+    let foregroundResyncInFlight = false;
+    let lastPeriodicVerifyAt = Date.now();
+    let lastRecoveryAttemptAt = 0;
+
+    const runForegroundAuthResync = async () => {
+      const { user: u, sessionChecked: sc, loggingOut: lo } = authUiRef.current;
+      if (lo || !sc || foregroundResyncInFlight) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
+      const now = Date.now();
+      if (!u) {
+        if (now - lastRecoveryAttemptAt < FOREGROUND_RECOVERY_COOLDOWN_MS) return;
+        lastRecoveryAttemptAt = now;
+        foregroundResyncInFlight = true;
+        try {
+          await loadUser();
+        } finally {
+          foregroundResyncInFlight = false;
+        }
+        return;
+      }
+      if (now - lastPeriodicVerifyAt < FOREGROUND_PERIODIC_MS) return;
+      lastPeriodicVerifyAt = now;
+      foregroundResyncInFlight = true;
+      try {
+        await loadUser();
+      } finally {
+        foregroundResyncInFlight = false;
+      }
+    };
+
+    const onVisibilityForAuth = () => {
+      if (document.visibilityState !== "visible") return;
+      if (foregroundDebounceTimer !== null) {
+        window.clearTimeout(foregroundDebounceTimer);
+      }
+      foregroundDebounceTimer = window.setTimeout(() => {
+        foregroundDebounceTimer = null;
+        void runForegroundAuthResync();
+      }, FOREGROUND_AUTH_DEBOUNCE_MS);
+    };
+    document.addEventListener("visibilitychange", onVisibilityForAuth);
+
     return () => {
+      if (foregroundDebounceTimer !== null) {
+        window.clearTimeout(foregroundDebounceTimer);
+      }
+      document.removeEventListener("visibilitychange", onVisibilityForAuth);
       stopAuthWatchdog();
       subscription.unsubscribe();
     };

@@ -3,7 +3,34 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import type { AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+
+function formatLoginError(error: AuthError): string {
+  const raw = (error.message || "").trim();
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: string }).code || "") : "";
+
+  if (
+    code === "invalid_credentials" ||
+    /invalid login credentials|invalid email or password|invalid_credentials/i.test(raw)
+  ) {
+    return "이메일 또는 비밀번호가 올바르지 않아요.";
+  }
+  if (
+    /already.*(authenticated|signed)|user already signed|session exists|already logged/i.test(raw) ||
+    code === "session_exists"
+  ) {
+    return "이미 로그인된 상태입니다. 앱을 재시작해 주세요.";
+  }
+  if (/email not confirmed|email address not confirmed/i.test(raw)) {
+    return "이메일 인증이 필요합니다. 메일함을 확인해 주세요.";
+  }
+  if (/rate limit|too many requests|over_request_rate|429/i.test(raw) || code === "over_request_rate_limit") {
+    return "요청이 많아 잠시 후 다시 시도해 주세요.";
+  }
+  if (raw) return raw;
+  return "로그인에 실패했어요. 잠시 후 다시 시도해 주세요.";
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -26,7 +53,7 @@ export default function LoginPage() {
     setLoading(false);
 
     if (error) {
-      setError("이메일 또는 비밀번호가 올바르지 않아요.");
+      setError(formatLoginError(error));
       return;
     }
 
