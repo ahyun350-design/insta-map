@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabase";
 
 export type AppUser = {
@@ -14,6 +14,22 @@ export function useUser() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [sessionChecked, setSessionChecked] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const logout = useCallback(async () => {
+    setLoggingOut(true);
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error("[PindMap:home][auth] signOut failed", err);
+    } finally {
+      const target = "/login";
+      window.location.href = target;
+      window.setTimeout(() => {
+        window.location.href = target;
+      }, 50);
+    }
+  }, []);
 
   useEffect(() => {
     setSessionChecked(false);
@@ -197,11 +213,5 @@ export function useUser() {
     };
   }, []);
 
-  return { user, loading, sessionChecked };
-}
-
-// 로그아웃 함수
-export async function logout() {
-  await supabase.auth.signOut();
-  window.location.href = "/login";
+  return { user, loading, sessionChecked, loggingOut, logout };
 }

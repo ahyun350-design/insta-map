@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Sus
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { useUser, logout } from "@/lib/useUser";
+import { useUser } from "@/lib/useUser";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
@@ -359,7 +359,16 @@ export default function HomePage() {
 function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, loading: userLoading, sessionChecked } = useUser();
+  const { user, loading: userLoading, sessionChecked, loggingOut, logout } = useUser();
+
+  const handleLogoutClick = async () => {
+    if (!confirm("정말 로그아웃하시겠어요?")) return;
+    try {
+      await logout();
+    } catch (err) {
+      console.error("[PindMap:home][auth] logout handler failed", err);
+    }
+  };
   usePushNotifications(user?.id);
   const MY_USER = user?.id || "";
   const MY_USERNAME = user?.username || "";
@@ -3291,6 +3300,36 @@ function HomePageContent() {
     );
   }
 
+  if (loggingOut) {
+    return (
+      <main className="mobileRoot">
+        <section
+          className="phoneFrame"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            flex: 1,
+            minHeight: 0,
+            background: "#fafafa",
+            gap: 16,
+            padding: 24,
+          }}
+        >
+          <div
+            className="skeleton"
+            style={{ width: 40, height: 40, borderRadius: "50%", flexShrink: 0 }}
+            aria-hidden
+          />
+          <p role="status" style={{ margin: 0, fontSize: 14, color: "#666" }}>
+            로그아웃 중...
+          </p>
+        </section>
+      </main>
+    );
+  }
+
   if (!user) {
     return null;
   }
@@ -4581,7 +4620,9 @@ function HomePageContent() {
                 >
                   계정 삭제
                 </button>
-                <button type="button" className="settingItem" onClick={() => { if (confirm("정말 로그아웃하시겠어요?")) logout(); }}>로그아웃</button>
+                <button type="button" className="settingItem" onClick={() => void handleLogoutClick()}>
+                  로그아웃
+                </button>
               </div>
             </div>
           )}
