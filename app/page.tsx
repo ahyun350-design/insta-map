@@ -75,6 +75,8 @@ type Message = { id: string; senderId: string; text: string; createdAt: string; 
 
 const CHAT_MESSAGES_PAGE_SIZE = 50;
 const CHAT_INSERT_TIMEOUT_MS = 15_000;
+const CHAT_GETUSER_TIMEOUT_MS = 4_000;
+const CHAT_OPEN_SELECT_TIMEOUT_MS = 20_000;
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -476,6 +478,7 @@ function HomePageContent() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatOlderHasMore, setChatOlderHasMore] = useState(false);
   const [chatLoadingOlder, setChatLoadingOlder] = useState(false);
+  const [chatRoomLoading, setChatRoomLoading] = useState(false);
   const [newMessage, setNewMessage] = useState("");
   /** iOS/WKWebView 키보드와 하단 입력줄 사이 여백 보정 (visualViewport) */
   const [chatKeyboardOverlap, setChatKeyboardOverlap] = useState(0);
@@ -514,6 +517,7 @@ function HomePageContent() {
   const completedJobIdsRef = useRef<Set<string>>(new Set());
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const chatComposerInputRef = useRef<HTMLInputElement | null>(null);
   /** 사용자가 위로 스크롤해 과거 메시지를 보면 false — 새 수신 시 자동 스크롤 안 함 */
   const chatStickToBottomRef = useRef(true);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
@@ -1492,74 +1496,112 @@ function HomePageContent() {
     const fromId = activeChatRoom?.id ?? null;
     const reqId = ++openChatRequestRef.current;
     console.log("[PindMap:message] chatroom switched", { from: fromId, to: room.id });
-    unmountRoomSubscription("openChat");
-    setMessages([]);
-    setChatOlderHasMore(false);
-    setChatLoadingOlder(false);
-    chatOlderLoadInFlightRef.current = false;
-    setActiveChatRoom(room);
-    setChatRooms((prev) => prev.map((r) => (r.id === room.id ? { ...r, unreadCount: 0 } : r)));
-
-    void supabase
-      .from("messages")
-      .update({ read: true })
-      .eq("room_id", room.id)
-      .neq("sender_id", MY_USER)
-      .eq("read", false)
-      .then(
-        () => {},
-        (err) => console.error("[PindMap:message] mark messages read failed", err),
-      );
-
-    const me = user?.id;
-    if (me && room?.id) {
-      void supabase
-        .from("notifications")
-        .update({ read: true })
-        .eq("user_id", me)
-        .eq("type", "message")
-        .eq("target_id", room.id)
-        .eq("read", false)
-        .then(
-          () => {
-            setNotifications((prev) =>
-              prev.map((n) => (n.type === "message" && n.target_id === room.id ? { ...n, read: true } : n)),
-            );
-          },
-          (err) => console.error("[PindMap:notify] mark message notifications read failed", err),
-        );
-    }
-
-    const { data, error } = await supabase
-      .from("messages")
-      .select("*")
-      .eq("room_id", room.id)
-      .order("created_at", { ascending: false })
-      .limit(CHAT_MESSAGES_PAGE_SIZE);
-
-    if (reqId !== openChatRequestRef.current) return;
-    if (error) {
-      console.error("[PindMap:message] openChat fetch failed", error);
+    setChatRoomLoading(true);
+    try {
+      unmountRoomSubscription("openChat");
       setMessages([]);
       setChatOlderHasMore(false);
+      setChatLoadingOlder(false);
+      chatOlderLoadInFlightRef.current = false;
+      setActiveChatRoom(room);
+      setChatRooms((prev) => prev.map((r) => (r.id === room.id ? { ...r, unreadCount: 0 } : r)));
+
+      void supabase
+        .from("messages")
+        .update({ read: true })
+        .eq("room_id", room.id)
+        .neq("sender_id", MY_USER)
+        .eq("read", false)
+        .then(
+          () => {},
+          (err) => console.error("[PindMap:message] mark messages read failed", err),
+        );
+
+      const me = user?.id;
+      if (me && room?.id) {
+        void supabase
+          .from("notifications")
+          .update({ read: true })
+          .eq("user_id", me)
+          .eq("type", "message")
+          .eq("target_id", room.id)
+          .eq("read", false)
+          .then(
+            () => {
+              setNotifications((prev) =>
+                prev.map((n) => (n.type === "message" && n.target_id === room.id ? { ...n, read: true } : n)),
+              );
+            },
+            (err) => console.error("[PindMap:notify] mark message notifications read failed", err),
+          );
+      }
+
+      let data: any[] | null = null;
+      let error: any = null;
+      try {
+        const res = await promiseWithTimeout(
+          Promise.resolve(
+            supabase
+              .from("messages")
+              .select("*")
+              .eq("room_id", room.id)
+              .order("created_at", { ascending: false })
+              .limit(CHAT_MESSAGES_PAGE_SIZE),
+          ),
+          CHAT_OPEN_SELECT_TIMEOUT_MS,
+          "messages.openSelect",
+        );
+        data = res.data as any[] | null;
+        error = res.error;
+      } catch (e) {
+        console.error("[PindMap:message] openChat fetch timeout", e);
+        showToast("대화를 불러오는 데 시간이 걸렸어요. 잠시 후 다시 시도해 주세요.", "error");
+        setMessages([]);
+        setChatOlderHasMore(false);
+        mountRoomSubscription(room.id);
+        return;
+      }
+
+      if (reqId !== openChatRequestRef.current) return;
+      if (error) {
+        console.error("[PindMap:message] openChat fetch failed", error);
+        setMessages([]);
+        setChatOlderHasMore(false);
+        mountRoomSubscription(room.id);
+        return;
+      }
+      const rows = data ?? [];
+      const asc = [...rows].reverse();
+      setMessages(
+        asc.map((m: any) => ({
+          id: m.id,
+          senderId: m.sender_id,
+          text: m.text,
+          createdAt: m.created_at,
+          read: m.read,
+          status: "sent" as const,
+        })),
+      );
+      setChatOlderHasMore(rows.length === CHAT_MESSAGES_PAGE_SIZE);
       mountRoomSubscription(room.id);
-      return;
+    } finally {
+      if (reqId === openChatRequestRef.current) {
+        setChatRoomLoading(false);
+      }
     }
-    const rows = data ?? [];
-    const asc = [...rows].reverse();
-    setMessages(
-      asc.map((m: any) => ({
-        id: m.id,
-        senderId: m.sender_id,
-        text: m.text,
-        createdAt: m.created_at,
-        read: m.read,
-        status: "sent" as const,
-      })),
-    );
-    setChatOlderHasMore(rows.length === CHAT_MESSAGES_PAGE_SIZE);
-    mountRoomSubscription(room.id);
   };
+
+  const resolveMessageSenderId = useCallback(async (): Promise<string | null> => {
+    const sid = userSendRef.current?.id || userIdRef.current;
+    if (sid) return sid;
+    try {
+      const gu = await promiseWithTimeout(Promise.resolve(supabase.auth.getUser()), CHAT_GETUSER_TIMEOUT_MS, "auth.getUser");
+      return gu.data.user?.id ?? null;
+    } catch (e) {
+      console.error("[PindMap:message] getUser failed or timeout", e);
+      return null;
+    }
+  }, []);
 
   const loadOlderMessages = useCallback(async () => {
     const room = activeChatRoomRef.current;
@@ -1626,11 +1668,7 @@ function HomePageContent() {
     const roomId = activeChatRoom.id;
     const friendId = activeChatRoom.friendId;
     const text = newMessage.trim();
-    let senderId = userSendRef.current?.id;
-    if (!senderId) {
-      const { data: authData } = await supabase.auth.getUser();
-      senderId = authData.user?.id;
-    }
+    const senderId = await resolveMessageSenderId();
     if (!senderId) {
       showToast("잠시 후 다시 시도해 주세요", "error");
       return;
@@ -1686,6 +1724,9 @@ function HomePageContent() {
       showToast(msg, "error");
     } finally {
       sendingIdsRef.current.delete(id);
+      requestAnimationFrame(() => {
+        chatComposerInputRef.current?.focus();
+      });
     }
   };
 
@@ -1695,11 +1736,7 @@ function HomePageContent() {
     const roomId = activeChatRoom.id;
     const id = failedMessage.id;
     if (sendingIdsRef.current.has(id)) return;
-    let senderId = userSendRef.current?.id;
-    if (!senderId) {
-      const { data: authData } = await supabase.auth.getUser();
-      senderId = authData.user?.id;
-    }
+    const senderId = await resolveMessageSenderId();
     if (!senderId) {
       showToast("잠시 후 다시 시도해 주세요", "error");
       return;
@@ -1734,6 +1771,9 @@ function HomePageContent() {
       showToast(msg, "error");
     } finally {
       sendingIdsRef.current.delete(id);
+      requestAnimationFrame(() => {
+        chatComposerInputRef.current?.focus();
+      });
     }
   };
 
@@ -4327,10 +4367,16 @@ function HomePageContent() {
             paddingBottom: "calc(8px + 52px + env(safe-area-inset-bottom, 0px))",
           }}
         >
-          {chatLoadingOlder && (
+          {chatRoomLoading && messages.length === 0 && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "24px 12px" }}>
+              <div className="skeleton" style={{ width: 36, height: 36, borderRadius: "50%" }} aria-hidden />
+              <p style={{ margin: 0, fontSize: "12px", color: "#888" }}>대화 불러오는 중...</p>
+            </div>
+          )}
+          {!chatRoomLoading && chatLoadingOlder && (
             <p style={{ textAlign: "center", color: "#aaa", fontSize: "11px", padding: "4px 0", margin: 0 }}>이전 메시지 불러오는 중...</p>
           )}
-          {!chatLoadingOlder && chatOlderHasMore && (
+          {!chatRoomLoading && !chatLoadingOlder && chatOlderHasMore && (
             <button
               type="button"
               onClick={() => void loadOlderMessages()}
@@ -4414,7 +4460,7 @@ function HomePageContent() {
               </div>
             );
           })}
-          {messages.length === 0 && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", marginTop: "40px" }}>첫 메시지를 보내보세요 💬</p>}
+          {!chatRoomLoading && messages.length === 0 && <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", marginTop: "40px" }}>첫 메시지를 보내보세요 💬</p>}
         </div>
         <div
           style={{
@@ -4436,11 +4482,12 @@ function HomePageContent() {
           }}
         >
           <input
+            ref={chatComposerInputRef}
             placeholder="메시지 입력..."
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) sendMessage();
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) void sendMessage();
             }}
             style={{
               flex: 1,
@@ -4460,7 +4507,12 @@ function HomePageContent() {
           />
           <button
             type="button"
-            onClick={sendMessage}
+            onMouseDown={(e) => {
+              e.preventDefault();
+            }}
+            onClick={() => {
+              void sendMessage();
+            }}
             disabled={!newMessage.trim()}
             aria-label="전송"
             style={{
