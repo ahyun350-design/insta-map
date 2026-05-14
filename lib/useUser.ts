@@ -1,7 +1,26 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+
+const AUTH_LOGIN_GATE_GET_SESSION_MS = 3_000;
+
+function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error(`${label}:timeout`)), ms);
+    p.then(
+      (v) => {
+        window.clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
 
 export type AppUser = {
   id: string;
@@ -15,6 +34,8 @@ export function useUser() {
   const [loading, setLoading] = useState(true);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const loggingOutRef = useRef(false);
+  const reloadFromSessionRef = useRef<(() => Promise<void>) | null>(null);
 
   const authUiRef = useRef({
     user: null as AppUser | null,
@@ -26,6 +47,7 @@ export function useUser() {
   }, [user, sessionChecked, loggingOut]);
 
   const logout = useCallback(async () => {
+    loggingOutRef.current = true;
     setLoggingOut(true);
     try {
       await supabase.auth.signOut();
@@ -171,15 +193,26 @@ export function useUser() {
     };
 
     void loadUser();
+    reloadFromSessionRef.current = loadUser;
 
     // 2) 로그인/로그아웃 변화 감지 (실시간)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      async (event: AuthChangeEvent, session) => {
         if (!listenerFiredRef.current) {
           listenerFiredRef.current = true;
           tryMarkSessionChecked();
         }
-        console.log("[PindMap:home][auth] onAuthStateChange start");
+        console.log("[PindMap:home][auth] onAuthStateChange start", event);
+        if (event === "SIGNED_OUT") {
+          if (loggingOutRef.current) {
+            setUser(null);
+          } else {
+            console.warn("[PindMap:auth] external SIGNED_OUT ignored; session will be re-checked on visibility");
+          }
+          stopAuthWatchdog();
+          setLoading(false);
+          return;
+        }
         try {
           if (!session?.user) {
             setUser(null);
@@ -237,11 +270,9 @@ export function useUser() {
     /** 포그라운드 복귀 시 세션·user 불일치 회복 및 주기적 재검증 (N-1 워치독·sessionChecked 게이트 로직은 변경 없음) */
     const FOREGROUND_AUTH_DEBOUNCE_MS = 1000;
     const FOREGROUND_PERIODIC_MS = 5 * 60 * 1000;
-    const FOREGROUND_RECOVERY_COOLDOWN_MS = 15_000;
     let foregroundDebounceTimer: number | null = null;
     let foregroundResyncInFlight = false;
     let lastPeriodicVerifyAt = Date.now();
-    let lastRecoveryAttemptAt = 0;
 
     const runForegroundAuthResync = async () => {
       const { user: u, sessionChecked: sc, loggingOut: lo } = authUiRef.current;
@@ -250,8 +281,6 @@ export function useUser() {
       if (!session?.user) return;
       const now = Date.now();
       if (!u) {
-        if (now - lastRecoveryAttemptAt < FOREGROUND_RECOVERY_COOLDOWN_MS) return;
-        lastRecoveryAttemptAt = now;
         foregroundResyncInFlight = true;
         try {
           await loadUser();
@@ -287,10 +316,29 @@ export function useUser() {
         window.clearTimeout(foregroundDebounceTimer);
       }
       document.removeEventListener("visibilitychange", onVisibilityForAuth);
+      reloadFromSessionRef.current = null;
       stopAuthWatchdog();
       subscription.unsubscribe();
     };
   }, []);
 
-  return { user, loading, sessionChecked, loggingOut, logout };
+  const reloadUserFromSession = useCallback(async () => {
+    await reloadFromSessionRef.current?.();
+  }, []);
+
+  const verifySessionQuick = useCallback(async (): Promise<Session | null> => {
+    try {
+      const { data } = await promiseWithTimeout(
+        Promise.resolve(supabase.auth.getSession()),
+        AUTH_LOGIN_GATE_GET_SESSION_MS,
+        "auth.loginGate.getSession",
+      );
+      return data.session ?? null;
+    } catch (e) {
+      console.warn("[PindMap:auth] login gate getSession timeout or error", e);
+      return null;
+    }
+  }, []);
+
+  return { user, loading, sessionChecked, loggingOut, logout, reloadUserFromSession, verifySessionQuick };
 }

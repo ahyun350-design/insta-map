@@ -42,7 +42,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const params = useParams<{ username: string }>();
   const routeUsername = useMemo(() => decodeURIComponent(params?.username ?? ""), [params?.username]);
-  const { user, loading: userLoading, sessionChecked } = useUser();
+  const { user, loading: userLoading, sessionChecked, reloadUserFromSession, verifySessionQuick } = useUser();
 
   const [profile, setProfile] = useState<ProfileUser | null>(null);
   const [posts, setPosts] = useState<ProfilePost[]>([]);
@@ -66,10 +66,33 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!sessionChecked) return;
     if (userLoading) return;
-    if (!user) {
-      router.push("/login");
-    }
-  }, [user, userLoading, sessionChecked, router]);
+    if (user) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        let session = await verifySessionQuick();
+        if (cancelled) return;
+        if (session?.user) {
+          await reloadUserFromSession();
+          return;
+        }
+        await reloadUserFromSession();
+        if (cancelled) return;
+        session = await verifySessionQuick();
+        if (cancelled) return;
+        if (!session?.user) {
+          router.push("/login");
+        }
+      } catch (e) {
+        console.error("[PindMap:profile][auth] login gate failed", e);
+        if (!cancelled) router.push("/login");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, userLoading, sessionChecked, router, reloadUserFromSession, verifySessionQuick]);
 
   useEffect(() => {
     const loadProfile = async () => {

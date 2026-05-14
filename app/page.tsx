@@ -383,7 +383,8 @@ export default function HomePage() {
 function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, loading: userLoading, sessionChecked, loggingOut, logout } = useUser();
+  const { user, loading: userLoading, sessionChecked, loggingOut, logout, reloadUserFromSession, verifySessionQuick } =
+    useUser();
 
   const handleLogoutClick = async () => {
     if (!confirm("정말 로그아웃하시겠어요?")) return;
@@ -842,12 +843,35 @@ function HomePageContent() {
   useEffect(() => {
     if (!sessionChecked) return;
     if (userLoading) return;
-    if (!user) {
-      router.push("/login");
+    if (user) {
+      void loadData();
       return;
     }
-    void loadData();
-  }, [user, userLoading, sessionChecked]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        let session = await verifySessionQuick();
+        if (cancelled) return;
+        if (session?.user) {
+          await reloadUserFromSession();
+          return;
+        }
+        await reloadUserFromSession();
+        if (cancelled) return;
+        session = await verifySessionQuick();
+        if (cancelled) return;
+        if (!session?.user) {
+          router.push("/login");
+        }
+      } catch (e) {
+        console.error("[PindMap:home][auth] login gate failed", e);
+        if (!cancelled) router.push("/login");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, userLoading, sessionChecked, router, reloadUserFromSession, verifySessionQuick]);
 
   useEffect(() => {
     const onVisible = () => {
