@@ -36,6 +36,10 @@ export function useUser() {
   const [loggingOut, setLoggingOut] = useState(false);
   const loggingOutRef = useRef(false);
   const reloadFromSessionRef = useRef<(() => Promise<void>) | null>(null);
+  /** `document.visibilityState === "hidden"` 시각 — 포그라운드 복귀 시 백그라운드 경과 시간 계산용 */
+  const authForegroundLastHiddenAtRef = useRef<number | null>(null);
+  /** WKWebView 등 stale connection 구간: 가벼운 GET warmup 진행 중 (실패해도 전송 등은 막지 않음) */
+  const connectionWarmupPendingRef = useRef(false);
 
   const authUiRef = useRef({
     user: null as AppUser | null,
@@ -269,6 +273,9 @@ export function useUser() {
 
     /** 포그라운드 복귀 시 세션·user 불일치 회복 및 주기적 재검증 (N-1 워치독·sessionChecked 게이트 로직은 변경 없음) */
     const FOREGROUND_AUTH_DEBOUNCE_MS = 1000;
+    /** 장시간 백그라운드 후 첫 fetch hang 완화 — 짧은 전환은 생략 */
+    const MIN_BG_MS_FOR_CONN_WARMUP = 10_000;
+    const CONN_WARMUP_TIMEOUT_MS = 5_000;
     const FOREGROUND_PERIODIC_MS = 5 * 60 * 1000;
     let foregroundDebounceTimer: number | null = null;
     let foregroundResyncInFlight = false;
@@ -300,13 +307,40 @@ export function useUser() {
     };
 
     const onVisibilityForAuth = () => {
+      if (document.visibilityState === "hidden") {
+        authForegroundLastHiddenAtRef.current = Date.now();
+        return;
+      }
       if (document.visibilityState !== "visible") return;
       if (foregroundDebounceTimer !== null) {
         window.clearTimeout(foregroundDebounceTimer);
       }
       foregroundDebounceTimer = window.setTimeout(() => {
         foregroundDebounceTimer = null;
-        void runForegroundAuthResync();
+        void (async () => {
+          const hiddenAt = authForegroundLastHiddenAtRef.current;
+          authForegroundLastHiddenAtRef.current = null;
+          const bgMs = hiddenAt !== null ? Date.now() - hiddenAt : 0;
+
+          if (bgMs >= MIN_BG_MS_FOR_CONN_WARMUP) {
+            if (!connectionWarmupPendingRef.current) {
+              connectionWarmupPendingRef.current = true;
+              try {
+                await promiseWithTimeout(
+                  Promise.resolve(supabase.from("users").select("id").limit(1)),
+                  CONN_WARMUP_TIMEOUT_MS,
+                  "connectionWarmup.users",
+                );
+              } catch (e) {
+                console.warn("[PindMap:auth] connection warmup failed", e);
+              } finally {
+                connectionWarmupPendingRef.current = false;
+              }
+            }
+          }
+
+          await runForegroundAuthResync();
+        })();
       }, FOREGROUND_AUTH_DEBOUNCE_MS);
     };
     document.addEventListener("visibilitychange", onVisibilityForAuth);
