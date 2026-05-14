@@ -72,6 +72,26 @@ function sortChatRoomsByRecency(rooms: ChatRoom[]): ChatRoom[] {
   );
 }
 type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; status?: "pending" | "sent" | "failed"; };
+
+const CHAT_MESSAGES_PAGE_SIZE = 50;
+const CHAT_INSERT_TIMEOUT_MS = 15_000;
+
+function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error(`${label}:timeout`)), ms);
+    p.then(
+      (v) => {
+        window.clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 type ExtractJobStatus = "pending" | "processing" | "completed" | "failed";
 type ActiveExtractJob = {
   jobId: string;
@@ -372,6 +392,8 @@ function HomePageContent() {
   usePushNotifications(user?.id);
   const MY_USER = user?.id || "";
   const MY_USERNAME = user?.username || "";
+  const userSendRef = useRef(user);
+  userSendRef.current = user;
   const userIdRef = useRef<string>("");
   userIdRef.current = user?.id || "";
   type Notification = {
@@ -449,7 +471,11 @@ function HomePageContent() {
   const [loading, setLoading] = useState(true);
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
   const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
+  const activeChatRoomRef = useRef<ChatRoom | null>(null);
+  activeChatRoomRef.current = activeChatRoom;
   const [messages, setMessages] = useState<Message[]>([]);
+  const [chatOlderHasMore, setChatOlderHasMore] = useState(false);
+  const [chatLoadingOlder, setChatLoadingOlder] = useState(false);
   const [newMessage, setNewMessage] = useState("");
   /** iOS/WKWebView 키보드와 하단 입력줄 사이 여백 보정 (visualViewport) */
   const [chatKeyboardOverlap, setChatKeyboardOverlap] = useState(0);
@@ -546,7 +572,13 @@ function HomePageContent() {
   /** Realtime INSERT 시 read 처리: 이 방을 실제로 보고 있을 때만 true (구독만 붙은 백그라운드와 구분) */
   const activeChatRoomIdRef = useRef<string | null>(null);
   const openChatRequestRef = useRef(0);
-  const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const globalMessagesChannelRef = useRef<any>(null);
+  const sendingIdsRef = useRef<Set<string>>(new Set());
+  const chatOlderLoadInFlightRef = useRef(false);
+  const oldestMessageCreatedAtRef = useRef<string | null>(null);
+  const chatOlderHasMoreRef = useRef(false);
+  const realtimeResubTimerRef = useRef<number | null>(null);
+  const lastVisibilityHiddenAtRef = useRef<number | null>(null);
   const placeExtractionToastTimerRef = useRef<number | null>(null);
   const [showPlaceExtractionToast, setShowPlaceExtractionToast] = useState(false);
 
@@ -1362,6 +1394,46 @@ function HomePageContent() {
     roomChannelRef.current = null;
   }, []);
 
+  const unmountGlobalMessagesSubscription = useCallback(() => {
+    if (!globalMessagesChannelRef.current) return;
+    supabase.removeChannel(globalMessagesChannelRef.current);
+    globalMessagesChannelRef.current = null;
+  }, []);
+
+  const mountGlobalMessagesSubscription = useCallback(() => {
+    if (!MY_USER) return;
+    unmountGlobalMessagesSubscription();
+    const channel = supabase
+      .channel(`global-messages-${MY_USER}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload: any) => {
+          const m = payload.new;
+          if (m.sender_id === MY_USER) return;
+          const viewingRoomId = activeChatRoomRef.current?.id ?? null;
+          setChatRooms((prev) => {
+            const room = prev.find((r) => r.id === m.room_id);
+            if (!room) return prev;
+            const isViewing = viewingRoomId === m.room_id;
+            const next = prev.map((r) =>
+              r.id === m.room_id
+                ? {
+                    ...r,
+                    lastMessage: m.text,
+                    lastTime: m.created_at,
+                    unreadCount: isViewing ? 0 : r.unreadCount + 1,
+                  }
+                : r,
+            );
+            return sortChatRoomsByRecency(next);
+          });
+        },
+      )
+      .subscribe();
+    globalMessagesChannelRef.current = channel;
+  }, [MY_USER, unmountGlobalMessagesSubscription]);
+
   const mountRoomSubscription = useCallback((roomId: string) => {
     unmountRoomSubscription("replace");
     const channel = supabase
@@ -1422,43 +1494,154 @@ function HomePageContent() {
     console.log("[PindMap:message] chatroom switched", { from: fromId, to: room.id });
     unmountRoomSubscription("openChat");
     setMessages([]);
+    setChatOlderHasMore(false);
+    setChatLoadingOlder(false);
+    chatOlderLoadInFlightRef.current = false;
     setActiveChatRoom(room);
-    await supabase.from("messages").update({ read: true }).eq("room_id", room.id).neq("sender_id", MY_USER).eq("read", false);
+    setChatRooms((prev) => prev.map((r) => (r.id === room.id ? { ...r, unreadCount: 0 } : r)));
+
+    void supabase
+      .from("messages")
+      .update({ read: true })
+      .eq("room_id", room.id)
+      .neq("sender_id", MY_USER)
+      .eq("read", false)
+      .then(
+        () => {},
+        (err) => console.error("[PindMap:message] mark messages read failed", err),
+      );
+
     const me = user?.id;
     if (me && room?.id) {
-      try {
-        await supabase
-          .from("notifications")
-          .update({ read: true })
-          .eq("user_id", me)
-          .eq("type", "message")
-          .eq("target_id", room.id)
-          .eq("read", false);
-        setNotifications((prev) =>
-          prev.map((n) => (n.type === "message" && n.target_id === room.id ? { ...n, read: true } : n)),
+      void supabase
+        .from("notifications")
+        .update({ read: true })
+        .eq("user_id", me)
+        .eq("type", "message")
+        .eq("target_id", room.id)
+        .eq("read", false)
+        .then(
+          () => {
+            setNotifications((prev) =>
+              prev.map((n) => (n.type === "message" && n.target_id === room.id ? { ...n, read: true } : n)),
+            );
+          },
+          (err) => console.error("[PindMap:notify] mark message notifications read failed", err),
         );
-      } catch (err) {
-        console.error("[PindMap:notify] mark message notifications read failed", err);
-      }
     }
+
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("room_id", room.id)
+      .order("created_at", { ascending: false })
+      .limit(CHAT_MESSAGES_PAGE_SIZE);
+
     if (reqId !== openChatRequestRef.current) return;
-    setChatRooms(prev => prev.map(r => r.id === room.id ? { ...r, unreadCount: 0 } : r));
-    const { data } = await supabase.from("messages").select("*").eq("room_id", room.id).order("created_at", { ascending: true });
-    if (reqId !== openChatRequestRef.current) return;
-    if (data) setMessages(data.map((m: any) => ({ id: m.id, senderId: m.sender_id, text: m.text, createdAt: m.created_at, read: m.read, status: "sent" })));
+    if (error) {
+      console.error("[PindMap:message] openChat fetch failed", error);
+      setMessages([]);
+      setChatOlderHasMore(false);
+      mountRoomSubscription(room.id);
+      return;
+    }
+    const rows = data ?? [];
+    const asc = [...rows].reverse();
+    setMessages(
+      asc.map((m: any) => ({
+        id: m.id,
+        senderId: m.sender_id,
+        text: m.text,
+        createdAt: m.created_at,
+        read: m.read,
+        status: "sent" as const,
+      })),
+    );
+    setChatOlderHasMore(rows.length === CHAT_MESSAGES_PAGE_SIZE);
     mountRoomSubscription(room.id);
   };
 
+  const loadOlderMessages = useCallback(async () => {
+    const room = activeChatRoomRef.current;
+    if (!room || chatOlderLoadInFlightRef.current || !chatOlderHasMoreRef.current) return;
+    const oldest = oldestMessageCreatedAtRef.current;
+    if (!oldest) return;
+    chatOlderLoadInFlightRef.current = true;
+    setChatLoadingOlder(true);
+    const roomId = room.id;
+    const el = chatMessagesContainerRef.current;
+    const prevScrollHeight = el?.scrollHeight ?? 0;
+    const prevScrollTop = el?.scrollTop ?? 0;
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("room_id", roomId)
+        .lt("created_at", oldest)
+        .order("created_at", { ascending: false })
+        .limit(CHAT_MESSAGES_PAGE_SIZE);
+      if (activeChatRoomRef.current?.id !== roomId) return;
+      if (error) {
+        console.error("[PindMap:message] loadOlder failed", error);
+        return;
+      }
+      const rows = data ?? [];
+      const asc = [...rows].reverse().map((m: any) => ({
+        id: m.id,
+        senderId: m.sender_id,
+        text: m.text,
+        createdAt: m.created_at,
+        read: m.read,
+        status: "sent" as const,
+      }));
+      setMessages((prev) => {
+        const merged = [...asc, ...prev];
+        const seen = new Set<string>();
+        return merged.filter((m) => {
+          if (seen.has(m.id)) return false;
+          seen.add(m.id);
+          return true;
+        });
+      });
+      setChatOlderHasMore(rows.length === CHAT_MESSAGES_PAGE_SIZE);
+      requestAnimationFrame(() => {
+        const el2 = chatMessagesContainerRef.current;
+        if (el2 && activeChatRoomRef.current?.id === roomId) {
+          el2.scrollTop = prevScrollTop + (el2.scrollHeight - prevScrollHeight);
+        }
+      });
+    } finally {
+      chatOlderLoadInFlightRef.current = false;
+      if (activeChatRoomRef.current?.id === roomId) setChatLoadingOlder(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    oldestMessageCreatedAtRef.current = messages[0]?.createdAt ?? null;
+    chatOlderHasMoreRef.current = chatOlderHasMore;
+  }, [messages, chatOlderHasMore]);
+
   const sendMessage = async () => {
-    if (!newMessage.trim() || !activeChatRoom || !user) return;
+    if (!newMessage.trim() || !activeChatRoom) return;
     const roomId = activeChatRoom.id;
     const friendId = activeChatRoom.friendId;
     const text = newMessage.trim();
+    let senderId = userSendRef.current?.id;
+    if (!senderId) {
+      const { data: authData } = await supabase.auth.getUser();
+      senderId = authData.user?.id;
+    }
+    if (!senderId) {
+      showToast("잠시 후 다시 시도해 주세요", "error");
+      return;
+    }
     const id = Date.now().toString();
+    if (sendingIdsRef.current.has(id)) return;
+    sendingIdsRef.current.add(id);
     const createdAt = new Date().toISOString();
     console.log("[PindMap:message] send start", { id, roomId });
     chatStickToBottomRef.current = true;
-    setMessages(prev => [...prev, { id, senderId: user.id, text, createdAt, read: false, status: "pending" }]);
+    setMessages((prev) => [...prev, { id, senderId, text, createdAt, read: false, status: "pending" }]);
     setNewMessage("");
     setChatRooms((prev) =>
       sortChatRoomsByRecency(
@@ -1467,61 +1650,91 @@ function HomePageContent() {
         ),
       ),
     );
-    const performSend = async () => {
-      try {
-        await supabase.from("messages").insert({ id, room_id: roomId, sender_id: user.id, text, read: false });
-        setMessages(prev => prev.map((m) => m.id === id ? { ...m, status: "sent" } : m));
-        console.log("[PindMap:message] send success", { id, roomId });
-        if (friendId && friendId !== user.id) {
-          try {
-            await supabase.from("notifications").insert({
-              id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
-              user_id: friendId,
-              type: "message",
-              actor_id: user.id,
-              actor_username: MY_USERNAME,
-              target_id: roomId,
-              target_text: text.length > 30 ? text.slice(0, 30) + "..." : text,
-            });
-          } catch {
-            /* 알림 INSERT 실패 무시 */
-          }
-        }
-      } catch (err) {
-        console.error("[PindMap:message] send failed", { id, roomId, err });
-        setMessages(prev => prev.map((m) => m.id === id ? { ...m, status: "failed" } : m));
-        showToast("메시지 전송에 실패했어요. 재전송해 주세요.", "error");
+    try {
+      const result = await promiseWithTimeout(
+        Promise.resolve(supabase.from("messages").insert({ id, room_id: roomId, sender_id: senderId, text, read: false })),
+        CHAT_INSERT_TIMEOUT_MS,
+        "messages.insert",
+      );
+      if (result.error) throw result.error;
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status: "sent" as const } : m)));
+      console.log("[PindMap:message] send success", { id, roomId });
+      if (friendId && friendId !== senderId) {
+        void supabase
+          .from("notifications")
+          .insert({
+            id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
+            user_id: friendId,
+            type: "message",
+            actor_id: senderId,
+            actor_username: MY_USERNAME,
+            target_id: roomId,
+            target_text: text.length > 30 ? text.slice(0, 30) + "..." : text,
+          })
+          .then(
+            () => {},
+            () => {},
+          );
       }
-    };
-    sendQueueRef.current = sendQueueRef.current.then(performSend);
-    await sendQueueRef.current;
+    } catch (err: unknown) {
+      console.error("[PindMap:message] send failed", { id, roomId, err });
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status: "failed" as const } : m)));
+      const msg =
+        err instanceof Error && err.message.includes("timeout")
+          ? "메시지 전송 시간이 초과됐어요. 다시 보내 주세요."
+          : "메시지 전송에 실패했어요. 재전송해 주세요.";
+      showToast(msg, "error");
+    } finally {
+      sendingIdsRef.current.delete(id);
+    }
   };
 
   const resendFailedMessage = async (failedMessage: Message) => {
-    if (!activeChatRoom || !user) return;
+    if (!activeChatRoom) return;
     if (failedMessage.status !== "failed") return;
     const roomId = activeChatRoom.id;
-    console.log("[PindMap:message] resend start", { id: failedMessage.id, roomId });
-    setMessages(prev => prev.map((m) => m.id === failedMessage.id ? { ...m, status: "pending" } : m));
-    const performResend = async () => {
-      try {
-        await supabase.from("messages").insert({
-          id: failedMessage.id,
-          room_id: roomId,
-          sender_id: user.id,
-          text: failedMessage.text,
-          read: false,
-        });
-        setMessages(prev => prev.map((m) => m.id === failedMessage.id ? { ...m, status: "sent" } : m));
-        console.log("[PindMap:message] resend success", { id: failedMessage.id, roomId });
-      } catch (err) {
-        console.error("[PindMap:message] resend failed", { id: failedMessage.id, roomId, err });
-        setMessages(prev => prev.map((m) => m.id === failedMessage.id ? { ...m, status: "failed" } : m));
-        showToast("재전송에 실패했어요.", "error");
-      }
-    };
-    sendQueueRef.current = sendQueueRef.current.then(performResend);
-    await sendQueueRef.current;
+    const id = failedMessage.id;
+    if (sendingIdsRef.current.has(id)) return;
+    let senderId = userSendRef.current?.id;
+    if (!senderId) {
+      const { data: authData } = await supabase.auth.getUser();
+      senderId = authData.user?.id;
+    }
+    if (!senderId) {
+      showToast("잠시 후 다시 시도해 주세요", "error");
+      return;
+    }
+    console.log("[PindMap:message] resend start", { id, roomId });
+    sendingIdsRef.current.add(id);
+    setMessages((prev) => prev.map((m) => (m.id === failedMessage.id ? { ...m, status: "pending" as const } : m)));
+    try {
+      const result = await promiseWithTimeout(
+        Promise.resolve(
+          supabase.from("messages").insert({
+            id: failedMessage.id,
+            room_id: roomId,
+            sender_id: senderId,
+            text: failedMessage.text,
+            read: false,
+          }),
+        ),
+        CHAT_INSERT_TIMEOUT_MS,
+        "messages.insert",
+      );
+      if (result.error) throw result.error;
+      setMessages((prev) => prev.map((m) => (m.id === failedMessage.id ? { ...m, status: "sent" as const } : m)));
+      console.log("[PindMap:message] resend success", { id, roomId });
+    } catch (err: unknown) {
+      console.error("[PindMap:message] resend failed", { id, roomId, err });
+      setMessages((prev) => prev.map((m) => (m.id === failedMessage.id ? { ...m, status: "failed" as const } : m)));
+      const msg =
+        err instanceof Error && err.message.includes("timeout")
+          ? "재전송 시간이 초과됐어요."
+          : "재전송에 실패했어요.";
+      showToast(msg, "error");
+    } finally {
+      sendingIdsRef.current.delete(id);
+    }
   };
 
   // 저장 목록 장소 클릭 → 지도에서 보기
@@ -2087,6 +2300,10 @@ function HomePageContent() {
     if (!el) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
     chatStickToBottomRef.current = gap < 80;
+    const gRoom = activeChatRoomRef.current?.id;
+    if (gRoom && chatOlderHasMoreRef.current && !chatOlderLoadInFlightRef.current && el.scrollTop < 80) {
+      void loadOlderMessages();
+    }
   };
   const handlePostSearch = () => {
     if (!postSearchQuery.trim() || !window.kakao?.maps?.services) return;
@@ -2781,36 +2998,54 @@ function HomePageContent() {
     refreshRooms();
   }, [activeTab, activeChatRoom]);
 
-  // 전역 메시지 구독 - 어느 탭에 있든 새 메시지 오면 알림 갱신
+  // 전역 메시지 구독 — mountGlobalMessagesSubscription 단일 경로 (포그라운드 재구독과 공유)
   useEffect(() => {
-    const channel = supabase.channel(`global-messages-${MY_USER}`).on(
-      "postgres_changes",
-      { event: "INSERT", schema: "public", table: "messages" },
-      (payload: any) => {
-        const m = payload.new;
-        // 본인이 보낸 메시지면 무시
-        if (m.sender_id === MY_USER) return;
-        // 내가 속한 채팅방이 아니면 무시
-        setChatRooms((prev) => {
-          const room = prev.find((r) => r.id === m.room_id);
-          if (!room) return prev;
-          const isViewing = activeChatRoom?.id === m.room_id;
-          const next = prev.map((r) =>
-            r.id === m.room_id
-              ? {
-                  ...r,
-                  lastMessage: m.text,
-                  lastTime: m.created_at,
-                  unreadCount: isViewing ? 0 : r.unreadCount + 1,
-                }
-              : r,
-          );
-          return sortChatRoomsByRecency(next);
-        });
+    if (!MY_USER) {
+      unmountGlobalMessagesSubscription();
+      return;
+    }
+    mountGlobalMessagesSubscription();
+    return () => {
+      unmountGlobalMessagesSubscription();
+    };
+  }, [MY_USER, mountGlobalMessagesSubscription]);
+
+  /** 백그라운드 복귀 시 Realtime 재구독 (짧은 전환은 스킵) */
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "hidden") {
+        lastVisibilityHiddenAtRef.current = Date.now();
+        return;
       }
-    ).subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [activeChatRoom]);
+      const hiddenAt = lastVisibilityHiddenAtRef.current;
+      if (hiddenAt !== null) {
+        const bgMs = Date.now() - hiddenAt;
+        lastVisibilityHiddenAtRef.current = null;
+        if (bgMs < 5000) return;
+      }
+      if (realtimeResubTimerRef.current !== null) {
+        window.clearTimeout(realtimeResubTimerRef.current);
+      }
+      realtimeResubTimerRef.current = window.setTimeout(() => {
+        realtimeResubTimerRef.current = null;
+        const rid = activeChatRoomIdRef.current;
+        if (rid) {
+          mountRoomSubscription(rid);
+        }
+        if (MY_USER) {
+          mountGlobalMessagesSubscription();
+        }
+      }, 1000);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      if (realtimeResubTimerRef.current !== null) {
+        window.clearTimeout(realtimeResubTimerRef.current);
+        realtimeResubTimerRef.current = null;
+      }
+    };
+  }, [MY_USER, mountRoomSubscription, mountGlobalMessagesSubscription]);
 
   useEffect(() => {
     chatStickToBottomRef.current = true;
@@ -4092,6 +4327,29 @@ function HomePageContent() {
             paddingBottom: "calc(8px + 52px + env(safe-area-inset-bottom, 0px))",
           }}
         >
+          {chatLoadingOlder && (
+            <p style={{ textAlign: "center", color: "#aaa", fontSize: "11px", padding: "4px 0", margin: 0 }}>이전 메시지 불러오는 중...</p>
+          )}
+          {!chatLoadingOlder && chatOlderHasMore && (
+            <button
+              type="button"
+              onClick={() => void loadOlderMessages()}
+              style={{
+                alignSelf: "center",
+                marginBottom: "4px",
+                padding: "6px 12px",
+                fontSize: "11px",
+                borderRadius: "999px",
+                border: "0.5px solid #d9deec",
+                background: "#fbfcff",
+                color: "#1a2a7a",
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              이전 메시지 더보기
+            </button>
+          )}
           {messages.map(m => {
             const isMine = m.senderId === MY_USER;
             return (
