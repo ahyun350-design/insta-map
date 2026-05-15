@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import { debugLog } from "./debugLog";
 
 const AUTH_LOGIN_GATE_GET_SESSION_MS = 3_000;
 
@@ -142,7 +143,13 @@ export function useUser() {
       /** getSession까지 성공했고 session.user가 있었는데 이후 단계가 실패한 경우 — 세션은 유지되므로 user를 비우지 않음(P0). */
       let hadAuthedSessionFromGet = false;
       try {
+        const getSessionT = Date.now();
         const { data: { session } } = await supabase.auth.getSession();
+        try {
+          debugLog.set({ lastGetSession: { ok: !!session, ms: Date.now() - getSessionT, at: Date.now() } });
+        } catch {
+          /* ignore */
+        }
         if (!session?.user) {
           setUser(null);
           return;
@@ -207,6 +214,11 @@ export function useUser() {
           tryMarkSessionChecked();
         }
         console.log("[PindMap:home][auth] onAuthStateChange start", event);
+        try {
+          debugLog.set({ lastAuthEvent: `${event}@${new Date().toLocaleTimeString()}` });
+        } catch {
+          /* ignore */
+        }
         if (event === "SIGNED_OUT") {
           if (loggingOutRef.current) {
             setUser(null);
@@ -284,7 +296,13 @@ export function useUser() {
     const runForegroundAuthResync = async () => {
       const { user: u, sessionChecked: sc, loggingOut: lo } = authUiRef.current;
       if (lo || !sc || foregroundResyncInFlight) return;
+      const resyncGetSessionT = Date.now();
       const { data: { session } } = await supabase.auth.getSession();
+      try {
+        debugLog.set({ lastGetSession: { ok: !!session, ms: Date.now() - resyncGetSessionT, at: Date.now() } });
+      } catch {
+        /* ignore */
+      }
       if (!session?.user) return;
       const now = Date.now();
       if (!u) {
@@ -309,6 +327,11 @@ export function useUser() {
     const onVisibilityForAuth = () => {
       if (document.visibilityState === "hidden") {
         authForegroundLastHiddenAtRef.current = Date.now();
+        try {
+          debugLog.set({ bgEnteredAt: Date.now() });
+        } catch {
+          /* ignore */
+        }
         return;
       }
       if (document.visibilityState !== "visible") return;
@@ -321,18 +344,38 @@ export function useUser() {
           const hiddenAt = authForegroundLastHiddenAtRef.current;
           authForegroundLastHiddenAtRef.current = null;
           const bgMs = hiddenAt !== null ? Date.now() - hiddenAt : 0;
+          try {
+            debugLog.set({ bgDurationMs: hiddenAt !== null ? bgMs : null });
+          } catch {
+            /* ignore */
+          }
 
           if (bgMs >= MIN_BG_MS_FOR_CONN_WARMUP) {
             if (!connectionWarmupPendingRef.current) {
               connectionWarmupPendingRef.current = true;
               try {
+                try {
+                  debugLog.set({ warmupStartedAt: Date.now(), warmupResult: "pending" });
+                } catch {
+                  /* ignore */
+                }
                 await promiseWithTimeout(
                   Promise.resolve(supabase.from("users").select("id").limit(1)),
                   CONN_WARMUP_TIMEOUT_MS,
                   "connectionWarmup.users",
                 );
+                try {
+                  debugLog.set({ warmupFinishedAt: Date.now(), warmupResult: "ok" });
+                } catch {
+                  /* ignore */
+                }
               } catch (e) {
                 console.warn("[PindMap:auth] connection warmup failed", e);
+                try {
+                  debugLog.set({ warmupFinishedAt: Date.now(), warmupResult: "fail" });
+                } catch {
+                  /* ignore */
+                }
               } finally {
                 connectionWarmupPendingRef.current = false;
               }
@@ -361,14 +404,25 @@ export function useUser() {
   }, []);
 
   const verifySessionQuick = useCallback(async (): Promise<Session | null> => {
+    const getSessionT = Date.now();
     try {
       const { data } = await promiseWithTimeout(
         Promise.resolve(supabase.auth.getSession()),
         AUTH_LOGIN_GATE_GET_SESSION_MS,
         "auth.loginGate.getSession",
       );
+      try {
+        debugLog.set({ lastGetSession: { ok: !!data?.session, ms: Date.now() - getSessionT, at: Date.now() } });
+      } catch {
+        /* ignore */
+      }
       return data.session ?? null;
     } catch (e) {
+      try {
+        debugLog.set({ lastGetSession: { ok: false, ms: Date.now() - getSessionT, at: Date.now() } });
+      } catch {
+        /* ignore */
+      }
       console.warn("[PindMap:auth] login gate getSession timeout or error", e);
       return null;
     }

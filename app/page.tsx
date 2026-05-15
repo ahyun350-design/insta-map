@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Sus
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { debugLog } from "@/lib/debugLog";
 import { useUser } from "@/lib/useUser";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import FeedSkeleton from "@/components/FeedSkeleton";
@@ -1460,7 +1461,13 @@ function HomePageContent() {
           });
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        try {
+          debugLog.set({ realtimeStatus: `global:${status}` });
+        } catch {
+          /* ignore */
+        }
+      });
     globalMessagesChannelRef.current = channel;
   }, [MY_USER, unmountGlobalMessagesSubscription]);
 
@@ -1480,7 +1487,13 @@ function HomePageContent() {
         const m = payload.new;
         setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, read: m.read } : msg));
       })
-      .subscribe();
+      .subscribe((status) => {
+        try {
+          debugLog.set({ realtimeStatus: `room:${status}` });
+        } catch {
+          /* ignore */
+        }
+      });
     roomChannelRef.current = channel;
     activeChatRoomIdRef.current = roomId;
     console.log("[PindMap:message] subscription mounted", roomId);
@@ -1679,6 +1692,12 @@ function HomePageContent() {
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !activeChatRoom) return;
+    try {
+      debugLog.resetSendSteps();
+      debugLog.pushSendStep("start");
+    } catch {
+      /* ignore */
+    }
     const roomId = activeChatRoom.id;
     const friendId = activeChatRoom.friendId;
     const text = newMessage.trim();
@@ -1703,7 +1722,19 @@ function HomePageContent() {
       ),
     );
     const insertAbort = new AbortController();
+    let insertT = 0;
     try {
+      try {
+        debugLog.pushSendStep("abort_ctrl");
+      } catch {
+        /* ignore */
+      }
+      insertT = Date.now();
+      try {
+        debugLog.pushSendStep("insert_begin");
+      } catch {
+        /* ignore */
+      }
       const result = await promiseWithTimeout(
         Promise.resolve(
           supabase
@@ -1716,6 +1747,11 @@ function HomePageContent() {
         insertAbort,
       );
       if (result.error) throw result.error;
+      try {
+        debugLog.pushSendStep("insert_ok", Date.now() - insertT);
+      } catch {
+        /* ignore */
+      }
       setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status: "sent" as const } : m)));
       console.log("[PindMap:message] send success", { id, roomId });
       if (friendId && friendId !== senderId) {
@@ -1736,6 +1772,12 @@ function HomePageContent() {
           );
       }
     } catch (err: unknown) {
+      try {
+        const errName = err instanceof Error ? err.name : "err";
+        debugLog.pushSendStep(`insert_fail:${errName}`, Date.now() - insertT);
+      } catch {
+        /* ignore */
+      }
       console.error("[PindMap:message] send failed", { id, roomId, err });
       setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status: "failed" as const } : m)));
       const isTimeout =
@@ -1746,6 +1788,11 @@ function HomePageContent() {
         : "메시지 전송에 실패했어요. 재전송해 주세요.";
       showToast(msg, "error");
     } finally {
+      try {
+        debugLog.pushSendStep("done");
+      } catch {
+        /* ignore */
+      }
       sendingIdsRef.current.delete(id);
       requestAnimationFrame(() => {
         chatComposerInputRef.current?.focus();

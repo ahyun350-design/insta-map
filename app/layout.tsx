@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import Providers from "@/components/Providers";
+import DebugBoxLoader from "@/components/DebugBoxLoader";
 
 export const metadata: Metadata = {
   title: "PindMap — 인스타에서 본 그곳, 지도 위에서 다시 만나다",
@@ -25,6 +26,7 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body>
+        <DebugBoxLoader />
         <Providers>{children}</Providers>
       </body>
     </html>
