@@ -4,11 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { debugLog } from "./debugLog";
-import {
-  clientReloadNeededRef,
-  runConnectionWarmupWithRetry,
-  runExtraRefreshSession,
-} from "./connectionRecovery";
+import { runConnectionWarmupWithRetry, runExtraRefreshSession } from "./connectionRecovery";
 
 const AUTH_LOGIN_GATE_GET_SESSION_MS = 3_000;
 
@@ -396,11 +392,10 @@ export function useUser() {
                   warmupResult = await runConnectionWarmupWithRetry();
                 }
                 if (warmupResult === "fail") {
-                  clientReloadNeededRef.current = true;
+                  console.warn("[PindMap:auth] connection warmup failed after retry");
                 }
               } catch (e) {
                 console.warn("[PindMap:auth] connection warmup failed", e);
-                clientReloadNeededRef.current = true;
               } finally {
                 connectionWarmupPendingRef.current = false;
               }

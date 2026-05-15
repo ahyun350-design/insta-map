@@ -5,11 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { debugLog } from "@/lib/debugLog";
-import {
-  ensureConnectionWarm,
-  recordConnectionFailure,
-  recordConnectionSuccess,
-} from "@/lib/connectionRecovery";
+import { withAutoRetry } from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import FeedSkeleton from "@/components/FeedSkeleton";
@@ -80,8 +76,6 @@ function sortChatRoomsByRecency(rooms: ChatRoom[]): ChatRoom[] {
 type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; status?: "pending" | "sent" | "failed"; };
 
 const CHAT_MESSAGES_PAGE_SIZE = 50;
-const CHAT_INSERT_TIMEOUT_MS = 15_000;
-const CHAT_OPEN_SELECT_TIMEOUT_MS = 20_000;
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string, abort?: AbortController): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -1537,9 +1531,6 @@ function HomePageContent() {
   };
 
   const openChat = async (room: ChatRoom) => {
-    const warmGate = await ensureConnectionWarm(showToast);
-    if (warmGate === "reload" || warmGate === "abort") return;
-
     const fromId = activeChatRoom?.id ?? null;
     const reqId = ++openChatRequestRef.current;
     console.log("[PindMap:message] chatroom switched", { from: fromId, to: room.id });
@@ -1583,27 +1574,23 @@ function HomePageContent() {
           );
       }
 
-      let data: any[] | null = null;
-      let error: any = null;
+      let rows: any[] = [];
       try {
-        const res = await promiseWithTimeout(
+        const res = await withAutoRetry((signal) =>
           Promise.resolve(
             supabase
               .from("messages")
               .select("*")
               .eq("room_id", room.id)
               .order("created_at", { ascending: false })
-              .limit(CHAT_MESSAGES_PAGE_SIZE),
+              .limit(CHAT_MESSAGES_PAGE_SIZE)
+              .abortSignal(signal),
           ),
-          CHAT_OPEN_SELECT_TIMEOUT_MS,
-          "messages.openSelect",
         );
-        data = res.data as any[] | null;
-        error = res.error;
+        if (res.error) throw res.error;
+        rows = (res.data as any[] | null) ?? [];
       } catch (e) {
-        console.error("[PindMap:message] openChat fetch timeout", e);
-        recordConnectionFailure(showToast, e);
-        showToast("대화를 불러오는 데 시간이 걸렸어요. 잠시 후 다시 시도해 주세요.", "error");
+        console.error("[PindMap:message] openChat fetch failed", e);
         setMessages([]);
         setChatOlderHasMore(false);
         mountRoomSubscription(room.id);
@@ -1611,15 +1598,7 @@ function HomePageContent() {
       }
 
       if (reqId !== openChatRequestRef.current) return;
-      if (error) {
-        console.error("[PindMap:message] openChat fetch failed", error);
-        setMessages([]);
-        setChatOlderHasMore(false);
-        mountRoomSubscription(room.id);
-        return;
-      }
-      recordConnectionSuccess();
-      const rows = data ?? [];
+      const data = rows;
       const asc = [...rows].reverse();
       setMessages(
         asc.map((m: any) => ({
@@ -1709,24 +1688,6 @@ function HomePageContent() {
       /* ignore */
     }
 
-    const warmGate = await ensureConnectionWarm(showToast);
-    if (warmGate === "reload") {
-      try {
-        debugLog.pushSendStep("done");
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-    if (warmGate === "abort") {
-      try {
-        debugLog.pushSendStep("done");
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-
     const roomId = activeChatRoom.id;
     const friendId = activeChatRoom.friendId;
     const text = newMessage.trim();
@@ -1750,33 +1711,25 @@ function HomePageContent() {
         ),
       ),
     );
-    const insertAbort = new AbortController();
     let insertT = 0;
     try {
-      try {
-        debugLog.pushSendStep("abort_ctrl");
-      } catch {
-        /* ignore */
-      }
       insertT = Date.now();
       try {
         debugLog.pushSendStep("insert_begin");
       } catch {
         /* ignore */
       }
-      const result = await promiseWithTimeout(
+      await withAutoRetry((signal) =>
         Promise.resolve(
           supabase
             .from("messages")
             .insert({ id, room_id: roomId, sender_id: senderId, text, read: false })
-            .abortSignal(insertAbort.signal),
-        ),
-        CHAT_INSERT_TIMEOUT_MS,
-        "messages.insert",
-        insertAbort,
+            .abortSignal(signal),
+        ).then((r) => {
+          if (r.error) throw r.error;
+          return r;
+        }),
       );
-      if (result.error) throw result.error;
-      recordConnectionSuccess();
       try {
         debugLog.pushSendStep("insert_ok", Date.now() - insertT);
       } catch {
@@ -1802,7 +1755,6 @@ function HomePageContent() {
           );
       }
     } catch (err: unknown) {
-      recordConnectionFailure(showToast, err);
       try {
         const errName = err instanceof Error ? err.name : "err";
         debugLog.pushSendStep(`insert_fail:${errName}`, Date.now() - insertT);
@@ -1811,13 +1763,6 @@ function HomePageContent() {
       }
       console.error("[PindMap:message] send failed", { id, roomId, err });
       setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status: "failed" as const } : m)));
-      const isTimeout =
-        (err instanceof Error && err.message.includes("timeout")) ||
-        (err instanceof Error && err.name === "AbortError");
-      const msg = isTimeout
-        ? "메시지 전송 시간이 초과됐어요. 다시 보내 주세요."
-        : "메시지 전송에 실패했어요. 재전송해 주세요.";
-      showToast(msg, "error");
     } finally {
       try {
         debugLog.pushSendStep("done");
@@ -1845,9 +1790,8 @@ function HomePageContent() {
     console.log("[PindMap:message] resend start", { id, roomId });
     sendingIdsRef.current.add(id);
     setMessages((prev) => prev.map((m) => (m.id === failedMessage.id ? { ...m, status: "pending" as const } : m)));
-    const resendInsertAbort = new AbortController();
     try {
-      const result = await promiseWithTimeout(
+      await withAutoRetry((signal) =>
         Promise.resolve(
           supabase
             .from("messages")
@@ -1858,23 +1802,17 @@ function HomePageContent() {
               text: failedMessage.text,
               read: false,
             })
-            .abortSignal(resendInsertAbort.signal),
-        ),
-        CHAT_INSERT_TIMEOUT_MS,
-        "messages.insert",
-        resendInsertAbort,
+            .abortSignal(signal),
+        ).then((r) => {
+          if (r.error) throw r.error;
+          return r;
+        }),
       );
-      if (result.error) throw result.error;
       setMessages((prev) => prev.map((m) => (m.id === failedMessage.id ? { ...m, status: "sent" as const } : m)));
       console.log("[PindMap:message] resend success", { id, roomId });
     } catch (err: unknown) {
       console.error("[PindMap:message] resend failed", { id, roomId, err });
       setMessages((prev) => prev.map((m) => (m.id === failedMessage.id ? { ...m, status: "failed" as const } : m)));
-      const isTimeout =
-        (err instanceof Error && err.message.includes("timeout")) ||
-        (err instanceof Error && err.name === "AbortError");
-      const msg = isTimeout ? "재전송 시간이 초과됐어요." : "재전송에 실패했어요.";
-      showToast(msg, "error");
     } finally {
       sendingIdsRef.current.delete(id);
       requestAnimationFrame(() => {
