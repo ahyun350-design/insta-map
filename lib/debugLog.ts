@@ -32,7 +32,7 @@ let state: DebugLogState = { ...INITIAL_STATE };
 const listeners = new Set<() => void>();
 
 // TEMP DEBUG - 모바일 측정 끝나면 제거 (조아현)
-const FORCE_DEBUG = true;
+const FORCE_DEBUG = false;
 
 function isEnabled(): boolean {
   if (typeof window === "undefined") return false;
