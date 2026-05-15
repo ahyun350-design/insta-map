@@ -4,6 +4,9 @@ export type DebugLogState = {
   warmupStartedAt: number | null;
   warmupFinishedAt: number | null;
   warmupResult: "ok" | "fail" | "pending" | null;
+  warmAttempts: number | null;
+  refreshResult: "ok" | "fail" | "pending" | null;
+  refreshMs: number | null;
   lastAuthEvent: string | null;
   lastGetSession: { ok: boolean; ms: number; at: number } | null;
   sendSteps: Array<{ step: string; at: number; ms?: number }>;
@@ -16,6 +19,9 @@ const INITIAL_STATE: DebugLogState = {
   warmupStartedAt: null,
   warmupFinishedAt: null,
   warmupResult: null,
+  warmAttempts: null,
+  refreshResult: null,
+  refreshMs: null,
   lastAuthEvent: null,
   lastGetSession: null,
   sendSteps: [],

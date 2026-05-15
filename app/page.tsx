@@ -1698,6 +1698,48 @@ function HomePageContent() {
     } catch {
       /* ignore */
     }
+
+    const warmState = debugLog.getState();
+    if (warmState.warmupResult === "fail") {
+      try {
+        debugLog.pushSendStep("warm_gate_retry");
+      } catch {
+        /* ignore */
+      }
+      const retryT = Date.now();
+      let warmOk = false;
+      try {
+        await promiseWithTimeout(
+          Promise.resolve(supabase.from("users").select("id").limit(1)),
+          3_000,
+          "warmGate.users",
+        );
+        warmOk = true;
+        try {
+          debugLog.set({ warmupResult: "ok", warmupStartedAt: retryT, warmupFinishedAt: Date.now() });
+          debugLog.pushSendStep("warm_gate_ok", Date.now() - retryT);
+        } catch {
+          /* ignore */
+        }
+      } catch {
+        try {
+          debugLog.set({ warmupResult: "fail" });
+          debugLog.pushSendStep("warm_gate_fail", Date.now() - retryT);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!warmOk) {
+        showToast("연결이 끊어졌어요. 잠시 후 다시 시도해주세요.", "error");
+        try {
+          debugLog.pushSendStep("done");
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+    }
+
     const roomId = activeChatRoom.id;
     const friendId = activeChatRoom.friendId;
     const text = newMessage.trim();

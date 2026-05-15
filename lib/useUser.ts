@@ -285,13 +285,59 @@ export function useUser() {
 
     /** 포그라운드 복귀 시 세션·user 불일치 회복 및 주기적 재검증 (N-1 워치독·sessionChecked 게이트 로직은 변경 없음) */
     const FOREGROUND_AUTH_DEBOUNCE_MS = 1000;
-    /** 장시간 백그라운드 후 첫 fetch hang 완화 — 짧은 전환은 생략 */
-    const MIN_BG_MS_FOR_CONN_WARMUP = 10_000;
+    /** 백그라운드 5초+ 복귀 시 connection 리셋·warmup — 짧은 전환은 생략 */
+    const MIN_BG_MS_FOR_CONN_WARMUP = 5_000;
     const CONN_WARMUP_TIMEOUT_MS = 5_000;
+    const CONN_REFRESH_TIMEOUT_MS = 5_000;
     const FOREGROUND_PERIODIC_MS = 5 * 60 * 1000;
     let foregroundDebounceTimer: number | null = null;
     let foregroundResyncInFlight = false;
     let lastPeriodicVerifyAt = Date.now();
+
+    const runConnectionWarmup = async (): Promise<"ok" | "fail"> => {
+      const attemptWarmup = async (): Promise<boolean> => {
+        try {
+          await promiseWithTimeout(
+            Promise.resolve(supabase.from("users").select("id").limit(1)),
+            CONN_WARMUP_TIMEOUT_MS,
+            "connectionWarmup.users",
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      const startedAt = Date.now();
+      try {
+        debugLog.set({ warmupStartedAt: startedAt, warmupResult: "pending", warmAttempts: null });
+      } catch {
+        /* ignore */
+      }
+
+      let attempts = 1;
+      let ok = await attemptWarmup();
+      if (!ok) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 1000);
+        });
+        attempts = 2;
+        ok = await attemptWarmup();
+      }
+
+      const finishedAt = Date.now();
+      try {
+        debugLog.set({
+          warmupFinishedAt: finishedAt,
+          warmupResult: ok ? "ok" : "fail",
+          warmAttempts: attempts,
+        });
+      } catch {
+        /* ignore */
+      }
+
+      return ok ? "ok" : "fail";
+    };
 
     const runForegroundAuthResync = async () => {
       const { user: u, sessionChecked: sc, loggingOut: lo } = authUiRef.current;
@@ -351,31 +397,43 @@ export function useUser() {
           }
 
           if (bgMs >= MIN_BG_MS_FOR_CONN_WARMUP) {
+            try {
+              await supabase.removeAllChannels();
+            } catch {
+              /* ignore */
+            }
+
+            const refreshT = Date.now();
+            try {
+              debugLog.set({ refreshResult: "pending", refreshMs: null });
+            } catch {
+              /* ignore */
+            }
+            try {
+              await promiseWithTimeout(
+                Promise.resolve(supabase.auth.refreshSession()),
+                CONN_REFRESH_TIMEOUT_MS,
+                "auth.refreshSession",
+              );
+              try {
+                debugLog.set({ refreshResult: "ok", refreshMs: Date.now() - refreshT });
+              } catch {
+                /* ignore */
+              }
+            } catch {
+              try {
+                debugLog.set({ refreshResult: "fail", refreshMs: Date.now() - refreshT });
+              } catch {
+                /* ignore */
+              }
+            }
+
             if (!connectionWarmupPendingRef.current) {
               connectionWarmupPendingRef.current = true;
               try {
-                try {
-                  debugLog.set({ warmupStartedAt: Date.now(), warmupResult: "pending" });
-                } catch {
-                  /* ignore */
-                }
-                await promiseWithTimeout(
-                  Promise.resolve(supabase.from("users").select("id").limit(1)),
-                  CONN_WARMUP_TIMEOUT_MS,
-                  "connectionWarmup.users",
-                );
-                try {
-                  debugLog.set({ warmupFinishedAt: Date.now(), warmupResult: "ok" });
-                } catch {
-                  /* ignore */
-                }
+                await runConnectionWarmup();
               } catch (e) {
                 console.warn("[PindMap:auth] connection warmup failed", e);
-                try {
-                  debugLog.set({ warmupFinishedAt: Date.now(), warmupResult: "fail" });
-                } catch {
-                  /* ignore */
-                }
               } finally {
                 connectionWarmupPendingRef.current = false;
               }

@@ -49,10 +49,15 @@ export default function DebugBox() {
   const bgLabel =
     snap.bgDurationMs !== null ? `${(snap.bgDurationMs / 1000).toFixed(1)}s` : "-";
 
+  const warmAttemptsSuffix =
+    snap.warmAttempts !== null && snap.warmAttempts > 1 ? ` [x${snap.warmAttempts}]` : "";
+
   const warmLabel =
     snap.warmupResult !== null
-      ? `${snap.warmupResult}${warmupMs !== null ? ` (${warmupMs}ms)` : ""}`
+      ? `${snap.warmupResult}${warmupMs !== null ? ` (${warmupMs}ms)` : ""}${warmAttemptsSuffix}`
       : "-";
+
+  const refreshLabel = `${snap.refreshResult ?? "-"}${snap.refreshMs !== null ? ` ${snap.refreshMs}ms` : ""}`;
 
   const sessLabel = snap.lastGetSession
     ? `${snap.lastGetSession.ok ? "ok" : "fail"} ${snap.lastGetSession.ms}ms`
