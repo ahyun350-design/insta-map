@@ -25,13 +25,19 @@ const INITIAL_STATE: DebugLogState = {
 let state: DebugLogState = { ...INITIAL_STATE };
 const listeners = new Set<() => void>();
 
+// TEMP DEBUG - 모바일 측정 끝나면 제거 (조아현)
+const FORCE_DEBUG = true;
+
 function isEnabled(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    if (localStorage.getItem("debugMode") === "1") return true;
-    return new URLSearchParams(window.location.search).get("debug") === "1";
+    const enabled =
+      FORCE_DEBUG ||
+      localStorage.getItem("debugMode") === "1" ||
+      new URLSearchParams(window.location.search).get("debug") === "1";
+    return enabled;
   } catch {
-    return false;
+    return FORCE_DEBUG;
   }
 }
 
