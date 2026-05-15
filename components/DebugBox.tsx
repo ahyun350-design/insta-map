@@ -103,6 +103,7 @@ export default function DebugBox() {
       </button>
       <div style={{ paddingRight: 16 }}>
         <div>BG: {bgLabel}</div>
+        <div>REFRESH: {refreshLabel}</div>
         <div>WARM: {warmLabel}</div>
         <div>AUTH: {snap.lastAuthEvent ?? "-"}</div>
         <div>SESS: {sessLabel}</div>
