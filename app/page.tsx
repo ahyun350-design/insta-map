@@ -5,6 +5,11 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { debugLog } from "@/lib/debugLog";
+import {
+  ensureConnectionWarm,
+  recordConnectionFailure,
+  recordConnectionSuccess,
+} from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import FeedSkeleton from "@/components/FeedSkeleton";
@@ -1532,6 +1537,9 @@ function HomePageContent() {
   };
 
   const openChat = async (room: ChatRoom) => {
+    const warmGate = await ensureConnectionWarm(showToast);
+    if (warmGate === "reload" || warmGate === "abort") return;
+
     const fromId = activeChatRoom?.id ?? null;
     const reqId = ++openChatRequestRef.current;
     console.log("[PindMap:message] chatroom switched", { from: fromId, to: room.id });
@@ -1594,6 +1602,7 @@ function HomePageContent() {
         error = res.error;
       } catch (e) {
         console.error("[PindMap:message] openChat fetch timeout", e);
+        recordConnectionFailure(showToast, e);
         showToast("대화를 불러오는 데 시간이 걸렸어요. 잠시 후 다시 시도해 주세요.", "error");
         setMessages([]);
         setChatOlderHasMore(false);
@@ -1609,6 +1618,7 @@ function HomePageContent() {
         mountRoomSubscription(room.id);
         return;
       }
+      recordConnectionSuccess();
       const rows = data ?? [];
       const asc = [...rows].reverse();
       setMessages(
@@ -1699,45 +1709,22 @@ function HomePageContent() {
       /* ignore */
     }
 
-    const warmState = debugLog.getState();
-    if (warmState.warmupResult === "fail") {
+    const warmGate = await ensureConnectionWarm(showToast);
+    if (warmGate === "reload") {
       try {
-        debugLog.pushSendStep("warm_gate_retry");
+        debugLog.pushSendStep("done");
       } catch {
         /* ignore */
       }
-      const retryT = Date.now();
-      let warmOk = false;
+      return;
+    }
+    if (warmGate === "abort") {
       try {
-        await promiseWithTimeout(
-          Promise.resolve(supabase.from("users").select("id").limit(1)),
-          3_000,
-          "warmGate.users",
-        );
-        warmOk = true;
-        try {
-          debugLog.set({ warmupResult: "ok", warmupStartedAt: retryT, warmupFinishedAt: Date.now() });
-          debugLog.pushSendStep("warm_gate_ok", Date.now() - retryT);
-        } catch {
-          /* ignore */
-        }
+        debugLog.pushSendStep("done");
       } catch {
-        try {
-          debugLog.set({ warmupResult: "fail" });
-          debugLog.pushSendStep("warm_gate_fail", Date.now() - retryT);
-        } catch {
-          /* ignore */
-        }
+        /* ignore */
       }
-      if (!warmOk) {
-        showToast("연결이 끊어졌어요. 잠시 후 다시 시도해주세요.", "error");
-        try {
-          debugLog.pushSendStep("done");
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
+      return;
     }
 
     const roomId = activeChatRoom.id;
@@ -1789,6 +1776,7 @@ function HomePageContent() {
         insertAbort,
       );
       if (result.error) throw result.error;
+      recordConnectionSuccess();
       try {
         debugLog.pushSendStep("insert_ok", Date.now() - insertT);
       } catch {
@@ -1814,6 +1802,7 @@ function HomePageContent() {
           );
       }
     } catch (err: unknown) {
+      recordConnectionFailure(showToast, err);
       try {
         const errName = err instanceof Error ? err.name : "err";
         debugLog.pushSendStep(`insert_fail:${errName}`, Date.now() - insertT);

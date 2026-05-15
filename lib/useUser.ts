@@ -4,6 +4,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { debugLog } from "./debugLog";
+import {
+  clientReloadNeededRef,
+  runConnectionWarmupWithRetry,
+  runExtraRefreshSession,
+} from "./connectionRecovery";
 
 const AUTH_LOGIN_GATE_GET_SESSION_MS = 3_000;
 
@@ -287,57 +292,11 @@ export function useUser() {
     const FOREGROUND_AUTH_DEBOUNCE_MS = 1000;
     /** 백그라운드 5초+ 복귀 시 connection 리셋·warmup — 짧은 전환은 생략 */
     const MIN_BG_MS_FOR_CONN_WARMUP = 5_000;
-    const CONN_WARMUP_TIMEOUT_MS = 5_000;
     const CONN_REFRESH_TIMEOUT_MS = 5_000;
     const FOREGROUND_PERIODIC_MS = 5 * 60 * 1000;
     let foregroundDebounceTimer: number | null = null;
     let foregroundResyncInFlight = false;
     let lastPeriodicVerifyAt = Date.now();
-
-    const runConnectionWarmup = async (): Promise<"ok" | "fail"> => {
-      const attemptWarmup = async (): Promise<boolean> => {
-        try {
-          await promiseWithTimeout(
-            Promise.resolve(supabase.from("users").select("id").limit(1)),
-            CONN_WARMUP_TIMEOUT_MS,
-            "connectionWarmup.users",
-          );
-          return true;
-        } catch {
-          return false;
-        }
-      };
-
-      const startedAt = Date.now();
-      try {
-        debugLog.set({ warmupStartedAt: startedAt, warmupResult: "pending", warmAttempts: null });
-      } catch {
-        /* ignore */
-      }
-
-      let attempts = 1;
-      let ok = await attemptWarmup();
-      if (!ok) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 1000);
-        });
-        attempts = 2;
-        ok = await attemptWarmup();
-      }
-
-      const finishedAt = Date.now();
-      try {
-        debugLog.set({
-          warmupFinishedAt: finishedAt,
-          warmupResult: ok ? "ok" : "fail",
-          warmAttempts: attempts,
-        });
-      } catch {
-        /* ignore */
-      }
-
-      return ok ? "ok" : "fail";
-    };
 
     const runForegroundAuthResync = async () => {
       const { user: u, sessionChecked: sc, loggingOut: lo } = authUiRef.current;
@@ -431,9 +390,17 @@ export function useUser() {
             if (!connectionWarmupPendingRef.current) {
               connectionWarmupPendingRef.current = true;
               try {
-                await runConnectionWarmup();
+                let warmupResult = await runConnectionWarmupWithRetry();
+                if (warmupResult === "fail") {
+                  await runExtraRefreshSession();
+                  warmupResult = await runConnectionWarmupWithRetry();
+                }
+                if (warmupResult === "fail") {
+                  clientReloadNeededRef.current = true;
+                }
               } catch (e) {
                 console.warn("[PindMap:auth] connection warmup failed", e);
+                clientReloadNeededRef.current = true;
               } finally {
                 connectionWarmupPendingRef.current = false;
               }
