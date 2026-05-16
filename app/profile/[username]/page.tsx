@@ -28,6 +28,7 @@ type FriendRoom = {
   id: string;
   friendId: string;
   friendName: string;
+  friendAvatarUrl?: string;
 };
 
 function timeAgo(dateStr: string) {
@@ -238,13 +239,14 @@ export default function ProfilePage() {
         const friendId = r.user1_id === user.id ? r.user2_id : r.user1_id;
         const { data: friendData } = await supabase
           .from("users")
-          .select("username")
+          .select("username, avatar_url")
           .eq("id", friendId)
           .maybeSingle();
         return {
           id: r.id,
           friendId,
           friendName: friendData?.username ?? friendId,
+          friendAvatarUrl: typeof friendData?.avatar_url === "string" && friendData.avatar_url.trim() ? friendData.avatar_url.trim() : undefined,
         };
       })
     );
@@ -416,9 +418,7 @@ export default function ProfilePage() {
                   disabled={shareLoading}
                   style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", border: "0.5px solid #eee", borderRadius: "10px", background: "#fff", cursor: shareLoading ? "wait" : "pointer", fontFamily: "inherit", textAlign: "left", opacity: shareLoading ? 0.6 : 1 }}
                 >
-                  <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", flexShrink: 0 }}>
-                    {room.friendName.slice(0, 1).toUpperCase()}
-                  </div>
+                  <ProfileAvatar avatarUrl={room.friendAvatarUrl} username={room.friendName} size={32} fontSize={13} />
                   <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{room.friendName}</span>
                   <span style={{ fontSize: "11px", color: "#1a2a7a", fontWeight: 500 }}>보내기 →</span>
                 </button>

@@ -14,6 +14,7 @@ import { useToast } from "@/components/Toast";
 import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
+import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
 import {
   getCurrentPositionForMapStage1,
   getCurrentPositionForMapStage2,
@@ -56,9 +57,9 @@ function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): C
 }
 type Place = { id: string; name: string; address: string; category: Category };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
-type Comment = { id: string; user: string; text: string; createdAt: string };
+type Comment = { id: string; user: string; userId?: string; avatarUrl?: string; text: string; createdAt: string };
 type FeedPost = {
-  id: string; user: string; userId: string; title: string; placeName: string; address: string;
+  id: string; user: string; userId: string; userAvatarUrl?: string; title: string; placeName: string; address: string;
   category: Category; comment: string; images: string[]; createdAt: string;
   archived?: boolean; likes: string[]; comments: Comment[];
 };
@@ -70,8 +71,8 @@ type PostImageItem = {
   file?: File;
   error?: string;
 };
-type FriendRoom = { id: string; friendId: string; friendName: string };
-type ChatRoom = { id: string; friendId: string; friendName: string; lastMessage: string; lastTime: string; unreadCount: number; };
+type FriendRoom = { id: string; friendId: string; friendName: string; friendAvatarUrl?: string };
+type ChatRoom = { id: string; friendId: string; friendName: string; friendAvatarUrl?: string; lastMessage: string; lastTime: string; unreadCount: number; };
 
 /** 마지막 메시지 시각(lastTime) 기준 최신순 — DM 앱과 동일 */
 function sortChatRoomsByRecency(rooms: ChatRoom[]): ChatRoom[] {
@@ -413,11 +414,54 @@ function HomePageContent() {
     type: "like" | "comment" | "follow" | "message";
     actor_id: string;
     actor_username: string;
+    actorAvatarUrl?: string;
     target_id: string | null;
     target_text: string | null;
     read: boolean;
     created_at: string;
   };
+
+  const syncCurrentUserToAvatarCache = useCallback(() => {
+    if (!user?.id) return;
+    userAvatarCacheRef.current.setFromRow({
+      id: user.id,
+      username: user.username,
+      avatar_url: user.avatar_url,
+    });
+  }, [user?.id, user?.username, user?.avatar_url]);
+
+  const hydrateFeedPostsWithAvatars = useCallback((posts: FeedPost[]): FeedPost[] => {
+    const cache = userAvatarCacheRef.current;
+    return posts.map((p) => ({
+      ...p,
+      userAvatarUrl: cache.resolve(p.userId, p.user),
+      comments: p.comments.map((c) => ({
+        ...c,
+        avatarUrl: cache.resolve(c.userId, c.user),
+      })),
+    }));
+  }, []);
+
+  const hydrateNotificationsWithAvatars = useCallback((items: Notification[]): Notification[] => {
+    const cache = userAvatarCacheRef.current;
+    return items.map((n) => ({
+      ...n,
+      actorAvatarUrl: cache.getByUserId(n.actor_id),
+    }));
+  }, []);
+
+  const prefetchAvatarsForFeedPosts = useCallback(async (posts: FeedPost[]) => {
+    const { userIds, usernames } = collectFeedPostAvatarKeys(posts);
+    const cache = userAvatarCacheRef.current;
+    await Promise.all([cache.prefetchByIds(userIds), cache.prefetchByUsernames(usernames)]);
+  }, []);
+
+  const prefetchAvatarsForNotifications = useCallback(async (items: Notification[]) => {
+    const actorIds = [...new Set(items.map((n) => n.actor_id).filter(Boolean))];
+    await userAvatarCacheRef.current.prefetchByIds(actorIds);
+  }, []);
+
+  const userAvatarCacheRef = useRef(new UserAvatarCache());
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -499,7 +543,7 @@ function HomePageContent() {
   /** iOS/WKWebView 키보드와 하단 입력줄 사이 여백 보정 (visualViewport) */
   const [chatKeyboardOverlap, setChatKeyboardOverlap] = useState(0);
   const [friendSearch, setFriendSearch] = useState("");
-  const [friendSearchResult, setFriendSearchResult] = useState<{id: string; username: string} | null>(null);
+  const [friendSearchResult, setFriendSearchResult] = useState<{ id: string; username: string; avatar_url?: string } | null>(null);
   const [friendSearchError, setFriendSearchError] = useState("");
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
@@ -841,19 +885,33 @@ function HomePageContent() {
       ]), 8000);
 
       setFollowingIds((followsRes.data || []).map((f: any) => f.following_id));
-      setNotifications((notificationsRes.data || []) as Notification[]);
+      syncCurrentUserToAvatarCache();
+
+      const rawNotifications = (notificationsRes.data || []) as Notification[];
+      await prefetchAvatarsForNotifications(rawNotifications);
+      setNotifications(hydrateNotificationsWithAvatars(rawNotifications));
 
       if (placesRes.data) {
         setSavedPlaces(placesRes.data.map((p) => ({ id: p.id, name: p.name, address: p.address, category: p.category as Category })));
       }
       if (postsRes.data) {
-        setFeedPosts(postsRes.data.map((p: any) => ({
+        const rawPosts: FeedPost[] = postsRes.data.map((p: any) => ({
           id: p.id, user: p.user_name, userId: p.user_id ?? "", title: p.title, placeName: p.place_name,
           address: p.address, category: p.category as Category, comment: p.comment,
           images: p.images ?? [], createdAt: p.created_at, archived: p.archived,
           likes: p.likes ?? [],
-          comments: (p.comments ?? []).map((c: any) => ({ id: c.id, user: c.user_name, text: c.text, createdAt: c.created_at })),
-        })));
+          comments: (p.comments ?? []).map((c: any) => ({
+            id: c.id,
+            user: c.user_name,
+            userId: c.user_id ?? undefined,
+            text: c.text,
+            createdAt: c.created_at,
+          })),
+        }));
+        await prefetchAvatarsForFeedPosts(rawPosts);
+        setFeedPosts(hydrateFeedPostsWithAvatars(rawPosts));
+      } else {
+        setFeedPosts([]);
       }
 
       const roomsData = roomsRes.data;
@@ -861,7 +919,8 @@ function HomePageContent() {
         const rooms: ChatRoom[] = await withTimeout(Promise.all(
           roomsData.map(async (r: any) => {
             const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
-            const { data: friendData } = await supabase.from("users").select("username").eq("id", friendId).maybeSingle();
+            const { data: friendData } = await supabase.from("users").select("username, avatar_url").eq("id", friendId).maybeSingle();
+            if (friendData) userAvatarCacheRef.current.setFromRow({ id: friendId, username: friendData.username, avatar_url: friendData.avatar_url });
             const [msgsRes, unreadRes] = await Promise.all([
               supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1),
               supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false),
@@ -871,6 +930,7 @@ function HomePageContent() {
               id: r.id,
               friendId,
               friendName: friendData?.username || friendId,
+              friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
               lastMessage: msgsRes.data?.[0]?.text ?? "",
               lastTime: msgsRes.data?.[0]?.created_at ?? r.created_at,
               unreadCount: unread,
@@ -965,7 +1025,11 @@ function HomePageContent() {
         },
         (payload) => {
           const newNotification = payload.new as Notification;
-          setNotifications(prev => [newNotification, ...prev]);
+          void (async () => {
+            await userAvatarCacheRef.current.prefetchByIds([newNotification.actor_id]);
+            const actorAvatarUrl = userAvatarCacheRef.current.getByUserId(newNotification.actor_id);
+            setNotifications((prev) => [{ ...newNotification, actorAvatarUrl }, ...prev]);
+          })();
         }
       )
       .subscribe();
@@ -974,6 +1038,29 @@ function HomePageContent() {
       supabase.removeChannel(channel);
     };
   }, [user?.id]);
+
+  useEffect(() => {
+    syncCurrentUserToAvatarCache();
+    if (!user?.id) return;
+    const avatarUrl = user.avatar_url;
+    setFeedPosts((prev) =>
+      hydrateFeedPostsWithAvatars(
+        prev.map((p) =>
+          p.userId === user.id
+            ? { ...p, userAvatarUrl: avatarUrl }
+            : {
+                ...p,
+                comments: p.comments.map((c) =>
+                  c.userId === user.id ? { ...c, avatarUrl } : c,
+                ),
+              },
+        ),
+      ),
+    );
+    setNotifications((prev) =>
+      prev.map((n) => (n.actor_id === user.id ? { ...n, actorAvatarUrl: avatarUrl } : n)),
+    );
+  }, [user?.id, user?.avatar_url, user?.username, syncCurrentUserToAvatarCache, hydrateFeedPostsWithAvatars]);
 
   useEffect(() => {
     if (!detailPostId || !user) return;
@@ -1483,6 +1570,24 @@ function HomePageContent() {
 
       await reloadUserFromSession();
       const uid = user.id;
+      if (avatarChanged && nextAvatarUrl) {
+        userAvatarCacheRef.current.setByUserId(uid, nextAvatarUrl);
+        setFeedPosts((prev) =>
+          prev.map((p) =>
+            p.userId === uid
+              ? { ...p, userAvatarUrl: nextAvatarUrl }
+              : {
+                  ...p,
+                  comments: p.comments.map((c) =>
+                    c.userId === uid ? { ...c, avatarUrl: nextAvatarUrl } : c,
+                  ),
+                },
+          ),
+        );
+        setNotifications((prev) =>
+          prev.map((n) => (n.actor_id === uid ? { ...n, actorAvatarUrl: nextAvatarUrl } : n)),
+        );
+      }
       if (nameChanged) {
         setFeedPosts((prev) =>
           prev.map((p) => ({
@@ -1561,7 +1666,14 @@ function HomePageContent() {
     if (!newComment.trim()) return;
     const c = { id: Date.now().toString(), post_id: postId, user_id: user?.id || "", user_name: MY_USERNAME, text: newComment.trim() };
     await supabase.from("comments").insert(c);
-    const newC: Comment = { id: c.id, user: MY_USERNAME, text: newComment.trim(), createdAt: new Date().toISOString() };
+    const newC: Comment = {
+      id: c.id,
+      user: MY_USERNAME,
+      userId: user?.id,
+      avatarUrl: user?.avatar_url,
+      text: newComment.trim(),
+      createdAt: new Date().toISOString(),
+    };
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...p.comments, newC] } : p));
 
     const post = feedPosts.find(p => p.id === postId);
@@ -1682,7 +1794,12 @@ function HomePageContent() {
     console.log("[PindMap:message] search filter (self excluded)", friendSearch.trim(), !!data);
     if (!data) { setFriendSearchError("유저를 찾을 수 없어요."); return; }
     if (data.username === MY_USER) { setFriendSearchError("나 자신은 추가할 수 없어요."); return; }
-    setFriendSearchResult(data);
+    userAvatarCacheRef.current.setFromRow({ id: data.id, username: data.username, avatar_url: data.avatar_url });
+    setFriendSearchResult({
+      id: data.id,
+      username: data.username,
+      avatar_url: normalizeAvatarUrl(data.avatar_url),
+    });
   };
 
   const addFriend = async () => {
@@ -1695,7 +1812,15 @@ function HomePageContent() {
       roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
       await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: friendSearchResult.id });
     }
-    const newRoom: ChatRoom = { id: roomId, friendId: friendSearchResult.id, friendName: friendSearchResult.username, lastMessage: "", lastTime: new Date().toISOString(), unreadCount: 0 };
+    const newRoom: ChatRoom = {
+      id: roomId,
+      friendId: friendSearchResult.id,
+      friendName: friendSearchResult.username,
+      friendAvatarUrl: friendSearchResult.avatar_url,
+      lastMessage: "",
+      lastTime: new Date().toISOString(),
+      unreadCount: 0,
+    };
     setChatRooms((prev) => sortChatRoomsByRecency([newRoom, ...prev.filter((r) => r.id !== roomId)]));
     setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null);
     setActiveChatRoom(newRoom);
@@ -2123,13 +2248,17 @@ function HomePageContent() {
         const friendId = r.user1_id === user.id ? r.user2_id : r.user1_id;
         const { data: friendData } = await supabase
           .from("users")
-          .select("username")
+          .select("username, avatar_url")
           .eq("id", friendId)
           .maybeSingle();
+        if (friendData) {
+          userAvatarCacheRef.current.setFromRow({ id: friendId, username: friendData.username, avatar_url: friendData.avatar_url });
+        }
         return {
           id: r.id,
           friendId,
           friendName: friendData?.username ?? friendId,
+          friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
         };
       }),
     );
@@ -2592,7 +2721,21 @@ function HomePageContent() {
         img.status === "uploaded" && typeof img.publicUrl === "string",
       )
       .map((img) => img.publicUrl);
-    const newPost: FeedPost = { id: Math.random().toString(36).substring(2) + Date.now().toString(36), user: MY_USERNAME, userId: user?.id || "", title: postTitle, placeName: postPlaceName, address: postAddress, category: postCategory, comment: postComment, images: imageUrls, createdAt: new Date().toISOString(), likes: [], comments: [] };
+    const newPost: FeedPost = {
+      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+      user: MY_USERNAME,
+      userId: user?.id || "",
+      userAvatarUrl: user?.avatar_url,
+      title: postTitle,
+      placeName: postPlaceName,
+      address: postAddress,
+      category: postCategory,
+      comment: postComment,
+      images: imageUrls,
+      createdAt: new Date().toISOString(),
+      likes: [],
+      comments: [],
+    };
     await submitPost(newPost);
     showToast("큐레이션이 등록됐어요 ✨", "success");
     setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페");
@@ -3305,11 +3448,15 @@ function HomePageContent() {
         if (data) {
           const friendId = data.user1_id === user.id ? data.user2_id : data.user1_id;
           // 친구 username 가져오기
-          const { data: friendData } = await supabase.from("users").select("username").eq("id", friendId).maybeSingle();
+          const { data: friendData } = await supabase.from("users").select("username, avatar_url").eq("id", friendId).maybeSingle();
+          if (friendData) {
+            userAvatarCacheRef.current.setFromRow({ id: friendId, username: friendData.username, avatar_url: friendData.avatar_url });
+          }
           targetRoom = {
             id: data.id,
             friendId,
             friendName: friendData?.username ?? friendId,
+            friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
             lastMessage: "",
             lastTime: data.created_at,
             unreadCount: 0,
@@ -3341,10 +3488,21 @@ function HomePageContent() {
       if (!roomsData) return;
       const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
         const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
-        const { data: friendData } = await supabase.from("users").select("username").eq("id", friendId).maybeSingle();
+        const { data: friendData } = await supabase.from("users").select("username, avatar_url").eq("id", friendId).maybeSingle();
+        if (friendData) {
+          userAvatarCacheRef.current.setFromRow({ id: friendId, username: friendData.username, avatar_url: friendData.avatar_url });
+        }
         const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
         const { count: unread } = await supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false);
-        return { id: r.id, friendId, friendName: friendData?.username || friendId, lastMessage: msgs?.[0]?.text ?? "", lastTime: msgs?.[0]?.created_at ?? r.created_at, unreadCount: unread ?? 0 };
+        return {
+          id: r.id,
+          friendId,
+          friendName: friendData?.username || friendId,
+          friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
+          lastMessage: msgs?.[0]?.text ?? "",
+          lastTime: msgs?.[0]?.created_at ?? r.created_at,
+          unreadCount: unread ?? 0,
+        };
       }));
       setChatRooms(sortChatRoomsByRecency(rooms));
     };
@@ -3882,7 +4040,7 @@ function HomePageContent() {
             {relatedPosts.map((post) => (
               <div key={post.id} onClick={() => { setDetailPostId(post.id); setSelectedPlace(null); setMapExpanded(false); }} style={{ padding: "12px 24px", borderTop: "0.5px solid #f8f8f8", cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                  <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", flexShrink: 0 }}>{post.user.slice(0, 1).toUpperCase()}</div>
+                  <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={26} fontSize={11} />
                   <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a1a2e" }}>{post.user}</span>
                   <span style={{ fontSize: "10px", color: "#bbb", marginLeft: "auto" }}>{timeAgo(post.createdAt)}</span>
                 </div>
@@ -3982,9 +4140,7 @@ function HomePageContent() {
             disabled={shareLoading}
             style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", border: "0.5px solid #eee", borderRadius: "10px", background: "#fff", cursor: shareLoading ? "wait" : "pointer", fontFamily: "inherit", textAlign: "left", opacity: shareLoading ? 0.6 : 1 }}
           >
-            <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", flexShrink: 0 }}>
-              {room.friendName.slice(0, 1).toUpperCase()}
-            </div>
+            <ProfileAvatar avatarUrl={room.friendAvatarUrl} username={room.friendName} size={32} fontSize={13} />
             <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{room.friendName}</span>
             <span style={{ fontSize: "11px", color: "#1a2a7a", fontWeight: 500 }}>보내기 →</span>
           </button>
@@ -4100,20 +4256,7 @@ function HomePageContent() {
               marginBottom: "6px",
             }}
           >
-            <div style={{
-              width: "36px", height: "36px",
-              borderRadius: "50%",
-              background: "#1a2a7a",
-              color: "#fff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "13px",
-              flexShrink: 0,
-              fontWeight: 600,
-            }}>
-              {n.actor_username.slice(0, 1).toUpperCase()}
-            </div>
+            <ProfileAvatar avatarUrl={n.actorAvatarUrl} username={n.actor_username} size={36} fontSize={13} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e", lineHeight: 1.4 }}>
                 {getNotificationMessage(n)}
@@ -4157,7 +4300,7 @@ function HomePageContent() {
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "16px 20px 0" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
-                <div className="avatar">{detailPost.user.slice(0, 1).toUpperCase()}</div>
+                <ProfileAvatar avatarUrl={detailPost.userAvatarUrl} username={detailPost.user} size={38} className="avatar" />
                 <div><p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#1a1a2e" }}>{detailPost.user}</p><p style={{ margin: 0, fontSize: "11px", color: "#aaa" }}>{timeAgo(detailPost.createdAt)}</p></div>
               </div>
               <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
@@ -4255,9 +4398,9 @@ function HomePageContent() {
                   <button
                     type="button"
                     onClick={() => router.push(`/profile/${encodeURIComponent(c.user)}`)}
-                    style={{ width: "30px", height: "30px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", flexShrink: 0, border: "none", cursor: "pointer", padding: 0 }}
+                    style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, flexShrink: 0 }}
                   >
-                    {c.user.slice(0, 1).toUpperCase()}
+                    <ProfileAvatar avatarUrl={c.avatarUrl} username={c.user} size={30} fontSize={12} />
                   </button>
                   <div style={{ flex: 1, background: "#f8f8fc", borderRadius: "10px", padding: "8px 12px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
@@ -4627,7 +4770,7 @@ function HomePageContent() {
                       onClick={(e) => { e.stopPropagation(); router.push(`/profile/${encodeURIComponent(post.user)}`); }}
                       style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, border: "none", background: "transparent", padding: 0, textAlign: "left", cursor: "pointer", minWidth: 0 }}
                     >
-                      <div className="avatar">{post.user.slice(0, 1).toUpperCase()}</div>
+                      <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={38} className="avatar" />
                       <div style={{ flex: 1, minWidth: 0 }}><p className="feedUser">{post.user}</p><p className="feedMeta">{timeAgo(post.createdAt)}</p></div>
                     </button>
                     {post.user !== MY_USERNAME && post.userId && !followingIds.includes(post.userId) && (
@@ -4702,6 +4845,7 @@ function HomePageContent() {
           <button onClick={() => setActiveChatRoom(null)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
+          <ProfileAvatar avatarUrl={activeChatRoom.friendAvatarUrl} username={activeChatRoom.friendName} size={32} fontSize={13} />
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{activeChatRoom.friendName}</span>
         </div>
         <div
@@ -4907,7 +5051,7 @@ function HomePageContent() {
             {friendSearchError && <p style={{ color: "#e07070", fontSize: "11px", marginTop: "6px" }}>{friendSearchError}</p>}
             {friendSearchResult && (
               <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "10px", padding: "12px", background: "#f7f9ff", borderRadius: "10px", border: "0.5px solid #e1e7f7" }}>
-                <div style={{ width: "34px", height: "34px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", flexShrink: 0 }}>{friendSearchResult.username.slice(0,1).toUpperCase()}</div>
+                <ProfileAvatar avatarUrl={friendSearchResult.avatar_url} username={friendSearchResult.username} size={34} fontSize={13} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{friendSearchResult.username}</p>
                   <p style={{ margin: "3px 0 0", fontSize: "10px", color: "#9ca3b6" }}>검색 결과</p>
@@ -4930,7 +5074,7 @@ function HomePageContent() {
 )}
         {chatRooms.map(room => (
           <article key={room.id} className="chatItem" onClick={() => openChat(room)} style={{ cursor: "pointer" }}>
-            <div className="avatar">{room.friendName.slice(0,1).toUpperCase()}</div>
+            <ProfileAvatar avatarUrl={room.friendAvatarUrl} username={room.friendName} size={38} className="avatar" />
             <div className="chatBody"><p className="chatName">{room.friendName}</p><p className="chatPreview">{room.lastMessage || "대화를 시작해보세요"}</p></div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
               <span className="chatTime">{room.lastTime ? timeAgo(room.lastTime) : ""}</span>
@@ -5509,7 +5653,7 @@ function HomePageContent() {
                 {(selectedPlace._feedPosts as FeedPost[]).map((post) => (
                   <div key={post.id} onClick={() => { setDetailPostId(post.id); setSelectedPlace(null); }} style={{ padding: "12px 24px", borderTop: "0.5px solid #f8f8f8", cursor: "pointer" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                      <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", flexShrink: 0 }}>{post.user.slice(0, 1).toUpperCase()}</div>
+                      <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={26} fontSize={11} />
                       <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a1a2e" }}>{post.user}</span>
                       <span style={{ fontSize: "10px", color: "#bbb", marginLeft: "auto" }}>{timeAgo(post.createdAt)}</span>
                     </div>
