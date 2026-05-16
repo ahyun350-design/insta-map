@@ -18,6 +18,7 @@ import { FollowListModal, type FollowListType } from "@/components/FollowListMod
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
+import { fetchIsPostLikedByUser, toggleLikeRow } from "@/lib/likes";
 import {
   getCurrentPositionForMapStage1,
   getCurrentPositionForMapStage2,
@@ -65,7 +66,10 @@ type FeedPost = {
   id: string; user: string; userId: string; userAvatarUrl?: string; title: string; placeName: string; address: string;
   lat?: number; lng?: number;
   category: Category; comment: string; images: string[]; createdAt: string;
-  archived?: boolean; likes: string[]; comments: Comment[];
+  archived?: boolean;
+  likes_count: number;
+  liked_by_me: boolean;
+  comments: Comment[];
 };
 type PostImageItem = {
   id: string;
@@ -1002,13 +1006,18 @@ function HomePageContent() {
     setHomeLoadError(null);
     try {
       const uid = user?.id ?? "";
-      const [placesRes, postsRes, roomsRes, followsRes, notificationsRes] = await withTimeout(Promise.all([
+      const [placesRes, postsRes, roomsRes, followsRes, notificationsRes, myLikesRes] = await withTimeout(Promise.all([
         supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
         supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false }),
         supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`),
         supabase.from("follows").select("following_id").eq("follower_id", uid),
         supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50),
+        uid
+          ? supabase.from("likes").select("post_id").eq("user_id", uid)
+          : Promise.resolve({ data: [] as { post_id: string }[], error: null }),
       ]), 8000);
+
+      const myLikedSet = new Set((myLikesRes.data ?? []).map((l: { post_id: string }) => l.post_id));
 
       setFollowingIds((followsRes.data || []).map((f: any) => f.following_id));
       syncCurrentUserToAvatarCache();
@@ -1034,7 +1043,8 @@ function HomePageContent() {
           ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
           category: p.category as Category, comment: p.comment,
           images: p.images ?? [], createdAt: p.created_at, archived: p.archived,
-          likes: p.likes ?? [],
+          likes_count: p.likes_count ?? 0,
+          liked_by_me: myLikedSet.has(p.id),
           comments: (p.comments ?? []).map((c: any) => ({
             id: c.id,
             user: c.user_name,
@@ -1528,7 +1538,6 @@ function HomePageContent() {
       category: post.category,
       comment: post.comment,
       images: post.images,
-      likes: [],
       archived: false,
     });
     setFeedPosts(prev => [post, ...prev]);
@@ -1769,7 +1778,6 @@ function HomePageContent() {
           prev.map((p) => ({
             ...p,
             user: p.userId === uid ? nextName : p.user,
-            likes: p.likes.map((u) => (u === oldUsername ? nextName : u)),
             comments: p.comments.map((c) => (c.user === oldUsername ? { ...c, user: nextName } : c)),
           })),
         );
@@ -1781,7 +1789,6 @@ function HomePageContent() {
           return {
             ...sp,
             user: nextName,
-            likes: sp.likes.map((u) => (u === oldUsername ? nextName : u)),
             comments: sp.comments.map((c) => (c.user === oldUsername ? { ...c, user: nextName } : c)),
           };
         });
@@ -1816,13 +1823,51 @@ function HomePageContent() {
     setEditingPost(null); setEditComment("");
   };
   const toggleLike = async (postId: string) => {
-    const post = feedPosts.find(p => p.id === postId); if (!post) return;
-    const liked = post.likes.includes(MY_USERNAME);
-    const newLikes = liked ? post.likes.filter(u => u !== MY_USERNAME) : [...post.likes, MY_USERNAME];
-    await supabase.from("feed_posts").update({ likes: newLikes }).eq("id", postId);
-    setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: newLikes } : p));
+    const post = feedPosts.find((p) => p.id === postId);
+    if (!post || !user?.id) return;
 
-    if (!liked && post.userId && post.userId !== user?.id && user) {
+    const wasLiked = post.liked_by_me;
+    const prevCount = post.likes_count;
+
+    setFeedPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId
+          ? {
+              ...p,
+              liked_by_me: !wasLiked,
+              likes_count: Math.max(0, p.likes_count + (wasLiked ? -1 : 1)),
+            }
+          : p,
+      ),
+    );
+
+    const { liked, error } = await toggleLikeRow(postId, user.id);
+
+    if (error) {
+      setFeedPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId ? { ...p, liked_by_me: wasLiked, likes_count: prevCount } : p,
+        ),
+      );
+      showToast("좋아요를 처리하지 못했어요. 다시 시도해주세요", "error");
+      return;
+    }
+
+    if (liked !== !wasLiked) {
+      setFeedPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                liked_by_me: liked,
+                likes_count: Math.max(0, liked ? prevCount + 1 : prevCount - 1),
+              }
+            : p,
+        ),
+      );
+    }
+
+    if (liked && post.userId && post.userId !== user.id) {
       try {
         await supabase.from("notifications").insert({
           id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
@@ -2965,7 +3010,8 @@ function HomePageContent() {
       comment: postComment,
       images: imageUrls,
       createdAt: new Date().toISOString(),
-      likes: [],
+      likes_count: 0,
+      liked_by_me: false,
       comments: [],
     };
     await submitPost(newPost);
@@ -3807,6 +3853,8 @@ function HomePageContent() {
         .maybeSingle();
       if (cancelled || !data) return;
       const coords = latLngFromRow(data);
+      const likedByMe = user?.id ? await fetchIsPostLikedByUser(detailPostId, user.id) : false;
+      if (cancelled) return;
       const raw: FeedPost = {
         id: data.id,
         user: data.user_name,
@@ -3820,7 +3868,8 @@ function HomePageContent() {
         images: data.images ?? [],
         createdAt: data.created_at,
         archived: data.archived,
-        likes: data.likes ?? [],
+        likes_count: data.likes_count ?? 0,
+        liked_by_me: likedByMe,
         comments: (data.comments ?? []).map((c: { id: string; user_name: string; user_id?: string; text: string; created_at: string }) => ({
           id: c.id,
           user: c.user_name,
@@ -4418,7 +4467,7 @@ function HomePageContent() {
                 )}
                 <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#555", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>{post.comment}</p>
                 <div style={{ display: "flex", gap: "12px" }}>
-                  <span style={{ fontSize: "11px", color: post.likes.includes(MY_USERNAME) ? "#e05555" : "#ccc" }}>♥ {post.likes.length}</span>
+                  <span style={{ fontSize: "11px", color: post.liked_by_me ? "#e05555" : "#ccc" }}>♥ {post.likes_count}</span>
                   <span style={{ fontSize: "11px", color: "#ccc" }}>💬 {post.comments.length}</span>
                 </div>
               </div>
@@ -4670,7 +4719,7 @@ function HomePageContent() {
   }
 
   if (detailPost) {
-    const liked = detailPost.likes.includes(MY_USERNAME);
+    const liked = detailPost.liked_by_me;
     return (
       <>
       <main className="mobileRoot">
@@ -4757,7 +4806,7 @@ function HomePageContent() {
             <div style={{ padding: "16px 20px 0", display: "flex", alignItems: "center", gap: "14px", borderTop: "0.5px solid #f0f0f0", marginTop: "16px" }}>
               <button type="button" onClick={(e) => { e.stopPropagation(); void toggleLike(detailPost.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", padding: 0 }}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill={liked ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={liked ? "#e05555" : "#aaa"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                <span style={{ fontSize: "13px", color: liked ? "#e05555" : "#aaa" }}>{detailPost.likes.length}</span>
+                <span style={{ fontSize: "13px", color: liked ? "#e05555" : "#aaa" }}>{detailPost.likes_count}</span>
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="#aaa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -5195,8 +5244,8 @@ function HomePageContent() {
                   {post.images.length > 0 && (<div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: "6px", marginBottom: "10px", overflowX: "auto" }}>{post.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "72px", height: "72px", objectFit: "cover", borderRadius: "6px", flexShrink: 0, cursor: "pointer" }} />)}</div>)}
                   <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: "14px" }}>
                     <button onClick={() => toggleLike(post.id)} style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", padding: 0 }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill={post.likes.includes(MY_USERNAME) ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={post.likes.includes(MY_USERNAME) ? "#e05555" : "#ccc"} strokeWidth="1.5"/></svg>
-                      <span style={{ fontSize: "12px", color: post.likes.includes(MY_USERNAME) ? "#e05555" : "#ccc" }}>{post.likes.length}</span>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill={post.liked_by_me ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={post.liked_by_me ? "#e05555" : "#ccc"} strokeWidth="1.5"/></svg>
+                      <span style={{ fontSize: "12px", color: post.liked_by_me ? "#e05555" : "#ccc" }}>{post.likes_count}</span>
                     </button>
                     <div style={{ display: "flex", alignItems: "center", gap: "5px", cursor: "pointer" }} onClick={() => { setDetailPostId(post.id); setScrollToComment(true); }}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="#ccc" strokeWidth="1.5" strokeLinecap="round"/></svg>
@@ -5948,7 +5997,7 @@ function HomePageContent() {
                       titleLine={(post.title || post.placeName || "").trim()}
                       placeName={post.placeName}
                       address={post.address}
-                      likeCount={post.likes.length}
+                      likeCount={post.likes_count}
                       onClick={() => {
                         setDetailReturnTo({ type: "mypage" });
                         setActiveTab("mypage");
@@ -6050,7 +6099,7 @@ function HomePageContent() {
                     )}
                     <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#555", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>{post.comment}</p>
                     <div style={{ display: "flex", gap: "12px" }}>
-                      <span style={{ fontSize: "11px", color: post.likes.includes(MY_USERNAME) ? "#e05555" : "#ccc" }}>♥ {post.likes.length}</span>
+                      <span style={{ fontSize: "11px", color: post.liked_by_me ? "#e05555" : "#ccc" }}>♥ {post.likes_count}</span>
                       <span style={{ fontSize: "11px", color: "#ccc" }}>💬 {post.comments.length}</span>
                     </div>
                   </div>

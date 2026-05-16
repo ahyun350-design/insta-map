@@ -25,7 +25,8 @@ type ProfilePost = {
   comment: string;
   images: string[];
   created_at: string;
-  likes: string[];
+  likes_count: number;
+  liked_by_me: boolean;
   commentCount: number;
 };
 
@@ -133,10 +134,12 @@ export default function ProfilePage() {
 
       const postsPromise = supabase
         .from("feed_posts")
-        .select("id, title, place_name, address, category, comment, images, created_at, likes, comments(id)", { count: "exact" })
+        .select("id, title, place_name, address, category, comment, images, created_at, likes_count, comments(id)", { count: "exact" })
         .eq("user_name", target.username)
         .eq("archived", false)
         .order("created_at", { ascending: false });
+
+      const myLikesPromise = supabase.from("likes").select("post_id").eq("user_id", user.id);
 
       const followersPromise = supabase
         .from("follows")
@@ -156,12 +159,15 @@ export default function ProfilePage() {
             .eq("follower_id", user.id)
             .eq("following_id", target.id);
 
-      const [postsRes, followersRes, followingsRes, myFollowRes] = await Promise.all([
+      const [postsRes, followersRes, followingsRes, myFollowRes, myLikesRes] = await Promise.all([
         postsPromise,
         followersPromise,
         followingsPromise,
         myFollowPromise,
+        myLikesPromise,
       ]);
+
+      const myLikedSet = new Set((myLikesRes.data ?? []).map((l: { post_id: string }) => l.post_id));
 
       const enrichedPosts: ProfilePost[] = (postsRes.data ?? []).map((p: any) => ({
         id: p.id,
@@ -172,7 +178,8 @@ export default function ProfilePage() {
         comment: p.comment,
         images: p.images ?? [],
         created_at: p.created_at,
-        likes: p.likes ?? [],
+        likes_count: p.likes_count ?? 0,
+        liked_by_me: myLikedSet.has(p.id),
         commentCount: (p.comments ?? []).length,
       }));
 
@@ -402,7 +409,7 @@ export default function ProfilePage() {
                     titleLine={(post.title || post.place_name || "").trim()}
                     placeName={post.place_name}
                     address={post.address}
-                    likeCount={post.likes.length}
+                    likeCount={post.likes_count}
                     onClick={() => {
                       router.push(
                         `/?postId=${encodeURIComponent(post.id)}&from=profile&username=${encodeURIComponent(profile.username)}`,
