@@ -19,6 +19,7 @@ import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
 import { fetchIsPostLikedByUser, toggleLikeRow } from "@/lib/likes";
+import { saveCourse, type SavedCourseItem } from "@/lib/courses";
 import {
   getCurrentPositionForMapStage1,
   getCurrentPositionForMapStage2,
@@ -687,6 +688,11 @@ function HomePageContent() {
   const [courseCurrentLocation, setCourseCurrentLocation] = useState<LatLng | null>(null);
   const [courseLocationLoading, setCourseLocationLoading] = useState(false);
   const [coursePlaceCoords, setCoursePlaceCoords] = useState<Record<string, LatLng>>({});
+  const [showCourseSaveModal, setShowCourseSaveModal] = useState(false);
+  const [courseSaveTitle, setCourseSaveTitle] = useState("");
+  const [courseSaving, setCourseSaving] = useState(false);
+  const [savedCourseId, setSavedCourseId] = useState<string | null>(null);
+  const courseSaveInputRef = useRef<HTMLInputElement>(null);
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const handleAddSubmittingRef = useRef(false);
@@ -990,6 +996,53 @@ function HomePageContent() {
       cancelled = true;
     };
   }, [showCourseModal, courseOriginMode, savedPlaces, coursePlaceCoords]);
+
+  useEffect(() => {
+    setSavedCourseId(null);
+  }, [courseResult]);
+
+  useEffect(() => {
+    if (!showCourseSaveModal) return;
+    const t = window.setTimeout(() => courseSaveInputRef.current?.focus(), 50);
+    return () => window.clearTimeout(t);
+  }, [showCourseSaveModal]);
+
+  const closeCourseSaveModal = () => {
+    setShowCourseSaveModal(false);
+    setCourseSaveTitle("");
+  };
+
+  const handleSaveCourse = async () => {
+    if (!user?.id) {
+      showToast("로그인이 필요해요", "error");
+      return;
+    }
+    if (!courseResult || courseResult.length === 0) {
+      showToast("코스가 비어있어요", "error");
+      return;
+    }
+    const items: SavedCourseItem[] = courseResult.map(({ id, name, address, category, lat, lng }) => ({
+      id,
+      name,
+      address,
+      category,
+      lat,
+      lng,
+    }));
+    setCourseSaving(true);
+    try {
+      const { data, error } = await saveCourse(user.id, courseSaveTitle, items);
+      if (error) {
+        showToast(error, "error");
+        return;
+      }
+      closeCourseSaveModal();
+      showToast("코스를 저장했어요", "success");
+      if (data?.id) setSavedCourseId(data.id);
+    } finally {
+      setCourseSaving(false);
+    }
+  };
 
   const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T> => {
     return await Promise.race<T>([
@@ -5090,6 +5143,27 @@ function HomePageContent() {
                       ))}
                     </div>
 
+                    <button
+                      type="button"
+                      disabled={!!savedCourseId}
+                      onClick={() => setShowCourseSaveModal(true)}
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        borderRadius: "12px",
+                        border: "1px solid #1a2a7a",
+                        background: "#fff",
+                        color: "#1a2a7a",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        cursor: savedCourseId ? "default" : "pointer",
+                        fontFamily: "inherit",
+                        opacity: savedCourseId ? 0.65 : 1,
+                      }}
+                    >
+                      {savedCourseId ? "저장 완료 ✓" : "💾 코스 저장"}
+                    </button>
+
                     <div style={{ display: "flex", gap: "8px" }}>
                       <button type="button" onClick={() => { void generateCourse(); }} disabled={courseLoading} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: "13px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading ? 0.6 : 1 }}>{courseLoading ? "다시 짜는 중..." : "다시 만들기"}</button>
                       <button type="button" onClick={showCourseOnMap} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
@@ -5103,6 +5177,100 @@ function HomePageContent() {
                     </button>
                   </>
                 )}
+              </div>
+            </div>
+          )}
+          {showCourseSaveModal && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 100000,
+                background: "rgba(0,0,0,0.45)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "24px",
+                boxSizing: "border-box",
+              }}
+              onClick={closeCourseSaveModal}
+            >
+              <div
+                role="dialog"
+                aria-labelledby="course-save-title"
+                style={{
+                  width: "100%",
+                  maxWidth: "340px",
+                  background: "#fff",
+                  borderRadius: "16px",
+                  padding: "24px 20px",
+                  boxSizing: "border-box",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "16px",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p id="course-save-title" style={{ margin: 0, fontSize: "16px", fontWeight: 600, color: "#1a1a2e" }}>
+                  💾 코스 저장
+                </p>
+                <div>
+                  <input
+                    ref={courseSaveInputRef}
+                    className="profileEditField"
+                    placeholder="코스 이름 (예: 성수동 데이트)"
+                    value={courseSaveTitle}
+                    maxLength={60}
+                    onChange={(e) => setCourseSaveTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !courseSaving) void handleSaveCourse();
+                    }}
+                    style={{ width: "100%", boxSizing: "border-box" }}
+                  />
+                  <p style={{ margin: "6px 0 0", fontSize: "11px", color: "#8f93a6", textAlign: "right" }}>
+                    {courseSaveTitle.length}/60
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={closeCourseSaveModal}
+                    disabled={courseSaving}
+                    style={{
+                      flex: 1,
+                      padding: "12px",
+                      borderRadius: "10px",
+                      border: "1px solid #ddd",
+                      background: "#fff",
+                      color: "#666",
+                      fontSize: "13px",
+                      cursor: courseSaving ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void handleSaveCourse(); }}
+                    disabled={courseSaving}
+                    style={{
+                      flex: 1,
+                      padding: "12px",
+                      borderRadius: "10px",
+                      border: "none",
+                      background: "#1a2a7a",
+                      color: "#fff",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      cursor: courseSaving ? "wait" : "pointer",
+                      fontFamily: "inherit",
+                      opacity: courseSaving ? 0.7 : 1,
+                    }}
+                  >
+                    {courseSaving ? "저장 중..." : "저장하기"}
+                  </button>
+                </div>
               </div>
             </div>
           )}
