@@ -616,16 +616,36 @@ function HomePageContent() {
     lastExpandedSearchPlacesRef.current = [];
   }, []);
 
-  /** 확장 지도만: 저장 직후·URL 추출 완료 등에서 마지막 핀을 잃지 않도록 카메라 이동 (컴팩트 지도는 미사용) */
-  const focusExpandedMapOnLatLng = (lat: number, lng: number, level: number = 3) => {
+  /** 확장 지도 카메라: panTo 우선(부드러운 이동), SDK 미지원 시 setCenter 폴백 */
+  const applyExpandedMapCameraLatLng = (lat: number, lng: number, level: number = 3) => {
     try {
-      if (!expandedMapRef.current || !window.kakao?.maps) return;
+      const map = expandedMapRef.current;
+      if (!map || !window.kakao?.maps) return;
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(lat, lng));
-      expandedMapRef.current.setLevel(level);
+      const latlng = new window.kakao.maps.LatLng(lat, lng);
+      if (typeof map.panTo === "function") {
+        map.panTo(latlng);
+      } else {
+        map.setCenter(latlng);
+      }
+      map.setLevel(level);
     } catch {
       /* noop */
     }
+  };
+
+  /** React·핀 갱신 한 사이클 뒤 적용해 다른 경로의 setCenter와 겹침 완화 */
+  const scheduleExpandedMapCamera = (fn: () => void) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(fn);
+    });
+  };
+
+  /** 확장 지도만: 저장 직후·URL 추출 완료 등에서 마지막 핀을 잃지 않도록 카메라 이동 (컴팩트 지도는 미사용) */
+  const focusExpandedMapOnLatLng = (lat: number, lng: number, level: number = 3) => {
+    scheduleExpandedMapCamera(() => {
+      applyExpandedMapCameraLatLng(lat, lng, level);
+    });
   };
 
   const focusExpandedMapOnAddress = (address: string, level: number = 3) => {
@@ -636,7 +656,9 @@ function HomePageContent() {
         if (st !== window.kakao.maps.services.Status.OK || !result[0]) return;
         const y = parseFloat(result[0].y);
         const x = parseFloat(result[0].x);
-        focusExpandedMapOnLatLng(y, x, level);
+        scheduleExpandedMapCamera(() => {
+          applyExpandedMapCameraLatLng(y, x, level);
+        });
       });
     } catch {
       /* noop */
@@ -2489,14 +2511,17 @@ function HomePageContent() {
         }
         myLocationLatLngRef.current = { lat: latitude, lng: longitude };
         const latlng = new window.kakao.maps.LatLng(latitude, longitude);
-        map.setCenter(latlng);
-        map.setLevel(9);
+        // 메인 지도만 GPS로 센터 이동. 확장 지도는 복제된 center 유지 + 검색/저장용 focusExpandedMap만 이동(비동기 GPS가 저장 핀 카메라를 덮어쓰지 않게).
+        if (scope === "main") {
+          map.setCenter(latlng);
+          map.setLevel(9);
+        }
         new window.kakao.maps.Marker({
           map,
           position: latlng,
           image: new window.kakao.maps.MarkerImage(makeMyLocationImage(), new window.kakao.maps.Size(24, 24), { offset: new window.kakao.maps.Point(12, 12) }),
         });
-        console.log("[PindMap:location] my location render with coords", latitude, longitude);
+        console.log("[PindMap:location] my location render with coords", latitude, longitude, { scope });
       } catch (err) {
         const denied = isGeolocationPermissionDenied(err);
         showToast(
