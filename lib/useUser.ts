@@ -449,6 +449,10 @@ export function useUser() {
     await reloadFromSessionRef.current?.();
   }, []);
 
+  const patchUser = useCallback((patch: Partial<Omit<AppUser, "id">>) => {
+    setUser((prev) => (prev ? { ...prev, ...patch } : prev));
+  }, []);
+
   const verifySessionQuick = useCallback(async (): Promise<Session | null> => {
     const getSessionT = Date.now();
     try {
@@ -474,5 +478,5 @@ export function useUser() {
     }
   }, []);
 
-  return { user, loading, sessionChecked, loggingOut, logout, reloadUserFromSession, verifySessionQuick };
+  return { user, loading, sessionChecked, loggingOut, logout, reloadUserFromSession, verifySessionQuick, patchUser };
 }

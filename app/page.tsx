@@ -495,7 +495,7 @@ export default function HomePage() {
 function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, loading: userLoading, sessionChecked, loggingOut, logout, reloadUserFromSession, verifySessionQuick } =
+  const { user, loading: userLoading, sessionChecked, loggingOut, logout, reloadUserFromSession, verifySessionQuick, patchUser } =
     useUser();
 
   const handleLogoutClick = async () => {
@@ -1806,9 +1806,29 @@ function HomePageContent() {
       setProfileEditSaving(false);
     }
   };
+  const refreshMyTotalLikes = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const { data } = await supabase
+        .from("users")
+        .select("total_likes_received")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (data) {
+        patchUser({ total_likes_received: Math.max(0, Number(data.total_likes_received) || 0) });
+      }
+    } catch {
+      /* keep existing value */
+    }
+  }, [user?.id, patchUser]);
+
   const deletePost = async (id: string) => {
+    const deleted = feedPosts.find((p) => p.id === id);
     await supabase.from("feed_posts").delete().eq("id", id);
     setFeedPosts(prev => prev.filter(p => p.id !== id)); setOpenMenuId(null);
+    if (deleted?.userId === user?.id) {
+      void refreshMyTotalLikes();
+    }
   };
   const toggleArchive = async (id: string) => {
     const post = feedPosts.find(p => p.id === id); if (!post) return;
@@ -4320,6 +4340,7 @@ function HomePageContent() {
 
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id) return;
+    void refreshMyTotalLikes();
     let cancelled = false;
     void (async () => {
       const uid = user.id;
@@ -4334,7 +4355,17 @@ function HomePageContent() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, user?.id]);
+  }, [activeTab, user?.id, refreshMyTotalLikes]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (activeTab !== "mypage" || !user?.id) return;
+      void refreshMyTotalLikes();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [activeTab, user?.id, refreshMyTotalLikes]);
 
   const renderPlaceCard = () => {
     console.log("[renderCard]", selectedPlace?.place_name, "savedId:", selectedPlace?._savedPlaceId);
