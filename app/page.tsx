@@ -26,6 +26,7 @@ import {
   deleteCourse,
   fetchCourseById,
   fetchMyCourses,
+  importCourse,
   formatCourseDate,
   saveCourse,
   updateCourseItems,
@@ -730,6 +731,7 @@ function HomePageContent() {
   const [courseSaving, setCourseSaving] = useState(false);
   const [savedCourseId, setSavedCourseId] = useState<string | null>(null);
   const [isReadOnlyCourse, setIsReadOnlyCourse] = useState(false);
+  const [courseImporting, setCourseImporting] = useState(false);
   const [courseCache, setCourseCache] = useState<Record<string, SavedCourse>>({});
   const courseCacheRef = useRef<Record<string, SavedCourse>>({});
   courseCacheRef.current = courseCache;
@@ -3033,6 +3035,34 @@ function HomePageContent() {
       updated_at: "",
     };
     void openCourseShareModal(tempCourse);
+  };
+
+  const courseAlreadyImported = useMemo(() => {
+    if (!savedCourseId || !isReadOnlyCourse) return false;
+    return myCourses.some((c) => c.cloned_from_id === savedCourseId);
+  }, [savedCourseId, isReadOnlyCourse, myCourses]);
+
+  const handleImportCourse = async (originalCourseId: string) => {
+    if (!user?.id || courseImporting) return;
+    setCourseImporting(true);
+    try {
+      const { data, alreadyImported, error } = await importCourse(originalCourseId, user.id);
+      if (alreadyImported) {
+        showToast("이미 가져온 코스예요", "info");
+        return;
+      }
+      if (error) {
+        showToast(error, "error");
+        return;
+      }
+      if (data) {
+        showToast("내 코스에 저장했어요", "success");
+        setMyCourses((prev) => [data, ...prev.filter((c) => c.id !== data.id)]);
+        void refreshMyCourses();
+      }
+    } finally {
+      setCourseImporting(false);
+    }
   };
 
   // 코스 만들기 실행
@@ -5759,6 +5789,34 @@ function HomePageContent() {
 
                     {savedCourseId ? (
                       <>
+                        {isReadOnlyCourse && (
+                          <button
+                            type="button"
+                            disabled={courseImporting || courseAlreadyImported}
+                            onClick={() => {
+                              if (savedCourseId) void handleImportCourse(savedCourseId);
+                            }}
+                            style={{
+                              width: "100%",
+                              padding: "12px",
+                              borderRadius: "12px",
+                              border: "1px solid #1a2a7a",
+                              background: "#fff",
+                              color: courseAlreadyImported ? "#888" : "#1a2a7a",
+                              fontSize: "13px",
+                              fontWeight: 600,
+                              cursor: courseImporting || courseAlreadyImported ? "not-allowed" : "pointer",
+                              fontFamily: "inherit",
+                              opacity: courseImporting || courseAlreadyImported ? 0.7 : 1,
+                            }}
+                          >
+                            {courseImporting
+                              ? "가져오는 중..."
+                              : courseAlreadyImported
+                                ? "✓ 가져왔어요"
+                                : "📥 내 코스로 가져오기"}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={openCourseShareFromSheet}

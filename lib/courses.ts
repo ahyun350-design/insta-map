@@ -17,6 +17,7 @@ export type SavedCourse = {
   place_count: number;
   created_at: string;
   updated_at: string;
+  cloned_from_id?: string | null;
 };
 
 function mapDbError(error: { code?: string; message?: string }, fallback: string): string {
@@ -185,4 +186,46 @@ export async function fetchCourseById(
   }
 
   return { data: data as SavedCourse, error: null };
+}
+
+export async function importCourse(
+  originalCourseId: string,
+  userId: string,
+): Promise<{ data: SavedCourse | null; alreadyImported: boolean; error: string | null }> {
+  const { data: original, error: fetchError } = await fetchCourseById(originalCourseId);
+  if (fetchError || !original) {
+    return { data: null, alreadyImported: false, error: "코스를 불러올 수 없어요" };
+  }
+  if (original.user_id === userId) {
+    return { data: null, alreadyImported: false, error: "본인이 만든 코스예요" };
+  }
+
+  const { data: existing } = await supabase
+    .from("courses")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("cloned_from_id", originalCourseId)
+    .limit(1);
+
+  if ((existing?.length ?? 0) > 0) {
+    return { data: null, alreadyImported: true, error: null };
+  }
+
+  const { data, error } = await supabase
+    .from("courses")
+    .insert({
+      user_id: userId,
+      title: original.title,
+      items: original.items,
+      place_count: original.place_count,
+      cloned_from_id: originalCourseId,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    return { data: null, alreadyImported: false, error: mapInsertError(error) };
+  }
+
+  return { data: data as SavedCourse, alreadyImported: false, error: null };
 }
