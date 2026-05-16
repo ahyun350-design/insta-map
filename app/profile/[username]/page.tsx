@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { useUser } from "@/lib/useUser";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
+import { PostGrid } from "@/components/PostGrid";
+import { PostGridCell } from "@/components/PostGridCell";
 
 type ProfileUser = {
   id: string;
@@ -390,45 +392,21 @@ export default function ProfilePage() {
 
               <section style={{ marginTop: "18px" }}>
                 <p style={{ margin: "0 0 10px", fontSize: "12px", color: "#1a2a7a", letterSpacing: "1px" }}>큐레이션 {postCount}</p>
-                {posts.length === 0 && (
-                  <p style={{ margin: 0, textAlign: "center", fontSize: "12px", color: "#bbb", padding: "24px 0" }}>아직 공개된 큐레이션이 없어요</p>
-                )}
+                <PostGrid empty={posts.length === 0}>
                 {posts.map((post) => (
-                  <article key={post.id} onClick={() => alert("게시물 상세는 곧 연결될 예정이에요")} style={{ border: "0.5px solid #ececec", borderRadius: "14px", padding: "14px", marginBottom: "10px", cursor: "pointer", background: "#fff" }}>
-                    <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{post.title || post.place_name}</p>
-                    <p style={{ margin: "6px 0 0", fontSize: "12px", color: "#777" }}>{post.place_name} · {post.category}</p>
-                    {post.images && post.images.length > 0 && (
-                      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: "6px", marginTop: "10px", overflowX: "auto", paddingBottom: "2px" }}>
-                        {post.images.map((img, i) => (
-                          <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "96px", height: "96px", objectFit: "cover", borderRadius: "8px", flexShrink: 0, cursor: "pointer" }} />
-                        ))}
-                      </div>
-                    )}
-                    <p style={{ margin: "8px 0 0", fontSize: "12px", color: "#444", lineHeight: 1.6, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>{post.comment}</p>
-
-                    {/* 좋아요 / 댓글 / 공유 액션 행 */}
-                    <div onClick={(e) => e.stopPropagation()} style={{ marginTop: "10px", paddingTop: "10px", borderTop: "0.5px solid #f5f5f5", display: "flex", alignItems: "center", gap: "16px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill={post.likes.includes(user.id) ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={post.likes.includes(user.id) ? "#e05555" : "#bbb"} strokeWidth="1.5" /></svg>
-                        <span style={{ fontSize: "12px", color: post.likes.includes(user.id) ? "#e05555" : "#999" }}>{post.likes.length}</span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="#bbb" strokeWidth="1.5" strokeLinecap="round" /></svg>
-                        <span style={{ fontSize: "12px", color: "#999" }}>{post.commentCount}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => openShareModal(post)}
-                        style={{ marginLeft: "auto", border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: "5px" }}
-                      >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                        <span style={{ fontSize: "12px", color: "#1a2a7a", fontWeight: 500 }}>공유</span>
-                      </button>
-                    </div>
-
-                    <p style={{ margin: "8px 0 0", fontSize: "10px", color: "#aaa" }}>{timeAgo(post.created_at)}</p>
-                  </article>
+                  <PostGridCell
+                    key={post.id}
+                    imageUrl={post.images[0]}
+                    titleLine={(post.title || post.place_name || "").trim()}
+                    likeCount={post.likes.length}
+                    onClick={() => {
+                      router.push(
+                        `/?postId=${encodeURIComponent(post.id)}&from=profile&username=${encodeURIComponent(profile.username)}`,
+                      );
+                    }}
+                  />
                 ))}
+                </PostGrid>
               </section>
             </>
           )}

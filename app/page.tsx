@@ -15,6 +15,8 @@ import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
+import { PostGrid } from "@/components/PostGrid";
+import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
 import {
   getCurrentPositionForMapStage1,
@@ -601,6 +603,9 @@ function HomePageContent() {
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
   const [detailPostId, setDetailPostId] = useState<string | null>(null);
+  const [detailReturnTo, setDetailReturnTo] = useState<
+    { type: "mypage" } | { type: "profile"; username: string } | null
+  >(null);
   const [newComment, setNewComment] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editingPost, setEditingPost] = useState<FeedPost | null>(null);
@@ -869,6 +874,20 @@ function HomePageContent() {
   const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
   const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImagesAllUploaded;
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
+
+  const closeDetailPost = useCallback(() => {
+    const ret = detailReturnTo;
+    setDetailPostId(null);
+    setScrollToComment(false);
+    setDetailReturnTo(null);
+    if (ret?.type === "profile") {
+      router.push(`/profile/${encodeURIComponent(ret.username)}`);
+      return;
+    }
+    if (ret?.type === "mypage") {
+      setActiveTab("mypage");
+    }
+  }, [detailReturnTo, router]);
   const isAnalyzing = activeJobs.length > 0;
   const analyzingMainText = isAnalyzing
     ? activeJobs.length > 1
@@ -3745,6 +3764,66 @@ function HomePageContent() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    const postId = searchParams?.get("postId");
+    if (!postId) return;
+    const from = searchParams?.get("from");
+    const username = searchParams?.get("username");
+    setDetailPostId(postId);
+    if (from === "profile" && username) {
+      setDetailReturnTo({ type: "profile", username: decodeURIComponent(username) });
+    } else if (from === "mypage") {
+      setDetailReturnTo({ type: "mypage" });
+      setActiveTab("mypage");
+    } else {
+      setDetailReturnTo(null);
+    }
+    window.history.replaceState({}, "", "/");
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!detailPostId || feedPosts.some((p) => p.id === detailPostId)) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from("feed_posts")
+        .select("*, comments(*)")
+        .eq("id", detailPostId)
+        .maybeSingle();
+      if (cancelled || !data) return;
+      const coords = latLngFromRow(data);
+      const raw: FeedPost = {
+        id: data.id,
+        user: data.user_name,
+        userId: data.user_id ?? "",
+        title: data.title,
+        placeName: data.place_name,
+        address: data.address,
+        ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+        category: data.category as Category,
+        comment: data.comment,
+        images: data.images ?? [],
+        createdAt: data.created_at,
+        archived: data.archived,
+        likes: data.likes ?? [],
+        comments: (data.comments ?? []).map((c: { id: string; user_name: string; user_id?: string; text: string; created_at: string }) => ({
+          id: c.id,
+          user: c.user_name,
+          userId: c.user_id ?? undefined,
+          text: c.text,
+          createdAt: c.created_at,
+        })),
+      };
+      await prefetchAvatarsForFeedPosts([raw]);
+      if (cancelled) return;
+      const [hydrated] = hydrateFeedPostsWithAvatars([raw]);
+      setFeedPosts((prev) => (prev.some((p) => p.id === hydrated.id) ? prev : [hydrated, ...prev]));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [detailPostId, feedPosts, prefetchAvatarsForFeedPosts, hydrateFeedPostsWithAvatars]);
+
   // 메시지 탭 진입 시 안 읽은 개수 갱신
   useEffect(() => {
     if (activeTab !== "messages" || activeChatRoom) return;
@@ -4557,6 +4636,24 @@ function HomePageContent() {
     </div>
   );
 
+  if (detailPostId && !detailPost) {
+    return (
+      <main className="mobileRoot">
+        <section className="phoneFrame">
+          <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
+            <button onClick={closeDetailPost} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>큐레이션</span>
+          </header>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
+            <p style={{ margin: 0, fontSize: 13, color: "#888" }}>불러오는 중...</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   if (detailPost) {
     const liked = detailPost.likes.includes(MY_USERNAME);
     return (
@@ -4564,7 +4661,7 @@ function HomePageContent() {
       <main className="mobileRoot">
         <section className="phoneFrame">
           <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
-            <button onClick={() => setDetailPostId(null)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
+            <button onClick={closeDetailPost} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
             <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailPost.placeName}</span>
@@ -5824,97 +5921,25 @@ function HomePageContent() {
                   )}
                 </div>
               </div>
-              <div
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  overflowY: "auto",
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: 2,
-                  alignContent: "start",
-                  background: "#fafafa",
-                }}
-              >
-                {myMypagePosts.length === 0 && (
-                  <p
-                    style={{
-                      gridColumn: "1 / -1",
-                      margin: 0,
-                      padding: "48px 24px",
-                      textAlign: "center",
-                      fontSize: 13,
-                      color: "#aaa",
-                    }}
-                  >
-                    아직 작성한 게시물이 없어요
-                  </p>
-                )}
-                {myMypagePosts.map((post) => {
-                  const thumb = post.images[0];
-                  const titleLine = (post.title || post.placeName || "").trim();
-                  return (
-                    <button
+              <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                <PostGrid
+                  empty={myMypagePosts.length === 0}
+                  emptyMessage="아직 작성한 게시물이 없어요"
+                >
+                  {myMypagePosts.map((post) => (
+                    <PostGridCell
                       key={post.id}
-                      type="button"
-                      onClick={() => showToast("준비 중이에요", "info")}
-                      style={{
-                        position: "relative",
-                        aspectRatio: "1",
-                        padding: 0,
-                        border: "none",
-                        cursor: "pointer",
-                        overflow: "hidden",
-                        background: thumb ? "#eee" : "#e8eaf0",
-                        fontFamily: "inherit",
+                      imageUrl={post.images[0]}
+                      titleLine={(post.title || post.placeName || "").trim()}
+                      likeCount={post.likes.length}
+                      onClick={() => {
+                        setDetailReturnTo({ type: "mypage" });
+                        setActiveTab("mypage");
+                        setDetailPostId(post.id);
                       }}
-                    >
-                      {thumb ? (
-                        <img
-                          src={thumb}
-                          alt=""
-                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                        />
-                      ) : (
-                        <span
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            width: "100%",
-                            height: "100%",
-                            padding: 8,
-                            fontSize: 11,
-                            color: "#666",
-                            textAlign: "center",
-                            lineHeight: 1.35,
-                            overflow: "hidden",
-                          }}
-                        >
-                          {titleLine || "—"}
-                        </span>
-                      )}
-                      {post.likes.length > 0 && (
-                        <span
-                          style={{
-                            position: "absolute",
-                            left: 6,
-                            bottom: 6,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 3,
-                            color: "#fff",
-                            fontSize: 11,
-                            fontWeight: 600,
-                            textShadow: "0 1px 3px rgba(0,0,0,0.6)",
-                          }}
-                        >
-                          ♥ {post.likes.length}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                    />
+                  ))}
+                </PostGrid>
               </div>
             </div>
           )}
