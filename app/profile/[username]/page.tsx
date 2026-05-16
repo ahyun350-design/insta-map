@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@/lib/useUser";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
+import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
 
 type ProfileUser = {
   id: string;
@@ -59,6 +60,7 @@ export default function ProfilePage() {
   const [messageLoading, setMessageLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
+  const [showFollowList, setShowFollowList] = useState<FollowListType | null>(null);
 
   // 공유 모달 상태
   const [sharePost, setSharePost] = useState<ProfilePost | null>(null);
@@ -340,14 +342,22 @@ export default function ProfilePage() {
                     <p style={{ margin: 0, fontSize: "20px", color: "#1a2a7a", fontWeight: 700 }}>{postCount}</p>
                     <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#9aa0b2" }}>큐레이션</p>
                   </div>
-                  <div style={{ textAlign: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowFollowList("followers")}
+                    style={{ textAlign: "center", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                  >
                     <p style={{ margin: 0, fontSize: "20px", color: "#1a2a7a", fontWeight: 700 }}>{followerCount}</p>
                     <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#9aa0b2" }}>팔로워</p>
-                  </div>
-                  <div style={{ textAlign: "center" }}>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFollowList("following")}
+                    style={{ textAlign: "center", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                  >
                     <p style={{ margin: 0, fontSize: "20px", color: "#1a2a7a", fontWeight: 700 }}>{followingCount}</p>
                     <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#9aa0b2" }}>팔로잉</p>
-                  </div>
+                  </button>
                 </div>
 
                 <div style={{ marginTop: "14px" }}>
@@ -444,6 +454,24 @@ export default function ProfilePage() {
               ))}
             </div>
           </div>
+        )}
+
+        {profile && showFollowList && (
+          <FollowListModal
+            open
+            onClose={() => setShowFollowList(null)}
+            userId={profile.id}
+            type={showFollowList}
+            onUserClick={(username) => {
+              setShowFollowList(null);
+              if (username === user?.username) {
+                router.push("/?tab=mypage");
+                return;
+              }
+              if (username === profile.username) return;
+              router.push(`/profile/${encodeURIComponent(username)}`);
+            }}
+          />
         )}
 
         {lightboxImg && (

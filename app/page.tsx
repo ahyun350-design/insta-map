@@ -14,6 +14,7 @@ import { useToast } from "@/components/Toast";
 import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
+import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
 import {
   getCurrentPositionForMapStage1,
@@ -569,6 +570,7 @@ function HomePageContent() {
   const [showMypageSettingsSheet, setShowMypageSettingsSheet] = useState(false);
   const [mypageFollowerCount, setMypageFollowerCount] = useState(0);
   const [mypageFollowingCount, setMypageFollowingCount] = useState(0);
+  const [showFollowList, setShowFollowList] = useState<FollowListType | null>(null);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [showDeleteAccountFinalModal, setShowDeleteAccountFinalModal] = useState(false);
   const [deleteAccountPhraseInput, setDeleteAccountPhraseInput] = useState("");
@@ -3736,6 +3738,13 @@ function HomePageContent() {
     void handleOpen();
   }, [searchParams, user]);
 
+  useEffect(() => {
+    if (searchParams?.get("tab") === "mypage") {
+      setActiveTab("mypage");
+      window.history.replaceState({}, "", "/");
+    }
+  }, [searchParams]);
+
   // 메시지 탭 진입 시 안 읽은 개수 갱신
   useEffect(() => {
     if (activeTab !== "messages" || activeChatRoom) return;
@@ -5724,7 +5733,11 @@ function HomePageContent() {
                       <button
                         key={stat.label}
                         type="button"
-                        onClick={() => showToast("준비 중이에요", "info")}
+                        onClick={() => {
+                          if (stat.label === "팔로워") setShowFollowList("followers");
+                          else if (stat.label === "팔로잉") setShowFollowList("following");
+                          else showToast("준비 중이에요", "info");
+                        }}
                         style={{
                           border: "none",
                           background: "transparent",
@@ -5953,6 +5966,19 @@ function HomePageContent() {
         )}
         {sharePostModalEl}
         {notificationModalEl}
+        {user?.id && showFollowList && (
+          <FollowListModal
+            open
+            onClose={() => setShowFollowList(null)}
+            userId={user.id}
+            type={showFollowList}
+            onUserClick={(username) => {
+              setShowFollowList(null);
+              if (username === user.username) return;
+              router.push(`/profile/${encodeURIComponent(username)}`);
+            }}
+          />
+        )}
         {showMypageSettingsSheet && (
           <div
             onClick={() => setShowMypageSettingsSheet(false)}
