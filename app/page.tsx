@@ -6147,12 +6147,23 @@ function HomePageContent() {
         )}
         {showProfileEditModal && (
           <div onClick={closeProfileEditModal} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
-            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", boxSizing: "border-box" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "#fff",
+                width: "100%",
+                borderRadius: "20px 20px 0 0",
+                display: "flex",
+                flexDirection: "column",
+                boxSizing: "border-box",
+                padding: "0 20px calc(16px + env(safe-area-inset-bottom, 0px))",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 16 }}>
                 <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>프로필 편집</span>
                 <button type="button" onClick={closeProfileEditModal} disabled={profileEditSaving} style={{ border: "none", background: "transparent", color: "#bbb", fontSize: "20px", cursor: profileEditSaving ? "wait" : "pointer" }}>×</button>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, paddingTop: 4 }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 24 }}>
                 <div style={{ position: "relative" }}>
                   <ProfileAvatar
                     avatarUrl={profileEditAvatarPreview}
@@ -6195,47 +6206,35 @@ function HomePageContent() {
                     onChange={handleProfileAvatarFileChange}
                   />
                 </div>
-                <span style={{ fontSize: "11px", color: "#8b90a3" }}>사진은 저장 버튼을 누르면 반영돼요</span>
+                <span style={{ marginTop: 10, marginBottom: 28, fontSize: 12, color: "#8a8a8a" }}>사진은 저장 버튼을 누르면 반영돼요</span>
               </div>
-              <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 8, margin: 0 }}>
                 <span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>닉네임</span>
-                <input className="mapInput" value={profileEditName} onChange={(e) => setProfileEditName(e.target.value)} placeholder="닉네임 입력" />
+                <input className="profileEditField" value={profileEditName} onChange={(e) => setProfileEditName(e.target.value)} placeholder="닉네임 입력" />
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 20 }}>
                 <span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>소개</span>
-                <div style={{ position: "relative" }}>
-                  <textarea
-                    className="mapInput"
-                    value={profileEditBio}
-                    onChange={(e) => setProfileEditBio(e.target.value.slice(0, PROFILE_BIO_MAX_LENGTH))}
-                    placeholder="자기소개를 입력해주세요"
-                    rows={3}
-                    maxLength={PROFILE_BIO_MAX_LENGTH}
-                    disabled={profileEditSaving}
-                    style={{
-                      width: "100%",
-                      resize: "vertical",
-                      minHeight: "72px",
-                      maxHeight: "120px",
-                      lineHeight: 1.45,
-                      boxSizing: "border-box",
-                      paddingBottom: "22px",
-                    }}
-                  />
-                  <span
-                    style={{
-                      position: "absolute",
-                      right: 10,
-                      bottom: 8,
-                      fontSize: 10,
-                      color: profileEditBio.length >= PROFILE_BIO_MAX_LENGTH ? "#e07070" : "#8b90a3",
-                    }}
-                  >
-                    {profileEditBio.length}/{PROFILE_BIO_MAX_LENGTH}
-                  </span>
-                </div>
-              </label>
-              <button type="button" onClick={saveProfileEdit} disabled={profileEditSaving} className="primaryButton" style={{ width: "100%", opacity: profileEditSaving ? 0.7 : 1 }}>
+                <textarea
+                  className="profileEditField profileEditBioField"
+                  value={profileEditBio}
+                  onChange={(e) => setProfileEditBio(e.target.value.slice(0, PROFILE_BIO_MAX_LENGTH))}
+                  placeholder="자기소개를 입력해주세요"
+                  rows={3}
+                  maxLength={PROFILE_BIO_MAX_LENGTH}
+                  disabled={profileEditSaving}
+                />
+                <span
+                  style={{
+                    alignSelf: "flex-end",
+                    marginTop: 6,
+                    fontSize: 11,
+                    color: profileEditBio.length >= PROFILE_BIO_MAX_LENGTH ? "#e07070" : "#999",
+                  }}
+                >
+                  {profileEditBio.length}/{PROFILE_BIO_MAX_LENGTH}
+                </span>
+              </div>
+              <button type="button" onClick={saveProfileEdit} disabled={profileEditSaving} className="profileEditSaveBtn" style={{ marginTop: 28 }}>
                 {profileEditSaving ? "저장 중..." : "저장"}
               </button>
             </div>
