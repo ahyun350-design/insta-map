@@ -5599,9 +5599,9 @@ function HomePageContent() {
                         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                           <span
                             style={{
-                              fontFamily: "'Playfair Display', serif",
-                              fontSize: 18,
-                              color: "#1a2a7a",
+                              fontSize: 17,
+                              fontWeight: 600,
+                              color: "#000",
                               overflow: "hidden",
                               textOverflow: "ellipsis",
                               whiteSpace: "nowrap",
@@ -5609,7 +5609,7 @@ function HomePageContent() {
                               minWidth: 0,
                             }}
                           >
-                            📌 {editingCourseTitle}
+                            {editingCourseTitle}
                           </span>
                           <button
                             type="button"
@@ -5619,28 +5619,31 @@ function HomePageContent() {
                               setIsEditingCourseTitleInline(true);
                             }}
                             style={{
-                              width: 28,
-                              height: 28,
                               flexShrink: 0,
                               border: "none",
                               borderRadius: 6,
                               background: "transparent",
-                              color: "#666",
-                              fontSize: 14,
+                              color: "#1a2a7a",
+                              fontSize: 13,
+                              fontWeight: 500,
+                              padding: "4px 8px",
                               cursor: "pointer",
-                              padding: 0,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
+                              fontFamily: "inherit",
                             }}
                             onMouseEnter={(e) => {
-                              e.currentTarget.style.background = "#ececec";
+                              e.currentTarget.style.background = "#f0f0f5";
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.background = "transparent";
                             }}
+                            onMouseDown={(e) => {
+                              e.currentTarget.style.background = "#f0f0f5";
+                            }}
+                            onMouseUp={(e) => {
+                              e.currentTarget.style.background = "#f0f0f5";
+                            }}
                           >
-                            ✏️
+                            편집
                           </button>
                         </div>
                       )
