@@ -533,6 +533,8 @@ function HomePageContent() {
   const searchMarkersRef = useRef<any[]>([]); const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
   const placePinsRunIdRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
   const locationRenderTokenRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
+  /** 확장 지도 직접 검색 시 Location bias — addMyLocation 성공 시 저장, 없으면 지도 center */
+  const myLocationLatLngRef = useRef<{ lat: number; lng: number } | null>(null);
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
@@ -2454,6 +2456,7 @@ function HomePageContent() {
           console.log("[PindMap:location] map identity changed, retry on new map", { scope });
           return;
         }
+        myLocationLatLngRef.current = { lat: latitude, lng: longitude };
         const latlng = new window.kakao.maps.LatLng(latitude, longitude);
         map.setCenter(latlng);
         map.setLevel(9);
@@ -2798,12 +2801,53 @@ function HomePageContent() {
     }
     const ps = new window.kakao.maps.services.Places(); const geocoder = new window.kakao.maps.services.Geocoder();
     const trimmed = searchQuery.trim();
-    const doSearch = (data: any[], st: string) => {
-      if (st !== window.kakao.maps.services.Status.OK) { showToast("검색 결과가 없어요", "info"); return; }
-      console.log("[PindMap:expandedMap] keywordSearch ok count=", data?.length ?? 0);
-      searchMarkersRef.current.forEach((m) => m.setMap(null)); searchMarkersRef.current = [];
-      lastExpandedSearchPlacesRef.current = data.slice();
+    const getExpandedSearchBiasLatLng = () => {
+      const cached = myLocationLatLngRef.current;
+      if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lng)) {
+        return new window.kakao.maps.LatLng(cached.lat, cached.lng);
+      }
+      const mapNow = expandedMapRef.current;
+      const center = mapNow?.getCenter?.();
+      if (center) return center;
+      return new window.kakao.maps.LatLng(37.5665, 126.978);
+    };
+    const fitExpandedMapToKeywordResults = (places: any[]) => {
+      const mapNow = expandedMapRef.current;
+      if (!mapNow || places.length === 0) return;
+      const valid = places.filter((p) => {
+        const y = parseFloat(p.y);
+        const x = parseFloat(p.x);
+        return Number.isFinite(y) && Number.isFinite(x);
+      });
+      if (valid.length === 0) return;
+      const bias = getExpandedSearchBiasLatLng();
+      const bLat = bias.getLat();
+      const bLng = bias.getLng();
+      const sorted = [...valid].sort(
+        (a, b) =>
+          distanceMeters(bLat, bLng, parseFloat(a.y), parseFloat(a.x)) -
+          distanceMeters(bLat, bLng, parseFloat(b.y), parseFloat(b.x)),
+      );
+      const fitPlaces = sorted.slice(0, 3);
+      if (fitPlaces.length === 1) {
+        const p = fitPlaces[0];
+        mapNow.setCenter(new window.kakao.maps.LatLng(parseFloat(p.y), parseFloat(p.x)));
+        mapNow.setLevel(3);
+        return;
+      }
       const bounds = new window.kakao.maps.LatLngBounds();
+      fitPlaces.forEach((p) => bounds.extend(new window.kakao.maps.LatLng(parseFloat(p.y), parseFloat(p.x))));
+      mapNow.setBounds(bounds);
+    };
+    const doSearch = (data: any[], st: string) => {
+      if (st !== window.kakao.maps.services.Status.OK) {
+        showToast("검색 결과가 없어요", "info");
+        return;
+      }
+      console.log("[PindMap:expandedMap] keywordSearch ok count=", data?.length ?? 0);
+      searchMarkersRef.current.forEach((m) => m.setMap(null));
+      searchMarkersRef.current = [];
+      lastExpandedSearchPlacesRef.current = data.slice();
       data.forEach((place) => {
         const marker = new window.kakao.maps.Marker({
           map: expandedMapRef.current,
@@ -2814,9 +2858,10 @@ function HomePageContent() {
         window.kakao.maps.event.addListener(marker, "click", () =>
           openExpandedSearchPlaceCard(place, "marker-keyword-click"),
         );
-        searchMarkersRef.current.push(marker); bounds.extend(new window.kakao.maps.LatLng(place.y, place.x));
+        searchMarkersRef.current.push(marker);
       });
-      expandedMapRef.current.setBounds(bounds); setSearchQuery("");
+      fitExpandedMapToKeywordResults(data);
+      setSearchQuery("");
     };
     geocoder.addressSearch(trimmed, (result: any[], st: string) => {
       if (st === window.kakao.maps.services.Status.OK && result[0]) {
@@ -2846,7 +2891,16 @@ function HomePageContent() {
         expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(addr.y, addr.x)); expandedMapRef.current.setLevel(3); setSearchQuery("");
       } else {
         console.log("[PindMap:expandedMap] addressSearch fallback to keyword:", trimmed);
-        ps.keywordSearch(trimmed, doSearch);
+        const bias = getExpandedSearchBiasLatLng();
+        const SortBy = window.kakao.maps.services.SortBy;
+        const keywordOpts: Record<string, unknown> = {
+          location: bias,
+          radius: 20000,
+        };
+        if (SortBy?.DISTANCE != null) {
+          keywordOpts.sort = SortBy.DISTANCE;
+        }
+        ps.keywordSearch(trimmed, doSearch, keywordOpts);
       }
     });
   };
