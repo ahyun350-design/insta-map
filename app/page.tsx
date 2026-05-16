@@ -177,6 +177,63 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/** 동명이 장소 큐레이션 매칭 — 같은 블록(약 100m) 또는 좌표 없을 때 주소 텍스트 fallback */
+const RELATED_POST_MAX_DISTANCE_M = 100;
+
+type RelatedPostAnchor = {
+  placeName: string;
+  lat?: number;
+  lng?: number;
+  address?: string;
+};
+
+function relatedAnchorFromPlace(place: Place): RelatedPostAnchor {
+  return { placeName: place.name, lat: place.lat, lng: place.lng, address: place.address };
+}
+
+function relatedAnchorFromKakaoPlace(place: {
+  place_name?: string;
+  y?: string | number;
+  x?: string | number;
+  road_address_name?: string;
+  address_name?: string;
+}): RelatedPostAnchor {
+  const coords = kakaoYXToLatLng(place.y, place.x);
+  return {
+    placeName: String(place.place_name ?? ""),
+    ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+    address: String(place.road_address_name || place.address_name || ""),
+  };
+}
+
+function filterRelatedFeedPosts(posts: FeedPost[], anchor: RelatedPostAnchor): FeedPost[] {
+  const targetName = anchor.placeName.trim();
+  if (!targetName) return [];
+
+  const anchorCoords = latLngFromRow(anchor);
+  const anchorAddr = normalizeAddress(anchor.address ?? "");
+
+  return posts.filter((p) => {
+    if (p.archived) return false;
+    if (p.placeName.trim() !== targetName) return false;
+
+    const postCoords = latLngFromRow(p);
+    if (anchorCoords && postCoords) {
+      return (
+        distanceMeters(anchorCoords.lat, anchorCoords.lng, postCoords.lat, postCoords.lng) <=
+        RELATED_POST_MAX_DISTANCE_M
+      );
+    }
+
+    const postAddr = normalizeAddress(p.address ?? "");
+    if (anchorAddr && postAddr) {
+      return anchorAddr === postAddr || anchorAddr.includes(postAddr) || postAddr.includes(anchorAddr);
+    }
+
+    return !anchorCoords && !postCoords;
+  });
+}
+
 declare global { interface Window { kakao: any; } }
 
 /**
@@ -2203,7 +2260,7 @@ function HomePageContent() {
   const handleSavedPlaceClick = (place: Place) => {
     setSelectedMapPlace(place);
     setActiveTab("map");
-    const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
+    const relatedPosts = filterRelatedFeedPosts(feedPosts, relatedAnchorFromPlace(place));
     const stored = latLngFromRow(place);
     if (stored && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(stored.lat, stored.lng));
@@ -2245,7 +2302,12 @@ function HomePageContent() {
     if (postCoords && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(postCoords.lat, postCoords.lng));
       mapRef.current.setLevel(4);
-      const relatedPosts = feedPosts.filter((p) => !p.archived && p.placeName === detailPost.placeName);
+      const relatedPosts = filterRelatedFeedPosts(feedPosts, {
+        placeName: detailPost.placeName,
+        lat: postCoords.lat,
+        lng: postCoords.lng,
+        address: detailPost.address,
+      });
       setSelectedPlace({
         place_name: detailPost.placeName,
         category_name: detailPost.category,
@@ -2265,9 +2327,17 @@ function HomePageContent() {
     if (mapRef.current && geocoderRef.current) {
       geocoderRef.current.addressSearch(detailPost.address, (result: any[], sv: string) => {
         if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
-        mapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x));
+        const geocodedLat = parseFloat(result[0].y);
+        const geocodedLng = parseFloat(result[0].x);
+        mapRef.current.setCenter(new window.kakao.maps.LatLng(geocodedLat, geocodedLng));
         mapRef.current.setLevel(4);
-        const relatedPosts = feedPosts.filter((p) => !p.archived && p.placeName === detailPost.placeName);
+        const relatedPosts = filterRelatedFeedPosts(feedPosts, {
+          placeName: detailPost.placeName,
+          ...(Number.isFinite(geocodedLat) && Number.isFinite(geocodedLng)
+            ? { lat: geocodedLat, lng: geocodedLng }
+            : {}),
+          address: detailPost.address,
+        });
         new window.kakao.maps.services.Places().keywordSearch(detailPost.placeName, (data: any[], st: string) => {
           const base =
             st === window.kakao.maps.services.Status.OK && data[0]
@@ -2289,7 +2359,7 @@ function HomePageContent() {
 
   // 지도 탭의 작은 목록에서 장소 클릭 → 상세 카드만 띄움 (전체화면 X)
   const handleMiniListClick = (place: Place) => {
-    const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
+    const relatedPosts = filterRelatedFeedPosts(feedPosts, relatedAnchorFromPlace(place));
     if (!window.kakao?.maps?.services) {
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
       return;
@@ -2580,7 +2650,12 @@ function HomePageContent() {
           place_url: "",
           y: place.lat,
           x: place.lng,
-          _feedPosts: feedPosts.filter((p) => !p.archived && p.placeName === place.name),
+          _feedPosts: filterRelatedFeedPosts(feedPosts, {
+            placeName: place.name,
+            lat: place.lat,
+            lng: place.lng,
+            address: place.address,
+          }),
         });
       });
       searchMarkersRef.current.push(marker);
@@ -3044,7 +3119,12 @@ function HomePageContent() {
           const clickToken = Date.now();
           console.log("[place click]", place.name, "token:", clickToken);
           selectedPlaceTokenRef.current = clickToken;
-          const relatedPosts = posts.filter((p) => !p.archived && p.placeName === place.name);
+          const relatedPosts = filterRelatedFeedPosts(posts, {
+            placeName: place.name,
+            lat: markerLat,
+            lng: markerLng,
+            address: place.address,
+          });
           // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
           console.log("[place click:setSelected1]", place.name);
           setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
@@ -3202,7 +3282,12 @@ function HomePageContent() {
         position: new window.kakao.maps.LatLng(lat, lng),
         image: new window.kakao.maps.MarkerImage(makeMarkerImage(rep.category), new window.kakao.maps.Size(36, 44)),
       });
-      const groupPosts = posts.filter((p) => !p.archived && p.placeName === rep.placeName);
+      const groupPosts = filterRelatedFeedPosts(posts, {
+        placeName: rep.placeName,
+        lat,
+        lng,
+        address: rep.address,
+      });
       window.kakao.maps.event.addListener(marker, "click", () => {
         setSelectedPlace({
           place_name: rep.placeName,
@@ -3304,7 +3389,7 @@ function HomePageContent() {
     console.log("[PindMap:expandedMap] open place card", source, place.place_name, { y: place.y, x: place.x });
     setSelectedPlace({
       ...place,
-      _feedPosts: feedPostsRef.current.filter((p) => !p.archived && p.placeName === place.place_name),
+      _feedPosts: filterRelatedFeedPosts(feedPostsRef.current, relatedAnchorFromKakaoPlace(place)),
     });
   }, []);
 
@@ -4005,7 +4090,7 @@ function HomePageContent() {
         expandedSavedTouchAssistDedupeRef.current = { t: now, id: pickedSaved.id };
         const c = savedPlaceCoordsRef.current[pickedSaved.id];
         if (!c) return;
-        const relatedPosts = feedPosts.filter((p) => !p.archived && p.placeName === pickedSaved.name);
+        const relatedPosts = filterRelatedFeedPosts(feedPosts, relatedAnchorFromPlace(pickedSaved));
         console.log("[PindMap:expandedMap] saved-pin touch assist", pickedSaved.name);
         setSelectedPlace(toSelectedFromSavedPlace(pickedSaved, relatedPosts, c.lat, c.lng));
       };
