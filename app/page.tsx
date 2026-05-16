@@ -24,6 +24,7 @@ import {
   fetchMyCourses,
   formatCourseDate,
   saveCourse,
+  updateCourseTitle,
   type SavedCourse,
   type SavedCourseItem,
 } from "@/lib/courses";
@@ -699,6 +700,9 @@ function HomePageContent() {
   const [courseSaveTitle, setCourseSaveTitle] = useState("");
   const [courseSaving, setCourseSaving] = useState(false);
   const [savedCourseId, setSavedCourseId] = useState<string | null>(null);
+  const [editingCourseTitle, setEditingCourseTitle] = useState("");
+  const [isEditingCourseTitleInline, setIsEditingCourseTitleInline] = useState(false);
+  const [courseTitleSaving, setCourseTitleSaving] = useState(false);
   const [myCourses, setMyCourses] = useState<SavedCourse[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [courseActionTarget, setCourseActionTarget] = useState<SavedCourse | null>(null);
@@ -707,6 +711,8 @@ function HomePageContent() {
   const courseSaveInputRef = useRef<HTMLInputElement>(null);
   const preserveSavedCourseIdRef = useRef(false);
   const drawCourseRouteRetryRef = useRef(0);
+  const courseTitleOriginalRef = useRef("");
+  const courseTitleInlineInputRef = useRef<HTMLInputElement>(null);
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const handleAddSubmittingRef = useRef(false);
@@ -1024,6 +1030,12 @@ function HomePageContent() {
     const t = window.setTimeout(() => courseSaveInputRef.current?.focus(), 50);
     return () => window.clearTimeout(t);
   }, [showCourseSaveModal]);
+
+  useEffect(() => {
+    if (!isEditingCourseTitleInline) return;
+    const t = window.setTimeout(() => courseTitleInlineInputRef.current?.focus(), 50);
+    return () => window.clearTimeout(t);
+  }, [isEditingCourseTitleInline]);
 
   const closeCourseSaveModal = () => {
     setShowCourseSaveModal(false);
@@ -1907,6 +1919,15 @@ function HomePageContent() {
     }
   }, [user?.id]);
 
+  const closeCourseModal = () => {
+    setShowCourseModal(false);
+    setCourseResult(null);
+    setSavedCourseId(null);
+    setIsEditingCourseTitleInline(false);
+    setEditingCourseTitle("");
+    preserveSavedCourseIdRef.current = false;
+  };
+
   const openSavedCourse = (course: SavedCourse) => {
     const restored: CoursePlace[] = course.items
       .filter((it) => Number.isFinite(it.lat) && Number.isFinite(it.lng))
@@ -1925,12 +1946,43 @@ function HomePageContent() {
     preserveSavedCourseIdRef.current = true;
     setCourseResult(restored);
     setSavedCourseId(course.id);
-    setShowCourseModal(false);
-    setShowCourseRoute(true);
-    setMapExpanded(true);
-    setActiveTab("map");
-    drawCourseRouteRetryRef.current = 0;
-    window.setTimeout(() => drawCourseRoute(), 800);
+    setEditingCourseTitle(course.title);
+    setIsEditingCourseTitleInline(false);
+    setShowCourseModal(true);
+  };
+
+  const handleSaveCourseTitleInline = async () => {
+    if (!savedCourseId) return;
+    const trimmed = editingCourseTitle.trim();
+    if (!trimmed) {
+      showToast("제목을 입력해주세요", "error");
+      return;
+    }
+    if (trimmed === courseTitleOriginalRef.current.trim()) {
+      setIsEditingCourseTitleInline(false);
+      return;
+    }
+    setCourseTitleSaving(true);
+    try {
+      const { data, error } = await updateCourseTitle(savedCourseId, trimmed);
+      if (error) {
+        showToast(error, "error");
+        return;
+      }
+      setEditingCourseTitle(trimmed);
+      setIsEditingCourseTitleInline(false);
+      showToast("제목을 변경했어요", "success");
+      setMyCourses((prev) =>
+        prev.map((c) =>
+          c.id === savedCourseId
+            ? { ...c, title: trimmed, updated_at: data?.updated_at ?? new Date().toISOString() }
+            : c,
+        ),
+      );
+      void refreshMyCourses();
+    } finally {
+      setCourseTitleSaving(false);
+    }
   };
 
   const closeCourseActionSheet = () => {
@@ -5158,11 +5210,132 @@ function HomePageContent() {
 {showCourseModal && (
             <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
               <div style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>
-                    {courseResult ? "✨ 추천 코스" : "🗺️ 코스 만들기"}
-                  </span>
-                  <button onClick={() => { setShowCourseModal(false); setCourseResult(null); }} style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: "pointer" }}>×</button>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {savedCourseId ? (
+                      isEditingCourseTitleInline ? (
+                        <div>
+                          <input
+                            ref={courseTitleInlineInputRef}
+                            className="profileEditField"
+                            value={editingCourseTitle}
+                            maxLength={60}
+                            onChange={(e) => setEditingCourseTitle(e.target.value)}
+                            style={{
+                              width: "100%",
+                              boxSizing: "border-box",
+                              borderRadius: 12,
+                              padding: "10px 12px",
+                              fontSize: 14,
+                            }}
+                          />
+                          <p style={{ margin: "4px 0 0", fontSize: 11, color: "#999", textAlign: "right" }}>
+                            {editingCourseTitle.length}/60
+                          </p>
+                          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                            <button
+                              type="button"
+                              disabled={courseTitleSaving}
+                              onClick={() => { void handleSaveCourseTitleInline(); }}
+                              style={{
+                                padding: "8px 14px",
+                                borderRadius: 8,
+                                border: "none",
+                                background: "#1a2a7a",
+                                color: "#fff",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: courseTitleSaving ? "wait" : "pointer",
+                                fontFamily: "inherit",
+                                opacity: courseTitleSaving ? 0.7 : 1,
+                              }}
+                            >
+                              {courseTitleSaving ? "저장 중..." : "저장"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={courseTitleSaving}
+                              onClick={() => {
+                                setEditingCourseTitle(courseTitleOriginalRef.current);
+                                setIsEditingCourseTitleInline(false);
+                              }}
+                              style={{
+                                padding: "8px 14px",
+                                borderRadius: 8,
+                                border: "1px solid #ddd",
+                                background: "#fff",
+                                color: "#666",
+                                fontSize: 12,
+                                cursor: courseTitleSaving ? "wait" : "pointer",
+                                fontFamily: "inherit",
+                              }}
+                            >
+                              취소
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          <span
+                            style={{
+                              fontFamily: "'Playfair Display', serif",
+                              fontSize: 18,
+                              color: "#1a2a7a",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              flex: 1,
+                              minWidth: 0,
+                            }}
+                          >
+                            📌 {editingCourseTitle}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label="제목 수정"
+                            onClick={() => {
+                              courseTitleOriginalRef.current = editingCourseTitle;
+                              setIsEditingCourseTitleInline(true);
+                            }}
+                            style={{
+                              width: 28,
+                              height: 28,
+                              flexShrink: 0,
+                              border: "none",
+                              borderRadius: 6,
+                              background: "transparent",
+                              color: "#666",
+                              fontSize: 14,
+                              cursor: "pointer",
+                              padding: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = "#ececec";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            ✏️
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>
+                        {courseResult ? "✨ 추천 코스" : "🗺️ 코스 만들기"}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeCourseModal}
+                    style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: "pointer", flexShrink: 0, padding: 0, lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
                 </div>
 
                 {!courseResult && (
@@ -5239,38 +5412,59 @@ function HomePageContent() {
                       ))}
                     </div>
 
-                    <button
-                      type="button"
-                      disabled={!!savedCourseId}
-                      onClick={() => setShowCourseSaveModal(true)}
-                      style={{
-                        width: "100%",
-                        padding: "12px",
-                        borderRadius: "12px",
-                        border: "1px solid #1a2a7a",
-                        background: "#fff",
-                        color: "#1a2a7a",
-                        fontSize: "13px",
-                        fontWeight: 600,
-                        cursor: savedCourseId ? "default" : "pointer",
-                        fontFamily: "inherit",
-                        opacity: savedCourseId ? 0.65 : 1,
-                      }}
-                    >
-                      {savedCourseId ? "저장 완료 ✓" : "💾 코스 저장"}
-                    </button>
+                    {savedCourseId ? (
+                      <button
+                        type="button"
+                        onClick={showCourseOnMap}
+                        style={{
+                          width: "100%",
+                          padding: "12px",
+                          borderRadius: "8px",
+                          border: "none",
+                          background: "#1a2a7a",
+                          color: "#fff",
+                          fontSize: "13px",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        🗺️ 지도에서 경로 보기
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          disabled={!!savedCourseId}
+                          onClick={() => setShowCourseSaveModal(true)}
+                          style={{
+                            width: "100%",
+                            padding: "12px",
+                            borderRadius: "12px",
+                            border: "1px solid #1a2a7a",
+                            background: "#fff",
+                            color: "#1a2a7a",
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          💾 코스 저장
+                        </button>
 
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button type="button" onClick={() => { void generateCourse(); }} disabled={courseLoading} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: "13px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading ? 0.6 : 1 }}>{courseLoading ? "다시 짜는 중..." : "다시 만들기"}</button>
-                      <button type="button" onClick={showCourseOnMap} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={openAppleMapsCourseRoute}
-                      style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #d6ddf2", background: "#fff", color: "#1a2a7a", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}
-                    >
-                      🗺 Apple 지도에서 경로 보기
-                    </button>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button type="button" onClick={() => { void generateCourse(); }} disabled={courseLoading} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: "13px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading ? 0.6 : 1 }}>{courseLoading ? "다시 짜는 중..." : "다시 만들기"}</button>
+                          <button type="button" onClick={showCourseOnMap} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={openAppleMapsCourseRoute}
+                          style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #d6ddf2", background: "#fff", color: "#1a2a7a", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}
+                        >
+                          🗺 Apple 지도에서 경로 보기
+                        </button>
+                      </>
+                    )}
                   </>
                 )}
               </div>

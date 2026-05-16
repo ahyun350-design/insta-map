@@ -57,6 +57,36 @@ export async function fetchMyCourses(
   return { data: (data ?? []) as SavedCourse[], error: null };
 }
 
+function validateCourseTitle(trimmed: string): string | null {
+  if (!trimmed) return "제목을 입력해주세요";
+  if (trimmed.length > 60) return "제목은 60자 이내로 입력해주세요";
+  return null;
+}
+
+export async function updateCourseTitle(
+  courseId: string,
+  newTitle: string,
+): Promise<{ data: SavedCourse | null; error: string | null }> {
+  const trimmed = newTitle.trim();
+  const validationError = validateCourseTitle(trimmed);
+  if (validationError) {
+    return { data: null, error: validationError };
+  }
+
+  const { data, error } = await supabase
+    .from("courses")
+    .update({ title: trimmed })
+    .eq("id", courseId)
+    .select("*")
+    .single();
+
+  if (error) {
+    return { data: null, error: mapDbError(error, "제목을 변경하지 못했어요.") };
+  }
+
+  return { data: data as SavedCourse, error: null };
+}
+
 export async function deleteCourse(courseId: string): Promise<{ error: string | null }> {
   const { error } = await supabase.from("courses").delete().eq("id", courseId);
 
@@ -73,11 +103,9 @@ export async function saveCourse(
   items: SavedCourseItem[],
 ): Promise<{ data: SavedCourse | null; error: string | null }> {
   const trimmed = title.trim();
-  if (!trimmed) {
-    return { data: null, error: "이름을 입력해주세요" };
-  }
-  if (trimmed.length > 60) {
-    return { data: null, error: "이름은 60자 이내로 입력해주세요" };
+  const validationError = validateCourseTitle(trimmed);
+  if (validationError) {
+    return { data: null, error: validationError === "제목을 입력해주세요" ? "이름을 입력해주세요" : validationError };
   }
   if (items.length === 0) {
     return { data: null, error: "장소가 비어있어요" };
