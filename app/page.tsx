@@ -705,6 +705,8 @@ function HomePageContent() {
   const [showCourseDeleteConfirm, setShowCourseDeleteConfirm] = useState(false);
   const [courseDeleting, setCourseDeleting] = useState(false);
   const courseSaveInputRef = useRef<HTMLInputElement>(null);
+  const preserveSavedCourseIdRef = useRef(false);
+  const drawCourseRouteRetryRef = useRef(0);
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const handleAddSubmittingRef = useRef(false);
@@ -1010,6 +1012,10 @@ function HomePageContent() {
   }, [showCourseModal, courseOriginMode, savedPlaces, coursePlaceCoords]);
 
   useEffect(() => {
+    if (preserveSavedCourseIdRef.current) {
+      preserveSavedCourseIdRef.current = false;
+      return;
+    }
     setSavedCourseId(null);
   }, [courseResult]);
 
@@ -1901,8 +1907,30 @@ function HomePageContent() {
     }
   }, [user?.id]);
 
-  const openSavedCourse = (_course: SavedCourse) => {
-    /* 다음 단계 3-B에서 구현 */
+  const openSavedCourse = (course: SavedCourse) => {
+    const restored: CoursePlace[] = course.items
+      .filter((it) => Number.isFinite(it.lat) && Number.isFinite(it.lng))
+      .map((it) => ({
+        id: it.id,
+        name: it.name,
+        address: it.address,
+        category: it.category as Category,
+        lat: it.lat,
+        lng: it.lng,
+      }));
+    if (restored.length === 0) {
+      showToast("코스에 표시할 장소가 없어요", "error");
+      return;
+    }
+    preserveSavedCourseIdRef.current = true;
+    setCourseResult(restored);
+    setSavedCourseId(course.id);
+    setShowCourseModal(false);
+    setShowCourseRoute(true);
+    setMapExpanded(true);
+    setActiveTab("map");
+    drawCourseRouteRetryRef.current = 0;
+    window.setTimeout(() => drawCourseRoute(), 800);
   };
 
   const closeCourseActionSheet = () => {
@@ -2831,7 +2859,18 @@ function HomePageContent() {
 
   // 전체화면 지도에 코스 경로 그리기
   const drawCourseRoute = () => {
-    if (!courseResult || !expandedMapRef.current || !window.kakao?.maps) return;
+    if (!courseResult) return;
+    if (!expandedMapRef.current || !window.kakao?.maps) {
+      if (drawCourseRouteRetryRef.current < 2) {
+        drawCourseRouteRetryRef.current += 1;
+        window.setTimeout(
+          () => drawCourseRoute(),
+          !expandedMapRef.current ? 200 : 1000,
+        );
+      }
+      return;
+    }
+    drawCourseRouteRetryRef.current = 0;
     // 기존 경로 지우기
     clearRoute();
     searchMarkersRef.current.forEach((m) => m.setMap(null));
