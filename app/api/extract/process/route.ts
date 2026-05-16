@@ -46,7 +46,15 @@ async function updateJobProgress(jobId: string, progressStep: string) {
     .eq("id", jobId);
 }
 
-function buildPlaces(resolved: Array<{ name: string; category: Place["category"]; address: string }>): Place[] {
+type ResolvedPlace = {
+  name: string;
+  category: Place["category"];
+  address: string;
+  lat: number;
+  lng: number;
+};
+
+function buildPlaces(resolved: ResolvedPlace[]): Place[] {
   return resolved.map((p) => ({ name: p.name, category: p.category, address: p.address }));
 }
 
@@ -77,7 +85,7 @@ export async function POST(req: Request) {
     const rawPlaces = await extractPlacesByClaude(caption);
 
     await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
-    const resolved: Array<{ name: string; category: Place["category"]; address: string }> = [];
+    const resolved: ResolvedPlace[] = [];
     for (const item of rawPlaces) {
       const name = typeof item.name === "string" ? item.name.trim() : "";
       const hint = typeof item.hint === "string" ? item.hint.trim() : "";
@@ -85,7 +93,13 @@ export async function POST(req: Request) {
       if (!name || !category) continue;
       const kakaoResult = await searchKakaoPlace(name, hint);
       if (kakaoResult) {
-        resolved.push({ name, category, address: kakaoResult.roadAddress || kakaoResult.address });
+        resolved.push({
+          name,
+          category,
+          address: kakaoResult.roadAddress || kakaoResult.address,
+          lat: kakaoResult.lat,
+          lng: kakaoResult.lng,
+        });
       }
     }
 
@@ -128,12 +142,14 @@ export async function POST(req: Request) {
 
     if (places.length === 0) throw new Error("장소 추출에 실패했습니다.");
 
-    const rows = places.map((p) => ({
+    const rows = uniqueResolved.map((p) => ({
       id: typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       user_id: job.user_id,
       name: p.name,
       address: p.address,
       category: p.category,
+      lat: p.lat,
+      lng: p.lng,
     }));
 
     const { error: insertErr } = await supabase.from("places").insert(rows);
@@ -144,6 +160,8 @@ export async function POST(req: Request) {
       name: r.name,
       address: r.address,
       category: r.category,
+      lat: r.lat,
+      lng: r.lng,
     }));
 
     const { error: doneError } = await supabase

@@ -55,11 +55,12 @@ function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): C
   }
   return "쇼핑";
 }
-type Place = { id: string; name: string; address: string; category: Category };
+type Place = { id: string; name: string; address: string; category: Category; lat?: number; lng?: number };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
 type Comment = { id: string; user: string; userId?: string; avatarUrl?: string; text: string; createdAt: string };
 type FeedPost = {
   id: string; user: string; userId: string; userAvatarUrl?: string; title: string; placeName: string; address: string;
+  lat?: number; lng?: number;
   category: Category; comment: string; images: string[]; createdAt: string;
   archived?: boolean; likes: string[]; comments: Comment[];
 };
@@ -120,6 +121,33 @@ type ExtractStatusResponse = {
   error?: string;
 };
 type LatLng = { lat: number; lng: number };
+
+function coerceLatLng(lat?: unknown, lng?: unknown): LatLng | null {
+  const la = typeof lat === "number" ? lat : parseFloat(String(lat ?? ""));
+  const ln = typeof lng === "number" ? lng : parseFloat(String(lng ?? ""));
+  if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
+  return { lat: la, lng: ln };
+}
+
+/** 카카오 POI: y=위도(lat), x=경도(lng) */
+function kakaoYXToLatLng(y?: unknown, x?: unknown): LatLng | null {
+  return coerceLatLng(y, x);
+}
+
+function latLngFromRow(row: { lat?: unknown; lng?: unknown }): LatLng | null {
+  return coerceLatLng(row.lat, row.lng);
+}
+
+function mapPlaceRow(p: { id: string; name: string; address: string; category: string; lat?: unknown; lng?: unknown }): Place {
+  const coords = latLngFromRow(p);
+  return {
+    id: p.id,
+    name: p.name,
+    address: p.address,
+    category: p.category as Category,
+    ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+  };
+}
 
 function normalizeText(value: string): string {
   return value
@@ -521,6 +549,8 @@ function HomePageContent() {
   const [showPostModal, setShowPostModal] = useState(false);
   const [postTitle, setPostTitle] = useState(""); const [postPlaceName, setPostPlaceName] = useState("");
   const [postAddress, setPostAddress] = useState(""); const [postCategory, setPostCategory] = useState<Category>("카페");
+  const [postPlaceLat, setPostPlaceLat] = useState<number | undefined>(undefined);
+  const [postPlaceLng, setPostPlaceLng] = useState<number | undefined>(undefined);
   const [postComment, setPostComment] = useState(""); const [postSearchQuery, setPostSearchQuery] = useState("");
   const [postSearchResults, setPostSearchResults] = useState<any[]>([]); const [postImages, setPostImages] = useState<PostImageItem[]>([]);
   const postImagesRef = useRef<PostImageItem[]>([]);
@@ -894,12 +924,21 @@ function HomePageContent() {
       setNotifications(hydrateNotificationsWithAvatars(rawNotifications));
 
       if (placesRes.data) {
-        setSavedPlaces(placesRes.data.map((p) => ({ id: p.id, name: p.name, address: p.address, category: p.category as Category })));
+        const mappedPlaces = placesRes.data.map((p) => mapPlaceRow(p));
+        mappedPlaces.forEach((place) => {
+          const coords = latLngFromRow(place);
+          if (coords) savedPlaceCoordsRef.current[place.id] = coords;
+        });
+        setSavedPlaces(mappedPlaces);
       }
       if (postsRes.data) {
-        const rawPosts: FeedPost[] = postsRes.data.map((p: any) => ({
+        const rawPosts: FeedPost[] = postsRes.data.map((p: any) => {
+          const coords = latLngFromRow(p);
+          return {
           id: p.id, user: p.user_name, userId: p.user_id ?? "", title: p.title, placeName: p.place_name,
-          address: p.address, category: p.category as Category, comment: p.comment,
+          address: p.address,
+          ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+          category: p.category as Category, comment: p.comment,
           images: p.images ?? [], createdAt: p.created_at, archived: p.archived,
           likes: p.likes ?? [],
           comments: (p.comments ?? []).map((c: any) => ({
@@ -909,7 +948,8 @@ function HomePageContent() {
             text: c.text,
             createdAt: c.created_at,
           })),
-        }));
+        };
+        });
         await prefetchAvatarsForFeedPosts(rawPosts);
         setFeedPosts(hydrateFeedPostsWithAvatars(rawPosts));
       } else {
@@ -1263,19 +1303,30 @@ function HomePageContent() {
             console.log("[PindMap:url] extraction completed — all duplicates vs savedPlaces");
             return;
           }
-          const merged: Place[] = uniquePlaces.map((p) => ({
-            id:
-              typeof p.id === "string" && p.id.trim().length > 0
-                ? p.id.trim()
-                : `${Math.random().toString(36).substring(2)}${Date.now().toString(36)}`,
-            name: p.name,
-            address: p.address,
-            category: p.category as Category,
-          }));
+          const merged: Place[] = uniquePlaces.map((p) => {
+            const coords = latLngFromRow(p);
+            return {
+              id:
+                typeof p.id === "string" && p.id.trim().length > 0
+                  ? p.id.trim()
+                  : `${Math.random().toString(36).substring(2)}${Date.now().toString(36)}`,
+              name: p.name,
+              address: p.address,
+              category: p.category as Category,
+              ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+            };
+          });
           const mergedIds = new Set(merged.map((m) => m.id));
           setSavedPlaces((prev) => [...merged, ...prev.filter((p) => !mergedIds.has(p.id))]);
+          merged.forEach((place) => {
+            const coords = latLngFromRow(place);
+            if (coords) savedPlaceCoordsRef.current[place.id] = coords;
+          });
           const lastAdded = merged[merged.length - 1];
-          if (lastAdded?.address) {
+          const lastCoords = lastAdded ? latLngFromRow(lastAdded) : null;
+          if (lastCoords) {
+            focusExpandedMapOnLatLng(lastCoords.lat, lastCoords.lng, 3);
+          } else if (lastAdded?.address) {
             focusExpandedMapOnAddress(lastAdded.address, 3);
           }
           showToast(`✨ ${uniquePlaces.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
@@ -1370,7 +1421,22 @@ function HomePageContent() {
     }
   };
   const submitPost = async (post: FeedPost) => {
-    await supabase.from("feed_posts").insert({ id: post.id, user_id: user?.id || "", user_name: MY_USERNAME, title: post.title, place_name: post.placeName, address: post.address, category: post.category, comment: post.comment, images: post.images, likes: [], archived: false });
+    const coords = latLngFromRow(post);
+    await supabase.from("feed_posts").insert({
+      id: post.id,
+      user_id: user?.id || "",
+      user_name: MY_USERNAME,
+      title: post.title,
+      place_name: post.placeName,
+      address: post.address,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
+      category: post.category,
+      comment: post.comment,
+      images: post.images,
+      likes: [],
+      archived: false,
+    });
     setFeedPosts(prev => [post, ...prev]);
   };
   const openAppleMapsPlace = (placeName?: string, address?: string, latRaw?: string | number, lngRaw?: string | number) => {
@@ -2137,6 +2203,16 @@ function HomePageContent() {
   const handleSavedPlaceClick = (place: Place) => {
     setSelectedMapPlace(place);
     setActiveTab("map");
+    const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
+    const stored = latLngFromRow(place);
+    if (stored && mapRef.current) {
+      mapRef.current.setCenter(new window.kakao.maps.LatLng(stored.lat, stored.lng));
+      mapRef.current.setLevel(4);
+      savedPlaceCoordsRef.current[place.id] = stored;
+      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
+      setMapExpanded(true);
+      return;
+    }
     if (mapRef.current && geocoderRef.current) {
       geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
         if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
@@ -2144,7 +2220,6 @@ function HomePageContent() {
         const markerLng = parseFloat(result[0].x);
         mapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x));
         mapRef.current.setLevel(4);
-        const relatedPosts = feedPosts.filter(p => !p.archived && p.placeName === place.name);
         setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
         setMapExpanded(true);
       });
@@ -2165,7 +2240,28 @@ function HomePageContent() {
       return;
     }
 
+    const postCoords = latLngFromRow(detailPost);
     setActiveTab("map");
+    if (postCoords && mapRef.current) {
+      mapRef.current.setCenter(new window.kakao.maps.LatLng(postCoords.lat, postCoords.lng));
+      mapRef.current.setLevel(4);
+      const relatedPosts = feedPosts.filter((p) => !p.archived && p.placeName === detailPost.placeName);
+      setSelectedPlace({
+        place_name: detailPost.placeName,
+        category_name: detailPost.category,
+        road_address_name: detailPost.address,
+        address_name: detailPost.address,
+        phone: "",
+        place_url: "",
+        y: String(postCoords.lat),
+        x: String(postCoords.lng),
+        _feedPosts: relatedPosts,
+      });
+      setMapExpanded(true);
+      setDetailPostId(null);
+      return;
+    }
+
     if (mapRef.current && geocoderRef.current) {
       geocoderRef.current.addressSearch(detailPost.address, (result: any[], sv: string) => {
         if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
@@ -2712,9 +2808,15 @@ function HomePageContent() {
     });
   };
   const handleSelectPostPlace = (place: any) => {
-    setPostPlaceName(place.place_name); setPostAddress(place.road_address_name || place.address_name || "");
+    setPostPlaceName(place.place_name);
+    setPostAddress(place.road_address_name || place.address_name || "");
+    const coords = kakaoYXToLatLng(place.y, place.x);
+    setPostPlaceLat(coords?.lat);
+    setPostPlaceLng(coords?.lng);
     const cat = inferCategoryFromKakaoCategoryName(place.category_name);
-    setPostCategory(cat); setPostSearchResults([]); setPostSearchQuery("");
+    setPostCategory(cat);
+    setPostSearchResults([]);
+    setPostSearchQuery("");
   };
   const handleSubmitPost = async () => {
     if (!canPost) return;
@@ -2737,6 +2839,7 @@ function HomePageContent() {
         img.status === "uploaded" && typeof img.publicUrl === "string",
       )
       .map((img) => img.publicUrl);
+    const postCoords = coerceLatLng(postPlaceLat, postPlaceLng);
     const newPost: FeedPost = {
       id: Math.random().toString(36).substring(2) + Date.now().toString(36),
       user: MY_USERNAME,
@@ -2745,6 +2848,7 @@ function HomePageContent() {
       title: postTitle,
       placeName: postPlaceName,
       address: postAddress,
+      ...(postCoords ? { lat: postCoords.lat, lng: postCoords.lng } : {}),
       category: postCategory,
       comment: postComment,
       images: imageUrls,
@@ -2754,7 +2858,14 @@ function HomePageContent() {
     };
     await submitPost(newPost);
     showToast("큐레이션이 등록됐어요 ✨", "success");
-    setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페");
+    setShowPostModal(false);
+    setPostTitle("");
+    setPostPlaceName("");
+    setPostAddress("");
+    setPostPlaceLat(undefined);
+    setPostPlaceLng(undefined);
+    setPostComment("");
+    setPostCategory("카페");
     setPostImages((prev) => {
       prev.forEach((img) => {
         if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
@@ -2764,14 +2875,22 @@ function HomePageContent() {
     setActiveTab("home");
   };
   const resetModal = () => {
-    setShowPostModal(false); setPostTitle(""); setPostPlaceName(""); setPostAddress(""); setPostComment(""); setPostCategory("카페");
+    setShowPostModal(false);
+    setPostTitle("");
+    setPostPlaceName("");
+    setPostAddress("");
+    setPostPlaceLat(undefined);
+    setPostPlaceLng(undefined);
+    setPostComment("");
+    setPostCategory("카페");
     setPostImages((prev) => {
       prev.forEach((img) => {
         if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
       });
       return [];
     });
-    setPostSearchQuery(""); setPostSearchResults([]);
+    setPostSearchQuery("");
+    setPostSearchResults([]);
   };
 
   const applyMyLocationOnMap = (
@@ -2880,7 +2999,7 @@ function HomePageContent() {
       place: Place,
       markerLat: number,
       markerLng: number,
-      source: "cache" | "geocode",
+      source: "cache" | "geocode" | "db",
       pinScope: "main" | "expanded",
     ) => {
       if (myRunId !== placePinsRunIdRef.current[scope]) {
@@ -2915,6 +3034,8 @@ function HomePageContent() {
         marker.setMap(liveMap);
         if (source === "cache") {
           console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng, "(cached coords)");
+        } else if (source === "db") {
+          console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng, "(stored coords)");
         } else {
           console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng);
         }
@@ -2979,6 +3100,11 @@ function HomePageContent() {
     };
     places.forEach((place) => {
       console.log("[addPlacePins:start]", place.name, "address:", place.address);
+      const stored = latLngFromRow(place);
+      if (stored) {
+        attachSavedPlaceMarkerAtLatLng(place, stored.lat, stored.lng, "db", scope);
+        return;
+      }
       const cached = savedPlaceCoordsRef.current[place.id];
       if (
         cached &&
@@ -3070,15 +3196,44 @@ function HomePageContent() {
   const addFeedPins = (map: any, arr: any[], posts: FeedPost[]) => {
     if (!geocoderRef.current) return;
     arr.forEach((m) => m.setMap(null)); arr.length = 0;
+    const placeFeedPin = (rep: FeedPost, lat: number, lng: number) => {
+      const marker = new window.kakao.maps.Marker({
+        map,
+        position: new window.kakao.maps.LatLng(lat, lng),
+        image: new window.kakao.maps.MarkerImage(makeMarkerImage(rep.category), new window.kakao.maps.Size(36, 44)),
+      });
+      const groupPosts = posts.filter((p) => !p.archived && p.placeName === rep.placeName);
+      window.kakao.maps.event.addListener(marker, "click", () => {
+        setSelectedPlace({
+          place_name: rep.placeName,
+          category_name: rep.category,
+          road_address_name: rep.address,
+          phone: "",
+          place_url: "",
+          y: String(lat),
+          x: String(lng),
+          _feedPosts: groupPosts,
+        });
+      });
+      arr.push(marker);
+    };
     const byAddress = new Map<string, FeedPost[]>();
-    posts.filter(p => !p.archived && p.address).forEach(p => { if (!byAddress.has(p.address)) byAddress.set(p.address, []); byAddress.get(p.address)!.push(p); });
+    posts.filter((p) => !p.archived && p.address).forEach((p) => {
+      if (!byAddress.has(p.address)) byAddress.set(p.address, []);
+      byAddress.get(p.address)!.push(p);
+    });
     byAddress.forEach((groupPosts, address) => {
+      const rep = groupPosts[0];
+      const stored = latLngFromRow(rep);
+      if (stored) {
+        placeFeedPin(rep, stored.lat, stored.lng);
+        return;
+      }
       geocoderRef.current.addressSearch(address, (result: any[], sv: string) => {
         if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
-        const rep = groupPosts[0];
-        const marker = new window.kakao.maps.Marker({ map, position: new window.kakao.maps.LatLng(result[0].y, result[0].x), image: new window.kakao.maps.MarkerImage(makeMarkerImage(rep.category), new window.kakao.maps.Size(36, 44)) });
-        window.kakao.maps.event.addListener(marker, "click", () => { setSelectedPlace({ place_name: rep.placeName, category_name: rep.category, road_address_name: rep.address, phone: "", place_url: "", _feedPosts: groupPosts }); });
-        arr.push(marker);
+        const lat = parseFloat(result[0].y);
+        const lng = parseFloat(result[0].x);
+        placeFeedPin(rep, lat, lng);
       });
     });
   };
@@ -3967,9 +4122,16 @@ function HomePageContent() {
                     showToast("저장이 취소되었어요", "info");
                   } else {
                     const category = inferCategoryFromKakaoCategoryName(selectedPlace.category_name);
-                    await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), name: selectedPlace.place_name, address: selectedPlace.road_address_name || selectedPlace.address_name || "", category });
                     const py = parseFloat(String(selectedPlace.y ?? ""));
                     const px = parseFloat(String(selectedPlace.x ?? ""));
+                    const heartCoords = kakaoYXToLatLng(selectedPlace.y, selectedPlace.x);
+                    await addPlace({
+                      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+                      name: selectedPlace.place_name,
+                      address: selectedPlace.road_address_name || selectedPlace.address_name || "",
+                      category,
+                      ...(heartCoords ? { lat: heartCoords.lat, lng: heartCoords.lng } : {}),
+                    });
                     if (Number.isFinite(py) && Number.isFinite(px)) {
                       focusExpandedMapOnLatLng(py, px, 3);
                     } else {

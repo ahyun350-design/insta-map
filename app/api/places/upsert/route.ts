@@ -39,11 +39,18 @@ export async function POST(req: Request) {
       name?: string;
       address?: string;
       category?: string;
+      lat?: number | string | null;
+      lng?: number | string | null;
     };
     const id = typeof body.id === "string" ? body.id.trim() : "";
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const address = typeof body.address === "string" ? body.address.trim() : "";
     const category = typeof body.category === "string" ? body.category.trim() : "";
+    const latRaw = body.lat;
+    const lngRaw = body.lng;
+    const lat = typeof latRaw === "number" ? latRaw : latRaw != null ? parseFloat(String(latRaw)) : NaN;
+    const lng = typeof lngRaw === "number" ? lngRaw : lngRaw != null ? parseFloat(String(lngRaw)) : NaN;
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
     if (!id || !name || !category) {
       return NextResponse.json({ error: "id, name, category는 필수입니다." }, { status: 400 });
     }
@@ -69,6 +76,8 @@ export async function POST(req: Request) {
       name,
       address,
       category,
+      lat: hasCoords ? lat : null,
+      lng: hasCoords ? lng : null,
     });
 
     if (error) {

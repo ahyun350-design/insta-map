@@ -14,6 +14,8 @@ type InsertRow = {
   name: string;
   address: string;
   category: string;
+  lat?: number | null;
+  lng?: number | null;
 };
 
 export async function POST(req: Request) {
@@ -75,7 +77,20 @@ export async function POST(req: Request) {
       ) {
         return NextResponse.json({ error: "유효하지 않은 카테고리가 포함되어 있습니다." }, { status: 400 });
       }
-      rows.push({ id, user_id, name, address, category });
+      const latRaw = (r as { lat?: number | string | null }).lat;
+      const lngRaw = (r as { lng?: number | string | null }).lng;
+      const lat = typeof latRaw === "number" ? latRaw : latRaw != null ? parseFloat(String(latRaw)) : NaN;
+      const lng = typeof lngRaw === "number" ? lngRaw : lngRaw != null ? parseFloat(String(lngRaw)) : NaN;
+      const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+      rows.push({
+        id,
+        user_id,
+        name,
+        address,
+        category,
+        lat: hasCoords ? lat : null,
+        lng: hasCoords ? lng : null,
+      });
     }
 
     let admin;

@@ -62,7 +62,14 @@ function parseClaudePlacesSafely(rawText: string): RawPlace[] {
   return items.filter((item) => item && typeof item === "object") as RawPlace[];
 }
 
-export async function searchKakaoPlace(name: string, hint: string): Promise<{ address: string; roadAddress: string } | null> {
+export type KakaoPlaceLookup = {
+  address: string;
+  roadAddress: string;
+  lat: number;
+  lng: number;
+};
+
+export async function searchKakaoPlace(name: string, hint: string): Promise<KakaoPlaceLookup | null> {
   const kakaoKey = process.env.KAKAO_REST_API_KEY;
   if (!kakaoKey) return null;
   const regionHint = hint.replace(/[-~]/g, " ").split(/[\s,]+/).find((w) => w.length >= 2 && /[가-힣]/.test(w)) ?? "";
@@ -70,10 +77,18 @@ export async function searchKakaoPlace(name: string, hint: string): Promise<{ ad
   try {
     const res = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=1`, { headers: { Authorization: `KakaoAK ${kakaoKey}` } });
     if (!res.ok) return null;
-    const data = await res.json() as { documents?: Array<{ address_name: string; road_address_name: string }> };
+    const data = await res.json() as { documents?: Array<{ address_name: string; road_address_name: string; x: string; y: string }> };
     const first = data.documents?.[0];
     if (!first) return null;
-    return { address: first.address_name, roadAddress: first.road_address_name || first.address_name };
+    const lat = parseFloat(first.y);
+    const lng = parseFloat(first.x);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return {
+      address: first.address_name,
+      roadAddress: first.road_address_name || first.address_name,
+      lat,
+      lng,
+    };
   } catch {
     return null;
   }
