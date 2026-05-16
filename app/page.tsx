@@ -5117,8 +5117,62 @@ function HomePageContent() {
           <button onClick={() => setActiveChatRoom(null)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
-          <ProfileAvatar avatarUrl={activeChatRoom.friendAvatarUrl} username={activeChatRoom.friendName} size={32} fontSize={13} />
-          <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>{activeChatRoom.friendName}</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (!activeChatRoom) return;
+              if (user?.id && activeChatRoom.friendId === user.id) {
+                router.push("/?tab=mypage");
+                return;
+              }
+              router.push(
+                `/profile/${encodeURIComponent(activeChatRoom.friendName)}?fromChat=${encodeURIComponent(activeChatRoom.id)}`,
+              );
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flex: 1,
+              minWidth: 0,
+              minHeight: 40,
+              padding: "6px 10px",
+              marginLeft: -2,
+              border: "none",
+              borderRadius: 10,
+              background: "transparent",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              textAlign: "left",
+              WebkitTapHighlightColor: "transparent",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#f4f5f9";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+            }}
+            onMouseDown={(e) => {
+              e.currentTarget.style.background = "#eceef4";
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.background = "#f4f5f9";
+            }}
+          >
+            <ProfileAvatar avatarUrl={activeChatRoom.friendAvatarUrl} username={activeChatRoom.friendName} size={32} fontSize={13} />
+            <span
+              style={{
+                fontFamily: "'Playfair Display', serif",
+                fontSize: "16px",
+                color: "#1a2a7a",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {activeChatRoom.friendName}
+            </span>
+          </button>
         </div>
         <div
           ref={chatMessagesContainerRef}

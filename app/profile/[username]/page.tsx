@@ -293,7 +293,17 @@ export default function ProfilePage() {
     <main className="mobileRoot">
       <section className="phoneFrame">
         <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
-          <button onClick={() => router.back()} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
+          <button
+            onClick={() => {
+              const fromChat = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("fromChat") : null;
+              if (fromChat) {
+                router.push(`/?openChatRoom=${encodeURIComponent(fromChat)}`);
+                return;
+              }
+              router.back();
+            }}
+            style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
+          >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>프로필</span>
