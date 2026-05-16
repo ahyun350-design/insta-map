@@ -19,7 +19,14 @@ import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
 import { fetchIsPostLikedByUser, toggleLikeRow } from "@/lib/likes";
-import { saveCourse, type SavedCourseItem } from "@/lib/courses";
+import {
+  deleteCourse,
+  fetchMyCourses,
+  formatCourseDate,
+  saveCourse,
+  type SavedCourse,
+  type SavedCourseItem,
+} from "@/lib/courses";
 import {
   getCurrentPositionForMapStage1,
   getCurrentPositionForMapStage2,
@@ -692,6 +699,11 @@ function HomePageContent() {
   const [courseSaveTitle, setCourseSaveTitle] = useState("");
   const [courseSaving, setCourseSaving] = useState(false);
   const [savedCourseId, setSavedCourseId] = useState<string | null>(null);
+  const [myCourses, setMyCourses] = useState<SavedCourse[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(false);
+  const [courseActionTarget, setCourseActionTarget] = useState<SavedCourse | null>(null);
+  const [showCourseDeleteConfirm, setShowCourseDeleteConfirm] = useState(false);
+  const [courseDeleting, setCourseDeleting] = useState(false);
   const courseSaveInputRef = useRef<HTMLInputElement>(null);
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const pollInFlightRef = useRef<Set<string>>(new Set());
@@ -1039,6 +1051,7 @@ function HomePageContent() {
       closeCourseSaveModal();
       showToast("코스를 저장했어요", "success");
       if (data?.id) setSavedCourseId(data.id);
+      void refreshMyCourses();
     } finally {
       setCourseSaving(false);
     }
@@ -1874,6 +1887,48 @@ function HomePageContent() {
       /* keep existing value */
     }
   }, [user?.id, patchUser]);
+
+  const refreshMyCourses = useCallback(async () => {
+    if (!user?.id) return;
+    setCoursesLoading(true);
+    try {
+      const { data, error } = await fetchMyCourses(user.id);
+      if (!error) setMyCourses(data);
+    } catch {
+      /* keep existing list */
+    } finally {
+      setCoursesLoading(false);
+    }
+  }, [user?.id]);
+
+  const openSavedCourse = (_course: SavedCourse) => {
+    /* 다음 단계 3-B에서 구현 */
+  };
+
+  const closeCourseActionSheet = () => {
+    setCourseActionTarget(null);
+    setShowCourseDeleteConfirm(false);
+  };
+
+  const handleConfirmDeleteCourse = async () => {
+    if (!courseActionTarget) return;
+    const targetId = courseActionTarget.id;
+    setCourseDeleting(true);
+    try {
+      const { error } = await deleteCourse(targetId);
+      setShowCourseDeleteConfirm(false);
+      setCourseActionTarget(null);
+      if (error) {
+        showToast(error, "error");
+        return;
+      }
+      showToast("코스를 삭제했어요", "success");
+      setMyCourses((prev) => prev.filter((c) => c.id !== targetId));
+      void refreshMyCourses();
+    } finally {
+      setCourseDeleting(false);
+    }
+  };
 
   const deletePost = async (id: string) => {
     const deleted = feedPosts.find((p) => p.id === id);
@@ -4394,6 +4449,7 @@ function HomePageContent() {
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id) return;
     void refreshMyTotalLikes();
+    void refreshMyCourses();
     let cancelled = false;
     void (async () => {
       const uid = user.id;
@@ -4408,17 +4464,18 @@ function HomePageContent() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, user?.id, refreshMyTotalLikes]);
+  }, [activeTab, user?.id, refreshMyTotalLikes, refreshMyCourses]);
 
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       if (activeTab !== "mypage" || !user?.id) return;
       void refreshMyTotalLikes();
+      void refreshMyCourses();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [activeTab, user?.id, refreshMyTotalLikes]);
+  }, [activeTab, user?.id, refreshMyTotalLikes, refreshMyCourses]);
 
   const renderPlaceCard = () => {
     console.log("[renderCard]", selectedPlace?.place_name, "savedId:", selectedPlace?._savedPlaceId);
@@ -6202,6 +6259,119 @@ function HomePageContent() {
                 </div>
               </div>
               <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}>
+                {myCourses.length > 0 && (
+                  <section style={{ padding: "0 16px", marginBottom: 16 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 10,
+                      }}
+                    >
+                      <span style={{ fontSize: 15, fontWeight: 600, color: "#000" }}>내 코스</span>
+                      <span style={{ fontSize: 12, color: "#999" }}>전체 {myCourses.length}</span>
+                    </div>
+                    <div
+                      className="myCoursesScroll"
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        marginLeft: -16,
+                        marginRight: -16,
+                        paddingLeft: 16,
+                        paddingRight: 16,
+                      }}
+                    >
+                      {myCourses.map((course) => (
+                        <div
+                          key={course.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openSavedCourse(course)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") openSavedCourse(course);
+                          }}
+                          style={{
+                            position: "relative",
+                            width: 220,
+                            height: 80,
+                            flexShrink: 0,
+                            borderRadius: 14,
+                            background: "#f7f7f7",
+                            padding: 14,
+                            boxSizing: "border-box",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            border: "none",
+                            fontFamily: "inherit",
+                          }}
+                          onMouseDown={(e) => {
+                            (e.currentTarget as HTMLDivElement).style.opacity = "0.85";
+                          }}
+                          onMouseUp={(e) => {
+                            (e.currentTarget as HTMLDivElement).style.opacity = "1";
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLDivElement).style.opacity = "1";
+                          }}
+                        >
+                          <p
+                            style={{
+                              margin: 0,
+                              fontSize: 14,
+                              fontWeight: 600,
+                              color: "#1a1a2e",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              paddingRight: 24,
+                            }}
+                          >
+                            {course.title}
+                          </p>
+                          <p style={{ margin: "6px 0 0", fontSize: 12, color: "#777" }}>
+                            장소 {course.place_count}곳 · {formatCourseDate(course.created_at)}
+                          </p>
+                          <button
+                            type="button"
+                            aria-label="코스 옵션"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCourseActionTarget(course);
+                            }}
+                            style={{
+                              position: "absolute",
+                              top: 8,
+                              right: 8,
+                              width: 28,
+                              height: 28,
+                              border: "none",
+                              borderRadius: 6,
+                              background: "transparent",
+                              color: "#666",
+                              fontSize: 16,
+                              lineHeight: 1,
+                              cursor: "pointer",
+                              padding: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = "#ececec";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = "transparent";
+                            }}
+                          >
+                            ⋯
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
                 <PostGrid
                   empty={myMypagePosts.length === 0}
                   emptyMessage="아직 작성한 게시물이 없어요"
@@ -6339,6 +6509,153 @@ function HomePageContent() {
               router.push(`/profile/${encodeURIComponent(username)}`);
             }}
           />
+        )}
+        {courseActionTarget && !showCourseDeleteConfirm && (
+          <div
+            onClick={closeCourseActionSheet}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 99999,
+              background: "rgba(0,0,0,0.4)",
+              display: "flex",
+              alignItems: "flex-end",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "#fff",
+                width: "100%",
+                borderRadius: "20px 20px 0 0",
+                padding: "24px 20px 40px",
+                boxSizing: "border-box",
+              }}
+            >
+              <p style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600, color: "#1a1a2e" }}>
+                {courseActionTarget.title}
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowCourseDeleteConfirm(true)}
+                style={{
+                  width: "100%",
+                  padding: "14px",
+                  borderRadius: "10px",
+                  border: "none",
+                  background: "#fff",
+                  color: "#e53935",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  marginBottom: 8,
+                }}
+              >
+                삭제
+              </button>
+              <button
+                type="button"
+                onClick={closeCourseActionSheet}
+                style={{
+                  width: "100%",
+                  padding: "14px",
+                  borderRadius: "10px",
+                  border: "none",
+                  background: "#f5f5f5",
+                  color: "#666",
+                  fontSize: 14,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+        {showCourseDeleteConfirm && courseActionTarget && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 100001,
+              background: "rgba(0,0,0,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 24,
+              boxSizing: "border-box",
+            }}
+            onClick={() => {
+              if (!courseDeleting) {
+                setShowCourseDeleteConfirm(false);
+              }
+            }}
+          >
+            <div
+              role="dialog"
+              style={{
+                width: "100%",
+                maxWidth: 320,
+                background: "#fff",
+                borderRadius: 16,
+                padding: "24px 20px",
+                boxSizing: "border-box",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 600, color: "#1a1a2e" }}>
+                정말 삭제할까요?
+              </p>
+              <p style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 500, color: "#333" }}>
+                {courseActionTarget.title}
+              </p>
+              <p style={{ margin: "0 0 20px", fontSize: 12, color: "#888" }}>
+                이 작업은 되돌릴 수 없어요
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  disabled={courseDeleting}
+                  onClick={() => setShowCourseDeleteConfirm(false)}
+                  style={{
+                    flex: 1,
+                    padding: 12,
+                    borderRadius: 10,
+                    border: "1px solid #ddd",
+                    background: "#fff",
+                    color: "#666",
+                    fontSize: 13,
+                    cursor: courseDeleting ? "wait" : "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  disabled={courseDeleting}
+                  onClick={() => { void handleConfirmDeleteCourse(); }}
+                  style={{
+                    flex: 1,
+                    padding: 12,
+                    borderRadius: 10,
+                    border: "none",
+                    background: "#e53935",
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: courseDeleting ? "wait" : "pointer",
+                    fontFamily: "inherit",
+                    opacity: courseDeleting ? 0.7 : 1,
+                  }}
+                >
+                  {courseDeleting ? "삭제 중..." : "삭제"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
         {showMypageSettingsSheet && (
           <div

@@ -19,11 +19,52 @@ export type SavedCourse = {
   updated_at: string;
 };
 
-function mapInsertError(error: { code?: string; message?: string }): string {
+function mapDbError(error: { code?: string; message?: string }, fallback: string): string {
   if (error.code === "23505" || error.code === "42501") {
-    return "코스를 저장하지 못했어요. 다시 시도해주세요";
+    return `${fallback} 다시 시도해주세요`;
   }
-  return error.message || "코스를 저장하지 못했어요. 다시 시도해주세요";
+  return error.message || fallback;
+}
+
+function mapInsertError(error: { code?: string; message?: string }): string {
+  return mapDbError(error, "코스를 저장하지 못했어요.");
+}
+
+/** created_at → "5월 16일" (올해만) / "2025년 12월 31일" */
+export function formatCourseDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  if (d.getFullYear() === now.getFullYear()) {
+    return new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric" }).format(d);
+  }
+  return new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long", day: "numeric" }).format(d);
+}
+
+export async function fetchMyCourses(
+  userId: string,
+): Promise<{ data: SavedCourse[]; error: string | null }> {
+  const { data, error } = await supabase
+    .from("courses")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return { data: [], error: mapDbError(error, "코스 목록을 불러오지 못했어요.") };
+  }
+
+  return { data: (data ?? []) as SavedCourse[], error: null };
+}
+
+export async function deleteCourse(courseId: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("courses").delete().eq("id", courseId);
+
+  if (error) {
+    return { error: mapDbError(error, "코스를 삭제하지 못했어요.") };
+  }
+
+  return { error: null };
 }
 
 export async function saveCourse(

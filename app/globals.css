@@ -329,6 +329,16 @@ body {
   line-height: 1.45;
 }
 
+.myCoursesScroll {
+  overflow-x: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.myCoursesScroll::-webkit-scrollbar {
+  display: none;
+}
+
 .profileEditSaveBtn {
   width: 100%;
   border: none;
