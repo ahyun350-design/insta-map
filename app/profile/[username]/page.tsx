@@ -10,6 +10,7 @@ type ProfileUser = {
   id: string;
   username: string;
   avatar_url?: string | null;
+  bio?: string | null;
 };
 
 type ProfilePost = {
@@ -106,7 +107,7 @@ export default function ProfilePage() {
 
       const { data: profileData } = await supabase
         .from("users")
-        .select("id, username, avatar_url")
+        .select("id, username, avatar_url, bio")
         .eq("username", routeUsername)
         .maybeSingle();
 
@@ -315,6 +316,24 @@ export default function ProfilePage() {
                 />
                 <p style={{ margin: 0, textAlign: "center", fontFamily: "'Playfair Display', serif", fontSize: "24px", color: "#1a1a2e" }}>{profile.username}</p>
                 <p style={{ margin: "4px 0 0", textAlign: "center", fontSize: "12px", color: "#8f93a6" }}>@{profile.username}_travelnote</p>
+                {profile.bio?.trim() ? (
+                  <p
+                    style={{
+                      margin: "10px 0 0",
+                      textAlign: "center",
+                      fontSize: 14,
+                      color: "#4a4a4a",
+                      lineHeight: 1.45,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {profile.bio.trim()}
+                  </p>
+                ) : isOwnProfile ? (
+                  <p style={{ margin: "10px 0 0", textAlign: "center", fontSize: 13, color: "#8f93a6", lineHeight: 1.45 }}>
+                    자기소개를 입력해보세요
+                  </p>
+                ) : null}
 
                 <div style={{ marginTop: "18px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", borderTop: "0.5px solid #f0f0f0", borderBottom: "0.5px solid #f0f0f0", padding: "14px 0" }}>
                   <div style={{ textAlign: "center" }}>

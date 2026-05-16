@@ -83,6 +83,7 @@ function sortChatRoomsByRecency(rooms: ChatRoom[]): ChatRoom[] {
 type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; status?: "pending" | "sent" | "failed"; };
 
 const CHAT_MESSAGES_PAGE_SIZE = 50;
+const PROFILE_BIO_MAX_LENGTH = 150;
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string, abort?: AbortController): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -474,6 +475,7 @@ function HomePageContent() {
   const [shareLoading, setShareLoading] = useState(false);
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [profileEditName, setProfileEditName] = useState("");
+  const [profileEditBio, setProfileEditBio] = useState("");
   const [profileEditSaving, setProfileEditSaving] = useState(false);
   const [profileEditAvatarPreview, setProfileEditAvatarPreview] = useState<string | null>(null);
   const [profileEditPendingFile, setProfileEditPendingFile] = useState<File | null>(null);
@@ -1432,6 +1434,7 @@ function HomePageContent() {
     console.log("[PindMap:mypage] profile edit button clicked", { uid: user?.id, username: user?.username });
     revokeProfileEditAvatarBlob();
     setProfileEditName(user?.username ?? "");
+    setProfileEditBio(user?.bio ?? "");
     setProfileEditAvatarPreview(user?.avatar_url ?? null);
     setProfileEditPendingFile(null);
     setShowProfileEditModal(true);
@@ -1513,6 +1516,7 @@ function HomePageContent() {
 
   const saveProfileEdit = async () => {
     const nextName = profileEditName.trim();
+    const nextBio = profileEditBio.trim();
     if (!user?.id) return;
     if (!nextName) {
       showToast("이름을 입력해 주세요", "info");
@@ -1521,11 +1525,13 @@ function HomePageContent() {
     const oldUsername = user.username;
     const nameChanged = oldUsername !== nextName;
     const avatarChanged = profileEditPendingFile !== null;
-    if (!nameChanged && !avatarChanged) {
-      showToast("변경할 내용이 없어요", "info");
+    const currentBio = (user.bio ?? "").trim();
+    const bioChanged = currentBio !== nextBio;
+    if (!nameChanged && !avatarChanged && !bioChanged) {
+      closeProfileEditModal();
       return;
     }
-    console.log("[PindMap:mypage] saving profile", { uid: user.id, nextName, avatarChanged });
+    console.log("[PindMap:mypage] saving profile", { uid: user.id, nextName, avatarChanged, bioChanged });
     setProfileEditSaving(true);
     try {
       let nextAvatarUrl = user.avatar_url ?? null;
@@ -1538,6 +1544,16 @@ function HomePageContent() {
           .eq("id", user.id);
         if (avatarError) {
           throw avatarError;
+        }
+      }
+
+      if (bioChanged) {
+        const { error: bioError } = await supabase
+          .from("users")
+          .update({ bio: nextBio.length > 0 ? nextBio : null })
+          .eq("id", user.id);
+        if (bioError) {
+          throw bioError;
         }
       }
 
@@ -5479,6 +5495,19 @@ function HomePageContent() {
                 <div style={{ marginTop: 14, paddingBottom: 12, borderBottom: "0.5px solid #efefef" }}>
                   <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#1a1a2e" }}>{user?.username || ""}</p>
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "#8f93a6" }}>@{user?.username || ""}_travelnote</p>
+                  {user?.bio && (
+                    <p
+                      style={{
+                        margin: "8px 0 0",
+                        fontSize: 14,
+                        color: "#4a4a4a",
+                        lineHeight: 1.45,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {user.bio}
+                    </p>
+                  )}
                 </div>
               </div>
               <div
@@ -5802,6 +5831,40 @@ function HomePageContent() {
               <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>닉네임</span>
                 <input className="mapInput" value={profileEditName} onChange={(e) => setProfileEditName(e.target.value)} placeholder="닉네임 입력" />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>소개</span>
+                <div style={{ position: "relative" }}>
+                  <textarea
+                    className="mapInput"
+                    value={profileEditBio}
+                    onChange={(e) => setProfileEditBio(e.target.value.slice(0, PROFILE_BIO_MAX_LENGTH))}
+                    placeholder="자기소개를 입력해주세요"
+                    rows={3}
+                    maxLength={PROFILE_BIO_MAX_LENGTH}
+                    disabled={profileEditSaving}
+                    style={{
+                      width: "100%",
+                      resize: "vertical",
+                      minHeight: "72px",
+                      maxHeight: "120px",
+                      lineHeight: 1.45,
+                      boxSizing: "border-box",
+                      paddingBottom: "22px",
+                    }}
+                  />
+                  <span
+                    style={{
+                      position: "absolute",
+                      right: 10,
+                      bottom: 8,
+                      fontSize: 10,
+                      color: profileEditBio.length >= PROFILE_BIO_MAX_LENGTH ? "#e07070" : "#8b90a3",
+                    }}
+                  >
+                    {profileEditBio.length}/{PROFILE_BIO_MAX_LENGTH}
+                  </span>
+                </div>
               </label>
               <button type="button" onClick={saveProfileEdit} disabled={profileEditSaving} className="primaryButton" style={{ width: "100%", opacity: profileEditSaving ? 0.7 : 1 }}>
                 {profileEditSaving ? "저장 중..." : "저장"}
