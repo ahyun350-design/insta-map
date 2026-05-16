@@ -616,6 +616,33 @@ function HomePageContent() {
     lastExpandedSearchPlacesRef.current = [];
   }, []);
 
+  /** 확장 지도만: 저장 직후·URL 추출 완료 등에서 마지막 핀을 잃지 않도록 카메라 이동 (컴팩트 지도는 미사용) */
+  const focusExpandedMapOnLatLng = (lat: number, lng: number, level: number = 3) => {
+    try {
+      if (!expandedMapRef.current || !window.kakao?.maps) return;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(lat, lng));
+      expandedMapRef.current.setLevel(level);
+    } catch {
+      /* noop */
+    }
+  };
+
+  const focusExpandedMapOnAddress = (address: string, level: number = 3) => {
+    const trimmedAddr = String(address ?? "").trim();
+    if (!trimmedAddr || !expandedMapRef.current || !geocoderRef.current || !window.kakao?.maps) return;
+    try {
+      geocoderRef.current.addressSearch(trimmedAddr, (result: any[], st: string) => {
+        if (st !== window.kakao.maps.services.Status.OK || !result[0]) return;
+        const y = parseFloat(result[0].y);
+        const x = parseFloat(result[0].x);
+        focusExpandedMapOnLatLng(y, x, level);
+      });
+    } catch {
+      /* noop */
+    }
+  };
+
   const resetHiddenPlaces = () => {
     console.log("[PindMap:pin] reset hidden places");
     setHiddenIds(new Set());
@@ -1122,6 +1149,10 @@ function HomePageContent() {
           }));
           const mergedIds = new Set(merged.map((m) => m.id));
           setSavedPlaces((prev) => [...merged, ...prev.filter((p) => !mergedIds.has(p.id))]);
+          const lastAdded = merged[merged.length - 1];
+          if (lastAdded?.address) {
+            focusExpandedMapOnAddress(lastAdded.address, 3);
+          }
           showToast(`✨ ${uniquePlaces.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
           setStatus("");
           console.log("[PindMap:url] extraction message hidden (success)");
@@ -2893,14 +2924,19 @@ function HomePageContent() {
         console.log("[PindMap:expandedMap] addressSearch fallback to keyword:", trimmed);
         const bias = getExpandedSearchBiasLatLng();
         const SortBy = window.kakao.maps.services.SortBy;
-        const keywordOpts: Record<string, unknown> = {
-          location: bias,
-          radius: 20000,
-        };
+        const keywordOpts: Record<string, unknown> = { location: bias };
         if (SortBy?.DISTANCE != null) {
           keywordOpts.sort = SortBy.DISTANCE;
         }
-        ps.keywordSearch(trimmed, doSearch, keywordOpts);
+        const handleKeyword = (data: any[], st: string) => {
+          const ok = st === window.kakao.maps.services.Status.OK && Array.isArray(data) && data.length > 0;
+          if (ok) {
+            doSearch(data, st);
+            return;
+          }
+          ps.keywordSearch(trimmed, doSearch);
+        };
+        ps.keywordSearch(trimmed, handleKeyword, keywordOpts);
       }
     });
   };
@@ -3548,6 +3584,13 @@ function HomePageContent() {
                   } else {
                     const category = inferCategoryFromKakaoCategoryName(selectedPlace.category_name);
                     await addPlace({ id: Math.random().toString(36).substring(2) + Date.now().toString(36), name: selectedPlace.place_name, address: selectedPlace.road_address_name || selectedPlace.address_name || "", category });
+                    const py = parseFloat(String(selectedPlace.y ?? ""));
+                    const px = parseFloat(String(selectedPlace.x ?? ""));
+                    if (Number.isFinite(py) && Number.isFinite(px)) {
+                      focusExpandedMapOnLatLng(py, px, 3);
+                    } else {
+                      focusExpandedMapOnAddress(selectedPlace.road_address_name || selectedPlace.address_name || "", 3);
+                    }
                     clearSearchMarkers();
                   }
                 }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}>
