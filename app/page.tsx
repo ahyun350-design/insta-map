@@ -5967,7 +5967,24 @@ function HomePageContent() {
                     ))}
                   </div>
                 </div>
-                <div style={{ marginTop: 14, paddingBottom: 12, borderBottom: "0.5px solid #efefef" }}>
+                {(user?.total_likes_received ?? 0) > 0 && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      marginBottom: 8,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 13,
+                      color: "#555",
+                      fontWeight: 400,
+                    }}
+                  >
+                    <span>❤️</span>
+                    <span>총 {user!.total_likes_received.toLocaleString()}개의 좋아요를 받았어요</span>
+                  </div>
+                )}
+                <div style={{ paddingBottom: 12, borderBottom: "0.5px solid #efefef" }}>
                   <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#1a1a2e" }}>{user?.username || ""}</p>
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "#8f93a6" }}>@{user?.username || ""}_travelnote</p>
                   {user?.bio && (

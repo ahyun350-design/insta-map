@@ -14,6 +14,7 @@ type ProfileUser = {
   username: string;
   avatar_url?: string | null;
   bio?: string | null;
+  total_likes_received: number;
 };
 
 type ProfilePost = {
@@ -113,7 +114,7 @@ export default function ProfilePage() {
 
       const { data: profileData } = await supabase
         .from("users")
-        .select("id, username, avatar_url, bio")
+        .select("id, username, avatar_url, bio, total_likes_received")
         .eq("username", routeUsername)
         .maybeSingle();
 
@@ -129,7 +130,13 @@ export default function ProfilePage() {
         return;
       }
 
-      const target = profileData as ProfileUser;
+      const target: ProfileUser = {
+        id: profileData.id,
+        username: profileData.username,
+        avatar_url: profileData.avatar_url,
+        bio: profileData.bio,
+        total_likes_received: Math.max(0, Number(profileData.total_likes_received) || 0),
+      };
       setProfile(target);
 
       const postsPromise = supabase
@@ -380,6 +387,25 @@ export default function ProfilePage() {
                     <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#9aa0b2" }}>팔로잉</p>
                   </button>
                 </div>
+
+                {(profile.total_likes_received ?? 0) > 0 && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      marginBottom: 8,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      fontSize: 13,
+                      color: "#555",
+                      fontWeight: 400,
+                    }}
+                  >
+                    <span>❤️</span>
+                    <span>총 {profile.total_likes_received.toLocaleString()}개의 좋아요를 받았어요</span>
+                  </div>
+                )}
 
                 <div style={{ marginTop: "14px" }}>
                   {isOwnProfile ? (

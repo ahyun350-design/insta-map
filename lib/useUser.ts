@@ -30,6 +30,7 @@ export type AppUser = {
   email?: string;
   avatar_url?: string;
   bio?: string;
+  total_likes_received: number;
 };
 
 function normalizeAvatarUrl(value: unknown): string | undefined {
@@ -42,6 +43,11 @@ function normalizeBio(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeTotalLikesReceived(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
 function usernameFromSessionAndRow(
@@ -195,7 +201,7 @@ export function useUser() {
         // users 테이블에서 username 가져오기
         const { data } = await supabase
           .from("users")
-          .select("username, avatar_url, bio")
+          .select("username, avatar_url, bio, total_likes_received")
           .eq("id", session.user.id)
           .single();
 
@@ -205,6 +211,7 @@ export function useUser() {
           email: session.user.email,
           avatar_url: normalizeAvatarUrl(data?.avatar_url),
           bio: normalizeBio(data?.bio),
+          total_likes_received: normalizeTotalLikesReceived(data?.total_likes_received),
         });
         console.log("[PindMap:home][auth] loadUser done");
       } catch (err) {
@@ -267,7 +274,7 @@ export function useUser() {
 
           const { data } = await supabase
             .from("users")
-            .select("username, avatar_url, bio")
+            .select("username, avatar_url, bio, total_likes_received")
             .eq("id", session.user.id)
             .single();
 
@@ -277,6 +284,7 @@ export function useUser() {
             email: session.user.email,
             avatar_url: normalizeAvatarUrl(data?.avatar_url),
             bio: normalizeBio(data?.bio),
+            total_likes_received: normalizeTotalLikesReceived(data?.total_likes_received),
           });
           console.log("[PindMap:home][auth] onAuthStateChange done");
         } catch (err) {
@@ -292,6 +300,7 @@ export function useUser() {
               email: su.email,
               avatar_url: prev?.id === su.id ? prev.avatar_url : undefined,
               bio: prev?.id === su.id ? prev.bio : undefined,
+              total_likes_received: prev?.id === su.id ? (prev.total_likes_received ?? 0) : 0,
             });
           }
         } finally {
