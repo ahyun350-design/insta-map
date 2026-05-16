@@ -429,6 +429,9 @@ function HomePageContent() {
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [profileEditName, setProfileEditName] = useState("");
   const [profileEditSaving, setProfileEditSaving] = useState(false);
+  const [showMypageSettingsSheet, setShowMypageSettingsSheet] = useState(false);
+  const [mypageFollowerCount, setMypageFollowerCount] = useState(0);
+  const [mypageFollowingCount, setMypageFollowingCount] = useState(0);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [showDeleteAccountFinalModal, setShowDeleteAccountFinalModal] = useState(false);
   const [deleteAccountPhraseInput, setDeleteAccountPhraseInput] = useState("");
@@ -3675,6 +3678,36 @@ function HomePageContent() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [feedPosts]);
 
+  const myMypagePosts = useMemo(() => {
+    if (!user?.id) return [];
+    const uname = user.username;
+    return feedPosts
+      .filter(
+        (p) =>
+          !p.archived &&
+          (p.userId === user.id || (uname && p.user === uname)),
+      )
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [feedPosts, user?.id, user?.username]);
+
+  useEffect(() => {
+    if (activeTab !== "mypage" || !user?.id) return;
+    let cancelled = false;
+    void (async () => {
+      const uid = user.id;
+      const [followersRes, followingsRes] = await Promise.all([
+        supabase.from("follows").select("*", { count: "exact", head: true }).eq("following_id", uid),
+        supabase.from("follows").select("*", { count: "exact", head: true }).eq("follower_id", uid),
+      ]);
+      if (cancelled) return;
+      setMypageFollowerCount(followersRes.count ?? 0);
+      setMypageFollowingCount(followingsRes.count ?? 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, user?.id]);
+
   const renderPlaceCard = () => {
     console.log("[renderCard]", selectedPlace?.place_name, "savedId:", selectedPlace?._savedPlaceId);
     if (!selectedPlace) return null;
@@ -5165,30 +5198,167 @@ function HomePageContent() {
 )}
 
           {activeTab === "mypage" && (
-            <div className="screen">
-              <p className="screenTitle">마이페이지</p>
-              <article className="profileCard">
-                <div className="profileAvatar">{(user?.username || "").slice(0, 1).toUpperCase()}</div>
-                <div>
-                  <p className="profileName">{user?.username || ""}</p>
-                  <p className="profileHandle">@{user?.username || ""}_travelnote</p>
-                </div>
-              </article>
-              <div className="settingList">
-                <button type="button" className="settingItem" onClick={openProfileEdit}>프로필 편집</button>
-                <button type="button" className="settingItem">알림 설정</button>
-                <button type="button" className="settingItem">공개 범위 설정</button>
+            <div className="screen" style={{ padding: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <div style={{ flexShrink: 0, padding: "12px 16px 0", position: "relative" }}>
                 <button
                   type="button"
-                  className="settingItem"
-                  onClick={openDeleteAccountModal}
-                  style={{ color: "#d32f2f", fontWeight: 600 }}
+                  onClick={() => setShowMypageSettingsSheet(true)}
+                  aria-label="설정"
+                  style={{
+                    position: "absolute",
+                    top: 8,
+                    right: 12,
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    padding: 8,
+                    lineHeight: 1,
+                    fontSize: 22,
+                    color: "#1a1a2e",
+                  }}
                 >
-                  계정 삭제
+                  ⚙️
                 </button>
-                <button type="button" className="settingItem" onClick={() => void handleLogoutClick()}>
-                  로그아웃
-                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 28, paddingRight: 40 }}>
+                  <div
+                    style={{
+                      width: 90,
+                      height: 90,
+                      borderRadius: "50%",
+                      background: "#1a2a7a",
+                      color: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontFamily: "'Playfair Display', serif",
+                      fontSize: 36,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {(user?.username || "").slice(0, 1).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, display: "flex", justifyContent: "space-around", textAlign: "center" }}>
+                    {(
+                      [
+                        { label: "게시", value: myMypagePosts.length },
+                        { label: "팔로워", value: mypageFollowerCount },
+                        { label: "팔로잉", value: mypageFollowingCount },
+                      ] as const
+                    ).map((stat) => (
+                      <button
+                        key={stat.label}
+                        type="button"
+                        onClick={() => showToast("준비 중이에요", "info")}
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          cursor: "pointer",
+                          padding: "4px 8px",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>{stat.value}</p>
+                        <p style={{ margin: "2px 0 0", fontSize: 11, color: "#8f93a6" }}>{stat.label}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ marginTop: 14, paddingBottom: 12, borderBottom: "0.5px solid #efefef" }}>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#1a1a2e" }}>{user?.username || ""}</p>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#8f93a6" }}>@{user?.username || ""}_travelnote</p>
+                </div>
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, 1fr)",
+                  gap: 2,
+                  alignContent: "start",
+                  background: "#fafafa",
+                }}
+              >
+                {myMypagePosts.length === 0 && (
+                  <p
+                    style={{
+                      gridColumn: "1 / -1",
+                      margin: 0,
+                      padding: "48px 24px",
+                      textAlign: "center",
+                      fontSize: 13,
+                      color: "#aaa",
+                    }}
+                  >
+                    아직 작성한 게시물이 없어요
+                  </p>
+                )}
+                {myMypagePosts.map((post) => {
+                  const thumb = post.images[0];
+                  const titleLine = (post.title || post.placeName || "").trim();
+                  return (
+                    <button
+                      key={post.id}
+                      type="button"
+                      onClick={() => showToast("준비 중이에요", "info")}
+                      style={{
+                        position: "relative",
+                        aspectRatio: "1",
+                        padding: 0,
+                        border: "none",
+                        cursor: "pointer",
+                        overflow: "hidden",
+                        background: thumb ? "#eee" : "#e8eaf0",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {thumb ? (
+                        <img
+                          src={thumb}
+                          alt=""
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                        />
+                      ) : (
+                        <span
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: "100%",
+                            height: "100%",
+                            padding: 8,
+                            fontSize: 11,
+                            color: "#666",
+                            textAlign: "center",
+                            lineHeight: 1.35,
+                            overflow: "hidden",
+                          }}
+                        >
+                          {titleLine || "—"}
+                        </span>
+                      )}
+                      {post.likes.length > 0 && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            left: 6,
+                            bottom: 6,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 3,
+                            color: "#fff",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            textShadow: "0 1px 3px rgba(0,0,0,0.6)",
+                          }}
+                        >
+                          ♥ {post.likes.length}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -5294,6 +5464,76 @@ function HomePageContent() {
         )}
         {sharePostModalEl}
         {notificationModalEl}
+        {showMypageSettingsSheet && (
+          <div
+            onClick={() => setShowMypageSettingsSheet(false)}
+            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "8px 0 40px", boxSizing: "border-box" }}
+            >
+              <div style={{ padding: "12px 20px 8px", borderBottom: "0.5px solid #efefef" }}>
+                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>설정</span>
+              </div>
+              <button
+                type="button"
+                className="settingItem"
+                style={{ width: "100%", padding: "16px 20px" }}
+                onClick={() => {
+                  setShowMypageSettingsSheet(false);
+                  openProfileEdit();
+                }}
+              >
+                프로필 편집
+              </button>
+              <button
+                type="button"
+                className="settingItem"
+                style={{ width: "100%", padding: "16px 20px" }}
+                onClick={() => {
+                  setShowMypageSettingsSheet(false);
+                  showToast("준비 중이에요", "info");
+                }}
+              >
+                알림 설정
+              </button>
+              <button
+                type="button"
+                className="settingItem"
+                style={{ width: "100%", padding: "16px 20px" }}
+                onClick={() => {
+                  setShowMypageSettingsSheet(false);
+                  showToast("준비 중이에요", "info");
+                }}
+              >
+                공개 범위 설정
+              </button>
+              <button
+                type="button"
+                className="settingItem"
+                style={{ width: "100%", padding: "16px 20px", color: "#d32f2f", fontWeight: 600 }}
+                onClick={() => {
+                  setShowMypageSettingsSheet(false);
+                  openDeleteAccountModal();
+                }}
+              >
+                계정 삭제
+              </button>
+              <button
+                type="button"
+                className="settingItem"
+                style={{ width: "100%", padding: "16px 20px" }}
+                onClick={() => {
+                  setShowMypageSettingsSheet(false);
+                  void handleLogoutClick();
+                }}
+              >
+                로그아웃
+              </button>
+            </div>
+          </div>
+        )}
         {showProfileEditModal && (
           <div onClick={() => { if (!profileEditSaving) setShowProfileEditModal(false); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
             <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", boxSizing: "border-box" }}>
