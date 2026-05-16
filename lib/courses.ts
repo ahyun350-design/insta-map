@@ -156,3 +156,9 @@ export async function saveCourse(
 
   return { data: data as SavedCourse, error: null };
 }
+
+/** 채팅 공유용 스냅샷 텍스트 + [course:id] 마커 */
+export function buildCourseShareText(course: SavedCourse): string {
+  const count = course.place_count ?? course.items.length;
+  return `📍 코스: ${course.title} · ${count}곳\n\n[course:${course.id}]`;
+}

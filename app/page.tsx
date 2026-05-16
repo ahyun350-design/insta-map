@@ -21,6 +21,7 @@ import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
 import { fetchIsPostLikedByUser, toggleLikeRow } from "@/lib/likes";
 import {
+  buildCourseShareText,
   deleteCourse,
   fetchMyCourses,
   formatCourseDate,
@@ -607,6 +608,11 @@ function HomePageContent() {
   const [sharePost, setSharePost] = useState<FeedPost | null>(null);
   const [friendRooms, setFriendRooms] = useState<FriendRoom[]>([]);
   const [shareLoading, setShareLoading] = useState(false);
+  const [showCourseShareModal, setShowCourseShareModal] = useState(false);
+  const [sharingCourse, setSharingCourse] = useState<SavedCourse | null>(null);
+  const [courseShareFriendRooms, setCourseShareFriendRooms] = useState<FriendRoom[]>([]);
+  const [courseShareLoading, setCourseShareLoading] = useState(false);
+  const [courseShareSendingRoomId, setCourseShareSendingRoomId] = useState<string | null>(null);
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [profileEditName, setProfileEditName] = useState("");
   const [profileEditBio, setProfileEditBio] = useState("");
@@ -2901,6 +2907,115 @@ function HomePageContent() {
     }
   };
 
+  const closeCourseShareModal = () => {
+    if (courseShareLoading) return;
+    setShowCourseShareModal(false);
+    setSharingCourse(null);
+    setCourseShareFriendRooms([]);
+    setCourseShareSendingRoomId(null);
+  };
+
+  const openCourseShareModal = async (course: SavedCourse) => {
+    if (!user) return;
+    setSharingCourse(course);
+    setShowCourseShareModal(true);
+    const { data: roomsData } = await supabase
+      .from("chat_rooms")
+      .select("*")
+      .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`);
+    if (!roomsData) {
+      setCourseShareFriendRooms([]);
+      return;
+    }
+    const rooms: FriendRoom[] = await Promise.all(
+      roomsData.map(async (r: { id: string; user1_id: string; user2_id: string }) => {
+        const friendId = r.user1_id === user.id ? r.user2_id : r.user1_id;
+        const { data: friendData } = await supabase
+          .from("users")
+          .select("username, avatar_url")
+          .eq("id", friendId)
+          .maybeSingle();
+        if (friendData) {
+          userAvatarCacheRef.current.setFromRow({ id: friendId, username: friendData.username, avatar_url: friendData.avatar_url });
+        }
+        return {
+          id: r.id,
+          friendId,
+          friendName: friendData?.username ?? friendId,
+          friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
+        };
+      }),
+    );
+    setCourseShareFriendRooms(rooms);
+  };
+
+  const sendCourseToFriend = async (room: FriendRoom) => {
+    if (!user || !sharingCourse || courseShareLoading) return;
+    setCourseShareLoading(true);
+    setCourseShareSendingRoomId(room.id);
+    try {
+      const shareText = buildCourseShareText(sharingCourse);
+      const msgId = Date.now().toString();
+      await withAutoRetry((signal) =>
+        Promise.resolve(
+          supabase
+            .from("messages")
+            .insert({
+              id: msgId,
+              room_id: room.id,
+              sender_id: user.id,
+              text: shareText,
+              read: false,
+            })
+            .abortSignal(signal),
+        ).then((r) => {
+          if (r.error) throw r.error;
+          return r;
+        }),
+      );
+      const preview = shareText.replace(/\[course:[^\]]+\]/, "").trim();
+      const targetText = preview.length > 30 ? `${preview.slice(0, 30)}...` : preview;
+      void supabase
+        .from("notifications")
+        .insert({
+          id: Date.now().toString() + Math.random().toString(36).substring(2, 8),
+          user_id: room.friendId,
+          type: "message",
+          actor_id: user.id,
+          actor_username: MY_USERNAME,
+          target_id: room.id,
+          target_text: targetText,
+        })
+        .then(
+          () => {},
+          () => {},
+        );
+      setShowCourseShareModal(false);
+      setSharingCourse(null);
+      setCourseShareFriendRooms([]);
+      showToast(`${room.friendName}님에게 공유했어요`, "success");
+    } catch {
+      showToast("공유에 실패했어요. 다시 시도해주세요", "error");
+    } finally {
+      setCourseShareLoading(false);
+      setCourseShareSendingRoomId(null);
+    }
+  };
+
+  const openCourseShareFromSheet = () => {
+    if (!savedCourseId || !user?.id || !courseResult?.length) return;
+    const tempCourse: SavedCourse = {
+      id: savedCourseId,
+      user_id: user.id,
+      title: editingCourseTitle,
+      items: courseResult.map(coursePlaceToSavedItem),
+      place_count: courseResult.length,
+      created_at: "",
+      updated_at: "",
+    };
+    void openCourseShareModal(tempCourse);
+  };
+
   // 코스 만들기 실행
   const generateCourse = async () => {
     if (!geocoderRef.current) {
@@ -4904,6 +5019,72 @@ function HomePageContent() {
     return null;
   }
 
+  const courseShareModalEl = showCourseShareModal && sharingCourse && (
+    <div
+      onClick={() => {
+        if (!courseShareLoading) closeCourseShareModal();
+      }}
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", maxHeight: "70vh", overflowY: "auto", boxSizing: "border-box" }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+          <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>코스 공유하기</span>
+          <button
+            type="button"
+            onClick={closeCourseShareModal}
+            disabled={courseShareLoading}
+            style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: courseShareLoading ? "wait" : "pointer" }}
+          >
+            ×
+          </button>
+        </div>
+        <div style={{ padding: "12px", background: "#f7f7f7", borderRadius: "12px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 500 }}>
+            📍 {sharingCourse.title} · {sharingCourse.place_count ?? sharingCourse.items.length}곳
+          </p>
+        </div>
+        {courseShareFriendRooms.length === 0 && (
+          <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", padding: "20px 0" }}>
+            대화 중인 친구가 없어요. 메시지 탭에서 먼저 친구를 추가해주세요
+          </p>
+        )}
+        {courseShareFriendRooms.map((room) => {
+          const isSending = courseShareSendingRoomId === room.id;
+          return (
+            <button
+              key={room.id}
+              type="button"
+              onClick={() => void sendCourseToFriend(room)}
+              disabled={courseShareLoading}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                padding: "10px 12px",
+                border: "0.5px solid #eee",
+                borderRadius: "10px",
+                background: "#fff",
+                cursor: courseShareLoading ? "wait" : "pointer",
+                fontFamily: "inherit",
+                textAlign: "left",
+                opacity: courseShareLoading && !isSending ? 0.6 : 1,
+              }}
+            >
+              <ProfileAvatar avatarUrl={room.friendAvatarUrl} username={room.friendName} size={32} fontSize={13} />
+              <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{room.friendName}</span>
+              <span style={{ fontSize: "11px", color: "#1a2a7a", fontWeight: 500 }}>
+                {isSending ? "보내는 중..." : "보내기 →"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   const sharePostModalEl = sharePost && (
     <div onClick={() => { if (!shareLoading) { setSharePost(null); setFriendRooms([]); } }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", maxHeight: "70vh", overflowY: "auto", boxSizing: "border-box" }}>
@@ -5232,6 +5413,7 @@ function HomePageContent() {
             </div>
           </div>
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
+          {courseShareModalEl}
           {sharePostModalEl}
           {notificationModalEl}
         </section>
@@ -5553,6 +5735,24 @@ function HomePageContent() {
 
                     {savedCourseId ? (
                       <>
+                        <button
+                          type="button"
+                          onClick={openCourseShareFromSheet}
+                          style={{
+                            width: "100%",
+                            padding: "12px",
+                            borderRadius: "12px",
+                            border: "1px solid #1a2a7a",
+                            background: "#fff",
+                            color: "#1a2a7a",
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          📤 코스 공유
+                        </button>
                         <button
                           type="button"
                           onClick={openCourseEditScreen}
@@ -6907,6 +7107,7 @@ function HomePageContent() {
             {(selectedPlace._feedPosts ?? []).length === 0 && (<div style={{ padding: "14px 24px 20px", textAlign: "center" }}><p style={{ margin: 0, fontSize: "12px", color: "#ccc" }}>아직 큐레이션이 없어요</p></div>)}
           </div>
         )}
+        {courseShareModalEl}
         {sharePostModalEl}
         {notificationModalEl}
         {user?.id && showFollowList && (
