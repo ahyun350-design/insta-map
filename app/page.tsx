@@ -1384,17 +1384,61 @@ function HomePageContent() {
       showToast("이름을 입력해 주세요", "info");
       return;
     }
+    const oldUsername = user.username;
+    if (oldUsername === nextName) {
+      showToast("변경할 닉네임을 입력해 주세요", "info");
+      return;
+    }
     console.log("[PindMap:mypage] saving profile", { uid: user.id, nextName });
     setProfileEditSaving(true);
     try {
-      const { error: updateError } = await supabase
-        .from("users")
-        .update({ username: nextName })
-        .eq("id", user.id);
-      if (updateError) throw updateError;
+      const { error: updateError } = await supabase.rpc("rename_user_username", {
+        p_user_id: user.id,
+        p_old_username: oldUsername,
+        p_new_username: nextName,
+      });
+      if (updateError) {
+        const code = (updateError as { code?: string }).code;
+        const msg = String((updateError as { message?: string }).message || "");
+        if (code === "23505" || /duplicate|unique/i.test(msg)) {
+          showToast("이미 사용 중인 닉네임이에요", "error");
+          return;
+        }
+        if (code === "P0001" || msg.includes("does not match")) {
+          showToast("닉네임이 바뀌었어요. 새로고침 후 다시 시도해 주세요", "info");
+          return;
+        }
+        if (code === "42501" || msg.includes("not authorized")) {
+          showToast("권한이 없어요", "error");
+          return;
+        }
+        throw updateError;
+      }
+      await reloadUserFromSession();
+      const uid = user.id;
+      setFeedPosts((prev) =>
+        prev.map((p) => ({
+          ...p,
+          user: p.userId === uid ? nextName : p.user,
+          likes: p.likes.map((u) => (u === oldUsername ? nextName : u)),
+          comments: p.comments.map((c) => (c.user === oldUsername ? { ...c, user: nextName } : c)),
+        })),
+      );
+      setNotifications((prev) =>
+        prev.map((n) => (n.actor_id === uid ? { ...n, actor_username: nextName } : n)),
+      );
+      setSharePost((sp) => {
+        if (!sp || sp.userId !== uid) return sp;
+        return {
+          ...sp,
+          user: nextName,
+          likes: sp.likes.map((u) => (u === oldUsername ? nextName : u)),
+          comments: sp.comments.map((c) => (c.user === oldUsername ? { ...c, user: nextName } : c)),
+        };
+      });
+      setEditingPost((ep) => (ep && ep.userId === uid ? { ...ep, user: nextName } : ep));
       showToast("프로필이 저장되었어요", "success");
       setShowProfileEditModal(false);
-      window.location.reload();
     } catch (err) {
       console.log("[PindMap:mypage] save profile failed", err);
       showToast("프로필 저장에 실패했어요", "error");
