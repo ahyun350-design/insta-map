@@ -754,6 +754,7 @@ function HomePageContent() {
   const courseSaveInputRef = useRef<HTMLInputElement>(null);
   const courseEditOriginalRef = useRef<{ title: string; items: SavedCourseItem[] } | null>(null);
   const preserveSavedCourseIdRef = useRef(false);
+  const returnToCourseSheetRef = useRef(false);
   const drawCourseRouteRetryRef = useRef(0);
   const courseTitleOriginalRef = useRef("");
   const courseTitleInlineInputRef = useRef<HTMLInputElement>(null);
@@ -1971,6 +1972,7 @@ function HomePageContent() {
     setEditingCourseTitle("");
     setIsReadOnlyCourse(false);
     preserveSavedCourseIdRef.current = false;
+    returnToCourseSheetRef.current = false;
   };
 
   const ensureCourseLoaded = useCallback(async (courseId: string): Promise<SavedCourse | null> => {
@@ -3204,6 +3206,7 @@ function HomePageContent() {
   // 코스를 전체화면 지도에 경로로 표시
   const showCourseOnMap = async () => {
     if (!courseResult || courseResult.length === 0) return;
+    returnToCourseSheetRef.current = true;
     setShowCourseModal(false);
     setShowCourseRoute(true);
     setMapExpanded(true);
@@ -4809,6 +4812,12 @@ function HomePageContent() {
     addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts, savedPlaces, "expanded");
     // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
   }, [feedPosts, mapExpanded, savedPlaces, expandedMapPinsTick]);
+
+  useEffect(() => {
+    if (activeTab !== "map") {
+      returnToCourseSheetRef.current = false;
+    }
+  }, [activeTab]);
 
   useEffect(() => { if (!openMenuId) return; const handler = () => setOpenMenuId(null); document.addEventListener("click", handler); return () => document.removeEventListener("click", handler); }, [openMenuId]);
 
@@ -6675,6 +6684,14 @@ function HomePageContent() {
                         type="button"
                         aria-label="전체 지도 닫기"
                         onClick={() => {
+                          if (returnToCourseSheetRef.current) {
+                            returnToCourseSheetRef.current = false;
+                            setMapExpanded(false);
+                            clearRoute();
+                            setShowCourseRoute(false);
+                            setShowCourseModal(true);
+                            return;
+                          }
                           setMapExpanded(false);
                           setSelectedPlace(null);
                         }}
