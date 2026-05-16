@@ -1413,7 +1413,7 @@ function HomePageContent() {
           return;
         }
         console.error("[PindMap:mypage] save profile rpc error", updateError);
-        showToast(`실패: ${(updateError as { code?: string }).code ?? "?"} - ${(updateError as { message?: string }).message ?? ""}`, "error");
+        showToast("프로필 저장에 실패했어요", "error");
         return;
       }
       await reloadUserFromSession();
@@ -1443,14 +1443,7 @@ function HomePageContent() {
       setShowProfileEditModal(false);
     } catch (err) {
       console.error("[PindMap:mypage] save profile failed", err);
-      const e = err && typeof err === "object" && ("code" in err || "message" in err)
-        ? (err as { code?: string; message?: string })
-        : null;
-      const code = e?.code ?? "?";
-      const msg =
-        e?.message ??
-        (err instanceof Error ? err.message : typeof err === "string" ? err : String(err));
-      showToast(`실패: ${code} - ${msg}`, "error");
+      showToast("프로필 저장에 실패했어요", "error");
     } finally {
       setProfileEditSaving(false);
     }
