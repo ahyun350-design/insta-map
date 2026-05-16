@@ -12,7 +12,11 @@ import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
-import { getCurrentPositionForMap, isGeolocationPermissionDenied } from "@/lib/getCurrentPositionForMap";
+import {
+  getCurrentPositionForMapStage1,
+  getCurrentPositionForMapStage2,
+  isGeolocationPermissionDenied,
+} from "@/lib/getCurrentPositionForMap";
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -535,6 +539,7 @@ function HomePageContent() {
   const locationRenderTokenRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
   /** 확장 지도 직접 검색 시 Location bias — addMyLocation 성공 시 저장, 없으면 지도 center */
   const myLocationLatLngRef = useRef<{ lat: number; lng: number } | null>(null);
+  const myLocationMarkerRef = useRef<{ main: any | null; expanded: any | null }>({ main: null, expanded: null });
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
@@ -2545,35 +2550,72 @@ function HomePageContent() {
     setPostSearchQuery(""); setPostSearchResults([]);
   };
 
+  const applyMyLocationOnMap = (
+    map: any,
+    scope: "main" | "expanded",
+    latitude: number,
+    longitude: number,
+    moveCenter: boolean,
+  ) => {
+    myLocationLatLngRef.current = { lat: latitude, lng: longitude };
+    const latlng = new window.kakao.maps.LatLng(latitude, longitude);
+    // 메인 지도만 GPS로 센터 이동. 확장 지도는 복제된 center 유지 + 검색/저장용 focusExpandedMap만 이동.
+    if (moveCenter && scope === "main") {
+      map.setCenter(latlng);
+      map.setLevel(9);
+    }
+    const existing = myLocationMarkerRef.current[scope];
+    if (existing?.setPosition) {
+      existing.setPosition(latlng);
+    } else {
+      myLocationMarkerRef.current[scope] = new window.kakao.maps.Marker({
+        map,
+        position: latlng,
+        image: new window.kakao.maps.MarkerImage(makeMyLocationImage(), new window.kakao.maps.Size(24, 24), { offset: new window.kakao.maps.Point(12, 12) }),
+      });
+    }
+  };
+
   const addMyLocation = (map: any, scope: "main" | "expanded" = "main") => {
     const token = ++locationRenderTokenRef.current[scope];
     void (async () => {
+      let stage1Ok = false;
       try {
-        const { latitude, longitude } = await getCurrentPositionForMap();
+        const { latitude, longitude } = await getCurrentPositionForMapStage1();
         const currentMap = scope === "main" ? mapRef.current : expandedMapRef.current;
         if (currentMap !== map || token !== locationRenderTokenRef.current[scope]) {
           console.log("[PindMap:location] map identity changed, retry on new map", { scope });
           return;
         }
-        myLocationLatLngRef.current = { lat: latitude, lng: longitude };
-        const latlng = new window.kakao.maps.LatLng(latitude, longitude);
-        // 메인 지도만 GPS로 센터 이동. 확장 지도는 복제된 center 유지 + 검색/저장용 focusExpandedMap만 이동(비동기 GPS가 저장 핀 카메라를 덮어쓰지 않게).
-        if (scope === "main") {
-          map.setCenter(latlng);
-          map.setLevel(9);
-        }
-        new window.kakao.maps.Marker({
-          map,
-          position: latlng,
-          image: new window.kakao.maps.MarkerImage(makeMyLocationImage(), new window.kakao.maps.Size(24, 24), { offset: new window.kakao.maps.Point(12, 12) }),
-        });
-        console.log("[PindMap:location] my location render with coords", latitude, longitude, { scope });
+        applyMyLocationOnMap(map, scope, latitude, longitude, true);
+        stage1Ok = true;
+        console.log("[PindMap:location] stage1 (fast) coords", latitude, longitude, { scope });
       } catch (err) {
-        const denied = isGeolocationPermissionDenied(err);
-        showToast(
-          denied ? "위치 권한이 필요해요. 설정에서 위치를 허용해 주세요." : "현재 위치를 가져오지 못했어요.",
-          "info",
-        );
+        console.log("[PindMap:location] stage1 failed", { scope, err });
+        if (isGeolocationPermissionDenied(err)) {
+          showToast("위치 권한이 필요해요. 설정에서 위치를 허용해 주세요.", "info");
+          return;
+        }
+      }
+
+      try {
+        const { latitude, longitude } = await getCurrentPositionForMapStage2();
+        const currentMap = scope === "main" ? mapRef.current : expandedMapRef.current;
+        if (currentMap !== map || token !== locationRenderTokenRef.current[scope]) {
+          console.log("[PindMap:location] map identity changed before stage2", { scope });
+          return;
+        }
+        applyMyLocationOnMap(map, scope, latitude, longitude, false);
+        console.log("[PindMap:location] stage2 (refined) coords", latitude, longitude, { scope });
+      } catch (err) {
+        console.log("[PindMap:location] stage2 failed", { scope, err });
+        if (!stage1Ok) {
+          const denied = isGeolocationPermissionDenied(err);
+          showToast(
+            denied ? "위치 권한이 필요해요. 설정에서 위치를 허용해 주세요." : "현재 위치를 가져오지 못했어요.",
+            "info",
+          );
+        }
       }
     })();
   };
@@ -3089,6 +3131,7 @@ function HomePageContent() {
     if (!mapRef.current) return;
     mapRef.current = null;
     mapInstanceIdRef.current += 1;
+    myLocationMarkerRef.current.main = null;
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
     setCompactMapReady(false);
@@ -3602,6 +3645,7 @@ function HomePageContent() {
         }
       });
       searchMarkersRef.current = [];
+      myLocationMarkerRef.current.expanded = null;
     };
   }, [mapExpanded, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace]);
 
