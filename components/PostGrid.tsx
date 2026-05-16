@@ -17,7 +17,7 @@ export function PostGrid({ children, empty, emptyMessage = "아직 게시물이 
         gridTemplateColumns: "repeat(3, 1fr)",
         gap: 2,
         alignContent: "start",
-        background: "#fafafa",
+        background: "#fff",
         ...style,
       }}
     >

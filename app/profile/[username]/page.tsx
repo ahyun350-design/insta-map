@@ -20,6 +20,7 @@ type ProfilePost = {
   id: string;
   title: string;
   place_name: string;
+  address: string;
   category: string;
   comment: string;
   images: string[];
@@ -132,7 +133,7 @@ export default function ProfilePage() {
 
       const postsPromise = supabase
         .from("feed_posts")
-        .select("id, title, place_name, category, comment, images, created_at, likes, comments(id)", { count: "exact" })
+        .select("id, title, place_name, address, category, comment, images, created_at, likes, comments(id)", { count: "exact" })
         .eq("user_name", target.username)
         .eq("archived", false)
         .order("created_at", { ascending: false });
@@ -166,6 +167,7 @@ export default function ProfilePage() {
         id: p.id,
         title: p.title,
         place_name: p.place_name,
+        address: p.address ?? "",
         category: p.category,
         comment: p.comment,
         images: p.images ?? [],
@@ -398,6 +400,8 @@ export default function ProfilePage() {
                     key={post.id}
                     imageUrl={post.images[0]}
                     titleLine={(post.title || post.place_name || "").trim()}
+                    placeName={post.place_name}
+                    address={post.address}
                     likeCount={post.likes.length}
                     onClick={() => {
                       router.push(

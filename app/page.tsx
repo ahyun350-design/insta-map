@@ -468,6 +468,18 @@ function shufflePick<T>(items: T[], count: number): T[] {
   return copy.slice(0, count);
 }
 
+function parseDetailReturnTo(
+  sp: { get: (key: string) => string | null } | null | undefined,
+): { type: "mypage" } | { type: "profile"; username: string } | null {
+  const from = sp?.get("from");
+  const username = sp?.get("username");
+  if (from === "profile" && username) {
+    return { type: "profile", username: decodeURIComponent(username) };
+  }
+  if (from === "mypage") return { type: "mypage" };
+  return null;
+}
+
 export default function HomePage() {
   return (
     <Suspense fallback={<main style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}><p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p></main>}>
@@ -578,7 +590,9 @@ function HomePageContent() {
   const [deleteAccountPhraseInput, setDeleteAccountPhraseInput] = useState("");
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<TabId>("map");
+  const [activeTab, setActiveTab] = useState<TabId>(() =>
+    searchParams?.get("from") === "mypage" ? "mypage" : "map",
+  );
   const [instagramUrl, setInstagramUrl] = useState("");
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
@@ -602,10 +616,12 @@ function HomePageContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
-  const [detailPostId, setDetailPostId] = useState<string | null>(null);
+  const [detailPostId, setDetailPostId] = useState<string | null>(
+    () => searchParams?.get("postId") ?? null,
+  );
   const [detailReturnTo, setDetailReturnTo] = useState<
     { type: "mypage" } | { type: "profile"; username: string } | null
-  >(null);
+  >(() => parseDetailReturnTo(searchParams));
   const [newComment, setNewComment] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editingPost, setEditingPost] = useState<FeedPost | null>(null);
@@ -3764,21 +3780,20 @@ function HomePageContent() {
     }
   }, [searchParams]);
 
+  useLayoutEffect(() => {
+    if (searchParams?.get("postId")) {
+      window.history.replaceState({}, "", "/");
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     const postId = searchParams?.get("postId");
     if (!postId) return;
-    const from = searchParams?.get("from");
-    const username = searchParams?.get("username");
-    setDetailPostId(postId);
-    if (from === "profile" && username) {
-      setDetailReturnTo({ type: "profile", username: decodeURIComponent(username) });
-    } else if (from === "mypage") {
-      setDetailReturnTo({ type: "mypage" });
+    setDetailPostId((prev) => (prev === postId ? prev : postId));
+    setDetailReturnTo(parseDetailReturnTo(searchParams));
+    if (searchParams.get("from") === "mypage") {
       setActiveTab("mypage");
-    } else {
-      setDetailReturnTo(null);
     }
-    window.history.replaceState({}, "", "/");
   }, [searchParams]);
 
   useEffect(() => {
@@ -5921,7 +5936,7 @@ function HomePageContent() {
                   )}
                 </div>
               </div>
-              <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+              <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}>
                 <PostGrid
                   empty={myMypagePosts.length === 0}
                   emptyMessage="아직 작성한 게시물이 없어요"
@@ -5931,6 +5946,8 @@ function HomePageContent() {
                       key={post.id}
                       imageUrl={post.images[0]}
                       titleLine={(post.title || post.placeName || "").trim()}
+                      placeName={post.placeName}
+                      address={post.address}
                       likeCount={post.likes.length}
                       onClick={() => {
                         setDetailReturnTo({ type: "mypage" });
