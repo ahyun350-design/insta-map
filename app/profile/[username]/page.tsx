@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useUser } from "@/lib/useUser";
+import { ProfileAvatar } from "@/components/ProfileAvatar";
 
 type ProfileUser = {
   id: string;
   username: string;
+  avatar_url?: string | null;
 };
 
 type ProfilePost = {
@@ -103,7 +105,7 @@ export default function ProfilePage() {
 
       const { data: profileData } = await supabase
         .from("users")
-        .select("id, username")
+        .select("id, username, avatar_url")
         .eq("username", routeUsername)
         .maybeSingle();
 
@@ -302,9 +304,13 @@ export default function ProfilePage() {
           {!notFound && profile && (
             <>
               <article style={{ border: "0.5px solid #efefef", borderRadius: "16px", padding: "22px 18px", background: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,0.04)" }}>
-                <div style={{ width: "72px", height: "72px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px", margin: "0 auto 12px" }}>
-                  {profile.username.slice(0, 1).toUpperCase()}
-                </div>
+                <ProfileAvatar
+                  avatarUrl={profile.avatar_url}
+                  username={profile.username}
+                  size={72}
+                  fontSize={28}
+                  style={{ margin: "0 auto 12px" }}
+                />
                 <p style={{ margin: 0, textAlign: "center", fontFamily: "'Playfair Display', serif", fontSize: "24px", color: "#1a1a2e" }}>{profile.username}</p>
                 <p style={{ margin: "4px 0 0", textAlign: "center", fontSize: "12px", color: "#8f93a6" }}>@{profile.username}_travelnote</p>
 

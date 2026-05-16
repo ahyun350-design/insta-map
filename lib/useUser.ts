@@ -28,7 +28,28 @@ export type AppUser = {
   id: string;
   username: string;
   email?: string;
+  avatar_url?: string;
 };
+
+function normalizeAvatarUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function usernameFromSessionAndRow(
+  row: { username?: string } | null,
+  sessionUser: { email?: string; user_metadata?: Record<string, unknown> },
+): string {
+  const meta = sessionUser.user_metadata;
+  return (
+    row?.username ||
+    (typeof meta?.username === "string" ? meta.username : undefined) ||
+    (typeof meta?.name === "string" ? meta.name : undefined) ||
+    sessionUser.email?.split("@")[0] ||
+    "user"
+  );
+}
 
 // 현재 로그인된 사용자 정보를 가져오는 훅
 export function useUser() {
@@ -167,21 +188,15 @@ export function useUser() {
         // users 테이블에서 username 가져오기
         const { data } = await supabase
           .from("users")
-          .select("username")
+          .select("username, avatar_url")
           .eq("id", session.user.id)
           .single();
 
-        const username =
-          data?.username ||
-          session.user.user_metadata?.username ||
-          session.user.user_metadata?.name ||
-          session.user.email?.split("@")[0] ||
-          "user";
-
         setUser({
           id: session.user.id,
-          username,
+          username: usernameFromSessionAndRow(data, session.user),
           email: session.user.email,
+          avatar_url: normalizeAvatarUrl(data?.avatar_url),
         });
         console.log("[PindMap:home][auth] loadUser done");
       } catch (err) {
@@ -244,21 +259,15 @@ export function useUser() {
 
           const { data } = await supabase
             .from("users")
-            .select("username")
+            .select("username, avatar_url")
             .eq("id", session.user.id)
             .single();
 
-          const username =
-            data?.username ||
-            session.user.user_metadata?.username ||
-            session.user.user_metadata?.name ||
-            session.user.email?.split("@")[0] ||
-            "user";
-
           setUser({
             id: session.user.id,
-            username,
+            username: usernameFromSessionAndRow(data, session.user),
             email: session.user.email,
+            avatar_url: normalizeAvatarUrl(data?.avatar_url),
           });
           console.log("[PindMap:home][auth] onAuthStateChange done");
         } catch (err) {
@@ -267,14 +276,12 @@ export function useUser() {
             setUser(null);
           } else {
             const su = session.user;
+            const prev = authUiRef.current.user;
             setUser({
               id: su.id,
-              username:
-                su.user_metadata?.username ||
-                su.user_metadata?.name ||
-                su.email?.split("@")[0] ||
-                "user",
+              username: usernameFromSessionAndRow(null, su),
               email: su.email,
+              avatar_url: prev?.id === su.id ? prev.avatar_url : undefined,
             });
           }
         } finally {

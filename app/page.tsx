@@ -12,6 +12,8 @@ import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
+import { uploadAvatar } from "@/lib/uploadAvatar";
+import { ProfileAvatar } from "@/components/ProfileAvatar";
 import {
   getCurrentPositionForMapStage1,
   getCurrentPositionForMapStage2,
@@ -429,6 +431,10 @@ function HomePageContent() {
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [profileEditName, setProfileEditName] = useState("");
   const [profileEditSaving, setProfileEditSaving] = useState(false);
+  const [profileEditAvatarPreview, setProfileEditAvatarPreview] = useState<string | null>(null);
+  const [profileEditPendingFile, setProfileEditPendingFile] = useState<File | null>(null);
+  const profileEditAvatarBlobRef = useRef<string | null>(null);
+  const profileAvatarFileInputRef = useRef<HTMLInputElement | null>(null);
   const [showMypageSettingsSheet, setShowMypageSettingsSheet] = useState(false);
   const [mypageFollowerCount, setMypageFollowerCount] = useState(0);
   const [mypageFollowingCount, setMypageFollowingCount] = useState(0);
@@ -1320,10 +1326,43 @@ function HomePageContent() {
     window.open(webUrl, "_blank");
   };
 
+  const revokeProfileEditAvatarBlob = () => {
+    if (profileEditAvatarBlobRef.current) {
+      URL.revokeObjectURL(profileEditAvatarBlobRef.current);
+      profileEditAvatarBlobRef.current = null;
+    }
+  };
+
+  const closeProfileEditModal = () => {
+    if (profileEditSaving) return;
+    revokeProfileEditAvatarBlob();
+    setProfileEditPendingFile(null);
+    setProfileEditAvatarPreview(null);
+    setShowProfileEditModal(false);
+  };
+
   const openProfileEdit = () => {
     console.log("[PindMap:mypage] profile edit button clicked", { uid: user?.id, username: user?.username });
+    revokeProfileEditAvatarBlob();
     setProfileEditName(user?.username ?? "");
+    setProfileEditAvatarPreview(user?.avatar_url ?? null);
+    setProfileEditPendingFile(null);
     setShowProfileEditModal(true);
+  };
+
+  const handleProfileAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("이미지 파일만 선택할 수 있어요", "info");
+      return;
+    }
+    revokeProfileEditAvatarBlob();
+    const blobUrl = URL.createObjectURL(file);
+    profileEditAvatarBlobRef.current = blobUrl;
+    setProfileEditAvatarPreview(blobUrl);
+    setProfileEditPendingFile(file);
   };
 
   const openDeleteAccountModal = () => {
@@ -1393,65 +1432,88 @@ function HomePageContent() {
       return;
     }
     const oldUsername = user.username;
-    if (oldUsername === nextName) {
-      showToast("변경할 닉네임을 입력해 주세요", "info");
+    const nameChanged = oldUsername !== nextName;
+    const avatarChanged = profileEditPendingFile !== null;
+    if (!nameChanged && !avatarChanged) {
+      showToast("변경할 내용이 없어요", "info");
       return;
     }
-    console.log("[PindMap:mypage] saving profile", { uid: user.id, nextName });
+    console.log("[PindMap:mypage] saving profile", { uid: user.id, nextName, avatarChanged });
     setProfileEditSaving(true);
     try {
-      const { error: updateError } = await supabase.rpc("rename_user_username", {
-        p_user_id: user.id,
-        p_old_username: oldUsername,
-        p_new_username: nextName,
-      });
-      if (updateError) {
-        const code = (updateError as { code?: string }).code;
-        const msg = String((updateError as { message?: string }).message || "");
-        if (code === "23505" || /duplicate|unique/i.test(msg)) {
-          showToast("이미 사용 중인 닉네임이에요", "error");
-          return;
+      let nextAvatarUrl = user.avatar_url ?? null;
+
+      if (avatarChanged && profileEditPendingFile) {
+        nextAvatarUrl = await uploadAvatar(user.id, profileEditPendingFile);
+        const { error: avatarError } = await supabase
+          .from("users")
+          .update({ avatar_url: nextAvatarUrl })
+          .eq("id", user.id);
+        if (avatarError) {
+          throw avatarError;
         }
-        if (code === "P0001" || msg.includes("does not match")) {
-          showToast("닉네임이 바뀌었어요. 새로고침 후 다시 시도해 주세요", "info");
-          return;
-        }
-        if (code === "42501" || msg.includes("not authorized")) {
-          showToast("권한이 없어요", "error");
-          return;
-        }
-        console.error("[PindMap:mypage] save profile rpc error", updateError);
-        showToast("프로필 저장에 실패했어요", "error");
-        return;
       }
+
+      if (nameChanged) {
+        const { error: updateError } = await supabase.rpc("rename_user_username", {
+          p_user_id: user.id,
+          p_old_username: oldUsername,
+          p_new_username: nextName,
+        });
+        if (updateError) {
+          const code = (updateError as { code?: string }).code;
+          const msg = String((updateError as { message?: string }).message || "");
+          if (code === "23505" || /duplicate|unique/i.test(msg)) {
+            showToast("이미 사용 중인 닉네임이에요", "error");
+            return;
+          }
+          if (code === "P0001" || msg.includes("does not match")) {
+            showToast("닉네임이 바뀌었어요. 새로고침 후 다시 시도해 주세요", "info");
+            return;
+          }
+          if (code === "42501" || msg.includes("not authorized")) {
+            showToast("권한이 없어요", "error");
+            return;
+          }
+          console.error("[PindMap:mypage] save profile rpc error", updateError);
+          showToast("프로필 저장에 실패했어요", "error");
+          return;
+        }
+      }
+
       await reloadUserFromSession();
       const uid = user.id;
-      setFeedPosts((prev) =>
-        prev.map((p) => ({
-          ...p,
-          user: p.userId === uid ? nextName : p.user,
-          likes: p.likes.map((u) => (u === oldUsername ? nextName : u)),
-          comments: p.comments.map((c) => (c.user === oldUsername ? { ...c, user: nextName } : c)),
-        })),
-      );
-      setNotifications((prev) =>
-        prev.map((n) => (n.actor_id === uid ? { ...n, actor_username: nextName } : n)),
-      );
-      setSharePost((sp) => {
-        if (!sp || sp.userId !== uid) return sp;
-        return {
-          ...sp,
-          user: nextName,
-          likes: sp.likes.map((u) => (u === oldUsername ? nextName : u)),
-          comments: sp.comments.map((c) => (c.user === oldUsername ? { ...c, user: nextName } : c)),
-        };
-      });
-      setEditingPost((ep) => (ep && ep.userId === uid ? { ...ep, user: nextName } : ep));
+      if (nameChanged) {
+        setFeedPosts((prev) =>
+          prev.map((p) => ({
+            ...p,
+            user: p.userId === uid ? nextName : p.user,
+            likes: p.likes.map((u) => (u === oldUsername ? nextName : u)),
+            comments: p.comments.map((c) => (c.user === oldUsername ? { ...c, user: nextName } : c)),
+          })),
+        );
+        setNotifications((prev) =>
+          prev.map((n) => (n.actor_id === uid ? { ...n, actor_username: nextName } : n)),
+        );
+        setSharePost((sp) => {
+          if (!sp || sp.userId !== uid) return sp;
+          return {
+            ...sp,
+            user: nextName,
+            likes: sp.likes.map((u) => (u === oldUsername ? nextName : u)),
+            comments: sp.comments.map((c) => (c.user === oldUsername ? { ...c, user: nextName } : c)),
+          };
+        });
+        setEditingPost((ep) => (ep && ep.userId === uid ? { ...ep, user: nextName } : ep));
+      }
       showToast("프로필이 저장되었어요", "success");
+      revokeProfileEditAvatarBlob();
+      setProfileEditPendingFile(null);
       setShowProfileEditModal(false);
     } catch (err) {
       console.error("[PindMap:mypage] save profile failed", err);
-      showToast("프로필 저장에 실패했어요", "error");
+      const message = err instanceof Error ? err.message : "프로필 저장에 실패했어요";
+      showToast(message, "error");
     } finally {
       setProfileEditSaving(false);
     }
@@ -5238,23 +5300,12 @@ function HomePageContent() {
                   </svg>
                 </button>
                 <div style={{ display: "flex", alignItems: "center", gap: 28, paddingRight: 40 }}>
-                  <div
-                    style={{
-                      width: 90,
-                      height: 90,
-                      borderRadius: "50%",
-                      background: "#1a2a7a",
-                      color: "#fff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontFamily: "'Playfair Display', serif",
-                      fontSize: 36,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {(user?.username || "").slice(0, 1).toUpperCase()}
-                  </div>
+                  <ProfileAvatar
+                    avatarUrl={user?.avatar_url}
+                    username={user?.username ?? ""}
+                    size={90}
+                    fontSize={36}
+                  />
                   <div style={{ flex: 1, display: "flex", justifyContent: "space-around", textAlign: "center" }}>
                     {(
                       [
@@ -5553,13 +5604,57 @@ function HomePageContent() {
           </div>
         )}
         {showProfileEditModal && (
-          <div onClick={() => { if (!profileEditSaving) setShowProfileEditModal(false); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
+          <div onClick={closeProfileEditModal} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
             <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", boxSizing: "border-box" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>프로필 편집</span>
-                <button type="button" onClick={() => setShowProfileEditModal(false)} disabled={profileEditSaving} style={{ border: "none", background: "transparent", color: "#bbb", fontSize: "20px", cursor: profileEditSaving ? "wait" : "pointer" }}>×</button>
+                <button type="button" onClick={closeProfileEditModal} disabled={profileEditSaving} style={{ border: "none", background: "transparent", color: "#bbb", fontSize: "20px", cursor: profileEditSaving ? "wait" : "pointer" }}>×</button>
               </div>
-              <p style={{ margin: 0, fontSize: "11px", color: "#8b90a3" }}>App Review 대응: 버튼 반응 및 편집 플로우 점검 로그가 콘솔에 기록됩니다.</p>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, paddingTop: 4 }}>
+                <div style={{ position: "relative" }}>
+                  <ProfileAvatar
+                    avatarUrl={profileEditAvatarPreview}
+                    username={profileEditName || user?.username || ""}
+                    size={96}
+                    fontSize={38}
+                  />
+                  <button
+                    type="button"
+                    aria-label="프로필 사진 변경"
+                    disabled={profileEditSaving}
+                    onClick={() => profileAvatarFileInputRef.current?.click()}
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      bottom: 0,
+                      width: 32,
+                      height: 32,
+                      borderRadius: "50%",
+                      border: "2px solid #fff",
+                      background: "#1a2a7a",
+                      color: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: profileEditSaving ? "wait" : "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" strokeWidth="1.8" />
+                      <path d="M3 7h2l1.4-2.4a1 1 0 0 1 .9-.6h9.4a1 1 0 0 1 .9.6L19 7h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                  <input
+                    ref={profileAvatarFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={handleProfileAvatarFileChange}
+                  />
+                </div>
+                <span style={{ fontSize: "11px", color: "#8b90a3" }}>사진은 저장 버튼을 누르면 반영돼요</span>
+              </div>
               <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>닉네임</span>
                 <input className="mapInput" value={profileEditName} onChange={(e) => setProfileEditName(e.target.value)} placeholder="닉네임 입력" />
