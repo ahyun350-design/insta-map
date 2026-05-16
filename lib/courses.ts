@@ -162,3 +162,27 @@ export function buildCourseShareText(course: SavedCourse): string {
   const count = course.place_count ?? course.items.length;
   return `📍 코스: ${course.title} · ${count}곳\n\n[course:${course.id}]`;
 }
+
+export function parseCourseMarker(text: string): { courseId: string; cleanText: string } | null {
+  const match = text.match(/\[course:([^\]]+)\]/);
+  if (!match) return null;
+  return {
+    courseId: match[1]!,
+    cleanText: text.replace(/\[course:[^\]]+\]/, "").trim(),
+  };
+}
+
+export async function fetchCourseById(
+  courseId: string,
+): Promise<{ data: SavedCourse | null; error: string | null }> {
+  const { data, error } = await supabase.from("courses").select("*").eq("id", courseId).maybeSingle();
+
+  if (error) {
+    return { data: null, error: mapDbError(error, "코스를 불러오지 못했어요.") };
+  }
+  if (!data) {
+    return { data: null, error: "삭제된 코스이거나 접근할 수 없는 코스예요" };
+  }
+
+  return { data: data as SavedCourse, error: null };
+}

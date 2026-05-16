@@ -15,6 +15,7 @@ import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
+import { ChatCourseCard } from "@/components/ChatCourseCard";
 import { CourseEditScreen } from "@/components/CourseEditScreen";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
@@ -23,6 +24,7 @@ import { fetchIsPostLikedByUser, toggleLikeRow } from "@/lib/likes";
 import {
   buildCourseShareText,
   deleteCourse,
+  fetchCourseById,
   fetchMyCourses,
   formatCourseDate,
   saveCourse,
@@ -727,6 +729,10 @@ function HomePageContent() {
   const [courseSaveTitle, setCourseSaveTitle] = useState("");
   const [courseSaving, setCourseSaving] = useState(false);
   const [savedCourseId, setSavedCourseId] = useState<string | null>(null);
+  const [isReadOnlyCourse, setIsReadOnlyCourse] = useState(false);
+  const [courseCache, setCourseCache] = useState<Record<string, SavedCourse>>({});
+  const courseCacheRef = useRef<Record<string, SavedCourse>>({});
+  courseCacheRef.current = courseCache;
   const [editingCourseTitle, setEditingCourseTitle] = useState("");
   const [isEditingCourseTitleInline, setIsEditingCourseTitleInline] = useState(false);
   const [courseTitleSaving, setCourseTitleSaving] = useState(false);
@@ -1961,10 +1967,22 @@ function HomePageContent() {
     setSavedCourseId(null);
     setIsEditingCourseTitleInline(false);
     setEditingCourseTitle("");
+    setIsReadOnlyCourse(false);
     preserveSavedCourseIdRef.current = false;
   };
 
-  const openSavedCourse = (course: SavedCourse) => {
+  const ensureCourseLoaded = useCallback(async (courseId: string): Promise<SavedCourse | null> => {
+    const hit = courseCacheRef.current[courseId];
+    if (hit) return hit;
+    const { data } = await fetchCourseById(courseId);
+    if (data) {
+      setCourseCache((prev) => ({ ...prev, [courseId]: data }));
+      return data;
+    }
+    return null;
+  }, []);
+
+  const openSavedCourse = (course: SavedCourse, options?: { readOnly?: boolean }) => {
     const restored: CoursePlace[] = course.items
       .filter((it) => Number.isFinite(it.lat) && Number.isFinite(it.lng))
       .map((it) => ({
@@ -1980,6 +1998,7 @@ function HomePageContent() {
       return;
     }
     preserveSavedCourseIdRef.current = true;
+    setIsReadOnlyCourse(options?.readOnly ?? false);
     setCourseResult(restored);
     setSavedCourseId(course.id);
     setEditingCourseTitle(course.title);
@@ -2008,7 +2027,7 @@ function HomePageContent() {
   };
 
   const openCourseEditScreen = () => {
-    if (!savedCourseId || !courseResult?.length) return;
+    if (isReadOnlyCourse || !savedCourseId || !courseResult?.length) return;
     const items = courseResult.map(coursePlaceToSavedItem);
     courseEditOriginalRef.current = {
       title: editingCourseTitle,
@@ -2100,7 +2119,7 @@ function HomePageContent() {
   }, [editingCourseDraft, savedPlaces]);
 
   const handleSaveCourseTitleInline = async () => {
-    if (!savedCourseId) return;
+    if (isReadOnlyCourse || !savedCourseId) return;
     const trimmed = editingCourseTitle.trim();
     if (!trimmed) {
       showToast("제목을 입력해주세요", "error");
@@ -5534,7 +5553,7 @@ function HomePageContent() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     {savedCourseId ? (
-                      isEditingCourseTitleInline ? (
+                      isEditingCourseTitleInline && !isReadOnlyCourse ? (
                         <div>
                           <input
                             ref={courseTitleInlineInputRef}
@@ -5611,40 +5630,42 @@ function HomePageContent() {
                           >
                             {editingCourseTitle}
                           </span>
-                          <button
-                            type="button"
-                            aria-label="제목 수정"
-                            onClick={() => {
-                              courseTitleOriginalRef.current = editingCourseTitle;
-                              setIsEditingCourseTitleInline(true);
-                            }}
-                            style={{
-                              flexShrink: 0,
-                              border: "none",
-                              borderRadius: 6,
-                              background: "transparent",
-                              color: "#1a2a7a",
-                              fontSize: 13,
-                              fontWeight: 500,
-                              padding: "4px 8px",
-                              cursor: "pointer",
-                              fontFamily: "inherit",
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = "#f0f0f5";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = "transparent";
-                            }}
-                            onMouseDown={(e) => {
-                              e.currentTarget.style.background = "#f0f0f5";
-                            }}
-                            onMouseUp={(e) => {
-                              e.currentTarget.style.background = "#f0f0f5";
-                            }}
-                          >
-                            편집
-                          </button>
+                          {!isReadOnlyCourse && (
+                            <button
+                              type="button"
+                              aria-label="제목 수정"
+                              onClick={() => {
+                                courseTitleOriginalRef.current = editingCourseTitle;
+                                setIsEditingCourseTitleInline(true);
+                              }}
+                              style={{
+                                flexShrink: 0,
+                                border: "none",
+                                borderRadius: 6,
+                                background: "transparent",
+                                color: "#1a2a7a",
+                                fontSize: 13,
+                                fontWeight: 500,
+                                padding: "4px 8px",
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "#f0f0f5";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "transparent";
+                              }}
+                              onMouseDown={(e) => {
+                                e.currentTarget.style.background = "#f0f0f5";
+                              }}
+                              onMouseUp={(e) => {
+                                e.currentTarget.style.background = "#f0f0f5";
+                              }}
+                            >
+                              편집
+                            </button>
+                          )}
                         </div>
                       )
                     ) : (
@@ -5756,24 +5777,26 @@ function HomePageContent() {
                         >
                           📤 코스 공유
                         </button>
-                        <button
-                          type="button"
-                          onClick={openCourseEditScreen}
-                          style={{
-                            width: "100%",
-                            padding: "12px",
-                            borderRadius: "12px",
-                            border: "1px solid #ddd",
-                            background: "#fff",
-                            color: "#333",
-                            fontSize: "13px",
-                            fontWeight: 500,
-                            cursor: "pointer",
-                            fontFamily: "inherit",
-                          }}
-                        >
-                          ✏️ 코스 수정
-                        </button>
+                        {!isReadOnlyCourse && (
+                          <button
+                            type="button"
+                            onClick={openCourseEditScreen}
+                            style={{
+                              width: "100%",
+                              padding: "12px",
+                              borderRadius: "12px",
+                              border: "1px solid #ddd",
+                              background: "#fff",
+                              color: "#333",
+                              fontSize: "13px",
+                              fontWeight: 500,
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            ✏️ 코스 수정
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={showCourseOnMap}
@@ -6293,6 +6316,24 @@ function HomePageContent() {
                             📍 큐레이션 열어보기
                           </button>
                         </>
+                      );
+                    }
+                    const courseMatch = m.text.match(/\[course:([^\]]+)\]/);
+                    if (courseMatch) {
+                      const sharedCourseId = courseMatch[1]!;
+                      const cleanText = m.text.replace(/\[course:[^\]]+\]/, "").trim();
+                      return (
+                        <ChatCourseCard
+                          courseId={sharedCourseId}
+                          cleanText={cleanText}
+                          isMine={isMine}
+                          currentUserId={MY_USER}
+                          ensureCourseLoaded={ensureCourseLoaded}
+                          onOpenCourse={(course, readOnly) => {
+                            setActiveChatRoom(null);
+                            openSavedCourse(course, { readOnly });
+                          }}
+                        />
                       );
                     }
                     return m.text;
