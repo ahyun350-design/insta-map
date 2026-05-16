@@ -15,6 +15,7 @@ import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
+import { CourseEditScreen } from "@/components/CourseEditScreen";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
@@ -24,6 +25,7 @@ import {
   fetchMyCourses,
   formatCourseDate,
   saveCourse,
+  updateCourseItems,
   updateCourseTitle,
   type SavedCourse,
   type SavedCourseItem,
@@ -426,6 +428,34 @@ function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): nu
 // 좌표가 있는 장소들에서 가까운 순으로 코스 짜기 (Nearest Neighbor 알고리즘)
 type CoursePlace = Place & { lat: number; lng: number };
 
+function coursePlaceToSavedItem(p: CoursePlace): SavedCourseItem {
+  return { id: p.id, name: p.name, address: p.address, category: p.category, lat: p.lat, lng: p.lng };
+}
+
+function savedItemToCoursePlace(it: SavedCourseItem): CoursePlace {
+  return {
+    id: it.id,
+    name: it.name,
+    address: it.address,
+    category: it.category as Category,
+    lat: it.lat,
+    lng: it.lng,
+  };
+}
+
+function placeToSavedItemIfCoords(place: Place): SavedCourseItem | null {
+  const coords = latLngFromRow(place);
+  if (!coords) return null;
+  return {
+    id: place.id,
+    name: place.name,
+    address: place.address,
+    category: place.category,
+    lat: coords.lat,
+    lng: coords.lng,
+  };
+}
+
 function buildCourse(
   origin: { lat: number; lng: number },
   candidates: CoursePlace[],
@@ -699,7 +729,16 @@ function HomePageContent() {
   const [courseActionTarget, setCourseActionTarget] = useState<SavedCourse | null>(null);
   const [showCourseDeleteConfirm, setShowCourseDeleteConfirm] = useState(false);
   const [courseDeleting, setCourseDeleting] = useState(false);
+  const [showCourseEditScreen, setShowCourseEditScreen] = useState(false);
+  const [editingCourseDraft, setEditingCourseDraft] = useState<{
+    id: string;
+    title: string;
+    items: SavedCourseItem[];
+  } | null>(null);
+  const [showAddPlaceSheet, setShowAddPlaceSheet] = useState(false);
+  const [courseEditSaving, setCourseEditSaving] = useState(false);
   const courseSaveInputRef = useRef<HTMLInputElement>(null);
+  const courseEditOriginalRef = useRef<{ title: string; items: SavedCourseItem[] } | null>(null);
   const preserveSavedCourseIdRef = useRef(false);
   const drawCourseRouteRetryRef = useRef(0);
   const courseTitleOriginalRef = useRef("");
@@ -1941,6 +1980,118 @@ function HomePageContent() {
     setIsEditingCourseTitleInline(false);
     setShowCourseModal(true);
   };
+
+  const isCourseEditDirty = useCallback(() => {
+    const draft = editingCourseDraft;
+    const orig = courseEditOriginalRef.current;
+    if (!draft || !orig) return false;
+    if (draft.title.trim() !== orig.title.trim()) return true;
+    return JSON.stringify(draft.items) !== JSON.stringify(orig.items);
+  }, [editingCourseDraft]);
+
+  const closeCourseEditScreen = () => {
+    setShowCourseEditScreen(false);
+    setEditingCourseDraft(null);
+    setShowAddPlaceSheet(false);
+    courseEditOriginalRef.current = null;
+  };
+
+  const requestCloseCourseEditScreen = () => {
+    if (isCourseEditDirty() && !window.confirm("변경사항을 버릴까요?")) return;
+    closeCourseEditScreen();
+  };
+
+  const openCourseEditScreen = () => {
+    if (!savedCourseId || !courseResult?.length) return;
+    const items = courseResult.map(coursePlaceToSavedItem);
+    courseEditOriginalRef.current = {
+      title: editingCourseTitle,
+      items: JSON.parse(JSON.stringify(items)) as SavedCourseItem[],
+    };
+    setEditingCourseDraft({ id: savedCourseId, title: editingCourseTitle, items });
+    setShowCourseEditScreen(true);
+  };
+
+  const moveCourseEditItem = (idx: number, direction: "up" | "down") => {
+    setEditingCourseDraft((prev) => {
+      if (!prev) return prev;
+      const swapWith = direction === "up" ? idx - 1 : idx + 1;
+      if (swapWith < 0 || swapWith >= prev.items.length) return prev;
+      const items = [...prev.items];
+      [items[idx], items[swapWith]] = [items[swapWith]!, items[idx]!];
+      return { ...prev, items };
+    });
+  };
+
+  const removeCourseEditItem = (idx: number) => {
+    if (!window.confirm("이 장소를 코스에서 뺄까요?")) return;
+    setEditingCourseDraft((prev) => {
+      if (!prev) return prev;
+      return { ...prev, items: prev.items.filter((_, i) => i !== idx) };
+    });
+  };
+
+  const addPlaceToCourseEdit = (place: Place) => {
+    const item = placeToSavedItemIfCoords(place);
+    if (!item) {
+      showToast("이 장소는 좌표 정보가 없어 추가할 수 없어요", "error");
+      return;
+    }
+    setEditingCourseDraft((prev) => (prev ? { ...prev, items: [...prev.items, item] } : prev));
+    setShowAddPlaceSheet(false);
+  };
+
+  const handleSaveCourseEdit = async () => {
+    if (!editingCourseDraft) return;
+    const trimmed = editingCourseDraft.title.trim();
+    if (!trimmed) {
+      showToast("제목을 입력해주세요", "error");
+      return;
+    }
+    if (editingCourseDraft.items.length === 0) {
+      showToast("장소를 1개 이상 추가해주세요", "error");
+      return;
+    }
+    setCourseEditSaving(true);
+    try {
+      const { data, error } = await updateCourseItems(
+        editingCourseDraft.id,
+        trimmed,
+        editingCourseDraft.items,
+      );
+      if (error) {
+        showToast(error, "error");
+        return;
+      }
+      preserveSavedCourseIdRef.current = true;
+      setCourseResult(editingCourseDraft.items.map(savedItemToCoursePlace));
+      setEditingCourseTitle(trimmed);
+      setMyCourses((prev) =>
+        prev.map((c) =>
+          c.id === editingCourseDraft.id
+            ? {
+                ...c,
+                title: trimmed,
+                items: editingCourseDraft.items,
+                place_count: editingCourseDraft.items.length,
+                updated_at: data?.updated_at ?? new Date().toISOString(),
+              }
+            : c,
+        ),
+      );
+      showToast("코스를 저장했어요", "success");
+      closeCourseEditScreen();
+      void refreshMyCourses();
+    } finally {
+      setCourseEditSaving(false);
+    }
+  };
+
+  const addableSavedPlacesForCourseEdit = useMemo(() => {
+    if (!editingCourseDraft) return [];
+    const inDraft = new Set(editingCourseDraft.items.map((it) => it.id));
+    return savedPlaces.filter((p) => !inDraft.has(p.id));
+  }, [editingCourseDraft, savedPlaces]);
 
   const handleSaveCourseTitleInline = async () => {
     if (!savedCourseId) return;
@@ -5401,23 +5552,43 @@ function HomePageContent() {
                     </div>
 
                     {savedCourseId ? (
-                      <button
-                        type="button"
-                        onClick={showCourseOnMap}
-                        style={{
-                          width: "100%",
-                          padding: "12px",
-                          borderRadius: "8px",
-                          border: "none",
-                          background: "#1a2a7a",
-                          color: "#fff",
-                          fontSize: "13px",
-                          cursor: "pointer",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        🗺️ 지도에서 경로 보기
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={openCourseEditScreen}
+                          style={{
+                            width: "100%",
+                            padding: "12px",
+                            borderRadius: "12px",
+                            border: "1px solid #ddd",
+                            background: "#fff",
+                            color: "#333",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          ✏️ 코스 수정
+                        </button>
+                        <button
+                          type="button"
+                          onClick={showCourseOnMap}
+                          style={{
+                            width: "100%",
+                            padding: "12px",
+                            borderRadius: "8px",
+                            border: "none",
+                            background: "#1a2a7a",
+                            color: "#fff",
+                            fontSize: "13px",
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          🗺️ 지도에서 경로 보기
+                        </button>
+                      </>
                     ) : (
                       <>
                         <button
@@ -5457,6 +5628,26 @@ function HomePageContent() {
                 )}
               </div>
             </div>
+          )}
+          {showCourseEditScreen && editingCourseDraft && (
+            <CourseEditScreen
+              draft={editingCourseDraft}
+              saving={courseEditSaving}
+              showAddPlace={showAddPlaceSheet}
+              addablePlaces={addableSavedPlacesForCourseEdit}
+              categoryPin={CATEGORY_PIN}
+              categoryColors={CATEGORY_COLORS}
+              onCloseRequest={requestCloseCourseEditScreen}
+              onSave={() => { void handleSaveCourseEdit(); }}
+              onTitleChange={(title) =>
+                setEditingCourseDraft((prev) => (prev ? { ...prev, title } : prev))
+              }
+              onOpenAddPlace={() => setShowAddPlaceSheet(true)}
+              onCloseAddPlace={() => setShowAddPlaceSheet(false)}
+              onMoveItem={moveCourseEditItem}
+              onRemoveItem={removeCourseEditItem}
+              onAddPlace={addPlaceToCourseEdit}
+            />
           )}
           {showCourseSaveModal && (
             <div

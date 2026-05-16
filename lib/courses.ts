@@ -63,6 +63,34 @@ function validateCourseTitle(trimmed: string): string | null {
   return null;
 }
 
+export async function updateCourseItems(
+  courseId: string,
+  title: string,
+  items: SavedCourseItem[],
+): Promise<{ data: SavedCourse | null; error: string | null }> {
+  const trimmed = title.trim();
+  const validationError = validateCourseTitle(trimmed);
+  if (validationError) {
+    return { data: null, error: validationError };
+  }
+  if (items.length === 0) {
+    return { data: null, error: "장소가 비어있어요" };
+  }
+
+  const { data, error } = await supabase
+    .from("courses")
+    .update({ title: trimmed, items, place_count: items.length })
+    .eq("id", courseId)
+    .select("*")
+    .single();
+
+  if (error) {
+    return { data: null, error: mapDbError(error, "코스를 수정하지 못했어요.") };
+  }
+
+  return { data: data as SavedCourse, error: null };
+}
+
 export async function updateCourseTitle(
   courseId: string,
   newTitle: string,
