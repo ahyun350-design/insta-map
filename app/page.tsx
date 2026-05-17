@@ -827,6 +827,7 @@ function HomePageContent() {
   hiddenIdsRef.current = hiddenIds;
   const activeTabRef = useRef<TabId>(activeTab);
   activeTabRef.current = activeTab;
+  const prevActiveTabRef = useRef<TabId>(activeTab);
   /** M-1: 오케스트레이터 3회 실패 후 지연 재시도 (WKWebView 지오코딩 지연) */
   const mainPinFallbackTimerRef = useRef<number | null>(null);
   const mainPinFallbackVerifyIntervalRef = useRef<number | null>(null);
@@ -2623,6 +2624,18 @@ function HomePageContent() {
     oldestMessageCreatedAtRef.current = messages[0]?.createdAt ?? null;
     chatOlderHasMoreRef.current = chatOlderHasMore;
   }, [messages, chatOlderHasMore]);
+
+  /** WKWebView 키보드 후 window/document 스크롤만 리셋. 메시지 목록(overflow-y)은 별도 컨테이너라 영향 없음. */
+  const resetWindowScrollAfterChatKeyboard = useCallback(() => {
+    chatComposerInputRef.current?.blur();
+    requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        window.scrollTo(0, 0);
+        if (document.documentElement) document.documentElement.scrollTop = 0;
+        if (document.body) document.body.scrollTop = 0;
+      }, 120);
+    });
+  }, []);
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !activeChatRoom) return;
@@ -4588,6 +4601,17 @@ function HomePageContent() {
   }, [activeTab, activeChatRoom?.id]);
 
   useEffect(() => {
+    if (
+      prevActiveTabRef.current === "messages" &&
+      activeTab !== "messages" &&
+      activeChatRoomRef.current
+    ) {
+      resetWindowScrollAfterChatKeyboard();
+    }
+    prevActiveTabRef.current = activeTab;
+  }, [activeTab, resetWindowScrollAfterChatKeyboard]);
+
+  useEffect(() => {
     const hasMap = !!mapRef.current;
     console.log("[PindMap:pin] orchestrator triggered");
     console.log("[PindMap:pin] orchestrator conditions: kakao=%s, map=%s, ready=%s, places=%d", kakaoStatus, hasMap, compactMapReady, savedPlaces.length);
@@ -6335,7 +6359,7 @@ function HomePageContent() {
     {activeChatRoom ? (
       <>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "16px 20px 14px", borderBottom: "0.5px solid #f0f0f0", flexShrink: 0 }}>
-          <button onClick={() => setActiveChatRoom(null)} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
+          <button onClick={() => { resetWindowScrollAfterChatKeyboard(); setActiveChatRoom(null); }} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
           <button
@@ -6462,6 +6486,7 @@ function HomePageContent() {
                           <button
                             type="button"
                             onClick={() => {
+                              resetWindowScrollAfterChatKeyboard();
                               setActiveChatRoom(null);
                               setDetailPostId(sharedPostId);
                             }}
@@ -6496,6 +6521,7 @@ function HomePageContent() {
                           currentUserId={MY_USER}
                           ensureCourseLoaded={ensureCourseLoaded}
                           onOpenCourse={(course, readOnly) => {
+                            resetWindowScrollAfterChatKeyboard();
                             setActiveChatRoom(null);
                             openSavedCourse(course, { readOnly });
                           }}
