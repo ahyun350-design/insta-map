@@ -554,6 +554,12 @@ function HomePageContent() {
     if (user) authStallRetryRef.current = 0;
   }, [user]);
 
+  useEffect(() => {
+    if (typeof history.scrollRestoration === "string") {
+      history.scrollRestoration = "manual";
+    }
+  }, []);
+
   const handleLogoutClick = async () => {
     if (!confirm("정말 로그아웃하시겠어요?")) return;
     try {
@@ -2627,13 +2633,60 @@ function HomePageContent() {
 
   /** WKWebView 키보드 후 window/document 스크롤만 리셋. 메시지 목록(overflow-y)은 별도 컨테이너라 영향 없음. */
   const resetWindowScrollAfterChatKeyboard = useCallback(() => {
+    const kbScrollSnapshot = () => ({
+      scrollY: window.scrollY,
+      docScroll: document.documentElement.scrollTop,
+      bodyScroll: document.body?.scrollTop,
+      vvOffset: window.visualViewport?.offsetTop,
+    });
+
+    console.log("[PindMap:kb] reset start", kbScrollSnapshot());
+
     chatComposerInputRef.current?.blur();
+    console.log("[PindMap:kb] blurred", { active: document.activeElement?.tagName });
+
+    const tryScrollReset = (attempt: number) => {
+      if (attempt === 1) {
+        console.log("[PindMap:kb] attempt 1 before", kbScrollSnapshot());
+      }
+
+      document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+      window.scrollTo(0, 0);
+
+      if (attempt === 4) {
+        const stillStuck =
+          document.documentElement.scrollTop !== 0 ||
+          window.scrollY !== 0 ||
+          (window.visualViewport?.offsetTop ?? 0) !== 0;
+        if (stillStuck) {
+          const htmlEl = document.documentElement;
+          const prevOverflow = htmlEl.style.overflow;
+          htmlEl.style.overflow = "hidden";
+          void htmlEl.offsetHeight;
+          htmlEl.style.overflow = prevOverflow;
+          htmlEl.scrollTop = 0;
+          if (document.body) document.body.scrollTop = 0;
+          window.scrollTo(0, 0);
+          console.log("[PindMap:kb] attempt 4 html reflow applied");
+        }
+      }
+
+      console.log(`[PindMap:kb] attempt ${attempt}`, {
+        docScroll: document.documentElement.scrollTop,
+        vvOffset: window.visualViewport?.offsetTop,
+      });
+
+      if (attempt === 1) {
+        console.log("[PindMap:kb] attempt 1 after", kbScrollSnapshot());
+      }
+    };
+
     requestAnimationFrame(() => {
-      window.setTimeout(() => {
-        window.scrollTo(0, 0);
-        if (document.documentElement) document.documentElement.scrollTop = 0;
-        if (document.body) document.body.scrollTop = 0;
-      }, 120);
+      tryScrollReset(1);
+      window.setTimeout(() => tryScrollReset(2), 120);
+      window.setTimeout(() => tryScrollReset(3), 300);
+      window.setTimeout(() => tryScrollReset(4), 600);
     });
   }, []);
 
