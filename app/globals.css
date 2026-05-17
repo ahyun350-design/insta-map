@@ -642,9 +642,35 @@ body {
 
 /* ── 반응형: 모바일 풀스크린 ── */
 @media (max-width: 768px) {
-  html {
-    height: 100%;
-    height: 100dvh;
+  /* WKWebView 키보드 인셋이 html을 밀지 못하게 lock — 스크롤은 .appContent 등 자식에서만 */
+  html,
+  body {
+    overflow: hidden !important;
+    overscroll-behavior: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100% !important;
+    height: 100% !important;
+    height: 100dvh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    box-sizing: border-box !important;
+    max-width: 100vw !important;
+  }
+
+  /* 로그인·약관 등 mobileRoot 밖 — body lock 하에서 자체 스크롤 */
+  body > main:not(.mobileRoot),
+  body > div.min-h-screen {
+    position: fixed;
+    inset: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   .mobileRoot {
@@ -796,29 +822,6 @@ body {
 
   .phoneScreen {
     border-radius: 0 !important;
-  }
-
-  html {
-    background: #fff !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-  }
-
-  body {
-    background: #fff !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    overflow-x: hidden !important;
-    /* 로그인 등 mobileRoot 밖 페이지는 세로 스크롤 필요 */
-    overflow-y: auto !important;
-    width: 100% !important;
-    max-width: 100vw !important;
-    min-height: 100% !important;
-    min-height: 100dvh !important;
-    min-height: -webkit-fill-available !important;
-    height: 100% !important;
-    height: 100dvh !important;
-    box-sizing: border-box !important;
   }
 }
 /* ── 스켈레톤 로딩 ── */
