@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
+import { safeGetSession } from "./authFallback";
 import { supabase } from "./supabase";
 import { debugLog } from "./debugLog";
 import { runConnectionWarmupWithRetry, runExtraRefreshSession } from "./connectionRecovery";
-
-const AUTH_LOGIN_GATE_GET_SESSION_MS = 3_000;
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -179,7 +178,7 @@ export function useUser() {
       let hadAuthedSessionFromGet = false;
       try {
         const getSessionT = Date.now();
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = await safeGetSession(3000);
         try {
           debugLog.set({ lastGetSession: { ok: !!session, ms: Date.now() - getSessionT, at: Date.now() } });
         } catch {
@@ -237,9 +236,9 @@ export function useUser() {
     void loadUser();
     reloadFromSessionRef.current = loadUser;
 
-    // 2) 로그인/로그아웃 변화 감지 (실시간)
+    // 2) 로그인/로그아웃 변화 감지 (실시간) — 콜백은 동기만 (#762 deadlock 회피)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event: AuthChangeEvent, session) => {
+      (event: AuthChangeEvent, session) => {
         if (!listenerFiredRef.current) {
           listenerFiredRef.current = true;
           tryMarkSessionChecked();
@@ -260,54 +259,56 @@ export function useUser() {
           setLoading(false);
           return;
         }
-        try {
-          if (!session?.user) {
-            setUser(null);
-            return;
-          }
-
-          await ensureUserExists(
-            session.user.id,
-            session.user.email,
-            session.user.user_metadata?.username || session.user.user_metadata?.name
-          );
-
-          const { data } = await supabase
-            .from("users")
-            .select("username, avatar_url, bio, total_likes_received")
-            .eq("id", session.user.id)
-            .single();
-
-          setUser({
-            id: session.user.id,
-            username: usernameFromSessionAndRow(data, session.user),
-            email: session.user.email,
-            avatar_url: normalizeAvatarUrl(data?.avatar_url),
-            bio: normalizeBio(data?.bio),
-            total_likes_received: normalizeTotalLikesReceived(data?.total_likes_received),
-          });
-          console.log("[PindMap:home][auth] onAuthStateChange done");
-        } catch (err) {
-          console.error("[PindMap:home][auth] onAuthStateChange failed", err);
-          if (!session?.user) {
-            setUser(null);
-          } else {
-            const su = session.user;
-            const prev = authUiRef.current.user;
-            setUser({
-              id: su.id,
-              username: usernameFromSessionAndRow(null, su),
-              email: su.email,
-              avatar_url: prev?.id === su.id ? prev.avatar_url : undefined,
-              bio: prev?.id === su.id ? prev.bio : undefined,
-              total_likes_received: prev?.id === su.id ? (prev.total_likes_received ?? 0) : 0,
-            });
-          }
-        } finally {
+        if (!session?.user) {
+          setUser(null);
           stopAuthWatchdog();
           setLoading(false);
+          return;
         }
-      }
+
+        const sessionUser = session.user;
+        setTimeout(() => {
+          void (async () => {
+            try {
+              await ensureUserExists(
+                sessionUser.id,
+                sessionUser.email,
+                sessionUser.user_metadata?.username || sessionUser.user_metadata?.name,
+              );
+
+              const { data } = await supabase
+                .from("users")
+                .select("username, avatar_url, bio, total_likes_received")
+                .eq("id", sessionUser.id)
+                .single();
+
+              setUser({
+                id: sessionUser.id,
+                username: usernameFromSessionAndRow(data, sessionUser),
+                email: sessionUser.email,
+                avatar_url: normalizeAvatarUrl(data?.avatar_url),
+                bio: normalizeBio(data?.bio),
+                total_likes_received: normalizeTotalLikesReceived(data?.total_likes_received),
+              });
+              console.log("[PindMap:home][auth] onAuthStateChange done");
+            } catch (err) {
+              console.error("[PindMap:home][auth] onAuthStateChange failed", err);
+              const prev = authUiRef.current.user;
+              setUser({
+                id: sessionUser.id,
+                username: usernameFromSessionAndRow(null, sessionUser),
+                email: sessionUser.email,
+                avatar_url: prev?.id === sessionUser.id ? prev.avatar_url : undefined,
+                bio: prev?.id === sessionUser.id ? prev.bio : undefined,
+                total_likes_received: prev?.id === sessionUser.id ? (prev.total_likes_received ?? 0) : 0,
+              });
+            } finally {
+              stopAuthWatchdog();
+              setLoading(false);
+            }
+          })();
+        }, 0);
+      },
     );
 
     /** 포그라운드 복귀 시 세션·user 불일치 회복 및 주기적 재검증 (N-1 워치독·sessionChecked 게이트 로직은 변경 없음) */
@@ -324,7 +325,7 @@ export function useUser() {
       const { user: u, sessionChecked: sc, loggingOut: lo } = authUiRef.current;
       if (lo || !sc || foregroundResyncInFlight) return;
       const resyncGetSessionT = Date.now();
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await safeGetSession(5000);
       try {
         debugLog.set({ lastGetSession: { ok: !!session, ms: Date.now() - resyncGetSessionT, at: Date.now() } });
       } catch {
@@ -455,27 +456,16 @@ export function useUser() {
 
   const verifySessionQuick = useCallback(async (): Promise<Session | null> => {
     const getSessionT = Date.now();
+    const session = await safeGetSession(3000);
     try {
-      const { data } = await promiseWithTimeout(
-        Promise.resolve(supabase.auth.getSession()),
-        AUTH_LOGIN_GATE_GET_SESSION_MS,
-        "auth.loginGate.getSession",
-      );
-      try {
-        debugLog.set({ lastGetSession: { ok: !!data?.session, ms: Date.now() - getSessionT, at: Date.now() } });
-      } catch {
-        /* ignore */
-      }
-      return data.session ?? null;
-    } catch (e) {
-      try {
-        debugLog.set({ lastGetSession: { ok: false, ms: Date.now() - getSessionT, at: Date.now() } });
-      } catch {
-        /* ignore */
-      }
-      console.warn("[PindMap:auth] login gate getSession timeout or error", e);
-      return null;
+      debugLog.set({ lastGetSession: { ok: !!session, ms: Date.now() - getSessionT, at: Date.now() } });
+    } catch {
+      /* ignore */
     }
+    if (!session) {
+      console.warn("[PindMap:auth] login gate getSession timeout or error (no session after safeGetSession)");
+    }
+    return session;
   }, []);
 
   return { user, loading, sessionChecked, loggingOut, logout, reloadUserFromSession, verifySessionQuick, patchUser };

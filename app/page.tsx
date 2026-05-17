@@ -532,6 +532,28 @@ function HomePageContent() {
   const { user, loading: userLoading, sessionChecked, loggingOut, logout, reloadUserFromSession, verifySessionQuick, patchUser } =
     useUser();
 
+  const AUTH_RELOAD_USER_TIMEOUT_MS = 5000;
+  const [authRetryPending, setAuthRetryPending] = useState(false);
+  const authStallRetryRef = useRef(0);
+
+  const reloadUserWithTimeout = useCallback(async (): Promise<boolean> => {
+    try {
+      await Promise.race([
+        reloadUserFromSession(),
+        new Promise<void>((_, reject) => {
+          window.setTimeout(() => reject(new Error("reloadUserFromSession:timeout")), AUTH_RELOAD_USER_TIMEOUT_MS);
+        }),
+      ]);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [reloadUserFromSession]);
+
+  useEffect(() => {
+    if (user) authStallRetryRef.current = 0;
+  }, [user]);
+
   const handleLogoutClick = async () => {
     if (!confirm("정말 로그아웃하시겠어요?")) return;
     try {
@@ -1253,11 +1275,17 @@ function HomePageContent() {
         let session = await verifySessionQuick();
         if (cancelled) return;
         if (session?.user) {
-          await reloadUserFromSession();
+          const ok = await reloadUserWithTimeout();
+          if (cancelled) return;
+          if (!ok) router.push("/login");
           return;
         }
-        await reloadUserFromSession();
+        const ok = await reloadUserWithTimeout();
         if (cancelled) return;
+        if (!ok) {
+          router.push("/login");
+          return;
+        }
         session = await verifySessionQuick();
         if (cancelled) return;
         if (!session?.user) {
@@ -1271,7 +1299,28 @@ function HomePageContent() {
     return () => {
       cancelled = true;
     };
-  }, [user, userLoading, sessionChecked, router, reloadUserFromSession, verifySessionQuick]);
+  }, [user, userLoading, sessionChecked, router, verifySessionQuick, reloadUserWithTimeout]);
+
+  useEffect(() => {
+    if (!sessionChecked || userLoading || user) return;
+    if (authStallRetryRef.current >= 1) {
+      router.push("/login");
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      authStallRetryRef.current += 1;
+      setAuthRetryPending(true);
+      void (async () => {
+        try {
+          const ok = await reloadUserWithTimeout();
+          if (!ok) router.push("/login");
+        } finally {
+          setAuthRetryPending(false);
+        }
+      })();
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [sessionChecked, userLoading, user, router, reloadUserWithTimeout]);
 
   useEffect(() => {
     const onVisible = () => {
@@ -5074,7 +5123,57 @@ function HomePageContent() {
   }
 
   if (!user) {
-    return null;
+    return (
+      <main className="mobileRoot">
+        <section
+          className="phoneFrame"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: "100dvh",
+            background: "#fafafa",
+            padding: 24,
+            gap: 16,
+          }}
+        >
+          <div className="skeleton" style={{ width: 40, height: 40, borderRadius: "50%" }} aria-hidden />
+          <p style={{ margin: 0, fontSize: 13, color: "#888", textAlign: "center" }}>
+            {authRetryPending ? "다시 연결하는 중..." : "세션을 확인하고 있어요..."}
+          </p>
+          <button
+            type="button"
+            disabled={authRetryPending}
+            onClick={() => {
+              setAuthRetryPending(true);
+              void (async () => {
+                try {
+                  const ok = await reloadUserWithTimeout();
+                  if (!ok) router.push("/login");
+                } finally {
+                  setAuthRetryPending(false);
+                }
+              })();
+            }}
+            style={{
+              padding: "10px 20px",
+              borderRadius: 8,
+              border: "1px solid #1a2a7a",
+              background: "#fff",
+              color: "#1a2a7a",
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: authRetryPending ? "wait" : "pointer",
+              fontFamily: "inherit",
+              opacity: authRetryPending ? 0.7 : 1,
+            }}
+          >
+            다시 시도
+          </button>
+        </section>
+      </main>
+    );
   }
 
   const courseShareModalEl = showCourseShareModal && sharingCourse && (

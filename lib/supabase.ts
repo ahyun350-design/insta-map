@@ -1,6 +1,16 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const ref = url.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] ?? "default";
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const SUPABASE_AUTH_STORAGE_KEY = `sb-${ref}-auth-token`;
+
+export const supabase = createClient(url, anonKey, {
+  auth: {
+    storageKey: SUPABASE_AUTH_STORAGE_KEY,
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
