@@ -793,6 +793,8 @@ function HomePageContent() {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
   const chatComposerInputRef = useRef<HTMLInputElement | null>(null);
+  const prevChatKeyboardOverlapRef = useRef(0);
+  const lastKbResetAtRef = useRef(0);
   /** 사용자가 위로 스크롤해 과거 메시지를 보면 false — 새 수신 시 자동 스크롤 안 함 */
   const chatStickToBottomRef = useRef(true);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
@@ -4680,12 +4682,26 @@ function HomePageContent() {
   useEffect(() => {
     if (activeTab !== "messages" || !activeChatRoom) {
       setChatKeyboardOverlap(0);
+      prevChatKeyboardOverlapRef.current = 0;
       return;
     }
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
-      setChatKeyboardOverlap(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+      const next = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const prev = prevChatKeyboardOverlapRef.current;
+      setChatKeyboardOverlap(next);
+
+      if (
+        prev > 60 &&
+        next < 10 &&
+        Date.now() - lastKbResetAtRef.current > 500
+      ) {
+        lastKbResetAtRef.current = Date.now();
+        resetWindowScrollAfterChatKeyboard();
+      }
+
+      prevChatKeyboardOverlapRef.current = next;
     };
     update();
     vv.addEventListener("resize", update);
@@ -4694,8 +4710,9 @@ function HomePageContent() {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
       setChatKeyboardOverlap(0);
+      prevChatKeyboardOverlapRef.current = 0;
     };
-  }, [activeTab, activeChatRoom?.id]);
+  }, [activeTab, activeChatRoom?.id, resetWindowScrollAfterChatKeyboard]);
 
   useEffect(() => {
     if (
