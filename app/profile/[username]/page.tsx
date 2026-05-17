@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { dlog } from "@/lib/debugLog";
 import { useUser } from "@/lib/useUser";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
@@ -109,6 +110,9 @@ export default function ProfilePage() {
     const loadProfile = async () => {
       if (!user || !routeUsername) return;
 
+      const perfScreen = `profile:${routeUsername}`;
+      dlog.perf.start(perfScreen);
+      dlog.perf.fetchStart(perfScreen);
       setLoadingProfile(true);
       setNotFound(false);
 
@@ -127,6 +131,8 @@ export default function ProfilePage() {
         setIsFollowing(false);
         setNotFound(true);
         setLoadingProfile(false);
+        dlog.perf.fetchEnd(perfScreen);
+        dlog.perf.markRender(perfScreen);
         return;
       }
 
@@ -196,6 +202,8 @@ export default function ProfilePage() {
       setFollowingCount(followingsRes.count ?? 0);
       setIsFollowing((myFollowRes.count ?? 0) > 0);
       setLoadingProfile(false);
+      dlog.perf.fetchEnd(perfScreen);
+      dlog.perf.markRender(perfScreen);
     };
 
     if (!sessionChecked || userLoading || !user) return;

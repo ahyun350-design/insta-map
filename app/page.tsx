@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Sus
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { debugLog } from "@/lib/debugLog";
+import { debugLog, dlog } from "@/lib/debugLog";
 import { withAutoRetry } from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
 import { usePushNotifications } from "@/lib/usePushNotifications";
@@ -1161,6 +1161,9 @@ function HomePageContent() {
   };
 
   const loadData = async (isRetry = false) => {
+    const perfScreen = "home:initial";
+    dlog.perf.start(perfScreen);
+    dlog.perf.fetchStart(perfScreen);
     console.log("[PindMap:home] 로딩 시작", { isRetry });
     setLoading(true);
     setHomeLoadError(null);
@@ -1248,8 +1251,10 @@ function HomePageContent() {
         setChatRooms([]);
       }
       homeAutoRetryCountRef.current = 0;
+      dlog.perf.fetchEnd(perfScreen);
       console.log("[PindMap:home] 로딩 완료");
     } catch (err) {
+      dlog.perf.fetchEnd(perfScreen);
       console.error("[PindMap:home] 로딩 실패", err);
       const friendlyMessage = "연결이 불안정해요. 다시 시도해주세요 🌐";
       setHomeLoadError(friendlyMessage);
@@ -1309,6 +1314,21 @@ function HomePageContent() {
       cancelled = true;
     };
   }, [user, userLoading, sessionChecked, router, verifySessionQuick, reloadUserWithTimeout]);
+
+  useEffect(() => {
+    if (!sessionChecked || userLoading || !user || loading) return;
+    dlog.perf.markRender("home:initial");
+  }, [sessionChecked, userLoading, user, loading]);
+
+  useEffect(() => {
+    const screen = `tab:${activeTab}`;
+    dlog.perf.start(screen);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const screen = `tab:${activeTab}`;
+    dlog.perf.markRender(screen);
+  }, [activeTab, loading, chatRoomLoading, coursesLoading, compactMapReady, activeChatRoom?.id]);
 
   useEffect(() => {
     if (!sessionChecked || userLoading || user) return;
@@ -2045,6 +2065,7 @@ function HomePageContent() {
   }, []);
 
   const openSavedCourse = (course: SavedCourse, options?: { readOnly?: boolean }) => {
+    dlog.perf.start("course:modal");
     const restored: CoursePlace[] = course.items
       .filter((it) => Number.isFinite(it.lat) && Number.isFinite(it.lng))
       .map((it) => ({
@@ -2066,6 +2087,7 @@ function HomePageContent() {
     setEditingCourseTitle(course.title);
     setIsEditingCourseTitleInline(false);
     setShowCourseModal(true);
+    dlog.perf.markRender("course:modal");
   };
 
   const isCourseEditDirty = useCallback(() => {
@@ -2485,6 +2507,8 @@ function HomePageContent() {
   };
 
   const openChat = async (room: ChatRoom) => {
+    const perfScreen = `chat:${room.id}`;
+    dlog.perf.start(perfScreen);
     const fromId = activeChatRoom?.id ?? null;
     const reqId = ++openChatRequestRef.current;
     console.log("[PindMap:message] chatroom switched", { from: fromId, to: room.id });
@@ -2530,6 +2554,7 @@ function HomePageContent() {
 
       let rows: any[] = [];
       try {
+        dlog.perf.fetchStart(perfScreen);
         const res = await withAutoRetry((signal) =>
           Promise.resolve(
             supabase
@@ -2543,15 +2568,21 @@ function HomePageContent() {
         );
         if (res.error) throw res.error;
         rows = (res.data as any[] | null) ?? [];
+        dlog.perf.fetchEnd(perfScreen);
       } catch (e) {
+        dlog.perf.fetchEnd(perfScreen);
         console.error("[PindMap:message] openChat fetch failed", e);
         setMessages([]);
         setChatOlderHasMore(false);
         mountRoomSubscription(room.id);
+        dlog.perf.markRender(perfScreen);
         return;
       }
 
-      if (reqId !== openChatRequestRef.current) return;
+      if (reqId !== openChatRequestRef.current) {
+        dlog.perf.cancel(perfScreen);
+        return;
+      }
       const data = rows;
       const asc = [...rows].reverse();
       setMessages(
@@ -3239,6 +3270,9 @@ function HomePageContent() {
       showToast("최소 한 개 이상 선택해주세요", "info");
       return;
     }
+    const perfScreen = "course:generate";
+    dlog.perf.start(perfScreen);
+    dlog.perf.fetchStart(perfScreen);
     setCourseLoading(true);
     try {
       // 1. 출발지 좌표 결정
@@ -3360,7 +3394,9 @@ function HomePageContent() {
     } catch (e) {
       showToast("코스를 만드는 중 오류가 발생했어요", "error");
     } finally {
+      dlog.perf.fetchEnd(perfScreen);
       setCourseLoading(false);
+      dlog.perf.markRender(perfScreen);
     }
   };
 
@@ -3449,6 +3485,8 @@ function HomePageContent() {
     handleAddSubmittingRef.current = true;
     try {
     const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
+    const perfScreen = "extract:start";
+    dlog.perf.start(perfScreen);
     const controller = new AbortController();
     console.log("[PindMap:url] extraction start", { url: trimmedUrl });
     setIsSubmitting(true); setStatus(""); setError("");
@@ -3459,6 +3497,7 @@ function HomePageContent() {
     try {
       timeout = window.setTimeout(() => controller.abort(), 10000);
       console.log("[PindMap:url] /api/extract/start request", { url: trimmedUrl, userId: user.id });
+      dlog.perf.fetchStart(perfScreen);
       const response = await fetch("/api/extract/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3468,6 +3507,7 @@ function HomePageContent() {
       });
       window.clearTimeout(timeout);
       const data = await response.json() as { jobId?: string; error?: string };
+      dlog.perf.fetchEnd(perfScreen);
       console.log("[PindMap:url] /api/extract/start response status:", response.status, "body:", data);
       if (!response.ok || !data.jobId) {
         console.log("[PindMap:url] /api/extract/start failed - status:", response.status, "error:", data?.error ?? "missing_job_id");
@@ -3485,9 +3525,12 @@ function HomePageContent() {
       console.log("[PindMap:url] extraction message shown");
       showToast("분석 작업을 백그라운드에서 시작했어요", "success");
       console.log("[PindMap:url] extraction success", { jobId: data.jobId });
+      dlog.perf.markRender(perfScreen);
     } catch (e) {
+      dlog.perf.fetchEnd(perfScreen);
       const isTimeout = e instanceof Error && e.name === "AbortError";
       console.log(`[PindMap:url] extraction ${isTimeout ? "timeout" : "failed"}`, { error: e });
+      dlog.perf.markRender(perfScreen);
       const message = e instanceof Error && e.name === "AbortError"
         ? "요청이 지연되고 있어요. 잠시 후 다시 시도해주세요."
         : e instanceof Error
@@ -4657,6 +4700,11 @@ function HomePageContent() {
   }, [activeChatRoom?.id]);
 
   useEffect(() => {
+    if (!activeChatRoom || chatRoomLoading) return;
+    dlog.perf.markRender(`chat:${activeChatRoom.id}`);
+  }, [activeChatRoom?.id, chatRoomLoading, messages.length]);
+
+  useEffect(() => {
     if (activeTab === "messages") return;
     unmountRoomSubscription("leave-messages-tab");
   }, [activeTab, unmountRoomSubscription]);
@@ -5038,6 +5086,9 @@ function HomePageContent() {
 
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id) return;
+    const perfScreen = "tab:mypage:fetch";
+    dlog.perf.start(perfScreen);
+    dlog.perf.fetchStart(perfScreen);
     void refreshMyTotalLikes();
     void refreshMyCourses();
     let cancelled = false;
@@ -5050,9 +5101,12 @@ function HomePageContent() {
       if (cancelled) return;
       setMypageFollowerCount(followersRes.count ?? 0);
       setMypageFollowingCount(followingsRes.count ?? 0);
+      dlog.perf.fetchEnd(perfScreen);
+      dlog.perf.markRender(perfScreen);
     })();
     return () => {
       cancelled = true;
+      dlog.perf.cancel(perfScreen);
     };
   }, [activeTab, user?.id, refreshMyTotalLikes, refreshMyCourses]);
 
