@@ -2640,10 +2640,38 @@ function HomePageContent() {
       vvOffset: window.visualViewport?.offsetTop,
     });
 
-    console.log("[PindMap:kb] reset start", kbScrollSnapshot());
+    const start = kbScrollSnapshot();
+    console.log("[PindMap:kb] reset start", start);
+
+    const kbDiag = {
+      at: Date.now(),
+      scrollY: start.scrollY,
+      docScroll: start.docScroll,
+      bodyScroll: start.bodyScroll ?? null,
+      vvOffset: start.vvOffset ?? null,
+      blurredActive: null as string | null,
+      after1: null as {
+        scrollY: number;
+        docScroll: number;
+        bodyScroll: number | null;
+        vvOffset: number | null;
+      } | null,
+      attempts: [] as Array<{
+        n: number;
+        docScroll: number;
+        vvOffset: number | null;
+        htmlReflow?: boolean;
+      }>,
+    };
+    const publishKbDiag = () => {
+      debugLog.set({ kbReset: { ...kbDiag, attempts: [...kbDiag.attempts] } });
+    };
+    publishKbDiag();
 
     chatComposerInputRef.current?.blur();
-    console.log("[PindMap:kb] blurred", { active: document.activeElement?.tagName });
+    kbDiag.blurredActive = document.activeElement?.tagName ?? null;
+    console.log("[PindMap:kb] blurred", { active: kbDiag.blurredActive });
+    publishKbDiag();
 
     const tryScrollReset = (attempt: number) => {
       if (attempt === 1) {
@@ -2654,6 +2682,7 @@ function HomePageContent() {
       if (document.body) document.body.scrollTop = 0;
       window.scrollTo(0, 0);
 
+      let htmlReflow = false;
       if (attempt === 4) {
         const stillStuck =
           document.documentElement.scrollTop !== 0 ||
@@ -2668,18 +2697,33 @@ function HomePageContent() {
           htmlEl.scrollTop = 0;
           if (document.body) document.body.scrollTop = 0;
           window.scrollTo(0, 0);
+          htmlReflow = true;
           console.log("[PindMap:kb] attempt 4 html reflow applied");
         }
       }
 
-      console.log(`[PindMap:kb] attempt ${attempt}`, {
-        docScroll: document.documentElement.scrollTop,
-        vvOffset: window.visualViewport?.offsetTop,
+      const docScroll = document.documentElement.scrollTop;
+      const vvOffset = window.visualViewport?.offsetTop ?? null;
+      console.log(`[PindMap:kb] attempt ${attempt}`, { docScroll, vvOffset });
+
+      kbDiag.attempts.push({
+        n: attempt,
+        docScroll,
+        vvOffset,
+        ...(htmlReflow ? { htmlReflow: true } : {}),
       });
 
       if (attempt === 1) {
-        console.log("[PindMap:kb] attempt 1 after", kbScrollSnapshot());
+        const after1 = kbScrollSnapshot();
+        console.log("[PindMap:kb] attempt 1 after", after1);
+        kbDiag.after1 = {
+          scrollY: after1.scrollY,
+          docScroll: after1.docScroll,
+          bodyScroll: after1.bodyScroll ?? null,
+          vvOffset: after1.vvOffset ?? null,
+        };
       }
+      publishKbDiag();
     };
 
     requestAnimationFrame(() => {

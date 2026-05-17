@@ -12,6 +12,17 @@ function formatSendSteps(steps: DebugLogState["sendSteps"]): string {
     .join(" → ");
 }
 
+function formatKbReset(kb: DebugLogState["kbReset"]): string {
+  if (!kb) return "-";
+  const start = `y${kb.scrollY} d${kb.docScroll} vv${kb.vvOffset ?? "-"}`;
+  const attempts =
+    kb.attempts.length > 0
+      ? kb.attempts.map((a) => `${a.n}:${a.docScroll}/${a.vvOffset ?? "-"}${a.htmlReflow ? "*" : ""}`).join(" ")
+      : "-";
+  const after1 = kb.after1 ? ` | 1a:y${kb.after1.scrollY}/d${kb.after1.docScroll}/vv${kb.after1.vvOffset ?? "-"}` : "";
+  return `${start} | ${attempts}${after1}`;
+}
+
 export default function DebugBox() {
   const [enabled, setEnabled] = useState(false);
   const [hidden, setHidden] = useState(false);
@@ -109,6 +120,7 @@ export default function DebugBox() {
         <div>SESS: {sessLabel}</div>
         <div>RT: {snap.realtimeStatus ?? "-"}</div>
         <div>SEND: {formatSendSteps(snap.sendSteps)}</div>
+        <div>KB: {formatKbReset(snap.kbReset)}</div>
       </div>
     </div>
   );
