@@ -56,8 +56,7 @@ const INITIAL_STATE: DebugLogState = {
 let state: DebugLogState = { ...INITIAL_STATE };
 const listeners = new Set<() => void>();
 
-// TEMP: 키보드 여백 진단용. 끝나면 false로 되돌릴 것
-const FORCE_DEBUG = true;
+const FORCE_DEBUG = false;
 
 function isEnabled(): boolean {
   if (typeof window === "undefined") return false;
