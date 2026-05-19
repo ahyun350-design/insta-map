@@ -181,11 +181,74 @@ body {
   flex-shrink: 0;
   background: #fff;
   border-bottom: 0.5px solid var(--border);
+  padding-top: env(safe-area-inset-top, 0px);
+  box-sizing: border-box;
+}
+
+.homeFeedToolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+}
+
+.homeFeedToolbarBtn {
+  position: relative;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #1a2a7a;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.homeFeedToolbarBtnAdd {
+  border: 1.5px dashed #bbb;
+  color: #666;
+}
+
+.homeFeedToolbarBtnNotify:active,
+.homeFeedToolbarBtnAdd:active {
+  opacity: 0.7;
+}
+
+.homeFeedToolbarNotifyDot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: #e53935;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  border-radius: 10px;
+  min-width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .homeFeedSearchWrap {
   padding: 10px 14px 8px;
   box-sizing: border-box;
+}
+
+.homeFeedSearchWrapInline {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
 }
 
 .homeFeedSearchField {

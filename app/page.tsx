@@ -25,7 +25,7 @@ import {
   type CompanionTagFilter,
 } from "@/lib/companionTag";
 import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
-import { HomeFeedSearchBar } from "@/components/HomeFeedSearchBar";
+import { HomeFeedTopBar } from "@/components/HomeFeedTopBar";
 import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { FeedPostCard } from "@/components/FeedPostCard";
@@ -5880,6 +5880,7 @@ function HomePageContent() {
     )}
     <main className="mobileRoot">
       <section className="phoneFrame">
+        {activeTab !== "home" && (
         <header className="appHeader">
         <h1 className="appTitle" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
   <svg width="22" height="22" viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
@@ -5928,9 +5929,9 @@ function HomePageContent() {
                 </span>
               )}
             </button>
-            {activeTab === "home" && <button className="headerAction" type="button" onClick={() => setShowPostModal(true)}><span>＋</span></button>}
           </div>
         </header>
+        )}
         <section className="appContent">
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
 
@@ -6432,7 +6433,13 @@ function HomePageContent() {
               <div className="homeFeedScroll">
               {!loading && !homeLoadError && (
                 <div className="homeFeedStickyBar">
-                  <HomeFeedSearchBar value={homeSearchQuery} onChange={setHomeSearchQuery} />
+                  <HomeFeedTopBar
+                    searchQuery={homeSearchQuery}
+                    onSearchChange={setHomeSearchQuery}
+                    unreadNotificationCount={unreadNotificationCount}
+                    onNotificationsClick={() => setShowNotifications(true)}
+                    onAddClick={() => setShowPostModal(true)}
+                  />
                   <div className="homeFeedChipsBar">
                     <CompanionTagFilterChips
                       value={selectedCompanionTag}
@@ -6460,7 +6467,7 @@ function HomePageContent() {
                   variant="feed"
                   icon="✍️"
                   title="아직 큐레이션이 없어요"
-                  description="오른쪽 위 + 버튼을 눌러 첫 번째 장소를 추가해보세요"
+                  description="상단 + 버튼을 눌러 첫 번째 장소를 추가해보세요"
                   action={{ label: "큐레이션 작성하기", onClick: () => setShowPostModal(true) }}
                 />
               )}

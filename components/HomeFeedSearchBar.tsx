@@ -3,6 +3,8 @@
 type Props = {
   value: string;
   onChange: (value: string) => void;
+  /** 홈 상단 툴바 한 줄 배치 시 바깥 패딩 제거 */
+  variant?: "default" | "inline";
 };
 
 function IconSearch() {
@@ -14,11 +16,11 @@ function IconSearch() {
   );
 }
 
-export function HomeFeedSearchBar({ value, onChange }: Props) {
+export function HomeFeedSearchBar({ value, onChange, variant = "default" }: Props) {
   const showClear = value.length > 0;
 
   return (
-    <div className="homeFeedSearchWrap">
+    <div className={variant === "inline" ? "homeFeedSearchWrap homeFeedSearchWrapInline" : "homeFeedSearchWrap"}>
       <label className="homeFeedSearchField">
         <IconSearch />
         <input
