@@ -32,6 +32,9 @@
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
+
+  /* 하단 플로팅 탭바 아래 콘텐츠 여유 (스크롤 영역 padding-bottom) */
+  --tab-bar-scroll-padding: calc(80px + env(safe-area-inset-bottom, 0px));
 }
 
 * {
@@ -146,6 +149,18 @@ body {
   box-sizing: border-box;
 }
 
+/* 탭 패널 스크롤 — 플로팅 탭바에 가리지 않도록 (채팅방 shell 제외) */
+.appContent > .screen:not(.messagesChatShell),
+.mypageTabScroll {
+  padding-bottom: var(--tab-bar-scroll-padding);
+  box-sizing: border-box;
+}
+
+/* 지도 탭: 지도는 탭바 아래까지 자연스럽게, 미니 리스트만 추가 여유 */
+.screenMapTab .miniList {
+  padding-bottom: 8px;
+}
+
 /* 홈 탭 피드 — 칩 바 고정 + 목록만 스크롤 */
 .homeFeed {
   display: flex;
@@ -227,7 +242,7 @@ body {
   align-items: stretch;
   gap: 0;
   padding-top: 0;
-  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: var(--tab-bar-scroll-padding);
 }
 
 .homeFeed .feedCard,
@@ -1358,9 +1373,11 @@ body {
   padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
   border-radius: 36px;
   background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
   box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.08),
-    0 1px 3px rgba(0, 0, 0, 0.06);
+    0 -2px 16px rgba(0, 0, 0, 0.06),
+    0 4px 16px rgba(0, 0, 0, 0.1),
+    0 8px 28px rgba(0, 0, 0, 0.08);
   overflow: visible;
 }
 

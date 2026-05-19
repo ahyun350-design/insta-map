@@ -6743,7 +6743,7 @@ function HomePageContent() {
   </div>
 )}
 
-          <div className="screen" style={{ display: activeTab === "map" ? "flex" : "none", flexDirection: "column" }}>
+          <div className="screen screenMapTab" style={{ display: activeTab === "map" ? "flex" : "none", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <p className="screenTitle" style={{ marginBottom: 0 }}>지도</p>
                 {activeJobs.length > 0 && (
@@ -7175,7 +7175,7 @@ function HomePageContent() {
                   )}
                 </div>
               </div>
-              <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}>
+              <div className="mypageTabScroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}>
                 {myCourses.length > 0 && (
                   <section style={{ padding: "0 16px", marginBottom: 16 }}>
                     <div
