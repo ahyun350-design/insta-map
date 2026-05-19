@@ -26,6 +26,8 @@ import {
 } from "@/lib/companionTag";
 import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
 import { FeedPostCard } from "@/components/FeedPostCard";
+import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
+import { feedPostToPlaceSheet, type PlaceSheetData } from "@/lib/placeSheet";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
@@ -709,6 +711,7 @@ function HomePageContent() {
   const [editComment, setEditComment] = useState("");
   const [showPostModal, setShowPostModal] = useState(false);
   const [selectedCompanionTag, setSelectedCompanionTag] = useState<CompanionTagFilter>("all");
+  const [homePlaceSheet, setHomePlaceSheet] = useState<PlaceSheetData | null>(null);
   const [postTitle, setPostTitle] = useState(""); const [postPlaceName, setPostPlaceName] = useState("");
   const [postAddress, setPostAddress] = useState(""); const [postCategory, setPostCategory] = useState<Category>("카페");
   const [postPlaceLat, setPostPlaceLat] = useState<number | undefined>(undefined);
@@ -5152,148 +5155,99 @@ function HomePageContent() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [activeTab, user?.id, refreshMyTotalLikes, refreshMyCourses]);
 
+  const togglePlaceSheetSave = useCallback(async (placeData: PlaceSheetData, onAfterSave?: () => void) => {
+    if (!user?.id) {
+      showToast("로그인 후 이용해주세요", "info");
+      return;
+    }
+    const saved = resolveSavedMatch(placeData);
+    if (saved) {
+      await deletePlace(saved.id);
+      showToast("저장이 취소되었어요", "info");
+      return;
+    }
+    const category = inferCategoryFromKakaoCategoryName(placeData.category_name) as Category;
+    const heartCoords = kakaoYXToLatLng(placeData.y, placeData.x);
+    await addPlace({
+      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+      name: placeData.place_name,
+      address: placeData.road_address_name || placeData.address_name || "",
+      category,
+      ...(heartCoords ? { lat: heartCoords.lat, lng: heartCoords.lng } : {}),
+    });
+    showToast("저장됐어요", "success");
+    onAfterSave?.();
+  }, [user?.id, resolveSavedMatch, deletePlace, addPlace, showToast]);
+
+  const openHomePlaceSheetFromPost = useCallback((post: FeedPost) => {
+    const relatedPosts = filterRelatedFeedPosts(feedPosts, {
+      placeName: post.placeName,
+      lat: post.lat,
+      lng: post.lng,
+      address: post.address,
+    });
+    const matchedSaved = savedPlaces.find(
+      (p) => p.name.trim() === post.placeName.trim() && p.address.trim() === post.address.trim(),
+    );
+    setHomePlaceSheet(feedPostToPlaceSheet(post, relatedPosts, matchedSaved?.id));
+  }, [feedPosts, savedPlaces]);
+
   const renderPlaceCard = () => {
-    console.log("[renderCard]", selectedPlace?.place_name, "savedId:", selectedPlace?._savedPlaceId);
     if (!selectedPlace) return null;
-    const relatedPosts: FeedPost[] = selectedPlace._feedPosts ?? [];
+    const placeData = selectedPlace as PlaceSheetData;
     return (
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: "0.5px solid #efefef", borderRadius: "16px 16px 0 0", boxShadow: "0 -4px 20px rgba(0,0,0,0.08)", zIndex: 1000, isolation: "isolate", pointerEvents: "auto", maxHeight: "60vh", overflowY: "auto" }}>
-        <div style={{ padding: "20px 24px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "0.5px solid #f0f0f0" }}>
-          <div style={{ flex: 1 }}>
-            <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a1a2e", fontWeight: 400 }}>{selectedPlace.place_name}</p>
-            <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#888" }}>{selectedPlace.category_name}</p>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            {(() => {
-              const saved = resolveSavedMatch(selectedPlace);
-              const heartFill = saved ? "#e53935" : "none";
-              const heartStroke = saved ? "#e53935" : "#1a2a7a";
-              return (
-                <button onClick={async () => {
-                  if (saved) {
-                    await deletePlace(saved.id);
-                    showToast("저장이 취소되었어요", "info");
-                  } else {
-                    const category = inferCategoryFromKakaoCategoryName(selectedPlace.category_name);
-                    const py = parseFloat(String(selectedPlace.y ?? ""));
-                    const px = parseFloat(String(selectedPlace.x ?? ""));
-                    const heartCoords = kakaoYXToLatLng(selectedPlace.y, selectedPlace.x);
-                    await addPlace({
-                      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
-                      name: selectedPlace.place_name,
-                      address: selectedPlace.road_address_name || selectedPlace.address_name || "",
-                      category,
-                      ...(heartCoords ? { lat: heartCoords.lat, lng: heartCoords.lng } : {}),
-                    });
-                    if (Number.isFinite(py) && Number.isFinite(px)) {
-                      focusExpandedMapOnLatLng(py, px, 3);
-                    } else {
-                      focusExpandedMapOnAddress(selectedPlace.road_address_name || selectedPlace.address_name || "", 3);
-                    }
-                    clearSearchMarkers();
-                  }
-                }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill={heartFill}>
-                    <path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={heartStroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </button>
-              );
-            })()}
-            <button onClick={() => { setSelectedPlace(null); setSelectedMapPlace(null); clearSearchMarkers(); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#bbb", fontSize: "20px", padding: 0, lineHeight: 1 }}>×</button>
-          </div>
-        </div>
-        <div style={{ padding: "12px 24px", display: "flex", flexDirection: "column", gap: "6px" }}>
-          {selectedPlace.road_address_name && (<div style={{ display: "flex", gap: "8px" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>주소</span><span style={{ fontSize: "13px", color: "#444" }}>{selectedPlace.road_address_name}</span></div>)}
-          {selectedPlace.phone && (<div style={{ display: "flex", gap: "8px", alignItems: "center" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 }}>전화</span><a href={"tel:" + String(selectedPlace.phone)} style={{ fontSize: "13px", color: "#1a2a7a", textDecoration: "none" }}>{String(selectedPlace.phone)}</a></div>)}
-          {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px" }}>카카오맵에서 영업시간 보기</a>)}
-          <button
-            type="button"
-            onClick={() => openAppleMapsPlace(selectedPlace.place_name, selectedPlace.road_address_name || selectedPlace.address_name, selectedPlace.y, selectedPlace.x)}
-            style={{ fontSize: "12px", color: "#1a2a7a", background: "#fff", padding: "8px 16px", letterSpacing: "0.4px", textDecoration: "none", display: "inline-block", marginTop: "4px", border: "1px solid #d6ddf2", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
-          >
-            🗺 Apple 지도에서 열기
-          </button>
-          {selectedPlace.y && selectedPlace.x && (
-            <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
-              {/* 모드 토글 */}
-              <div style={{ display: "flex", gap: "6px" }}>
-                {([
-                  { id: "car", label: "🚗 자동차" },
-                  { id: "walk", label: "🚶 도보" },
-                  { id: "transit", label: "🚌 대중교통" },
-                ] as const).map(m => {
-                  const isActive = m.id !== "transit" && directionsMode === m.id;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => {
-                        if (m.id === "transit") {
-                          openTransitInKakaoMap(selectedPlace.place_name, parseFloat(selectedPlace.y), parseFloat(selectedPlace.x));
-                        } else {
-                          setDirectionsMode(m.id);
-                          drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), m.id);
-                        }
-                      }}
-                      disabled={directionsLoading}
-                      style={{
-                        flex: 1,
-                        padding: "8px 10px",
-                        borderRadius: "8px",
-                        border: `1px solid ${isActive ? "#1a2a7a" : "#ddd"}`,
-                        background: isActive ? "#1a2a7a" : "#fff",
-                        color: isActive ? "#fff" : "#555",
-                        fontSize: "12px",
-                        cursor: directionsLoading ? "wait" : "pointer",
-                        fontFamily: "inherit",
-                        opacity: directionsLoading ? 0.6 : 1
-                      }}
-                    >
-                      {m.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {directionsLoading && <p style={{ fontSize: "12px", color: "#888", textAlign: "center", margin: 0 }}>경로 계산 중...</p>}
-              {directionsInfo && !directionsLoading && (
-                <div style={{ background: "#f0f4ff", borderRadius: "8px", padding: "10px 14px", display: "flex", gap: "16px", alignItems: "center" }}>
-                  <span style={{ fontSize: "13px", color: "#1a2a7a", fontWeight: 600 }}>🕐 {directionsInfo.duration}분</span>
-                  <span style={{ fontSize: "13px", color: "#1a2a7a", fontWeight: 600 }}>📍 {directionsInfo.distance}km</span>
-                  <button onClick={clearRoute} style={{ marginLeft: "auto", border: "none", background: "transparent", color: "#aaa", fontSize: "12px", cursor: "pointer" }}>경로 지우기</button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        {relatedPosts.length > 0 && (
-          <div style={{ borderTop: "0.5px solid #f0f0f0" }}>
-            <p style={{ margin: 0, padding: "12px 24px 8px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>큐레이션 {relatedPosts.length}</p>
-            {relatedPosts.map((post) => (
-              <div key={post.id} onClick={() => { setDetailPostId(post.id); setSelectedPlace(null); setMapExpanded(false); }} style={{ padding: "12px 24px", borderTop: "0.5px solid #f8f8f8", cursor: "pointer" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                  <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={26} fontSize={11} />
-                  <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a1a2e" }}>{post.user}</span>
-                  <span style={{ fontSize: "10px", color: "#bbb", marginLeft: "auto" }}>{timeAgo(post.createdAt)}</span>
-                </div>
-                <p style={{ margin: "0 0 8px", fontFamily: "'Playfair Display', serif", fontSize: "14px", color: "#1a2a7a" }}>{post.title || post.placeName}</p>
-                {post.images.length > 0 && (
-                  <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: "6px", marginBottom: "8px", overflowX: "auto" }}>
-                    {post.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "80px", height: "80px", objectFit: "cover", borderRadius: "8px", flexShrink: 0, cursor: "pointer" }} />)}
-                  </div>
-                )}
-                <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#555", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>{post.comment}</p>
-                <div style={{ display: "flex", gap: "12px" }}>
-                  <span style={{ fontSize: "11px", color: post.liked_by_me ? "#e05555" : "#ccc" }}>♥ {post.likes_count}</span>
-                  <span style={{ fontSize: "11px", color: "#ccc" }}>💬 {post.comments.length}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {relatedPosts.length === 0 && (<div style={{ padding: "14px 24px 20px", textAlign: "center" }}><p style={{ margin: 0, fontSize: "12px", color: "#ccc" }}>아직 큐레이션이 없어요</p></div>)}
-      </div>
+      <PlaceDetailSheet
+        place={placeData}
+        isSaved={!!resolveSavedMatch(selectedPlace)}
+        layout="embedded"
+        showDirections={!!(selectedPlace.y && selectedPlace.x)}
+        directionsMode={directionsMode}
+        directionsLoading={directionsLoading}
+        directionsInfo={directionsInfo}
+        onClose={() => {
+          setSelectedPlace(null);
+          setSelectedMapPlace(null);
+          clearSearchMarkers();
+        }}
+        onToggleSave={() => {
+          void togglePlaceSheetSave(placeData, () => {
+            const py = parseFloat(String(selectedPlace.y ?? ""));
+            const px = parseFloat(String(selectedPlace.x ?? ""));
+            if (Number.isFinite(py) && Number.isFinite(px)) {
+              focusExpandedMapOnLatLng(py, px, 3);
+            } else {
+              focusExpandedMapOnAddress(selectedPlace.road_address_name || selectedPlace.address_name || "", 3);
+            }
+            clearSearchMarkers();
+          });
+        }}
+        onCurationClick={(postId) => {
+          setDetailPostId(postId);
+          setSelectedPlace(null);
+          setMapExpanded(false);
+        }}
+        onImageLightbox={setLightboxImg}
+        timeAgoLabel={timeAgo}
+        onOpenAppleMaps={() =>
+          openAppleMapsPlace(
+            selectedPlace.place_name,
+            selectedPlace.road_address_name || selectedPlace.address_name,
+            selectedPlace.y,
+            selectedPlace.x,
+          )
+        }
+        onDirectionsModeChange={(mode) => {
+          setDirectionsMode(mode);
+          drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), mode);
+        }}
+        onOpenTransit={() =>
+          openTransitInKakaoMap(selectedPlace.place_name, parseFloat(selectedPlace.y), parseFloat(selectedPlace.x))
+        }
+        onClearRoute={clearRoute}
+      />
     );
   };
+
   if (userLoading || !sessionChecked) {
     return (
       <main className="mobileRoot">
@@ -6453,6 +6407,7 @@ function HomePageContent() {
                   onComment={() => { setDetailPostId(post.id); setScrollToComment(true); }}
                   onShare={() => { void openShareModal(post); }}
                   onImageLightbox={setLightboxImg}
+                  onPlaceOverlayClick={() => openHomePlaceSheetFromPost(post)}
                 />
               ))}
               </div>
@@ -7383,82 +7338,89 @@ function HomePageContent() {
           })}
         </nav>
         {selectedPlace && !mapExpanded && (
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: "0.5px solid #efefef", borderRadius: "16px 16px 0 0", boxShadow: "0 -4px 20px rgba(0,0,0,0.12)", zIndex: 9998, maxHeight: "70vh", overflowY: "auto" }}>
-            <div style={{ padding: "20px 24px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "0.5px solid #f0f0f0" }}>
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a1a2e", fontWeight: 400 }}>{selectedPlace.place_name}</p>
-                <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#888" }}>{selectedPlace.category_name}</p>
-              </div>
-              <button onClick={() => { setSelectedPlace(null); setSelectedMapPlace(null); clearSearchMarkers(); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#bbb", fontSize: "22px", padding: 0, lineHeight: 1 }}>×</button>
-            </div>
-            <div style={{ padding: "12px 24px", display: "flex", flexDirection: "column", gap: "6px" }}>
-              {selectedPlace.road_address_name && (<div style={{ display: "flex", gap: "8px" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0, marginTop: "1px" }}>주소</span><span style={{ fontSize: "13px", color: "#444" }}>{selectedPlace.road_address_name}</span></div>)}
-              {selectedPlace.phone && (<div style={{ display: "flex", gap: "8px", alignItems: "center" }}><span style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", textTransform: "uppercase", flexShrink: 0 }}>전화</span><a href={"tel:" + String(selectedPlace.phone)} style={{ fontSize: "13px", color: "#1a2a7a", textDecoration: "none" }}>{String(selectedPlace.phone)}</a></div>)}
-              {selectedPlace.place_url && (<a href={String(selectedPlace.place_url)} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#fff", background: "#1a2a7a", padding: "8px 16px", letterSpacing: "1px", textDecoration: "none", display: "inline-block", marginTop: "4px", textAlign: "center", borderRadius: "6px" }}>카카오맵에서 영업시간 보기</a>)}
-              <button
-                type="button"
-                onClick={() => openAppleMapsPlace(selectedPlace.place_name, selectedPlace.road_address_name || selectedPlace.address_name, selectedPlace.y, selectedPlace.x)}
-                style={{ fontSize: "12px", color: "#1a2a7a", background: "#fff", padding: "8px 16px", letterSpacing: "0.4px", textDecoration: "none", display: "inline-block", marginTop: "4px", textAlign: "center", borderRadius: "6px", border: "1px solid #d6ddf2", cursor: "pointer", fontFamily: "inherit" }}
-              >
-                🗺 Apple 지도에서 열기
-              </button>
-              {selectedPlace.y && selectedPlace.x && (
-                <div style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // 전체화면 지도 열고 자동차 길찾기
-                      setMapExpanded(true);
-                      setDirectionsMode("car");
-                      setTimeout(() => drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), "car"), 600);
-                    }}
-                    style={{ flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid #1a2a7a", background: "#1a2a7a", color: "#fff", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}
-                  >🚗 자동차</button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMapExpanded(true);
-                      setDirectionsMode("walk");
-                      setTimeout(() => drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), "walk"), 600);
-                    }}
-                    style={{ flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#555", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}
-                  >🚶 도보</button>
-                  <button
-                    type="button"
-                    onClick={() => openTransitInKakaoMap(selectedPlace.place_name, parseFloat(selectedPlace.y), parseFloat(selectedPlace.x))}
-                    style={{ flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#555", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}
-                  >🚌 대중교통</button>
-                </div>
-              )}
-            </div>
-            {(selectedPlace._feedPosts ?? []).length > 0 && (
-              <div style={{ borderTop: "0.5px solid #f0f0f0" }}>
-                <p style={{ margin: 0, padding: "12px 24px 8px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>큐레이션 {(selectedPlace._feedPosts as FeedPost[]).length}</p>
-                {(selectedPlace._feedPosts as FeedPost[]).map((post) => (
-                  <div key={post.id} onClick={() => { setDetailPostId(post.id); setSelectedPlace(null); }} style={{ padding: "12px 24px", borderTop: "0.5px solid #f8f8f8", cursor: "pointer" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                      <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={26} fontSize={11} />
-                      <span style={{ fontSize: "12px", fontWeight: 600, color: "#1a1a2e" }}>{post.user}</span>
-                      <span style={{ fontSize: "10px", color: "#bbb", marginLeft: "auto" }}>{timeAgo(post.createdAt)}</span>
-                    </div>
-                    <p style={{ margin: "0 0 8px", fontFamily: "'Playfair Display', serif", fontSize: "14px", color: "#1a2a7a" }}>{post.title || post.placeName}</p>
-                    {post.images.length > 0 && (
-                      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: "6px", marginBottom: "8px", overflowX: "auto" }}>
-                        {post.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "80px", height: "80px", objectFit: "cover", borderRadius: "8px", flexShrink: 0, cursor: "pointer" }} />)}
-                      </div>
-                    )}
-                    <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#555", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>{post.comment}</p>
-                    <div style={{ display: "flex", gap: "12px" }}>
-                      <span style={{ fontSize: "11px", color: post.liked_by_me ? "#e05555" : "#ccc" }}>♥ {post.likes_count}</span>
-                      <span style={{ fontSize: "11px", color: "#ccc" }}>💬 {post.comments.length}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {(selectedPlace._feedPosts ?? []).length === 0 && (<div style={{ padding: "14px 24px 20px", textAlign: "center" }}><p style={{ margin: 0, fontSize: "12px", color: "#ccc" }}>아직 큐레이션이 없어요</p></div>)}
-          </div>
+          <>
+            <div
+              className="placeDetailSheetBackdrop"
+              onClick={() => {
+                setSelectedPlace(null);
+                setSelectedMapPlace(null);
+                clearSearchMarkers();
+              }}
+            />
+            <PlaceDetailSheet
+              place={selectedPlace as PlaceSheetData}
+              isSaved={!!resolveSavedMatch(selectedPlace)}
+              layout="overlay"
+              showDirections={!!(selectedPlace.y && selectedPlace.x)}
+              directionsMode={directionsMode}
+              directionsLoading={directionsLoading}
+              directionsInfo={directionsInfo}
+              onClose={() => {
+                setSelectedPlace(null);
+                setSelectedMapPlace(null);
+                clearSearchMarkers();
+              }}
+              onToggleSave={() => { void togglePlaceSheetSave(selectedPlace as PlaceSheetData); }}
+              onCurationClick={(postId) => {
+                setDetailPostId(postId);
+                setSelectedPlace(null);
+              }}
+              onImageLightbox={setLightboxImg}
+              timeAgoLabel={timeAgo}
+              onOpenAppleMaps={() =>
+                openAppleMapsPlace(
+                  selectedPlace.place_name,
+                  selectedPlace.road_address_name || selectedPlace.address_name,
+                  selectedPlace.y,
+                  selectedPlace.x,
+                )
+              }
+              onDirectionsModeChange={(mode) => {
+                setMapExpanded(true);
+                setDirectionsMode(mode);
+                setTimeout(
+                  () => drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), mode),
+                  600,
+                );
+              }}
+              onOpenTransit={() =>
+                openTransitInKakaoMap(
+                  selectedPlace.place_name,
+                  parseFloat(selectedPlace.y),
+                  parseFloat(selectedPlace.x),
+                )
+              }
+            />
+          </>
         )}
+        {homePlaceSheet &&
+          createPortal(
+            <>
+              <div className="placeDetailSheetBackdrop" onClick={() => setHomePlaceSheet(null)} />
+              <PlaceDetailSheet
+                place={homePlaceSheet}
+                isSaved={!!resolveSavedMatch(homePlaceSheet)}
+                layout="overlay"
+                onClose={() => setHomePlaceSheet(null)}
+                onToggleSave={() => { void togglePlaceSheetSave(homePlaceSheet); }}
+                onCurationClick={(postId) => {
+                  setHomePlaceSheet(null);
+                  setDetailPostId(postId);
+                }}
+                onImageLightbox={setLightboxImg}
+                timeAgoLabel={timeAgo}
+                onOpenAppleMaps={() =>
+                  openAppleMapsPlace(
+                    homePlaceSheet.place_name,
+                    homePlaceSheet.road_address_name || homePlaceSheet.address_name,
+                    homePlaceSheet.y,
+                    homePlaceSheet.x,
+                  )
+                }
+              />
+            </>,
+            document.body,
+          )}
         {courseShareModalEl}
         {sharePostModalEl}
         {notificationModalEl}

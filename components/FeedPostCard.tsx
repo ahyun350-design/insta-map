@@ -42,6 +42,7 @@ type Props = {
   onComment: () => void;
   onShare: () => void;
   onImageLightbox: (url: string) => void;
+  onPlaceOverlayClick?: () => void;
 };
 
 const CAPTION_PREVIEW_LEN = 100;
@@ -53,11 +54,13 @@ function formatLikeCount(n: number): string {
 function FeedPostMedia({
   images,
   placeName,
-  onImageLightbox,
+      onImageLightbox,
+  onPlaceOverlayClick,
 }: {
   images: string[];
   placeName: string;
   onImageLightbox: (url: string) => void;
+  onPlaceOverlayClick?: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -98,7 +101,16 @@ function FeedPostMedia({
         ))}
       </div>
       {placeName.trim() && (
-        <span className="feedPostMediaOverlayPlace">📍 {placeName}</span>
+        <button
+          type="button"
+          className="feedPostMediaOverlayPlace"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPlaceOverlayClick?.();
+          }}
+        >
+          📍 {placeName}
+        </button>
       )}
       {multi && (
         <span className="feedPostMediaOverlayPage">
@@ -138,6 +150,7 @@ export function FeedPostCard({
   onComment,
   onShare,
   onImageLightbox,
+  onPlaceOverlayClick,
 }: Props) {
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const [likePop, setLikePop] = useState(false);
@@ -199,7 +212,12 @@ export function FeedPostCard({
         )}
       </header>
 
-      <FeedPostMedia images={post.images} placeName={post.placeName} onImageLightbox={onImageLightbox} />
+      <FeedPostMedia
+        images={post.images}
+        placeName={post.placeName}
+        onImageLightbox={onImageLightbox}
+        onPlaceOverlayClick={onPlaceOverlayClick}
+      />
 
       <div className="feedPostBody" onClick={(e) => e.stopPropagation()}>
         <div className="feedPostActions">
