@@ -978,6 +978,36 @@ body {
   cursor: pointer;
 }
 
+.placeDetailSheetCurationCarousel {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-radius: 8px;
+}
+
+.placeDetailSheetCurationCarousel::-webkit-scrollbar {
+  display: none;
+}
+
+.placeDetailSheetCurationCarouselImg {
+  flex: 0 0 100%;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  scroll-snap-align: center;
+  cursor: pointer;
+  display: block;
+}
+
+.placeDetailSheetCurationPage {
+  margin: 4px 0 0;
+  font-size: 10px;
+  color: #999;
+  text-align: right;
+}
+
 .placeDetailSheetCurationComment {
   margin: 0 0 6px;
   font-size: 12px;

@@ -118,20 +118,46 @@ export type RelatedPostsAnchor = {
 /**
  * 주어진 장소가 큐레이션의 사진 태그 중 하나에 매칭되는지 확인
  */
+function photoTagMatchesPlaceRef(tag: PhotoPlaceTag, placeRef: PlaceRefForPhotoTagMatch): boolean {
+  if (placeRef.placeId && tag.placeId && tag.placeId === placeRef.placeId) return true;
+  const refName = placeRef.placeName?.trim() ?? "";
+  const refAddr = placeRef.address?.trim() ?? "";
+  if (refName && tag.placeName.trim() === refName) {
+    if (!refAddr || tag.address.trim() === refAddr) return true;
+  }
+  return false;
+}
+
 export function postHasPlaceInPhotoTags(
   post: Pick<FeedPost, "photoPlaceTags">,
   placeRef: PlaceRefForPhotoTagMatch,
 ): boolean {
   if (!post.photoPlaceTags || post.photoPlaceTags.length === 0) return false;
-  const refName = placeRef.placeName?.trim() ?? "";
-  const refAddr = placeRef.address?.trim() ?? "";
-  return post.photoPlaceTags.some((tag) => {
-    if (placeRef.placeId && tag.placeId && tag.placeId === placeRef.placeId) return true;
-    if (refName && tag.placeName.trim() === refName) {
-      if (!refAddr || tag.address.trim() === refAddr) return true;
-    }
-    return false;
-  });
+  return post.photoPlaceTags.some((tag) => photoTagMatchesPlaceRef(tag, placeRef));
+}
+
+/** placeRef에 매칭되는 사진 인덱스. legacy(태그 없음)는 빈 배열 → 호출부에서 전체 사진 표시 */
+export function getMatchingPhotoIndices(
+  post: Pick<FeedPost, "photoPlaceTags">,
+  placeRef: PlaceRefForPhotoTagMatch,
+): number[] {
+  if (!post.photoPlaceTags || post.photoPlaceTags.length === 0) return [];
+  return post.photoPlaceTags
+    .filter((tag) => photoTagMatchesPlaceRef(tag, placeRef))
+    .map((tag) => tag.photoIndex);
+}
+
+/** PlaceDetailSheet 관련 큐레이션 카드용 — 태그 매칭 사진만, legacy는 전체 */
+export function getRelatedPostImagesForPlace(
+  post: Pick<FeedPost, "images" | "photoPlaceTags">,
+  placeRef: PlaceRefForPhotoTagMatch,
+): string[] {
+  const indices = getMatchingPhotoIndices(post, placeRef);
+  if (indices.length === 0) return post.images;
+  return [...indices]
+    .sort((a, b) => a - b)
+    .map((i) => post.images[i])
+    .filter((src): src is string => typeof src === "string" && src.length > 0);
 }
 
 export function placeRefToRelatedAnchor(ref: PlaceRefForPhotoTagMatch): RelatedPostsAnchor {

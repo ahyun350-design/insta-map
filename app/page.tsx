@@ -1032,6 +1032,7 @@ function HomePageContent() {
     x: typeof lng === "number" ? String(lng) : undefined,
     _feedPosts: relatedPosts,
     _savedPlaceId: place.id,
+    _placeRef: placeRefFromPlace(place, lat, lng),
   }), []);
 
   const resolveSavedMatch = useCallback((candidate: any): Place | undefined => {
@@ -3029,7 +3030,8 @@ function HomePageContent() {
     if (postCoords && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(postCoords.lat, postCoords.lng));
       mapRef.current.setLevel(4);
-      const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromFeedPost(detailPost));
+      const detailRef = placeRefFromFeedPost(detailPost);
+      const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, detailRef);
       setSelectedPlace({
         place_name: detailPost.placeName,
         category_name: detailPost.category,
@@ -3040,6 +3042,7 @@ function HomePageContent() {
         y: String(postCoords.lat),
         x: String(postCoords.lng),
         _feedPosts: relatedPosts,
+        _placeRef: detailRef,
       });
       setMapExpanded(true);
       setDetailPostId(null);
@@ -3053,15 +3056,13 @@ function HomePageContent() {
         const geocodedLng = parseFloat(result[0].x);
         mapRef.current.setCenter(new window.kakao.maps.LatLng(geocodedLat, geocodedLng));
         mapRef.current.setLevel(4);
-        const relatedPosts = getRelatedPostsForPlaceSheet(
-          feedPosts,
-          {
-            ...placeRefFromFeedPost(detailPost),
-            ...(Number.isFinite(geocodedLat) && Number.isFinite(geocodedLng)
-              ? { lat: geocodedLat, lng: geocodedLng }
-              : {}),
-          },
-        );
+        const detailRef = {
+          ...placeRefFromFeedPost(detailPost),
+          ...(Number.isFinite(geocodedLat) && Number.isFinite(geocodedLng)
+            ? { lat: geocodedLat, lng: geocodedLng }
+            : {}),
+        };
+        const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, detailRef);
         new window.kakao.maps.services.Places().keywordSearch(detailPost.placeName, (data: any[], st: string) => {
           const base =
             st === window.kakao.maps.services.Status.OK && data[0]
@@ -3073,7 +3074,7 @@ function HomePageContent() {
                   phone: "",
                   place_url: "",
                 };
-          setSelectedPlace({ ...base, _feedPosts: relatedPosts });
+          setSelectedPlace({ ...base, _feedPosts: relatedPosts, _placeRef: detailRef });
           setMapExpanded(true);
         });
       });
@@ -3517,6 +3518,11 @@ function HomePageContent() {
         image: new window.kakao.maps.MarkerImage(markerImg, new window.kakao.maps.Size(32, 40)),
       });
       window.kakao.maps.event.addListener(marker, "click", () => {
+        const coursePlaceRef = placeRefFromPlace(
+          { id: place.id, name: place.name, address: place.address, category: place.category },
+          place.lat,
+          place.lng,
+        );
         setSelectedPlace({
           place_name: place.name,
           category_name: place.category,
@@ -3525,14 +3531,8 @@ function HomePageContent() {
           place_url: "",
           y: place.lat,
           x: place.lng,
-          _feedPosts: getRelatedPostsForPlaceSheet(
-            feedPosts,
-            placeRefFromPlace(
-              { id: place.id, name: place.name, address: place.address, category: place.category },
-              place.lat,
-              place.lng,
-            ),
-          ),
+          _feedPosts: getRelatedPostsForPlaceSheet(feedPosts, coursePlaceRef),
+          _placeRef: coursePlaceRef,
         });
       });
       searchMarkersRef.current.push(marker);
@@ -4177,6 +4177,13 @@ function HomePageContent() {
         placeId: null,
       });
       window.kakao.maps.event.addListener(marker, "click", () => {
+        const feedPinRef = {
+          placeName: rep.placeName,
+          lat,
+          lng,
+          address: rep.address,
+          placeId: null,
+        };
         setSelectedPlace({
           place_name: rep.placeName,
           category_name: rep.category,
@@ -4186,6 +4193,7 @@ function HomePageContent() {
           y: String(lat),
           x: String(lng),
           _feedPosts: groupPosts,
+          _placeRef: feedPinRef,
         });
       });
       arr.push(marker);
@@ -4275,9 +4283,11 @@ function HomePageContent() {
     }
     expandedSearchOpenDedupeRef.current = { t: now, key };
     console.log("[PindMap:expandedMap] open place card", source, place.place_name, { y: place.y, x: place.x });
+    const expandedRef = placeRefFromKakaoPlace(place);
     setSelectedPlace({
       ...place,
-      _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, placeRefFromKakaoPlace(place)),
+      _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, expandedRef),
+      _placeRef: expandedRef,
     });
   }, []);
 
@@ -5264,6 +5274,7 @@ function HomePageContent() {
           },
           relatedPosts,
           matchedSaved?.id,
+          ref,
         ),
       );
     },

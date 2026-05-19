@@ -1,7 +1,9 @@
 "use client";
 
+import { useCallback, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
-import type { PlaceSheetData, PlaceSheetFeedPost } from "@/lib/placeSheet";
+import { getRelatedPostImagesForPlace } from "@/lib/photoPlaceTag";
+import { placeRefFromPlaceSheet, type PlaceSheetData, type PlaceSheetFeedPost } from "@/lib/placeSheet";
 
 type DirectionsMode = "car" | "walk";
 
@@ -24,6 +26,63 @@ type Props = {
   onClearRoute?: () => void;
 };
 
+function PlaceDetailCurationImages({
+  images,
+  onImageLightbox,
+}: {
+  images: string[];
+  onImageLightbox: (url: string) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const multi = images.length > 1;
+
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || el.clientWidth <= 0) return;
+    setActiveIndex(Math.round(el.scrollLeft / el.clientWidth));
+  }, []);
+
+  if (images.length === 0) return null;
+
+  if (!multi) {
+    return (
+      <div className="placeDetailSheetCurationImages" onClick={(e) => e.stopPropagation()}>
+        <img
+          src={images[0]}
+          alt=""
+          onClick={(ev) => {
+            ev.stopPropagation();
+            onImageLightbox(images[0]);
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div onClick={(e) => e.stopPropagation()}>
+      <div ref={scrollRef} className="placeDetailSheetCurationCarousel" onScroll={onScroll}>
+        {images.map((img, i) => (
+          <img
+            key={`${img}-${i}`}
+            src={img}
+            alt=""
+            className="placeDetailSheetCurationCarouselImg"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onImageLightbox(img);
+            }}
+          />
+        ))}
+      </div>
+      <p className="placeDetailSheetCurationPage" aria-hidden>
+        {activeIndex + 1}/{images.length}
+      </p>
+    </div>
+  );
+}
+
 export function PlaceDetailSheet({
   place,
   isSaved,
@@ -43,6 +102,7 @@ export function PlaceDetailSheet({
   onClearRoute,
 }: Props) {
   const relatedPosts: PlaceSheetFeedPost[] = place._feedPosts ?? [];
+  const placeRef = placeRefFromPlaceSheet(place);
   const heartFill = isSaved ? "#e53935" : "none";
   const heartStroke = isSaved ? "#e53935" : "#1a2a7a";
 
@@ -151,41 +211,30 @@ export function PlaceDetailSheet({
       {relatedPosts.length > 0 ? (
         <div className="placeDetailSheetCurations">
           <p className="placeDetailSheetCurationsTitle">큐레이션 {relatedPosts.length}</p>
-          {relatedPosts.map((post) => (
-            <button
-              key={post.id}
-              type="button"
-              className="placeDetailSheetCurationItem"
-              onClick={() => onCurationClick(post.id)}
-            >
-              <div className="placeDetailSheetCurationTop">
-                <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={26} fontSize={11} />
-                <span className="placeDetailSheetCurationUser">{post.user}</span>
-                <span className="placeDetailSheetCurationTime">{timeAgoLabel(post.createdAt)}</span>
-              </div>
-              <p className="placeDetailSheetCurationTitle">{post.title || post.placeName}</p>
-              {post.images.length > 0 && (
-                <div className="placeDetailSheetCurationImages" onClick={(e) => e.stopPropagation()}>
-                  {post.images.map((img, i) => (
-                    <img
-                      key={i}
-                      src={img}
-                      alt=""
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        onImageLightbox(img);
-                      }}
-                    />
-                  ))}
+          {relatedPosts.map((post) => {
+            const displayImages = getRelatedPostImagesForPlace(post, placeRef);
+            return (
+              <button
+                key={post.id}
+                type="button"
+                className="placeDetailSheetCurationItem"
+                onClick={() => onCurationClick(post.id)}
+              >
+                <div className="placeDetailSheetCurationTop">
+                  <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={26} fontSize={11} />
+                  <span className="placeDetailSheetCurationUser">{post.user}</span>
+                  <span className="placeDetailSheetCurationTime">{timeAgoLabel(post.createdAt)}</span>
                 </div>
-              )}
-              <p className="placeDetailSheetCurationComment">{post.comment}</p>
-              <div className="placeDetailSheetCurationStats">
-                <span style={{ color: post.liked_by_me ? "#e05555" : "#ccc" }}>♥ {post.likes_count}</span>
-                <span>💬 {post.comments.length}</span>
-              </div>
-            </button>
-          ))}
+                <p className="placeDetailSheetCurationTitle">{post.title || post.placeName}</p>
+                <PlaceDetailCurationImages images={displayImages} onImageLightbox={onImageLightbox} />
+                <p className="placeDetailSheetCurationComment">{post.comment}</p>
+                <div className="placeDetailSheetCurationStats">
+                  <span style={{ color: post.liked_by_me ? "#e05555" : "#ccc" }}>♥ {post.likes_count}</span>
+                  <span>💬 {post.comments.length}</span>
+                </div>
+              </button>
+            );
+          })}
         </div>
       ) : (
         <div className="placeDetailSheetCurationsEmpty">
