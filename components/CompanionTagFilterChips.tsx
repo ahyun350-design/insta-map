@@ -12,7 +12,6 @@ export function CompanionTagFilterChips({ value, onChange }: Props) {
     <div className="companionFilterChips" role="tablist" aria-label="동행 태그 필터">
       {COMPANION_FILTER_CHIPS.map((chip) => {
         const selected = value === chip.value;
-        const label = chip.value === "all" ? chip.label : `${chip.emoji} ${chip.label}`;
         return (
           <button
             key={chip.value}
@@ -22,7 +21,7 @@ export function CompanionTagFilterChips({ value, onChange }: Props) {
             className={selected ? "companionFilterChip companionFilterChipSelected" : "companionFilterChip"}
             onClick={() => onChange(chip.value)}
           >
-            {label}
+            {chip.shortLabel}
           </button>
         );
       })}
