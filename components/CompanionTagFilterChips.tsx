@@ -9,7 +9,7 @@ type Props = {
 
 export function CompanionTagFilterChips({ value, onChange }: Props) {
   return (
-    <div className="companionFilterChips" role="tablist" aria-label="동행 태그 필터">
+    <div className="companionFilterTabs" role="tablist" aria-label="동행 태그 필터">
       {COMPANION_FILTER_CHIPS.map((chip) => {
         const selected = value === chip.value;
         return (
@@ -18,7 +18,7 @@ export function CompanionTagFilterChips({ value, onChange }: Props) {
             type="button"
             role="tab"
             aria-selected={selected}
-            className={selected ? "companionFilterChip companionFilterChipSelected" : "companionFilterChip"}
+            className={selected ? "companionFilterTab companionFilterTabSelected" : "companionFilterTab"}
             onClick={() => onChange(chip.value)}
           >
             {chip.shortLabel}
