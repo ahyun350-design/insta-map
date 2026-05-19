@@ -1369,8 +1369,7 @@ body {
   width: 100%;
   box-sizing: border-box;
   margin: 0;
-  padding: 8px;
-  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  padding: 10px 8px;
   border-radius: 36px;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.06);
@@ -1638,7 +1637,7 @@ body {
     right: 0 !important;
     bottom: 0 !important;
     margin: 0 !important;
-    padding: 0 clamp(6px, 2.5vw, 8px) 0 !important;
+    padding: 0 clamp(6px, 2.5vw, 8px) env(safe-area-inset-bottom, 0px) !important;
     background: transparent !important;
     box-sizing: border-box !important;
   }
