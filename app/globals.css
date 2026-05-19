@@ -1368,6 +1368,7 @@ body {
   align-items: stretch;
   width: 100%;
   box-sizing: border-box;
+  margin: 0;
   padding: 8px;
   padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   border-radius: 36px;
@@ -1630,14 +1631,25 @@ body {
     box-sizing: border-box !important;
   }
 
-  /* 하단 탭바 — 화면 하단 고정 (데스크톱 프리뷰는 sticky 유지) */
+  /* 하단 탭바 — viewport 최하단 밀착, safe-area는 tabBar 흰 배경으로 채움 */
   .tabBar {
     position: fixed !important;
     left: 0 !important;
     right: 0 !important;
     bottom: 0 !important;
-    padding: 0 clamp(6px, 2.5vw, 8px) !important;
     margin: 0 !important;
+    padding: 0 clamp(6px, 2.5vw, 8px) env(safe-area-inset-bottom, 0px) !important;
+    background: #fff !important;
+    box-sizing: border-box !important;
+  }
+
+  .tabBarPill {
+    border-radius: 24px 24px 0 0 !important;
+    border-bottom: none !important;
+    box-shadow:
+      0 -2px 16px rgba(0, 0, 0, 0.06),
+      0 2px 8px rgba(0, 0, 0, 0.04) !important;
+    padding-bottom: 8px !important;
   }
 
   .phoneBezel {
