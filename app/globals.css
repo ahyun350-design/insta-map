@@ -1640,7 +1640,7 @@ body {
     right: 0 !important;
     bottom: 0 !important;
     margin: 0 !important;
-    padding: 6px clamp(6px, 2.5vw, 8px) env(safe-area-inset-bottom, 0px) !important;
+    padding: 6px clamp(6px, 2.5vw, 8px) max(14px, calc(env(safe-area-inset-bottom, 0px) - 16px)) !important;
     background: #fff !important;
     box-sizing: border-box !important;
     z-index: 100 !important;
