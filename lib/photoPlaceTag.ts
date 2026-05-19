@@ -100,6 +100,77 @@ export function getDisplayPlaceForPhoto(
   return null;
 }
 
+export type PlaceRefForPhotoTagMatch = {
+  placeId?: string | null;
+  placeName?: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+};
+
+export type RelatedPostsAnchor = {
+  placeName: string;
+  lat?: number;
+  lng?: number;
+  address?: string;
+};
+
+/**
+ * 주어진 장소가 큐레이션의 사진 태그 중 하나에 매칭되는지 확인
+ */
+export function postHasPlaceInPhotoTags(
+  post: Pick<FeedPost, "photoPlaceTags">,
+  placeRef: PlaceRefForPhotoTagMatch,
+): boolean {
+  if (!post.photoPlaceTags || post.photoPlaceTags.length === 0) return false;
+  const refName = placeRef.placeName?.trim() ?? "";
+  const refAddr = placeRef.address?.trim() ?? "";
+  return post.photoPlaceTags.some((tag) => {
+    if (placeRef.placeId && tag.placeId && tag.placeId === placeRef.placeId) return true;
+    if (refName && tag.placeName.trim() === refName) {
+      if (!refAddr || tag.address.trim() === refAddr) return true;
+    }
+    return false;
+  });
+}
+
+export function placeRefToRelatedAnchor(ref: PlaceRefForPhotoTagMatch): RelatedPostsAnchor {
+  return {
+    placeName: ref.placeName?.trim() ?? "",
+    ...(typeof ref.lat === "number" && typeof ref.lng === "number"
+      ? { lat: ref.lat, lng: ref.lng }
+      : {}),
+    address: ref.address,
+  };
+}
+
+export function dedupeFeedPostsById<T extends { id: string }>(posts: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const p of posts) {
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    out.push(p);
+  }
+  return out;
+}
+
+/**
+ * PlaceDetailSheet 관련 큐레이션: 사진 태그 매칭 + 기존 거리 매칭(legacy) 합치기
+ */
+export function mergeRelatedFeedPostsForPlaceSheet(
+  posts: FeedPost[],
+  placeRef: PlaceRefForPhotoTagMatch,
+  legacyFilter: (posts: FeedPost[], anchor: RelatedPostsAnchor) => FeedPost[],
+): FeedPost[] {
+  const tagMatched = posts.filter((p) => !p.archived && postHasPlaceInPhotoTags(p, placeRef));
+  const legacyPool = posts.filter(
+    (p) => !p.archived && (!p.photoPlaceTags || p.photoPlaceTags.length === 0),
+  );
+  const legacyMatched = legacyFilter(legacyPool, placeRefToRelatedAnchor(placeRef));
+  return dedupeFeedPostsById([...tagMatched, ...legacyMatched]);
+}
+
 export function validatePhotoPlaceTags(
   photos: string[],
   tags: PhotoPlaceTag[],

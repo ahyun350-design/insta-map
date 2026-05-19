@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
 import type { PhotoPlaceTag } from "@/lib/feedPost";
-import { getDisplayPlaceForPhoto } from "@/lib/photoPlaceTag";
+import { getDisplayPlaceForPhoto, type PlaceRefForPhotoTagMatch } from "@/lib/photoPlaceTag";
 
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -48,7 +48,7 @@ type Props = {
   onComment: () => void;
   onShare: () => void;
   onImageLightbox: (url: string) => void;
-  onPlaceOverlayClick?: () => void;
+  onPlaceOverlayClick?: (placeRef: PlaceRefForPhotoTagMatch) => void;
 };
 
 const CAPTION_PREVIEW_LEN = 100;
@@ -69,7 +69,7 @@ function FeedPostMedia({
     "placeName" | "address" | "category" | "lat" | "lng" | "photoPlaceTags"
   >;
   onImageLightbox: (url: string) => void;
-  onPlaceOverlayClick?: () => void;
+  onPlaceOverlayClick?: (placeRef: PlaceRefForPhotoTagMatch) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -128,7 +128,14 @@ function FeedPostMedia({
           className="feedPostMediaOverlayPlace"
           onClick={(e) => {
             e.stopPropagation();
-            onPlaceOverlayClick?.();
+            if (!displayPlace) return;
+            onPlaceOverlayClick?.({
+              placeId: displayPlace.placeId,
+              placeName: displayPlace.placeName,
+              address: displayPlace.address,
+              lat: displayPlace.lat,
+              lng: displayPlace.lng,
+            });
           }}
         >
           📍 {overlayPlaceName}

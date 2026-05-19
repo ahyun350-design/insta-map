@@ -54,7 +54,12 @@ import {
   isGeolocationPermissionDenied,
 } from "@/lib/getCurrentPositionForMap";
 import { parseFeedPostFromRow, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
-import { getRepresentativePhotoPlaceTag } from "@/lib/photoPlaceTag";
+import {
+  getDisplayPlaceForPhoto,
+  getRepresentativePhotoPlaceTag,
+  mergeRelatedFeedPostsForPlaceSheet,
+  type PlaceRefForPhotoTagMatch,
+} from "@/lib/photoPlaceTag";
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -264,6 +269,64 @@ function filterRelatedFeedPosts(posts: FeedPost[], anchor: RelatedPostAnchor): F
 
     return !anchorCoords && !postCoords;
   });
+}
+
+/** PlaceDetailSheet 관련 큐레이션 — 사진 태그 매칭 + legacy 거리 매칭 합침 (filterRelatedFeedPosts 본체는 그대로) */
+function getRelatedPostsForPlaceSheet(
+  posts: FeedPost[],
+  placeRef: PlaceRefForPhotoTagMatch,
+): FeedPost[] {
+  return mergeRelatedFeedPostsForPlaceSheet(posts, placeRef, filterRelatedFeedPosts);
+}
+
+function placeRefFromPlace(place: Place, lat?: number, lng?: number): PlaceRefForPhotoTagMatch {
+  const coords =
+    typeof lat === "number" && typeof lng === "number"
+      ? { lat, lng }
+      : latLngFromRow(place) ?? undefined;
+  return {
+    placeId: place.id,
+    placeName: place.name,
+    address: place.address,
+    ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+  };
+}
+
+function placeRefFromKakaoPlace(place: {
+  id?: string;
+  place_name?: string;
+  y?: string | number;
+  x?: string | number;
+  road_address_name?: string;
+  address_name?: string;
+}): PlaceRefForPhotoTagMatch {
+  const anchor = relatedAnchorFromKakaoPlace(place);
+  return {
+    placeId: place.id ?? null,
+    placeName: anchor.placeName,
+    address: anchor.address,
+    ...(anchor.lat != null && anchor.lng != null ? { lat: anchor.lat, lng: anchor.lng } : {}),
+  };
+}
+
+function placeRefFromFeedPost(post: FeedPost, photoIndex = 0): PlaceRefForPhotoTagMatch {
+  const display = getDisplayPlaceForPhoto(post, photoIndex);
+  if (display) {
+    return {
+      placeId: display.placeId,
+      placeName: display.placeName,
+      address: display.address,
+      lat: display.lat,
+      lng: display.lng,
+    };
+  }
+  return {
+    placeName: post.placeName,
+    address: post.address,
+    lat: post.lat,
+    lng: post.lng,
+    placeId: null,
+  };
 }
 
 declare global { interface Window { kakao: any; } }
@@ -2924,7 +2987,7 @@ function HomePageContent() {
   const handleSavedPlaceClick = (place: Place) => {
     setSelectedMapPlace(place);
     setActiveTab("map");
-    const relatedPosts = filterRelatedFeedPosts(feedPosts, relatedAnchorFromPlace(place));
+    const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
     const stored = latLngFromRow(place);
     if (stored && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(stored.lat, stored.lng));
@@ -2966,12 +3029,7 @@ function HomePageContent() {
     if (postCoords && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(postCoords.lat, postCoords.lng));
       mapRef.current.setLevel(4);
-      const relatedPosts = filterRelatedFeedPosts(feedPosts, {
-        placeName: detailPost.placeName,
-        lat: postCoords.lat,
-        lng: postCoords.lng,
-        address: detailPost.address,
-      });
+      const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromFeedPost(detailPost));
       setSelectedPlace({
         place_name: detailPost.placeName,
         category_name: detailPost.category,
@@ -2995,13 +3053,15 @@ function HomePageContent() {
         const geocodedLng = parseFloat(result[0].x);
         mapRef.current.setCenter(new window.kakao.maps.LatLng(geocodedLat, geocodedLng));
         mapRef.current.setLevel(4);
-        const relatedPosts = filterRelatedFeedPosts(feedPosts, {
-          placeName: detailPost.placeName,
-          ...(Number.isFinite(geocodedLat) && Number.isFinite(geocodedLng)
-            ? { lat: geocodedLat, lng: geocodedLng }
-            : {}),
-          address: detailPost.address,
-        });
+        const relatedPosts = getRelatedPostsForPlaceSheet(
+          feedPosts,
+          {
+            ...placeRefFromFeedPost(detailPost),
+            ...(Number.isFinite(geocodedLat) && Number.isFinite(geocodedLng)
+              ? { lat: geocodedLat, lng: geocodedLng }
+              : {}),
+          },
+        );
         new window.kakao.maps.services.Places().keywordSearch(detailPost.placeName, (data: any[], st: string) => {
           const base =
             st === window.kakao.maps.services.Status.OK && data[0]
@@ -3023,7 +3083,7 @@ function HomePageContent() {
 
   // 지도 탭의 작은 목록에서 장소 클릭 → 상세 카드만 띄움 (전체화면 X)
   const handleMiniListClick = (place: Place) => {
-    const relatedPosts = filterRelatedFeedPosts(feedPosts, relatedAnchorFromPlace(place));
+    const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
     if (!window.kakao?.maps?.services) {
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
       return;
@@ -3465,12 +3525,14 @@ function HomePageContent() {
           place_url: "",
           y: place.lat,
           x: place.lng,
-          _feedPosts: filterRelatedFeedPosts(feedPosts, {
-            placeName: place.name,
-            lat: place.lat,
-            lng: place.lng,
-            address: place.address,
-          }),
+          _feedPosts: getRelatedPostsForPlaceSheet(
+            feedPosts,
+            placeRefFromPlace(
+              { id: place.id, name: place.name, address: place.address, category: place.category },
+              place.lat,
+              place.lng,
+            ),
+          ),
         });
       });
       searchMarkersRef.current.push(marker);
@@ -3946,12 +4008,10 @@ function HomePageContent() {
           const clickToken = Date.now();
           console.log("[place click]", place.name, "token:", clickToken);
           selectedPlaceTokenRef.current = clickToken;
-          const relatedPosts = filterRelatedFeedPosts(posts, {
-            placeName: place.name,
-            lat: markerLat,
-            lng: markerLng,
-            address: place.address,
-          });
+          const relatedPosts = getRelatedPostsForPlaceSheet(
+            posts,
+            placeRefFromPlace(place, markerLat, markerLng),
+          );
           // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
           console.log("[place click:setSelected1]", place.name);
           setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
@@ -4109,11 +4169,12 @@ function HomePageContent() {
         position: new window.kakao.maps.LatLng(lat, lng),
         image: new window.kakao.maps.MarkerImage(makeMarkerImage(rep.category), new window.kakao.maps.Size(36, 44)),
       });
-      const groupPosts = filterRelatedFeedPosts(posts, {
+      const groupPosts = getRelatedPostsForPlaceSheet(posts, {
         placeName: rep.placeName,
         lat,
         lng,
         address: rep.address,
+        placeId: null,
       });
       window.kakao.maps.event.addListener(marker, "click", () => {
         setSelectedPlace({
@@ -4216,7 +4277,7 @@ function HomePageContent() {
     console.log("[PindMap:expandedMap] open place card", source, place.place_name, { y: place.y, x: place.x });
     setSelectedPlace({
       ...place,
-      _feedPosts: filterRelatedFeedPosts(feedPostsRef.current, relatedAnchorFromKakaoPlace(place)),
+      _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, placeRefFromKakaoPlace(place)),
     });
   }, []);
 
@@ -5017,7 +5078,10 @@ function HomePageContent() {
         expandedSavedTouchAssistDedupeRef.current = { t: now, id: pickedSaved.id };
         const c = savedPlaceCoordsRef.current[pickedSaved.id];
         if (!c) return;
-        const relatedPosts = filterRelatedFeedPosts(feedPosts, relatedAnchorFromPlace(pickedSaved));
+        const relatedPosts = getRelatedPostsForPlaceSheet(
+          feedPosts,
+          placeRefFromPlace(pickedSaved, c.lat, c.lng),
+        );
         console.log("[PindMap:expandedMap] saved-pin touch assist", pickedSaved.name);
         setSelectedPlace(toSelectedFromSavedPlace(pickedSaved, relatedPosts, c.lat, c.lng));
       };
@@ -5179,18 +5243,32 @@ function HomePageContent() {
     onAfterSave?.();
   }, [user?.id, resolveSavedMatch, deletePlace, addPlace, showToast]);
 
-  const openHomePlaceSheetFromPost = useCallback((post: FeedPost) => {
-    const relatedPosts = filterRelatedFeedPosts(feedPosts, {
-      placeName: post.placeName,
-      lat: post.lat,
-      lng: post.lng,
-      address: post.address,
-    });
-    const matchedSaved = savedPlaces.find(
-      (p) => p.name.trim() === post.placeName.trim() && p.address.trim() === post.address.trim(),
-    );
-    setHomePlaceSheet(feedPostToPlaceSheet(post, relatedPosts, matchedSaved?.id));
-  }, [feedPosts, savedPlaces]);
+  const openHomePlaceSheetFromPost = useCallback(
+    (post: FeedPost, placeRef?: PlaceRefForPhotoTagMatch) => {
+      const ref = placeRef ?? placeRefFromFeedPost(post);
+      const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, ref);
+      const sheetName = ref.placeName?.trim() || post.placeName;
+      const sheetAddress = ref.address?.trim() || post.address;
+      const matchedSaved = savedPlaces.find(
+        (p) => p.name.trim() === sheetName && p.address.trim() === sheetAddress,
+      );
+      setHomePlaceSheet(
+        feedPostToPlaceSheet(
+          {
+            id: post.id,
+            placeName: sheetName,
+            address: sheetAddress,
+            category: post.category,
+            lat: ref.lat ?? post.lat,
+            lng: ref.lng ?? post.lng,
+          },
+          relatedPosts,
+          matchedSaved?.id,
+        ),
+      );
+    },
+    [feedPosts, savedPlaces],
+  );
 
   const renderPlaceCard = () => {
     if (!selectedPlace) return null;
@@ -6412,7 +6490,7 @@ function HomePageContent() {
                   onComment={() => { setDetailPostId(post.id); setScrollToComment(true); }}
                   onShare={() => { void openShareModal(post); }}
                   onImageLightbox={setLightboxImg}
-                  onPlaceOverlayClick={() => openHomePlaceSheetFromPost(post)}
+                  onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(post, placeRef)}
                 />
               ))}
               </div>
