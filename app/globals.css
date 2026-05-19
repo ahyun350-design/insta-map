@@ -1366,12 +1366,11 @@ body {
   display: flex;
   flex-direction: row;
   justify-content: space-around;
-  align-items: stretch;
+  align-items: center;
   width: 100%;
   box-sizing: border-box;
   margin: 0;
-  padding: 10px 8px;
-  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  padding: 8px;
   border-radius: 36px;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.06);
@@ -1421,8 +1420,8 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 6px 0;
+  gap: 3px;
+  padding: 2px 0;
   border-radius: 24px;
   color: #9ca3af;
   cursor: pointer;
@@ -1634,18 +1633,22 @@ body {
     box-sizing: border-box !important;
   }
 
-  /* 하단 탭바 — 흰 바닥(safe-area) + 위에 둥근 필 (참고: 지그재그·인스타 패턴) */
+  /* 하단 탭바 — 크림 패턴: 작은 pill + 아래 흰 띠 ~12px + safe-area */
   .tabBar {
     position: fixed !important;
     left: 0 !important;
     right: 0 !important;
     bottom: 0 !important;
     margin: 0 !important;
-    padding: 6px clamp(6px, 2.5vw, 8px) 10px !important;
+    padding: 6px clamp(6px, 2.5vw, 8px) env(safe-area-inset-bottom, 0px) !important;
     background: #fff !important;
     box-sizing: border-box !important;
     z-index: 100 !important;
     pointer-events: auto !important;
+  }
+
+  .tabBarPill {
+    margin-bottom: 12px !important;
   }
 
   .phoneBezel {
