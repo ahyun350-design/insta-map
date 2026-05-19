@@ -115,7 +115,7 @@ export function BottomTabBar({ activeTab, onTabChange, hidden = false, messageUn
               onClick={() => onTabChange(tab.id)}
             >
               <span className="tabIconWrap">
-                <Icon className="tabIconSvg" width={22} height={22} />
+                <Icon className="tabIconSvg" aria-hidden />
                 {showBadge && (
                   <span
                     className="tabBadgeDot"

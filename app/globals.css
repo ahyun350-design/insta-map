@@ -34,7 +34,7 @@
   --sar: env(safe-area-inset-right, 0px);
 
   /* 하단 플로팅 탭바 아래 콘텐츠 여유 (스크롤 영역 padding-bottom) */
-  --tab-bar-scroll-padding: calc(80px + env(safe-area-inset-bottom, 0px));
+  --tab-bar-scroll-padding: calc(72px + env(safe-area-inset-bottom, 0px));
 }
 
 * {
@@ -1346,50 +1346,43 @@ body {
   color: var(--navy);
 }
 
-/* ── 탭바 (필 모양) ── */
+/* ── 하단 탭바 (필 모양, 단일 명세) ── */
 .tabBar {
   position: sticky;
   bottom: 0;
-  z-index: 40;
+  left: 0;
+  right: 0;
+  z-index: 50;
   flex-shrink: 0;
-  display: flex;
-  justify-content: center;
   box-sizing: border-box;
-  /* 외부: 상단만 살짝, 좌우 최소, 하단은 필에 붙임 */
-  padding: 4px clamp(6px, 2.5vw, 8px) 0;
+  margin: 0;
+  padding: 0 clamp(6px, 2.5vw, 8px);
   background: transparent;
   border: none;
 }
 
 .tabBarPill {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  align-items: center;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-around;
+  align-items: stretch;
   width: 100%;
-  max-width: 100%;
   box-sizing: border-box;
-  padding: 6px 8px;
-  /* 홈 인디케이터: 필 내부 하단 패딩 (min-height에 포함하지 않음) */
-  padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  padding: 8px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   border-radius: 36px;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.06);
   box-shadow:
     0 -2px 16px rgba(0, 0, 0, 0.06),
-    0 4px 16px rgba(0, 0, 0, 0.1),
-    0 8px 28px rgba(0, 0, 0, 0.08);
-  overflow: visible;
+    0 4px 16px rgba(0, 0, 0, 0.1);
 }
 
-/* 메시지 채팅방 진입 시 하단 탭 숨김 — 모바일 .tabBar display:!important 대응 */
+/* 메시지 채팅방 진입 시 하단 탭 숨김 */
 .tabBar.tabBarHidden {
   display: none !important;
-  height: 0 !important;
-  min-height: 0 !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  border: none !important;
-  overflow: hidden !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 /* 서브 화면 헤더(뒤로가기 56px) — 모바일에서 인라인 height를 덮어 노치 대응 */
@@ -1416,48 +1409,51 @@ body {
 }
 
 .tabItem {
-  border: 0;
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  border: none;
   background: transparent;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  min-width: 0;
-  min-height: 48px;
-  padding: 4px 2px;
-  border-radius: 28px;
+  padding: 8px 0;
+  border-radius: 24px;
   color: #9ca3af;
   cursor: pointer;
-  overflow: visible;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-tap-highlight-color: transparent;
   transition:
     color 0.2s ease,
     background 0.2s ease,
     box-shadow 0.2s ease;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  -webkit-tap-highlight-color: transparent;
 }
 
-.tabItemActive {
+.tabItem.tabItemActive {
   color: #111;
-  background: #fff;
-  box-shadow:
-    0 2px 10px rgba(0, 0, 0, 0.1),
-    0 1px 2px rgba(0, 0, 0, 0.06);
+  background: rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .tabIconWrap {
   position: relative;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 24px;
   height: 24px;
+  color: inherit;
 }
 
 .tabIconSvg {
   display: block;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
+  color: inherit;
 }
 
 .tabLabel {
@@ -1468,11 +1464,10 @@ body {
   line-height: 1.2;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  color: inherit;
-  overflow: visible;
+  color: #9ca3af;
 }
 
-.tabItemActive .tabLabel {
+.tabItem.tabItemActive .tabLabel {
   font-weight: 600;
   color: #111;
 }
@@ -1635,45 +1630,14 @@ body {
     box-sizing: border-box !important;
   }
 
-  /* 하단 탭바 — 필 모양, 하단·좌우 여백 최소 */
+  /* 하단 탭바 — 화면 하단 고정 (데스크톱 프리뷰는 sticky 유지) */
   .tabBar {
-    position: relative !important;
-    flex-shrink: 0 !important;
-    min-height: auto !important;
-    height: auto !important;
-    padding-top: 4px !important;
-    padding-left: clamp(6px, 2.5vw, 8px) !important;
-    padding-right: clamp(6px, 2.5vw, 8px) !important;
-    padding-bottom: 0 !important;
-    box-sizing: border-box !important;
-    background: transparent !important;
-    border-top: none !important;
-    overflow: visible !important;
-  }
-
-  .tabBarPill {
-    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)) !important;
-    overflow: visible !important;
-  }
-
-  .tabBar .tabItem {
-    min-height: 48px !important;
-    overflow: visible !important;
-  }
-
-  .tabBar .tabLabel {
-    display: block !important;
-    font-size: 10px !important;
-    font-weight: 500 !important;
-    line-height: 1.2 !important;
-    letter-spacing: 0.02em !important;
-    color: inherit !important;
-    overflow: visible !important;
-  }
-
-  .tabBar .tabItemActive .tabLabel {
-    font-weight: 600 !important;
-    color: #111 !important;
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    padding: 0 clamp(6px, 2.5vw, 8px) !important;
+    margin: 0 !important;
   }
 
   .phoneBezel {
