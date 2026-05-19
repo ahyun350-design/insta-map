@@ -18,7 +18,13 @@ import { FollowListModal, type FollowListType } from "@/components/FollowListMod
 import { ChatCourseCard } from "@/components/ChatCourseCard";
 import { CourseEditScreen } from "@/components/CourseEditScreen";
 import { NewCurationScreen } from "@/components/NewCurationScreen";
-import { isCompanionTag, type CompanionTag } from "@/lib/companionTag";
+import {
+  companionFilterChipLabel,
+  isCompanionTag,
+  type CompanionTag,
+  type CompanionTagFilter,
+} from "@/lib/companionTag";
+import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
@@ -701,6 +707,7 @@ function HomePageContent() {
   const [editingPost, setEditingPost] = useState<FeedPost | null>(null);
   const [editComment, setEditComment] = useState("");
   const [showPostModal, setShowPostModal] = useState(false);
+  const [selectedCompanionTag, setSelectedCompanionTag] = useState<CompanionTagFilter>("all");
   const [postTitle, setPostTitle] = useState(""); const [postPlaceName, setPostPlaceName] = useState("");
   const [postAddress, setPostAddress] = useState(""); const [postCategory, setPostCategory] = useState<Category>("카페");
   const [postPlaceLat, setPostPlaceLat] = useState<number | undefined>(undefined);
@@ -5090,6 +5097,11 @@ function HomePageContent() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [feedPosts]);
 
+  const filteredHomeFeedPosts = useMemo(() => {
+    if (selectedCompanionTag === "all") return visibleFeedPosts;
+    return visibleFeedPosts.filter((p) => p.companionTag === selectedCompanionTag);
+  }, [visibleFeedPosts, selectedCompanionTag]);
+
   const myMypagePosts = useMemo(() => {
     if (!user?.id) return [];
     const uname = user.username;
@@ -6393,6 +6405,12 @@ function HomePageContent() {
                 </div>
               )}
               {loading && <FeedSkeleton />}
+              {!loading && !homeLoadError && (
+                <CompanionTagFilterChips
+                  value={selectedCompanionTag}
+                  onChange={setSelectedCompanionTag}
+                />
+              )}
               {!loading && !homeLoadError && visibleFeedPosts.length === 0 && (
                 <EmptyState
                   variant="feed"
@@ -6402,7 +6420,15 @@ function HomePageContent() {
                   action={{ label: "큐레이션 작성하기", onClick: () => setShowPostModal(true) }}
                 />
               )}
-              {visibleFeedPosts.map((post) => (
+              {!loading && !homeLoadError && visibleFeedPosts.length > 0 && filteredHomeFeedPosts.length === 0 && (
+                <EmptyState
+                  variant="feed"
+                  icon="🔍"
+                  title={`아직 ${companionFilterChipLabel(selectedCompanionTag)} 큐레이션이 없어요`}
+                  description="다른 태그를 선택하거나 새 큐레이션을 올려보세요"
+                />
+              )}
+              {filteredHomeFeedPosts.map((post) => (
                 <article key={post.id} className="feedCard" style={{ position: "relative", cursor: "pointer", overflow: "hidden" }} onClick={() => setDetailPostId(post.id)}>
                   <div className="feedTop">
                     <button

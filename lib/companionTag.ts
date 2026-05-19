@@ -14,3 +14,16 @@ export const COMPANION_TAG_OPTIONS: { value: CompanionTag; emoji: string; label:
 export function isCompanionTag(value: unknown): value is CompanionTag {
   return typeof value === "string" && (COMPANION_TAGS as readonly string[]).includes(value);
 }
+
+export type CompanionTagFilter = "all" | CompanionTag;
+
+export const COMPANION_FILTER_CHIPS: { value: CompanionTagFilter; emoji: string; label: string }[] = [
+  { value: "all", emoji: "", label: "전체" },
+  ...COMPANION_TAG_OPTIONS,
+];
+
+export function companionFilterChipLabel(filter: CompanionTagFilter): string {
+  const chip = COMPANION_FILTER_CHIPS.find((c) => c.value === filter);
+  if (!chip) return filter;
+  return chip.value === "all" ? chip.label : `${chip.emoji} ${chip.label}`;
+}
