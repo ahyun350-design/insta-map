@@ -25,6 +25,7 @@ import {
   type CompanionTagFilter,
 } from "@/lib/companionTag";
 import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
+import { BottomTabBar } from "@/components/BottomTabBar";
 import { FeedPostCard } from "@/components/FeedPostCard";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import { feedPostToPlaceSheet, type PlaceSheetData } from "@/lib/placeSheet";
@@ -348,13 +349,6 @@ function pickNearestSavedPlaceByPixel(
   return bestPx <= maxPx ? bestPlace : null;
 }
 
-const TABS: Array<{ id: TabId; label: string; icon: string }> = [
-  { id: "home", label: "홈", icon: "🏠" },
-  { id: "messages", label: "메시지", icon: "💬" },
-  { id: "map", label: "지도", icon: "🗺️" },
-  { id: "saved", label: "저장", icon: "🔖" },
-  { id: "mypage", label: "마이", icon: "👤" },
-];
 const CHAT_LIST = [
   { id: "1", name: "지수", preview: "이번 주말 성수 갈래?", time: "오후 4:12" },
   { id: "2", name: "민호", preview: "저장해둔 카페 링크 보내줘!", time: "오전 11:05" },
@@ -731,6 +725,10 @@ function HomePageContent() {
   }, []);
   const [loading, setLoading] = useState(true);
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const messageUnreadTotal = useMemo(
+    () => chatRooms.reduce((sum, r) => sum + (r.unreadCount ?? 0), 0),
+    [chatRooms],
+  );
   const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
   const activeChatRoomRef = useRef<ChatRoom | null>(null);
   activeChatRoomRef.current = activeChatRoom;
@@ -7315,28 +7313,12 @@ function HomePageContent() {
             </div>
           )}
         </section>
-        <nav
-          className={`tabBar${activeTab === "messages" && activeChatRoom ? " tabBarHidden" : ""}`}
-          aria-hidden={activeTab === "messages" && activeChatRoom ? true : undefined}
-        >
-          {TABS.map((tab) => {
-            const totalUnread = chatRooms.reduce((sum, r) => sum + (r.unreadCount ?? 0), 0);
-            const showBadge = tab.id === "messages" && totalUnread > 0;
-            return (
-              <button key={tab.id} type="button" className={`tabItem ${activeTab === tab.id ? "active" : ""}`} onClick={() => setActiveTab(tab.id)}>
-                <span className="tabIcon" style={{ position: "relative", display: "inline-block" }}>
-                  {tab.icon}
-                  {showBadge && (
-                    <span style={{ position: "absolute", top: "-4px", right: "-12px", background: "#e05555", color: "#fff", borderRadius: "10px", minWidth: "16px", height: "16px", padding: "0 4px", fontSize: "9px", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
-                      {totalUnread}
-                    </span>
-                  )}
-                </span>
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        <BottomTabBar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          hidden={activeTab === "messages" && !!activeChatRoom}
+          messageUnreadCount={messageUnreadTotal}
+        />
         {selectedPlace && !mapExpanded && (
           <>
             <div

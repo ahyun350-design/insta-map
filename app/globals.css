@@ -1325,17 +1325,33 @@ body {
   color: var(--navy);
 }
 
-/* ── 탭바 ── */
+/* ── 탭바 (필 모양) ── */
 .tabBar {
   position: sticky;
   bottom: 0;
+  z-index: 40;
   flex-shrink: 0;
-  height: 70px;
-  border-top: 0.5px solid var(--border);
-  background: rgba(255, 255, 255, 0.97);
-  backdrop-filter: blur(12px);
+  display: flex;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 8px 16px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  background: transparent;
+  border: none;
+}
+
+.tabBarPill {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
+  align-items: stretch;
+  width: 100%;
+  max-width: 100%;
+  padding: 6px 4px;
+  border-radius: 36px;
+  background: #fff;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.08),
+    0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 /* 메시지 채팅방 진입 시 하단 탭 숨김 — 모바일 .tabBar display:!important 대응 */
@@ -1375,25 +1391,65 @@ body {
 .tabItem {
   border: 0;
   background: transparent;
-  display: grid;
-  place-items: center;
-  gap: 4px;
-  color: var(--gray-400);
-  font-size: 9px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 2px;
+  border-radius: 28px;
+  color: #9ca3af;
   cursor: pointer;
-  transition: color 0.2s;
-  font-family: 'Inter', sans-serif;
+  transition:
+    color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.tabIcon {
-  font-size: 16px;
+.tabItemActive {
+  color: #111;
+  background: #fff;
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.1),
+    0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
-.tabItem.active {
-  color: var(--navy);
-  font-weight: 500;
+.tabIconWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.tabIconSvg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.tabLabel {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.tabBadgeDot {
+  position: absolute;
+  top: 0;
+  right: -1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e53935;
+  border: 1.5px solid #fff;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
 /* ── 반응형: 모바일 풀스크린 ── */
@@ -1541,42 +1597,34 @@ body {
     box-sizing: border-box !important;
   }
 
-  /* 하단 탭바 — 라벨 노출 + 홈 인디케이터 안전 영역 */
+  /* 하단 탭바 — 필 모양 + 홈 인디케이터 안전 영역 */
   .tabBar {
     position: relative !important;
     flex-shrink: 0 !important;
-    min-height: calc(86px + env(safe-area-inset-bottom, 0px)) !important;
+    min-height: auto !important;
     height: auto !important;
     padding-top: 8px !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
     padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
     box-sizing: border-box !important;
-    background: #fff !important;
-    border-top: 0.5px solid #efefef !important;
+    background: transparent !important;
+    border-top: none !important;
     overflow: visible !important;
   }
 
-  .tabBar .tabItem {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    justify-content: center !important;
-    gap: 2px !important;
-    padding: 4px 0 !important;
-    height: auto !important;
-    min-height: 0 !important;
+  .tabBarPill {
+    min-height: 58px;
   }
 
-  .tabBar .tabItem > span:last-of-type {
+  .tabBar .tabItem {
+    min-height: 48px !important;
+  }
+
+  .tabBar .tabLabel {
     font-size: 10px !important;
     line-height: 1.2 !important;
-    text-transform: none !important;
-    letter-spacing: 0.3px !important;
-    white-space: nowrap !important;
-  }
-
-  /* 라벨: 한글 줄바꿈 방지, 탭아이콘+뱃지는 기존 스타일 유지 */
-  .tabBar .tabIcon {
-    flex-shrink: 0 !important;
+    letter-spacing: 0.02em !important;
   }
 
   .phoneBezel {
