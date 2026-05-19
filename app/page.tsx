@@ -80,10 +80,25 @@ function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): C
 type Place = { id: string; name: string; address: string; category: Category; lat?: number; lng?: number };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
 type Comment = { id: string; user: string; userId?: string; avatarUrl?: string; text: string; createdAt: string };
+const COMPANION_TAGS = ["lover", "friend", "pet", "alone", "family", "parent", "kid"] as const;
+type CompanionTag = (typeof COMPANION_TAGS)[number];
+const COMPANION_TAG_OPTIONS: { value: CompanionTag; emoji: string; label: string }[] = [
+  { value: "lover", emoji: "💑", label: "연인이랑" },
+  { value: "friend", emoji: "👫", label: "친구랑" },
+  { value: "pet", emoji: "🐾", label: "반려동물이랑" },
+  { value: "alone", emoji: "🧍", label: "혼자" },
+  { value: "family", emoji: "👨‍👩‍👧", label: "가족이랑" },
+  { value: "parent", emoji: "👵", label: "부모님이랑" },
+  { value: "kid", emoji: "👶", label: "아이랑" },
+];
+function isCompanionTag(value: unknown): value is CompanionTag {
+  return typeof value === "string" && (COMPANION_TAGS as readonly string[]).includes(value);
+}
 type FeedPost = {
   id: string; user: string; userId: string; userAvatarUrl?: string; title: string; placeName: string; address: string;
   lat?: number; lng?: number;
   category: Category; comment: string; images: string[]; createdAt: string;
+  companionTag?: CompanionTag | null;
   archived?: boolean;
   likes_count: number;
   liked_by_me: boolean;
@@ -702,7 +717,9 @@ function HomePageContent() {
   const [postAddress, setPostAddress] = useState(""); const [postCategory, setPostCategory] = useState<Category>("카페");
   const [postPlaceLat, setPostPlaceLat] = useState<number | undefined>(undefined);
   const [postPlaceLng, setPostPlaceLng] = useState<number | undefined>(undefined);
-  const [postComment, setPostComment] = useState(""); const [postSearchQuery, setPostSearchQuery] = useState("");
+  const [postComment, setPostComment] = useState("");
+  const [postCompanionTag, setPostCompanionTag] = useState<CompanionTag | null>(null);
+  const [postSearchQuery, setPostSearchQuery] = useState("");
   const [postSearchResults, setPostSearchResults] = useState<any[]>([]); const [postImages, setPostImages] = useState<PostImageItem[]>([]);
   const postImagesRef = useRef<PostImageItem[]>([]);
   postImagesRef.current = postImages;
@@ -994,7 +1011,7 @@ function HomePageContent() {
 
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
   const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
-  const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImagesAllUploaded;
+  const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImagesAllUploaded && postCompanionTag !== null;
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
 
   const closeDetailPost = useCallback(() => {
@@ -1205,6 +1222,7 @@ function HomePageContent() {
           address: p.address,
           ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
           category: p.category as Category, comment: p.comment,
+          companionTag: isCompanionTag(p.companion_tag) ? p.companion_tag : null,
           images: p.images ?? [], createdAt: p.created_at, archived: p.archived,
           likes_count: p.likes_count ?? 0,
           liked_by_me: myLikedSet.has(p.id),
@@ -1732,6 +1750,10 @@ function HomePageContent() {
     }
   };
   const submitPost = async (post: FeedPost) => {
+    if (!isCompanionTag(post.companionTag)) {
+      alert("동행 태그를 선택해주세요.");
+      return;
+    }
     const coords = latLngFromRow(post);
     await supabase.from("feed_posts").insert({
       id: post.id,
@@ -1745,6 +1767,7 @@ function HomePageContent() {
       category: post.category,
       comment: post.comment,
       images: post.images,
+      companion_tag: post.companionTag,
       archived: false,
     });
     setFeedPosts(prev => [post, ...prev]);
@@ -3706,6 +3729,10 @@ function HomePageContent() {
   };
   const handleSubmitPost = async () => {
     if (!canPost) return;
+    if (!isCompanionTag(postCompanionTag)) {
+      alert("동행 태그를 선택해주세요.");
+      return;
+    }
     const normalizedPlaceName = postPlaceName.trim();
     const normalizedAddress = postAddress.trim();
     const { data: existing } = await supabase
@@ -3737,6 +3764,7 @@ function HomePageContent() {
       ...(postCoords ? { lat: postCoords.lat, lng: postCoords.lng } : {}),
       category: postCategory,
       comment: postComment,
+      companionTag: postCompanionTag,
       images: imageUrls,
       createdAt: new Date().toISOString(),
       likes_count: 0,
@@ -3752,6 +3780,7 @@ function HomePageContent() {
     setPostPlaceLat(undefined);
     setPostPlaceLng(undefined);
     setPostComment("");
+    setPostCompanionTag(null);
     setPostCategory("카페");
     setPostImages((prev) => {
       prev.forEach((img) => {
@@ -3769,6 +3798,7 @@ function HomePageContent() {
     setPostPlaceLat(undefined);
     setPostPlaceLng(undefined);
     setPostComment("");
+    setPostCompanionTag(null);
     setPostCategory("카페");
     setPostImages((prev) => {
       prev.forEach((img) => {
@@ -6399,6 +6429,38 @@ function HomePageContent() {
                   </div>
                   <input ref={imageInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImageUpload} />
                 </div>
+                <div>
+                  <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>누구랑 갔어요?</p>
+                  <div role="radiogroup" aria-label="동행 태그" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {COMPANION_TAG_OPTIONS.map((opt) => (
+                      <label
+                        key={opt.value}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          padding: "10px 12px",
+                          borderRadius: "8px",
+                          border: `1px solid ${postCompanionTag === opt.value ? "#1a2a7a" : "#eee"}`,
+                          background: postCompanionTag === opt.value ? "#f0f4ff" : "#fff",
+                          cursor: "pointer",
+                          fontSize: "13px",
+                          color: "#333",
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="postCompanionTag"
+                          value={opt.value}
+                          checked={postCompanionTag === opt.value}
+                          onChange={() => setPostCompanionTag(opt.value)}
+                          style={{ accentColor: "#1a2a7a" }}
+                        />
+                        <span>{opt.emoji} {opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
                 <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "6px", marginTop: 0 }}>코멘트</p><textarea placeholder="이 장소에 대한 느낌을 자유롭게 적어주세요 ✍️" value={postComment} onChange={(e) => setPostComment(e.target.value)} rows={4} style={{ width: "100%", border: "0.5px solid #ddd", borderRadius: "4px", padding: "10px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", outline: "none", boxSizing: "border-box", color: "#333" }} /></div>
                 {!canPost && (
                   <p style={{ fontSize: "11px", color: "#e07070", margin: 0, textAlign: "center" }}>
@@ -6412,6 +6474,8 @@ function HomePageContent() {
                             ? "사진 업로드가 완료될 때까지 기다려주세요"
                             : postImages.some((i) => i.status === "failed")
                               ? "실패한 사진을 제거하거나 재시도해주세요"
+                              : postCompanionTag === null
+                                ? "누구랑 갔는지 선택해주세요"
                               : !postComment.trim()
                                 ? "코멘트를 입력해주세요"
                                 : "모든 사진 업로드가 끝나야 등록할 수 있어요"}
