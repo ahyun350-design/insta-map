@@ -3,6 +3,8 @@
 import { useCallback, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
+import type { PhotoPlaceTag } from "@/lib/feedPost";
+import { getDisplayPlaceForPhoto } from "@/lib/photoPlaceTag";
 
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -13,8 +15,12 @@ export type FeedPostCardData = {
   userAvatarUrl?: string;
   title: string;
   placeName: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
   category: Category;
   comment: string;
+  photoPlaceTags?: PhotoPlaceTag[] | null;
   images: string[];
   createdAt: string;
   companionTag?: CompanionTag | null;
@@ -53,12 +59,15 @@ function formatLikeCount(n: number): string {
 
 function FeedPostMedia({
   images,
-  placeName,
-      onImageLightbox,
+  placeSource,
+  onImageLightbox,
   onPlaceOverlayClick,
 }: {
   images: string[];
-  placeName: string;
+  placeSource: Pick<
+    FeedPostCardData,
+    "placeName" | "address" | "category" | "lat" | "lng" | "photoPlaceTags"
+  >;
   onImageLightbox: (url: string) => void;
   onPlaceOverlayClick?: () => void;
 }) {
@@ -71,6 +80,19 @@ function FeedPostMedia({
     if (!el || el.clientWidth <= 0) return;
     setActiveIndex(Math.round(el.scrollLeft / el.clientWidth));
   }, []);
+
+  const displayPlace = getDisplayPlaceForPhoto(
+    {
+      photoPlaceTags: placeSource.photoPlaceTags,
+      placeName: placeSource.placeName,
+      address: placeSource.address ?? "",
+      category: placeSource.category,
+      lat: placeSource.lat,
+      lng: placeSource.lng,
+    },
+    activeIndex,
+  );
+  const overlayPlaceName = displayPlace?.placeName?.trim() ?? "";
 
   if (images.length === 0) {
     return (
@@ -100,7 +122,7 @@ function FeedPostMedia({
           </div>
         ))}
       </div>
-      {placeName.trim() && (
+      {overlayPlaceName && (
         <button
           type="button"
           className="feedPostMediaOverlayPlace"
@@ -109,7 +131,7 @@ function FeedPostMedia({
             onPlaceOverlayClick?.();
           }}
         >
-          📍 {placeName}
+          📍 {overlayPlaceName}
         </button>
       )}
       {multi && (
@@ -214,7 +236,7 @@ export function FeedPostCard({
 
       <FeedPostMedia
         images={post.images}
-        placeName={post.placeName}
+        placeSource={post}
         onImageLightbox={onImageLightbox}
         onPlaceOverlayClick={onPlaceOverlayClick}
       />

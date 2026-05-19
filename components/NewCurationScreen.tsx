@@ -1,26 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { COMPANION_TAG_OPTIONS, type CompanionTag } from "@/lib/companionTag";
+import type { CompanionTag } from "@/lib/companionTag";
+import type { PhotoPlaceTag } from "@/lib/feedPost";
+import { validatePhotoPlaceTags } from "@/lib/photoPlaceTag";
+import { Step1Photos } from "@/components/curation/Step1Photos";
+import { Step2PlaceTags } from "@/components/curation/Step2PlaceTags";
+import { Step3Form } from "@/components/curation/Step3Form";
+import type { CurationCategory, CurationStep, PostImageItem } from "@/components/curation/types";
 
-type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
-
-export type PostImageItem = {
-  id: string;
-  previewUrl: string;
-  publicUrl?: string;
-  status: "uploading" | "uploaded" | "failed";
-  file?: File;
-  error?: string;
-};
-
-type KakaoPlaceResult = {
-  id: string;
-  place_name: string;
-  road_address_name?: string;
-  address_name?: string;
-};
+export type { PostImageItem } from "@/components/curation/types";
 
 type Props = {
   open: boolean;
@@ -32,23 +22,17 @@ type Props = {
   validationHint: string | null;
   title: string;
   onTitleChange: (value: string) => void;
-  placeName: string;
-  address: string;
-  onClearPlace: () => void;
-  searchQuery: string;
-  onSearchQueryChange: (value: string) => void;
-  onSearch: () => void;
-  searchResults: KakaoPlaceResult[];
-  onSelectPlace: (place: KakaoPlaceResult) => void;
-  category: Category;
-  onCategoryChange: (category: Category) => void;
-  categoryMainOrder: Category[];
-  categoryPin: Record<Category, { color: string; emoji: string }>;
-  categoryColors: Record<Category, string>;
+  category: CurationCategory;
+  onCategoryChange: (category: CurationCategory) => void;
+  categoryMainOrder: CurationCategory[];
+  categoryPin: Record<CurationCategory, { color: string; emoji: string }>;
+  categoryColors: Record<CurationCategory, string>;
   images: PostImageItem[];
   onImagesChange: (updater: (prev: PostImageItem[]) => PostImageItem[]) => void;
   onImageUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onRetryImage: (item: PostImageItem) => void;
+  photoPlaceTags: PhotoPlaceTag[];
+  onPhotoPlaceTagsChange: (tags: PhotoPlaceTag[]) => void;
   companionTag: CompanionTag | null;
   onCompanionTagChange: (tag: CompanionTag) => void;
   comment: string;
@@ -56,6 +40,12 @@ type Props = {
 };
 
 const SLIDE_MS = 280;
+
+const STEP_TITLES: Record<CurationStep, string> = {
+  1: "새 큐레이션",
+  2: "장소 태그",
+  3: "세부 정보",
+};
 
 const rootStyle = (active: boolean): CSSProperties => ({
   position: "fixed",
@@ -79,6 +69,33 @@ function scrollFieldIntoView(el: HTMLElement | null) {
   }, 120);
 }
 
+const headerBtnBase: CSSProperties = {
+  width: 40,
+  height: 40,
+  border: "none",
+  background: "transparent",
+  cursor: "pointer",
+  fontSize: 22,
+  color: "#666",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+};
+
+const actionBtnBase = (enabled: boolean): CSSProperties => ({
+  border: "none",
+  background: "transparent",
+  cursor: enabled ? "pointer" : "default",
+  padding: "8px 4px",
+  fontSize: 15,
+  fontWeight: 600,
+  color: enabled ? "#1a2a7a" : "#bbb",
+  fontFamily: "inherit",
+  flexShrink: 0,
+  minWidth: 40,
+});
+
 export function NewCurationScreen({
   open,
   onClose,
@@ -88,14 +105,6 @@ export function NewCurationScreen({
   validationHint,
   title,
   onTitleChange,
-  placeName,
-  address,
-  onClearPlace,
-  searchQuery,
-  onSearchQueryChange,
-  onSearch,
-  searchResults,
-  onSelectPlace,
   category,
   onCategoryChange,
   categoryMainOrder,
@@ -105,6 +114,8 @@ export function NewCurationScreen({
   onImagesChange,
   onImageUpload,
   onRetryImage,
+  photoPlaceTags,
+  onPhotoPlaceTagsChange,
   companionTag,
   onCompanionTagChange,
   comment,
@@ -113,9 +124,13 @@ export function NewCurationScreen({
   const [mounted, setMounted] = useState(false);
   const [slideActive, setSlideActive] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const [currentStep, setCurrentStep] = useState<CurationStep>(1);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (open) setCurrentStep(1);
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -132,6 +147,7 @@ export function NewCurationScreen({
     setSlideActive(false);
     const exitId = window.setTimeout(() => {
       setMounted(false);
+      setCurrentStep(1);
       onExited?.();
     }, SLIDE_MS);
     return () => window.clearTimeout(exitId);
@@ -166,6 +182,41 @@ export function NewCurationScreen({
     };
   }, [mounted]);
 
+  const canGoNextStep1 = images.length >= 1;
+
+  const step2Validation = useMemo(
+    () => validatePhotoPlaceTags(images.map(() => "x"), photoPlaceTags),
+    [images, photoPlaceTags],
+  );
+  const canGoNextStep2 = step2Validation.ok;
+  const step2Hint =
+    !step2Validation.ok && step2Validation.missing.length > 0
+      ? `${step2Validation.missing[0] + 1}번 사진에 장소를 추가하세요`
+      : null;
+
+  const isLastStep = currentStep === 3;
+
+  const rightActionEnabled = isLastStep ? canPost : currentStep === 1 ? canGoNextStep1 : canGoNextStep2;
+  const rightActionLabel = isLastStep ? "등록" : "다음";
+
+  const handleLeftAction = () => {
+    if (currentStep === 1) {
+      onClose();
+      return;
+    }
+    setCurrentStep((s) => (s > 1 ? ((s - 1) as CurationStep) : s));
+  };
+
+  const handleRightAction = () => {
+    if (isLastStep) {
+      if (canPost) onSubmit();
+      return;
+    }
+    if (currentStep === 1 && !canGoNextStep1) return;
+    if (currentStep === 2 && !canGoNextStep2) return;
+    setCurrentStep((s) => (s < 3 ? ((s + 1) as CurationStep) : s));
+  };
+
   if (!mounted || typeof document === "undefined") return null;
 
   return createPortal(
@@ -184,23 +235,11 @@ export function NewCurationScreen({
       >
         <button
           type="button"
-          onClick={onClose}
-          aria-label="닫기"
-          style={{
-            width: 40,
-            height: 40,
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            fontSize: 22,
-            color: "#666",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
+          onClick={handleLeftAction}
+          aria-label={currentStep === 1 ? "닫기" : "뒤로"}
+          style={headerBtnBase}
         >
-          ×
+          {currentStep === 1 ? "×" : "←"}
         </button>
         <span
           style={{
@@ -212,26 +251,15 @@ export function NewCurationScreen({
             fontWeight: 500,
           }}
         >
-          새 큐레이션
+          {STEP_TITLES[currentStep]}
         </span>
         <button
           type="button"
-          onClick={onSubmit}
-          disabled={!canPost}
-          style={{
-            border: "none",
-            background: "transparent",
-            cursor: canPost ? "pointer" : "default",
-            padding: "8px 4px",
-            fontSize: 15,
-            fontWeight: 600,
-            color: canPost ? "#1a2a7a" : "#bbb",
-            fontFamily: "inherit",
-            flexShrink: 0,
-            minWidth: 40,
-          }}
+          onClick={handleRightAction}
+          disabled={!rightActionEnabled}
+          style={actionBtnBase(rightActionEnabled)}
         >
-          등록
+          {rightActionLabel}
         </button>
       </header>
 
@@ -249,306 +277,39 @@ export function NewCurationScreen({
           boxSizing: "border-box",
         }}
       >
-        <div>
-          <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 6, marginTop: 0 }}>제목</p>
-          <input
-            className="mapInput"
-            placeholder="한 줄로 표현해보세요"
-            value={title}
-            onChange={(e) => onTitleChange(e.target.value)}
-            onFocus={(e) => scrollFieldIntoView(e.currentTarget)}
-            style={{ width: "100%", boxSizing: "border-box" }}
+        {currentStep === 1 && (
+          <Step1Photos
+            images={images}
+            onImagesChange={onImagesChange}
+            onImageUpload={onImageUpload}
+            onRetryImage={onRetryImage}
           />
-        </div>
-
-        <div>
-          <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 6, marginTop: 0 }}>장소 검색</p>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              className="mapInput"
-              placeholder="장소명 검색"
-              value={searchQuery}
-              onChange={(e) => onSearchQueryChange(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && onSearch()}
-              onFocus={(ev) => scrollFieldIntoView(ev.currentTarget)}
-              style={{ flex: 1 }}
-            />
-            <button className="primaryButton" onClick={onSearch} type="button" style={{ padding: "0 14px", flexShrink: 0 }}>
-              검색
-            </button>
-          </div>
-          {searchResults.length > 0 && (
-            <div style={{ border: "0.5px solid #eee", borderRadius: 4, marginTop: 6, overflow: "hidden" }}>
-              {searchResults.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => onSelectPlace(r)}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "10px 12px",
-                    background: "transparent",
-                    border: "none",
-                    borderBottom: "0.5px solid #f5f5f5",
-                    cursor: "pointer",
-                  }}
-                >
-                  <p style={{ margin: 0, fontSize: 13, color: "#1a1a2e" }}>{r.place_name}</p>
-                  <p style={{ margin: "2px 0 0", fontSize: 11, color: "#999" }}>{r.road_address_name || r.address_name}</p>
-                </button>
-              ))}
-            </div>
-          )}
-          {placeName ? (
-            <div
-              style={{
-                marginTop: 8,
-                padding: "10px 12px",
-                background: "#f0f4ff",
-                borderRadius: 4,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                border: "1px solid #d0daff",
-              }}
-            >
-              <span style={{ fontSize: 16 }}>{categoryPin[category].emoji}</span>
-              <div style={{ flex: 1 }}>
-                <p style={{ margin: 0, fontSize: 13, color: "#1a2a7a", fontWeight: 500 }}>{placeName}</p>
-                <p style={{ margin: "2px 0 0", fontSize: 11, color: "#999" }}>{address}</p>
-              </div>
-              <button
-                type="button"
-                onClick={onClearPlace}
-                style={{ border: "none", background: "transparent", color: "#bbb", cursor: "pointer", fontSize: 14 }}
-              >
-                ×
-              </button>
-            </div>
-          ) : (
-            <p style={{ fontSize: 11, color: "#bbb", marginTop: 6 }}>장소를 검색하고 선택해주세요</p>
-          )}
-        </div>
-
-        <div>
-          <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 8, marginTop: 0 }}>카테고리</p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
-            {categoryMainOrder.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => onCategoryChange(cat)}
-                style={{
-                  padding: "8px 6px",
-                  borderRadius: 12,
-                  border: `1px solid ${category === cat ? categoryColors[cat] : "#eee"}`,
-                  background: category === cat ? categoryColors[cat] : "transparent",
-                  color: category === cat ? "#fff" : "#888",
-                  fontSize: 11,
-                  cursor: "pointer",
-                  textAlign: "center",
-                  fontFamily: "inherit",
-                  lineHeight: 1.25,
-                }}
-              >
-                {categoryPin[cat].emoji} {cat}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 8, marginTop: 0 }}>사진 추가 (최대 6장)</p>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {images.map((img) => {
-              const thumbSrc = img.status === "uploaded" && img.publicUrl ? img.publicUrl : img.previewUrl;
-              return (
-                <div key={img.id} style={{ position: "relative", width: 72, height: 72 }}>
-                  <img
-                    src={thumbSrc}
-                    alt=""
-                    style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, opacity: img.status === "uploading" ? 0.65 : 1 }}
-                  />
-                  {img.status === "uploading" && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        pointerEvents: "none",
-                        borderRadius: 6,
-                        background: "rgba(255,255,255,0.35)",
-                      }}
-                    >
-                      <span style={{ fontSize: 18 }} aria-hidden>
-                        ⏳
-                      </span>
-                    </div>
-                  )}
-                  {img.status === "failed" && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        borderRadius: 6,
-                        background: "rgba(224,112,112,0.35)",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 4,
-                        padding: 4,
-                      }}
-                    >
-                      <span style={{ fontSize: 13, color: "#a03030", fontWeight: 700 }} aria-hidden>
-                        ✕
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          onRetryImage(img);
-                        }}
-                        style={{
-                          fontSize: 9,
-                          padding: "3px 6px",
-                          borderRadius: 4,
-                          border: "none",
-                          background: "#fff",
-                          cursor: "pointer",
-                          color: "#1a2a7a",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        재시도
-                      </button>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      onImagesChange((prev) => {
-                        const removed = prev.find((x) => x.id === img.id);
-                        if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
-                        return prev.filter((x) => x.id !== img.id);
-                      });
-                    }}
-                    style={{
-                      position: "absolute",
-                      top: -6,
-                      right: -6,
-                      width: 18,
-                      height: 18,
-                      borderRadius: "50%",
-                      background: "#333",
-                      border: "none",
-                      color: "#fff",
-                      fontSize: 11,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-            {images.length < 6 && (
-              <button
-                type="button"
-                onClick={() => imageInputRef.current?.click()}
-                style={{
-                  width: 72,
-                  height: 72,
-                  border: "1px dashed #ccc",
-                  borderRadius: 6,
-                  background: "transparent",
-                  cursor: "pointer",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 4,
-                  color: "#bbb",
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 5v14M5 12h14" stroke="#bbb" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-                <span style={{ fontSize: 10 }}>사진 추가</span>
-              </button>
-            )}
-          </div>
-          <input ref={imageInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={onImageUpload} />
-        </div>
-
-        <div>
-          <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 8, marginTop: 0 }}>누구랑 갔어요?</p>
-          <div role="radiogroup" aria-label="동행 태그" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {COMPANION_TAG_OPTIONS.map((opt) => (
-              <label
-                key={opt.value}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: `1px solid ${companionTag === opt.value ? "#1a2a7a" : "#eee"}`,
-                  background: companionTag === opt.value ? "#f0f4ff" : "#fff",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  color: "#333",
-                }}
-              >
-                <input
-                  type="radio"
-                  name="postCompanionTag"
-                  value={opt.value}
-                  checked={companionTag === opt.value}
-                  onChange={() => onCompanionTagChange(opt.value)}
-                  style={{ accentColor: "#1a2a7a" }}
-                />
-                <span>
-                  {opt.emoji} {opt.label}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 6, marginTop: 0 }}>코멘트</p>
-          <textarea
-            placeholder="이 장소에 대한 느낌을 자유롭게 적어주세요 ✍️"
-            value={comment}
-            onChange={(e) => onCommentChange(e.target.value)}
-            onFocus={(e) => scrollFieldIntoView(e.currentTarget)}
-            rows={4}
-            style={{
-              width: "100%",
-              border: "0.5px solid #ddd",
-              borderRadius: 4,
-              padding: "10px 12px",
-              fontSize: 13,
-              fontFamily: "inherit",
-              resize: "none",
-              outline: "none",
-              boxSizing: "border-box",
-              color: "#333",
-            }}
+        )}
+        {currentStep === 2 && (
+          <Step2PlaceTags
+            images={images}
+            photoPlaceTags={photoPlaceTags}
+            onPhotoPlaceTagsChange={onPhotoPlaceTagsChange}
+            stepHint={step2Hint}
+            keyboardInset={keyboardInset}
           />
-        </div>
-
-        {validationHint && (
-          <p style={{ fontSize: 11, color: "#e07070", margin: 0, textAlign: "center" }}>{validationHint}</p>
+        )}
+        {currentStep === 3 && (
+          <Step3Form
+            title={title}
+            onTitleChange={onTitleChange}
+            category={category}
+            onCategoryChange={onCategoryChange}
+            categoryMainOrder={categoryMainOrder}
+            categoryPin={categoryPin}
+            categoryColors={categoryColors}
+            companionTag={companionTag}
+            onCompanionTagChange={onCompanionTagChange}
+            comment={comment}
+            onCommentChange={onCommentChange}
+            validationHint={validationHint}
+            onFieldFocus={scrollFieldIntoView}
+          />
         )}
       </div>
     </section>,

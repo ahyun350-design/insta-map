@@ -53,7 +53,8 @@ import {
   getCurrentPositionForMapStage2,
   isGeolocationPermissionDenied,
 } from "@/lib/getCurrentPositionForMap";
-import { parseFeedPostFromRow, type FeedPost } from "@/lib/feedPost";
+import { parseFeedPostFromRow, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
+import { getRepresentativePhotoPlaceTag } from "@/lib/photoPlaceTag";
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -708,7 +709,9 @@ function HomePageContent() {
   const [postComment, setPostComment] = useState("");
   const [postCompanionTag, setPostCompanionTag] = useState<CompanionTag | null>(null);
   const [postSearchQuery, setPostSearchQuery] = useState("");
-  const [postSearchResults, setPostSearchResults] = useState<any[]>([]); const [postImages, setPostImages] = useState<PostImageItem[]>([]);
+  const [postSearchResults, setPostSearchResults] = useState<any[]>([]);
+  const [postPhotoPlaceTags, setPostPhotoPlaceTags] = useState<PhotoPlaceTag[]>([]);
+  const [postImages, setPostImages] = useState<PostImageItem[]>([]);
   const postImagesRef = useRef<PostImageItem[]>([]);
   postImagesRef.current = postImages;
   useEffect(() => {
@@ -1002,18 +1005,17 @@ function HomePageContent() {
 
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
   const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
-  const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImagesAllUploaded && postCompanionTag !== null;
+  const canPost =
+    postTitle.trim().length > 0 && postImagesAllUploaded && postCompanionTag !== null;
   const postValidationHint = useMemo(() => {
     if (canPost) return null;
     if (!postTitle.trim()) return "제목을 입력해주세요";
-    if (!postPlaceName.trim()) return "장소를 검색하고 선택해주세요";
     if (postImages.length === 0) return "사진을 최소 1장 추가해주세요";
     if (postImages.some((i) => i.status === "uploading")) return "사진 업로드가 완료될 때까지 기다려주세요";
     if (postImages.some((i) => i.status === "failed")) return "실패한 사진을 제거하거나 재시도해주세요";
     if (postCompanionTag === null) return "누구랑 갔는지 선택해주세요";
-    if (!postComment.trim()) return "코멘트를 입력해주세요";
     return "모든 사진 업로드가 끝나야 등록할 수 있어요";
-  }, [canPost, postTitle, postPlaceName, postImages, postCompanionTag, postComment]);
+  }, [canPost, postTitle, postImages, postCompanionTag]);
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
 
   const closeDetailPost = useCallback(() => {
@@ -1753,6 +1755,7 @@ function HomePageContent() {
       comment: post.comment,
       images: post.images,
       companion_tag: post.companionTag,
+      photo_place_tags: post.photoPlaceTags ?? null,
       archived: false,
     });
     setFeedPosts(prev => [post, ...prev]);
@@ -3718,38 +3721,44 @@ function HomePageContent() {
       alert("동행 태그를 선택해주세요.");
       return;
     }
-    const normalizedPlaceName = postPlaceName.trim();
-    const normalizedAddress = postAddress.trim();
-    const { data: existing } = await supabase
-      .from("feed_posts")
-      .select("id")
-      .eq("user_name", MY_USERNAME)
-      .eq("place_name", normalizedPlaceName)
-      .eq("address", normalizedAddress)
-      .eq("archived", false)
-      .maybeSingle();
-    if (existing) {
-      showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
-      return;
+    const repTag = getRepresentativePhotoPlaceTag(postPhotoPlaceTags);
+    const normalizedPlaceName = (repTag?.placeName ?? postPlaceName).trim();
+    const normalizedAddress = (repTag?.address ?? postAddress).trim();
+    if (normalizedPlaceName) {
+      const { data: existing } = await supabase
+        .from("feed_posts")
+        .select("id")
+        .eq("user_name", MY_USERNAME)
+        .eq("place_name", normalizedPlaceName)
+        .eq("address", normalizedAddress)
+        .eq("archived", false)
+        .maybeSingle();
+      if (existing) {
+        showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
+        return;
+      }
     }
     const imageUrls = postImages
       .filter((img): img is PostImageItem & { publicUrl: string; status: "uploaded" } =>
         img.status === "uploaded" && typeof img.publicUrl === "string",
       )
       .map((img) => img.publicUrl);
-    const postCoords = coerceLatLng(postPlaceLat, postPlaceLng);
+    const postCoords = repTag
+      ? { lat: repTag.lat, lng: repTag.lng }
+      : coerceLatLng(postPlaceLat, postPlaceLng);
     const newPost: FeedPost = {
       id: Math.random().toString(36).substring(2) + Date.now().toString(36),
       user: MY_USERNAME,
       userId: user?.id || "",
       userAvatarUrl: user?.avatar_url,
       title: postTitle,
-      placeName: postPlaceName,
-      address: postAddress,
+      placeName: repTag?.placeName ?? postPlaceName,
+      address: repTag?.address ?? postAddress,
       ...(postCoords ? { lat: postCoords.lat, lng: postCoords.lng } : {}),
       category: postCategory,
       comment: postComment,
       companionTag: postCompanionTag,
+      photoPlaceTags: postPhotoPlaceTags.length > 0 ? postPhotoPlaceTags : null,
       images: imageUrls,
       createdAt: new Date().toISOString(),
       likes_count: 0,
@@ -3778,6 +3787,7 @@ function HomePageContent() {
     });
     setPostSearchQuery("");
     setPostSearchResults([]);
+    setPostPhotoPlaceTags([]);
   }, []);
   const closePostScreen = () => setShowPostModal(false);
   const resetModal = () => {
@@ -6311,14 +6321,6 @@ function HomePageContent() {
             validationHint={postValidationHint}
             title={postTitle}
             onTitleChange={setPostTitle}
-            placeName={postPlaceName}
-            address={postAddress}
-            onClearPlace={() => { setPostPlaceName(""); setPostAddress(""); setPostPlaceLat(undefined); setPostPlaceLng(undefined); }}
-            searchQuery={postSearchQuery}
-            onSearchQueryChange={setPostSearchQuery}
-            onSearch={handlePostSearch}
-            searchResults={postSearchResults}
-            onSelectPlace={handleSelectPostPlace}
             category={postCategory}
             onCategoryChange={setPostCategory}
             categoryMainOrder={CATEGORY_MAIN_ORDER}
@@ -6328,6 +6330,8 @@ function HomePageContent() {
             onImagesChange={setPostImages}
             onImageUpload={handleImageUpload}
             onRetryImage={retryPostImageUpload}
+            photoPlaceTags={postPhotoPlaceTags}
+            onPhotoPlaceTagsChange={setPostPhotoPlaceTags}
             companionTag={postCompanionTag}
             onCompanionTagChange={setPostCompanionTag}
             comment={postComment}

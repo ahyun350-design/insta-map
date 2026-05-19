@@ -1,4 +1,50 @@
-import type { FeedPost, PhotoPlaceTag } from "@/lib/feedPost";
+import type { FeedPost, FeedPostCategory, PhotoPlaceTag } from "@/lib/feedPost";
+
+/** 카카오 `category_name` → PindMap 카테고리 */
+export function mapKakaoCategoryToPindMap(categoryName: string | undefined): FeedPostCategory {
+  const n = categoryName ?? "";
+  if (n.includes("카페")) return "카페";
+  if (n.includes("음식점") || n.includes("음식")) return "맛집";
+  if (n.includes("쇼핑") || n.includes("마트")) return "쇼핑";
+  if (n.includes("숙박")) return "숙소";
+  if (n.includes("관광") || n.includes("명소")) return "여행지";
+  if (n.includes("스포츠") || n.includes("여가")) return "놀거리";
+  return "맛집";
+}
+
+export function clampPhotoTagCoord(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+export function photoTapToNormalized(
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+): { x: number; y: number } {
+  const w = rect.width || 1;
+  const h = rect.height || 1;
+  return {
+    x: clampPhotoTagCoord((clientX - rect.left) / w),
+    y: clampPhotoTagCoord((clientY - rect.top) / h),
+  };
+}
+
+export function upsertPhotoPlaceTag(tags: PhotoPlaceTag[], tag: PhotoPlaceTag): PhotoPlaceTag[] {
+  return [...tags.filter((t) => t.photoIndex !== tag.photoIndex), tag];
+}
+
+export function removePhotoPlaceTag(tags: PhotoPlaceTag[], photoIndex: number): PhotoPlaceTag[] {
+  return tags.filter((t) => t.photoIndex !== photoIndex);
+}
+
+export function getPhotoPlaceTag(tags: PhotoPlaceTag[], photoIndex: number): PhotoPlaceTag | undefined {
+  return tags.find((t) => t.photoIndex === photoIndex);
+}
+
+/** 대표 장소(INSERT·카드 폴백): photoIndex 0 우선, 없으면 첫 태그 */
+export function getRepresentativePhotoPlaceTag(tags: PhotoPlaceTag[]): PhotoPlaceTag | undefined {
+  return tags.find((t) => t.photoIndex === 0) ?? tags[0];
+}
 
 export type DisplayPlaceForPhoto = {
   placeId: string | null;
