@@ -1334,8 +1334,8 @@ body {
   display: flex;
   justify-content: center;
   box-sizing: border-box;
-  padding: 8px 16px;
-  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  /* 외부: 상단만 살짝, 좌우 최소, 하단은 필에 붙임 */
+  padding: 4px clamp(6px, 2.5vw, 8px) 0;
   background: transparent;
   border: none;
 }
@@ -1346,7 +1346,10 @@ body {
   align-items: stretch;
   width: 100%;
   max-width: 100%;
-  padding: 6px 4px;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  /* 홈 인디케이터: 필 내부 하단 패딩으로 흡수 */
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   border-radius: 36px;
   background: #fff;
   box-shadow:
@@ -1395,9 +1398,9 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
-  padding: 6px 2px;
+  padding: 5px 2px;
   border-radius: 28px;
   color: #9ca3af;
   cursor: pointer;
@@ -1597,16 +1600,16 @@ body {
     box-sizing: border-box !important;
   }
 
-  /* 하단 탭바 — 필 모양 + 홈 인디케이터 안전 영역 */
+  /* 하단 탭바 — 필 모양, 하단·좌우 여백 최소 */
   .tabBar {
     position: relative !important;
     flex-shrink: 0 !important;
     min-height: auto !important;
     height: auto !important;
-    padding-top: 8px !important;
-    padding-left: 16px !important;
-    padding-right: 16px !important;
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-top: 4px !important;
+    padding-left: clamp(6px, 2.5vw, 8px) !important;
+    padding-right: clamp(6px, 2.5vw, 8px) !important;
+    padding-bottom: 0 !important;
     box-sizing: border-box !important;
     background: transparent !important;
     border-top: none !important;
@@ -1614,11 +1617,12 @@ body {
   }
 
   .tabBarPill {
-    min-height: 58px;
+    min-height: 52px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   .tabBar .tabItem {
-    min-height: 48px !important;
+    min-height: 44px !important;
   }
 
   .tabBar .tabLabel {
