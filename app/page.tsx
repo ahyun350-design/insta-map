@@ -53,6 +53,7 @@ import {
   getCurrentPositionForMapStage2,
   isGeolocationPermissionDenied,
 } from "@/lib/getCurrentPositionForMap";
+import { parseFeedPostFromRow, type FeedPost } from "@/lib/feedPost";
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -94,16 +95,6 @@ function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): C
 type Place = { id: string; name: string; address: string; category: Category; lat?: number; lng?: number };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
 type Comment = { id: string; user: string; userId?: string; avatarUrl?: string; text: string; createdAt: string };
-type FeedPost = {
-  id: string; user: string; userId: string; userAvatarUrl?: string; title: string; placeName: string; address: string;
-  lat?: number; lng?: number;
-  category: Category; comment: string; images: string[]; createdAt: string;
-  companionTag?: CompanionTag | null;
-  archived?: boolean;
-  likes_count: number;
-  liked_by_me: boolean;
-  comments: Comment[];
-};
 type PostImageItem = {
   id: string;
   previewUrl: string;
@@ -1226,26 +1217,9 @@ function HomePageContent() {
         setSavedPlaces(mappedPlaces);
       }
       if (postsRes.data) {
-        const rawPosts: FeedPost[] = postsRes.data.map((p: any) => {
-          const coords = latLngFromRow(p);
-          return {
-          id: p.id, user: p.user_name, userId: p.user_id ?? "", title: p.title, placeName: p.place_name,
-          address: p.address,
-          ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
-          category: p.category as Category, comment: p.comment,
-          companionTag: isCompanionTag(p.companion_tag) ? p.companion_tag : null,
-          images: p.images ?? [], createdAt: p.created_at, archived: p.archived,
-          likes_count: p.likes_count ?? 0,
-          liked_by_me: myLikedSet.has(p.id),
-          comments: (p.comments ?? []).map((c: any) => ({
-            id: c.id,
-            user: c.user_name,
-            userId: c.user_id ?? undefined,
-            text: c.text,
-            createdAt: c.created_at,
-          })),
-        };
-        });
+        const rawPosts: FeedPost[] = postsRes.data.map((p: any) =>
+          parseFeedPostFromRow(p, { likedByMe: myLikedSet.has(p.id) }),
+        );
         await prefetchAvatarsForFeedPosts(rawPosts);
         setFeedPosts(hydrateFeedPostsWithAvatars(rawPosts));
       } else {
