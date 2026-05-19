@@ -6391,6 +6391,15 @@ function HomePageContent() {
 
           {activeTab === "home" && (
             <div className="screen homeFeed">
+              {!loading && !homeLoadError && (
+                <div className="homeFeedChipsBar">
+                  <CompanionTagFilterChips
+                    value={selectedCompanionTag}
+                    onChange={setSelectedCompanionTag}
+                  />
+                </div>
+              )}
+              <div className="homeFeedScroll">
               {homeLoadError && !loading && (
                 <div style={{ minHeight: "45vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "12px", padding: "14px 10px" }}>
                   <p style={{ margin: 0, fontSize: "14px", color: "#56607a", textAlign: "center", lineHeight: 1.6 }}>{homeLoadError}</p>
@@ -6405,12 +6414,6 @@ function HomePageContent() {
                 </div>
               )}
               {loading && <FeedSkeleton />}
-              {!loading && !homeLoadError && (
-                <CompanionTagFilterChips
-                  value={selectedCompanionTag}
-                  onChange={setSelectedCompanionTag}
-                />
-              )}
               {!loading && !homeLoadError && visibleFeedPosts.length === 0 && (
                 <EmptyState
                   variant="feed"
@@ -6497,6 +6500,7 @@ function HomePageContent() {
                   </div>
                 </article>
               ))}
+              </div>
             </div>
           )}
 
