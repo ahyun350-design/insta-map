@@ -35,6 +35,11 @@ export const COMPANION_FILTER_CHIPS: {
   { value: "kid", emoji: "👶", label: "아이랑", shortLabel: "👶 아이" },
 ];
 
+export function companionTagDisplayLabel(tag: CompanionTag): string {
+  const opt = COMPANION_TAG_OPTIONS.find((o) => o.value === tag);
+  return opt ? `${opt.emoji} ${opt.label}` : tag;
+}
+
 export function companionFilterChipLabel(filter: CompanionTagFilter): string {
   const chip = COMPANION_FILTER_CHIPS.find((c) => c.value === filter);
   if (!chip) return filter;

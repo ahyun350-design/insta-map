@@ -25,6 +25,7 @@ import {
   type CompanionTagFilter,
 } from "@/lib/companionTag";
 import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
+import { FeedPostCard } from "@/components/FeedPostCard";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
@@ -6432,73 +6433,27 @@ function HomePageContent() {
                 />
               )}
               {filteredHomeFeedPosts.map((post) => (
-                <article key={post.id} className="feedCard" style={{ position: "relative", cursor: "pointer", overflow: "hidden" }} onClick={() => setDetailPostId(post.id)}>
-                  <div className="feedTop">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); router.push(`/profile/${encodeURIComponent(post.user)}`); }}
-                      style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, border: "none", background: "transparent", padding: 0, textAlign: "left", cursor: "pointer", minWidth: 0 }}
-                    >
-                      <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={38} className="avatar" />
-                      <div style={{ flex: 1, minWidth: 0 }}><p className="feedUser">{post.user}</p><p className="feedMeta">{timeAgo(post.createdAt)}</p></div>
-                    </button>
-                    {post.user !== MY_USERNAME && post.userId && !followingIds.includes(post.userId) && (
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); followUser(post.user); }}
-                        style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
-                      >+ 팔로우</button>
-                    )}
-                    {post.user !== MY_USERNAME && post.userId && followingIds.includes(post.userId) && (
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); unfollowUser(post.user); }}
-                        style={{ border: "1px solid #d0d4e0", background: "#fff", color: "#76809a", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 500, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
-                      >팔로잉</button>
-                    )}
-                    {post.user === MY_USERNAME && (
-                      <div style={{ position: "relative" }}>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === post.id ? null : post.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px 6px", display: "flex", flexDirection: "column", gap: "3px", alignItems: "center" }}>
-                          <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} /><span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} /><span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} />
-                        </button>
-                        {openMenuId === post.id && (
-                          <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: "28px", right: 0, background: "#fff", border: "0.5px solid #eee", borderRadius: "8px", boxShadow: "0 4px 16px rgba(0,0,0,0.1)", zIndex: 100, minWidth: "120px", overflow: "hidden" }}>
-                            <button type="button" onClick={() => openEdit(post)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#333", cursor: "pointer", borderBottom: "0.5px solid #f5f5f5" }}>✏️ 수정</button>
-                            <button type="button" onClick={() => toggleArchive(post.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#333", cursor: "pointer", borderBottom: "0.5px solid #f5f5f5" }}>📦 보관</button>
-                            <button type="button" onClick={() => deletePost(post.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 16px", border: "none", background: "transparent", fontSize: "13px", color: "#e07070", cursor: "pointer" }}>🗑️ 삭제</button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <p style={{ margin: "10px 0 6px", fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", fontWeight: 400, lineHeight: 1.3 }}>{post.title || post.placeName}</p>
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "10px" }}>
-                    <span style={{ fontSize: "13px" }}>{CATEGORY_PIN[post.category].emoji}</span>
-                    <span style={{ fontSize: "12px", color: "#888" }}>{post.placeName}</span>
-                    <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[post.category], padding: "2px 7px", borderRadius: "10px" }}>{post.category}</span>
-                  </div>
-                  {post.images.length > 0 && (<div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: "6px", marginBottom: "10px", overflowX: "auto" }}>{post.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "72px", height: "72px", objectFit: "cover", borderRadius: "6px", flexShrink: 0, cursor: "pointer" }} />)}</div>)}
-                  <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                    <button onClick={() => toggleLike(post.id)} style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", padding: 0 }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill={post.liked_by_me ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={post.liked_by_me ? "#e05555" : "#ccc"} strokeWidth="1.5"/></svg>
-                      <span style={{ fontSize: "12px", color: post.liked_by_me ? "#e05555" : "#ccc" }}>{post.likes_count}</span>
-                    </button>
-                    <div style={{ display: "flex", alignItems: "center", gap: "5px", cursor: "pointer" }} onClick={() => { setDetailPostId(post.id); setScrollToComment(true); }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="#ccc" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                      <span style={{ fontSize: "12px", color: "#ccc" }}>{post.comments.length}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); void openShareModal(post); }}
-                      style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", padding: 0 }}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                        <path d="M12 4v12m0-12l-4 4m4-4l4 4M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3" stroke="#ccc" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                      <span style={{ fontSize: "11px", color: "#ccc" }}>공유</span>
-                    </button>
-                  </div>
-                </article>
+                <FeedPostCard
+                  key={post.id}
+                  post={post}
+                  myUsername={MY_USERNAME}
+                  isFollowing={!!post.userId && followingIds.includes(post.userId)}
+                  menuOpen={openMenuId === post.id}
+                  timeAgoLabel={timeAgo(post.createdAt)}
+                  categoryPin={CATEGORY_PIN}
+                  onCardClick={() => setDetailPostId(post.id)}
+                  onProfileClick={() => router.push(`/profile/${encodeURIComponent(post.user)}`)}
+                  onFollow={() => followUser(post.user)}
+                  onUnfollow={() => unfollowUser(post.user)}
+                  onToggleMenu={() => setOpenMenuId(openMenuId === post.id ? null : post.id)}
+                  onEdit={() => openEdit(post)}
+                  onArchive={() => toggleArchive(post.id)}
+                  onDelete={() => deletePost(post.id)}
+                  onToggleLike={() => { void toggleLike(post.id); }}
+                  onComment={() => { setDetailPostId(post.id); setScrollToComment(true); }}
+                  onShare={() => { void openShareModal(post); }}
+                  onImageLightbox={setLightboxImg}
+                />
               ))}
               </div>
             </div>
