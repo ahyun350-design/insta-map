@@ -25,6 +25,8 @@ import {
   type CompanionTagFilter,
 } from "@/lib/companionTag";
 import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
+import { HomeFeedSearchBar } from "@/components/HomeFeedSearchBar";
+import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { FeedPostCard } from "@/components/FeedPostCard";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
@@ -705,6 +707,8 @@ function HomePageContent() {
   const [editComment, setEditComment] = useState("");
   const [showPostModal, setShowPostModal] = useState(false);
   const [selectedCompanionTag, setSelectedCompanionTag] = useState<CompanionTagFilter>("all");
+  const [homeSearchQuery, setHomeSearchQuery] = useState("");
+  const [debouncedHomeSearchQuery, setDebouncedHomeSearchQuery] = useState("");
   const [homePlaceSheet, setHomePlaceSheet] = useState<PlaceSheetData | null>(null);
   const [postTitle, setPostTitle] = useState(""); const [postPlaceName, setPostPlaceName] = useState("");
   const [postAddress, setPostAddress] = useState(""); const [postCategory, setPostCategory] = useState<Category>("카페");
@@ -5099,10 +5103,24 @@ function HomePageContent() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [feedPosts]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedHomeSearchQuery(homeSearchQuery);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [homeSearchQuery]);
+
   const filteredHomeFeedPosts = useMemo(() => {
-    if (selectedCompanionTag === "all") return visibleFeedPosts;
-    return visibleFeedPosts.filter((p) => p.companionTag === selectedCompanionTag);
-  }, [visibleFeedPosts, selectedCompanionTag]);
+    let result = visibleFeedPosts;
+    if (selectedCompanionTag !== "all") {
+      result = result.filter((p) => p.companionTag === selectedCompanionTag);
+    }
+    const q = debouncedHomeSearchQuery.trim();
+    if (q) {
+      result = result.filter((p) => feedPostMatchesHomeSearch(p, q));
+    }
+    return result;
+  }, [visibleFeedPosts, selectedCompanionTag, debouncedHomeSearchQuery]);
 
   const myMypagePosts = useMemo(() => {
     if (!user?.id) return [];
@@ -6344,15 +6362,18 @@ function HomePageContent() {
 
           {activeTab === "home" && (
             <div className="screen homeFeed">
+              <div className="homeFeedScroll">
               {!loading && !homeLoadError && (
-                <div className="homeFeedChipsBar">
-                  <CompanionTagFilterChips
-                    value={selectedCompanionTag}
-                    onChange={setSelectedCompanionTag}
-                  />
+                <div className="homeFeedStickyBar">
+                  <HomeFeedSearchBar value={homeSearchQuery} onChange={setHomeSearchQuery} />
+                  <div className="homeFeedChipsBar">
+                    <CompanionTagFilterChips
+                      value={selectedCompanionTag}
+                      onChange={setSelectedCompanionTag}
+                    />
+                  </div>
                 </div>
               )}
-              <div className="homeFeedScroll">
               {homeLoadError && !loading && (
                 <div style={{ minHeight: "45vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "12px", padding: "14px 10px" }}>
                   <p style={{ margin: 0, fontSize: "14px", color: "#56607a", textAlign: "center", lineHeight: 1.6 }}>{homeLoadError}</p>
@@ -6380,8 +6401,16 @@ function HomePageContent() {
                 <EmptyState
                   variant="feed"
                   icon="🔍"
-                  title={`아직 ${companionFilterChipLabel(selectedCompanionTag)} 큐레이션이 없어요`}
-                  description="다른 태그를 선택하거나 새 큐레이션을 올려보세요"
+                  title={
+                    debouncedHomeSearchQuery.trim()
+                      ? `'${debouncedHomeSearchQuery.trim()}'에 대한 큐레이션이 없어요`
+                      : `아직 ${companionFilterChipLabel(selectedCompanionTag)} 큐레이션이 없어요`
+                  }
+                  description={
+                    debouncedHomeSearchQuery.trim()
+                      ? "다른 키워드로 검색하거나 필터를 바꿔보세요"
+                      : "다른 태그를 선택하거나 새 큐레이션을 올려보세요"
+                  }
                 />
               )}
               {filteredHomeFeedPosts.map((post) => (
