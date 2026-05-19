@@ -17,6 +17,8 @@ import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
 import { ChatCourseCard } from "@/components/ChatCourseCard";
 import { CourseEditScreen } from "@/components/CourseEditScreen";
+import { NewCurationScreen } from "@/components/NewCurationScreen";
+import { isCompanionTag, type CompanionTag } from "@/lib/companionTag";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
@@ -80,20 +82,6 @@ function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): C
 type Place = { id: string; name: string; address: string; category: Category; lat?: number; lng?: number };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
 type Comment = { id: string; user: string; userId?: string; avatarUrl?: string; text: string; createdAt: string };
-const COMPANION_TAGS = ["lover", "friend", "pet", "alone", "family", "parent", "kid"] as const;
-type CompanionTag = (typeof COMPANION_TAGS)[number];
-const COMPANION_TAG_OPTIONS: { value: CompanionTag; emoji: string; label: string }[] = [
-  { value: "lover", emoji: "💑", label: "연인이랑" },
-  { value: "friend", emoji: "👫", label: "친구랑" },
-  { value: "pet", emoji: "🐾", label: "반려동물이랑" },
-  { value: "alone", emoji: "🧍", label: "혼자" },
-  { value: "family", emoji: "👨‍👩‍👧", label: "가족이랑" },
-  { value: "parent", emoji: "👵", label: "부모님이랑" },
-  { value: "kid", emoji: "👶", label: "아이랑" },
-];
-function isCompanionTag(value: unknown): value is CompanionTag {
-  return typeof value === "string" && (COMPANION_TAGS as readonly string[]).includes(value);
-}
 type FeedPost = {
   id: string; user: string; userId: string; userAvatarUrl?: string; title: string; placeName: string; address: string;
   lat?: number; lng?: number;
@@ -807,7 +795,6 @@ function HomePageContent() {
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const handleAddSubmittingRef = useRef(false);
   const completedJobIdsRef = useRef<Set<string>>(new Set());
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
   const chatComposerInputRef = useRef<HTMLInputElement | null>(null);
   const prevChatKeyboardOverlapRef = useRef(0);
@@ -1012,6 +999,17 @@ function HomePageContent() {
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
   const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
   const canPost = postTitle.trim().length > 0 && postPlaceName.trim().length > 0 && postComment.trim().length > 0 && postImagesAllUploaded && postCompanionTag !== null;
+  const postValidationHint = useMemo(() => {
+    if (canPost) return null;
+    if (!postTitle.trim()) return "제목을 입력해주세요";
+    if (!postPlaceName.trim()) return "장소를 검색하고 선택해주세요";
+    if (postImages.length === 0) return "사진을 최소 1장 추가해주세요";
+    if (postImages.some((i) => i.status === "uploading")) return "사진 업로드가 완료될 때까지 기다려주세요";
+    if (postImages.some((i) => i.status === "failed")) return "실패한 사진을 제거하거나 재시도해주세요";
+    if (postCompanionTag === null) return "누구랑 갔는지 선택해주세요";
+    if (!postComment.trim()) return "코멘트를 입력해주세요";
+    return "모든 사진 업로드가 끝나야 등록할 수 있어요";
+  }, [canPost, postTitle, postPlaceName, postImages, postCompanionTag, postComment]);
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
 
   const closeDetailPost = useCallback(() => {
@@ -3774,24 +3772,9 @@ function HomePageContent() {
     await submitPost(newPost);
     showToast("큐레이션이 등록됐어요 ✨", "success");
     setShowPostModal(false);
-    setPostTitle("");
-    setPostPlaceName("");
-    setPostAddress("");
-    setPostPlaceLat(undefined);
-    setPostPlaceLng(undefined);
-    setPostComment("");
-    setPostCompanionTag(null);
-    setPostCategory("카페");
-    setPostImages((prev) => {
-      prev.forEach((img) => {
-        if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
-      });
-      return [];
-    });
     setActiveTab("home");
   };
-  const resetModal = () => {
-    setShowPostModal(false);
+  const resetPostForm = useCallback(() => {
     setPostTitle("");
     setPostPlaceName("");
     setPostAddress("");
@@ -3808,6 +3791,11 @@ function HomePageContent() {
     });
     setPostSearchQuery("");
     setPostSearchResults([]);
+  }, []);
+  const closePostScreen = () => setShowPostModal(false);
+  const resetModal = () => {
+    closePostScreen();
+    resetPostForm();
   };
 
   const applyMyLocationOnMap = (
@@ -6357,134 +6345,37 @@ function HomePageContent() {
               </div>
             </div>
           )}
-          {showPostModal && (
-            <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
-              <div style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>새 큐레이션</span>
-                  <button onClick={resetModal} style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: "pointer" }}>×</button>
-                </div>
-                <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "6px", marginTop: 0 }}>제목</p><input className="mapInput" placeholder="한 줄로 표현해보세요" value={postTitle} onChange={(e) => setPostTitle(e.target.value)} style={{ width: "100%", boxSizing: "border-box" }} /></div>
-                <div>
-                  <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "6px", marginTop: 0 }}>장소 검색</p>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <input className="mapInput" placeholder="장소명 검색" value={postSearchQuery} onChange={(e) => setPostSearchQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handlePostSearch()} style={{ flex: 1 }} />
-                    <button className="primaryButton" onClick={handlePostSearch} type="button" style={{ padding: "0 14px", flexShrink: 0 }}>검색</button>
-                  </div>
-                  {postSearchResults.length > 0 && (<div style={{ border: "0.5px solid #eee", borderRadius: "4px", marginTop: "6px", overflow: "hidden" }}>{postSearchResults.map((r) => (<button key={r.id} type="button" onClick={() => handleSelectPostPlace(r)} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", background: "transparent", border: "none", borderBottom: "0.5px solid #f5f5f5", cursor: "pointer" }}><p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e" }}>{r.place_name}</p><p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999" }}>{r.road_address_name || r.address_name}</p></button>))}</div>)}
-                  {postPlaceName ? (
-                    <div style={{ marginTop: "8px", padding: "10px 12px", background: "#f0f4ff", borderRadius: "4px", display: "flex", alignItems: "center", gap: "8px", border: "1px solid #d0daff" }}>
-                      <span style={{ fontSize: "16px" }}>{CATEGORY_PIN[postCategory].emoji}</span>
-                      <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 500 }}>{postPlaceName}</p><p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999" }}>{postAddress}</p></div>
-                      <button onClick={() => { setPostPlaceName(""); setPostAddress(""); }} style={{ border: "none", background: "transparent", color: "#bbb", cursor: "pointer", fontSize: "14px" }}>×</button>
-                    </div>
-                  ) : <p style={{ fontSize: "11px", color: "#bbb", marginTop: "6px" }}>장소를 검색하고 선택해주세요</p>}
-                </div>
-                <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>카테고리</p><div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "8px" }}>{CATEGORY_MAIN_ORDER.map((cat) => (<button key={cat} type="button" onClick={() => setPostCategory(cat)} style={{ padding: "8px 6px", borderRadius: "12px", border: `1px solid ${postCategory === cat ? CATEGORY_COLORS[cat] : "#eee"}`, background: postCategory === cat ? CATEGORY_COLORS[cat] : "transparent", color: postCategory === cat ? "#fff" : "#888", fontSize: "11px", cursor: "pointer", textAlign: "center", fontFamily: "inherit", lineHeight: 1.25 }}>{CATEGORY_PIN[cat].emoji} {cat}</button>))}</div></div>
-                <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>사진 추가 (최대 6장)</p>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                    {postImages.map((img) => {
-                      const thumbSrc = img.status === "uploaded" && img.publicUrl ? img.publicUrl : img.previewUrl;
-                      return (
-                        <div key={img.id} style={{ position: "relative", width: "72px", height: "72px" }}>
-                          <img src={thumbSrc} alt="" style={{ width: "72px", height: "72px", objectFit: "cover", borderRadius: "6px", opacity: img.status === "uploading" ? 0.65 : 1 }} />
-                          {img.status === "uploading" && (
-                            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", borderRadius: "6px", background: "rgba(255,255,255,0.35)" }}>
-                              <span style={{ fontSize: "18px" }} aria-hidden>⏳</span>
-                            </div>
-                          )}
-                          {img.status === "failed" && (
-                            <div style={{ position: "absolute", inset: 0, borderRadius: "6px", background: "rgba(224,112,112,0.35)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px", padding: "4px" }}>
-                              <span style={{ fontSize: "13px", color: "#a03030", fontWeight: 700 }} aria-hidden>✕</span>
-                              <button
-                                type="button"
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
-                                  retryPostImageUpload(img);
-                                }}
-                                style={{ fontSize: "9px", padding: "3px 6px", borderRadius: "4px", border: "none", background: "#fff", cursor: "pointer", color: "#1a2a7a", fontFamily: "inherit" }}
-                              >
-                                재시도
-                              </button>
-                            </div>
-                          )}
-                          <button
-                            type="button"
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              setPostImages((prev) => {
-                                const removed = prev.find((x) => x.id === img.id);
-                                if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
-                                return prev.filter((x) => x.id !== img.id);
-                              });
-                            }}
-                            style={{ position: "absolute", top: "-6px", right: "-6px", width: "18px", height: "18px", borderRadius: "50%", background: "#333", border: "none", color: "#fff", fontSize: "11px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      );
-                    })}
-                    {postImages.length < 6 && (<button type="button" onClick={() => imageInputRef.current?.click()} style={{ width: "72px", height: "72px", border: "1px dashed #ccc", borderRadius: "6px", background: "transparent", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px", color: "#bbb" }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#bbb" strokeWidth="2" strokeLinecap="round"/></svg><span style={{ fontSize: "10px" }}>사진 추가</span></button>)}
-                  </div>
-                  <input ref={imageInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImageUpload} />
-                </div>
-                <div>
-                  <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>누구랑 갔어요?</p>
-                  <div role="radiogroup" aria-label="동행 태그" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    {COMPANION_TAG_OPTIONS.map((opt) => (
-                      <label
-                        key={opt.value}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          padding: "10px 12px",
-                          borderRadius: "8px",
-                          border: `1px solid ${postCompanionTag === opt.value ? "#1a2a7a" : "#eee"}`,
-                          background: postCompanionTag === opt.value ? "#f0f4ff" : "#fff",
-                          cursor: "pointer",
-                          fontSize: "13px",
-                          color: "#333",
-                        }}
-                      >
-                        <input
-                          type="radio"
-                          name="postCompanionTag"
-                          value={opt.value}
-                          checked={postCompanionTag === opt.value}
-                          onChange={() => setPostCompanionTag(opt.value)}
-                          style={{ accentColor: "#1a2a7a" }}
-                        />
-                        <span>{opt.emoji} {opt.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div><p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "6px", marginTop: 0 }}>코멘트</p><textarea placeholder="이 장소에 대한 느낌을 자유롭게 적어주세요 ✍️" value={postComment} onChange={(e) => setPostComment(e.target.value)} rows={4} style={{ width: "100%", border: "0.5px solid #ddd", borderRadius: "4px", padding: "10px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", outline: "none", boxSizing: "border-box", color: "#333" }} /></div>
-                {!canPost && (
-                  <p style={{ fontSize: "11px", color: "#e07070", margin: 0, textAlign: "center" }}>
-                    {!postTitle.trim()
-                      ? "제목을 입력해주세요"
-                      : !postPlaceName.trim()
-                        ? "장소를 검색하고 선택해주세요"
-                        : postImages.length === 0
-                          ? "사진을 최소 1장 추가해주세요"
-                          : postImages.some((i) => i.status === "uploading")
-                            ? "사진 업로드가 완료될 때까지 기다려주세요"
-                            : postImages.some((i) => i.status === "failed")
-                              ? "실패한 사진을 제거하거나 재시도해주세요"
-                              : postCompanionTag === null
-                                ? "누구랑 갔는지 선택해주세요"
-                              : !postComment.trim()
-                                ? "코멘트를 입력해주세요"
-                                : "모든 사진 업로드가 끝나야 등록할 수 있어요"}
-                  </p>
-                )}
-                <button className="primaryButton" type="button" disabled={!canPost} onClick={handleSubmitPost} style={{ width: "100%", padding: "14px", fontSize: "14px", letterSpacing: "1px", opacity: canPost ? 1 : 0.4 }}>올리기</button>
-              </div>
-            </div>
-          )}
+          <NewCurationScreen
+            open={showPostModal}
+            onClose={closePostScreen}
+            onExited={resetPostForm}
+            onSubmit={() => { void handleSubmitPost(); }}
+            canPost={canPost}
+            validationHint={postValidationHint}
+            title={postTitle}
+            onTitleChange={setPostTitle}
+            placeName={postPlaceName}
+            address={postAddress}
+            onClearPlace={() => { setPostPlaceName(""); setPostAddress(""); setPostPlaceLat(undefined); setPostPlaceLng(undefined); }}
+            searchQuery={postSearchQuery}
+            onSearchQueryChange={setPostSearchQuery}
+            onSearch={handlePostSearch}
+            searchResults={postSearchResults}
+            onSelectPlace={handleSelectPostPlace}
+            category={postCategory}
+            onCategoryChange={setPostCategory}
+            categoryMainOrder={CATEGORY_MAIN_ORDER}
+            categoryPin={CATEGORY_PIN}
+            categoryColors={CATEGORY_COLORS}
+            images={postImages}
+            onImagesChange={setPostImages}
+            onImageUpload={handleImageUpload}
+            onRetryImage={retryPostImageUpload}
+            companionTag={postCompanionTag}
+            onCompanionTagChange={setPostCompanionTag}
+            comment={postComment}
+            onCommentChange={setPostComment}
+          />
 
           {activeTab === "home" && (
             <div className="screen homeFeed">
