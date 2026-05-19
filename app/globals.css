@@ -1352,13 +1352,14 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  z-index: 50;
+  z-index: 100;
   flex-shrink: 0;
   box-sizing: border-box;
   margin: 0;
   padding: 0 clamp(6px, 2.5vw, 8px);
   background: transparent;
   border: none;
+  pointer-events: auto;
 }
 
 .tabBarPill {
@@ -1376,6 +1377,7 @@ body {
   box-shadow:
     0 -2px 16px rgba(0, 0, 0, 0.06),
     0 4px 16px rgba(0, 0, 0, 0.1);
+  pointer-events: auto;
 }
 
 /* 메시지 채팅방 진입 시 하단 탭 숨김 */
@@ -1423,6 +1425,7 @@ body {
   border-radius: 24px;
   color: #9ca3af;
   cursor: pointer;
+  pointer-events: auto;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-tap-highlight-color: transparent;
   transition:
@@ -1630,16 +1633,18 @@ body {
     box-sizing: border-box !important;
   }
 
-  /* 하단 탭바 — viewport 최하단 고정, 컨테이너는 투명 (필만 흰 배경) */
+  /* 하단 탭바 — 흰 바닥(safe-area) + 위에 둥근 필 (참고: 지그재그·인스타 패턴) */
   .tabBar {
     position: fixed !important;
     left: 0 !important;
     right: 0 !important;
     bottom: 0 !important;
     margin: 0 !important;
-    padding: 0 clamp(6px, 2.5vw, 8px) max(4px, calc(env(safe-area-inset-bottom, 0px) - 18px)) !important;
-    background: transparent !important;
+    padding: 6px clamp(6px, 2.5vw, 8px) env(safe-area-inset-bottom, 0px) !important;
+    background: #fff !important;
     box-sizing: border-box !important;
+    z-index: 100 !important;
+    pointer-events: auto !important;
   }
 
   .phoneBezel {
