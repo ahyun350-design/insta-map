@@ -851,6 +851,16 @@ body {
   cursor: wait;
 }
 
+.detailPostMediaWrap {
+  margin: 12px -20px 0;
+}
+
+.detailPostMediaWrap .feedPostMedia {
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+}
+
 /* ── 장소 상세 바텀시트 (지도·홈 공통) ── */
 .placeDetailSheetBackdrop {
   position: fixed;

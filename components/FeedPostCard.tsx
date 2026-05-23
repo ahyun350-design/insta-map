@@ -66,19 +66,21 @@ function formatLikeCount(n: number): string {
 const SWIPE_MOVE_PX = 10;
 const SWIPE_SCROLL_PX = 2;
 
-function FeedPostMedia({
+export function FeedPostMedia({
   images,
   placeSource,
   onMediaClick,
   onPlaceOverlayClick,
+  mediaAriaLabel = "게시물 상세 보기",
 }: {
   images: string[];
   placeSource: Pick<
     FeedPostCardData,
     "placeName" | "address" | "category" | "lat" | "lng" | "photoPlaceTags"
   >;
-  onMediaClick: () => void;
+  onMediaClick: (payload: { imageUrl: string; index: number }) => void;
   onPlaceOverlayClick?: (placeRef: PlaceRefForPhotoTagMatch) => void;
+  mediaAriaLabel?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -128,9 +130,10 @@ function FeedPostMedia({
         return;
       }
       e.stopPropagation();
-      onMediaClick();
+      const imageUrl = images[activeIndex] ?? images[0] ?? "";
+      onMediaClick({ imageUrl, index: activeIndex });
     },
-    [onMediaClick],
+    [onMediaClick, images, activeIndex],
   );
 
   const displayPlace = getDisplayPlaceForPhoto(
@@ -162,7 +165,7 @@ function FeedPostMedia({
         className="feedPostMediaTrack"
         role="button"
         tabIndex={0}
-        aria-label="게시물 상세 보기"
+        aria-label={mediaAriaLabel}
         onScroll={onScroll}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -173,7 +176,8 @@ function FeedPostMedia({
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             e.stopPropagation();
-            onMediaClick();
+            const imageUrl = images[activeIndex] ?? images[0] ?? "";
+            onMediaClick({ imageUrl, index: activeIndex });
           }
         }}
       >
@@ -308,7 +312,7 @@ export function FeedPostCard({
       <FeedPostMedia
         images={post.images}
         placeSource={post}
-        onMediaClick={onCardClick}
+        onMediaClick={() => onCardClick()}
         onPlaceOverlayClick={onPlaceOverlayClick}
       />
 

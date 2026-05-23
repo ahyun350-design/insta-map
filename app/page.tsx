@@ -29,7 +29,8 @@ import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
 import { HomeFeedTopBar } from "@/components/HomeFeedTopBar";
 import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
 import { BottomTabBar } from "@/components/BottomTabBar";
-import { FeedPostCard } from "@/components/FeedPostCard";
+import { FeedPostCard, FeedPostMedia } from "@/components/FeedPostCard";
+import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
 import { MapResearchAreaButton } from "@/components/MapResearchAreaButton";
@@ -5898,6 +5899,7 @@ function HomePageContent() {
 
   if (detailPost) {
     const liked = detailPost.liked_by_me;
+    const detailIsLegacyPlace = !hasPhotoPlaceTags(detailPost) && !!detailPost.placeName.trim();
     return (
       <>
       <main className="mobileRoot">
@@ -5909,7 +5911,8 @@ function HomePageContent() {
             <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailPost.placeName}</span>
           </header>
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "16px 20px 0" }}>
+            <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p></div>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "12px 20px 0" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
                 <ProfileAvatar avatarUrl={detailPost.userAvatarUrl} username={detailPost.user} size={38} className="avatar" />
                 <div><p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#1a1a2e" }}>{detailPost.user}</p><p style={{ margin: 0, fontSize: "11px", color: "#aaa" }}>{timeAgo(detailPost.createdAt)}</p></div>
@@ -5945,42 +5948,60 @@ function HomePageContent() {
                 )}
               </div>
             </div>
-            <div style={{ padding: "14px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p></div>
-            <div style={{ margin: "12px 20px 0", padding: "12px 14px", background: "#f8f8fc", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "10px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <span style={{ fontSize: "22px" }}>{CATEGORY_PIN[detailPost.category].emoji}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: "14px", fontFamily: "'Playfair Display', serif", color: "#1a1a2e" }}>{detailPost.placeName}</p>
-                  <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.address}</p>
+            {detailIsLegacyPlace && (
+              <div style={{ margin: "12px 20px 0", padding: "12px 14px", background: "#f8f8fc", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ fontSize: "22px" }}>{CATEGORY_PIN[detailPost.category].emoji}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: "14px", fontFamily: "'Playfair Display', serif", color: "#1a1a2e" }}>{detailPost.placeName}</p>
+                    <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.address}</p>
+                  </div>
+                  <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[detailPost.category], padding: "3px 8px", borderRadius: "10px", flexShrink: 0 }}>{detailPost.category}</span>
                 </div>
-                <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[detailPost.category], padding: "3px 8px", borderRadius: "10px", flexShrink: 0 }}>{detailPost.category}</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); goToMapFromDetailPost(); }}
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    borderRadius: "8px",
+                    background: "#3182F6",
+                    color: "#fff",
+                    padding: "11px 14px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  📍 지도에서 보기
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); goToMapFromDetailPost(); }}
-                style={{
-                  width: "100%",
-                  border: "none",
-                  borderRadius: "8px",
-                  background: "#3182F6",
-                  color: "#fff",
-                  padding: "11px 14px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  boxSizing: "border-box",
-                }}
-              >
-                📍 지도에서 보기
-              </button>
-            </div>
+            )}
             {detailPost.images.length > 0 && (
-              <div style={{ display: "flex", gap: "6px", margin: "14px 20px 0", overflowX: "auto", paddingBottom: "4px" }}>
-                {detailPost.images.map((img, i) => <img key={i} src={img} onClick={() => setLightboxImg(img)} style={{ width: "200px", height: "200px", objectFit: "cover", borderRadius: "10px", flexShrink: 0, cursor: "pointer" }} />)}
+              <div className="detailPostMediaWrap">
+                <FeedPostMedia
+                  images={detailPost.images}
+                  placeSource={detailPost}
+                  mediaAriaLabel="사진 확대"
+                  onMediaClick={({ imageUrl }) => setLightboxImg(imageUrl)}
+                  onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(detailPost, placeRef)}
+                />
               </div>
             )}
             <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontSize: "14px", color: "#333", lineHeight: 1.9 }}>{detailPost.comment}</p></div>
+            {detailPost.courseId && (
+              <div style={{ padding: "12px 20px 0" }}>
+                <FeedPostLinkedCourse
+                  courseId={detailPost.courseId}
+                  currentUserId={MY_USER}
+                  ensureCourseLoaded={ensureCourseLoaded}
+                  onOpenCourse={(course, readOnly) => openSavedCourse(course, { readOnly })}
+                  onCourseUnavailable={() => showToast("코스를 불러올 수 없어요", "error")}
+                />
+              </div>
+            )}
             <div style={{ padding: "16px 20px 0", display: "flex", alignItems: "center", gap: "14px", borderTop: "0.5px solid #f0f0f0", marginTop: "16px" }}>
               <button type="button" onClick={(e) => { e.stopPropagation(); void toggleLike(detailPost.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", padding: 0 }}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill={liked ? "#e05555" : "none"}><path d="M12 21C12 21 3 13.5 3 8C3 5.239 5.239 3 8 3C9.657 3 11.122 3.832 12 5.083C12.878 3.832 14.343 3 16 3C18.761 3 21 5.239 21 8C21 13.5 12 21 12 21Z" stroke={liked ? "#e05555" : "#aaa"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
