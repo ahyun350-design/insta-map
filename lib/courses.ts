@@ -31,6 +31,21 @@ function mapInsertError(error: { code?: string; message?: string }): string {
   return mapDbError(error, "코스를 저장하지 못했어요.");
 }
 
+/** Supabase row → SavedCourse (user_id 등 snake_case 보장) */
+function mapCourseRow(row: Record<string, unknown>): SavedCourse {
+  const items = (row.items ?? []) as SavedCourseItem[];
+  return {
+    id: String(row.id ?? ""),
+    user_id: String(row.user_id ?? row.userId ?? ""),
+    title: String(row.title ?? ""),
+    items,
+    place_count: Number(row.place_count ?? items.length),
+    created_at: String(row.created_at ?? ""),
+    updated_at: String(row.updated_at ?? ""),
+    cloned_from_id: (row.cloned_from_id as string | null | undefined) ?? null,
+  };
+}
+
 /** created_at → "5월 16일" (올해만) / "2025년 12월 31일" */
 export function formatCourseDate(iso: string): string {
   const d = new Date(iso);
@@ -185,7 +200,7 @@ export async function fetchCourseById(
     return { data: null, error: "삭제된 코스이거나 접근할 수 없는 코스예요" };
   }
 
-  return { data: data as SavedCourse, error: null };
+  return { data: mapCourseRow(data as Record<string, unknown>), error: null };
 }
 
 export async function importCourse(

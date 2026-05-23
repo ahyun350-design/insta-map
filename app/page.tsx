@@ -891,7 +891,8 @@ function HomePageContent() {
   const [courseEditSaving, setCourseEditSaving] = useState(false);
   const courseSaveInputRef = useRef<HTMLInputElement>(null);
   const courseEditOriginalRef = useRef<{ title: string; items: SavedCourseItem[] } | null>(null);
-  const preserveSavedCourseIdRef = useRef(false);
+  /** DB에 저장된 코스를 모달로 볼 때 id — courseResult 변경으로 savedCourseId가 지워지지 않게 */
+  const viewingSavedCourseIdRef = useRef<string | null>(null);
   const returnToCourseSheetRef = useRef(false);
   const drawCourseRouteRetryRef = useRef(0);
   const courseTitleOriginalRef = useRef("");
@@ -1251,10 +1252,7 @@ function HomePageContent() {
   }, [showCourseModal, courseOriginMode, savedPlaces, coursePlaceCoords]);
 
   useEffect(() => {
-    if (preserveSavedCourseIdRef.current) {
-      preserveSavedCourseIdRef.current = false;
-      return;
-    }
+    if (viewingSavedCourseIdRef.current) return;
     setSavedCourseId(null);
   }, [courseResult]);
 
@@ -1302,8 +1300,10 @@ function HomePageContent() {
       closeCourseSaveModal();
       showToast("코스를 저장했어요", "success");
       if (data?.id) {
+        viewingSavedCourseIdRef.current = data.id;
         setSavedCourseId(data.id);
         setViewedCourseUserId(user.id);
+        setCourseCache((prev) => ({ ...prev, [data.id]: data }));
       }
       void refreshMyCourses();
     } finally {
@@ -2205,7 +2205,7 @@ function HomePageContent() {
     setEditingCourseTitle("");
     setIsReadOnlyCourse(false);
     setViewedCourseUserId(null);
-    preserveSavedCourseIdRef.current = false;
+    viewingSavedCourseIdRef.current = null;
     returnToCourseSheetRef.current = false;
   };
 
@@ -2236,9 +2236,11 @@ function HomePageContent() {
       showToast("코스에 표시할 장소가 없어요", "error");
       return;
     }
-    preserveSavedCourseIdRef.current = true;
+    const ownerId = (course.user_id ?? "").trim();
+    viewingSavedCourseIdRef.current = course.id;
     setIsReadOnlyCourse(options?.readOnly ?? false);
-    setViewedCourseUserId(course.user_id);
+    setViewedCourseUserId(ownerId || null);
+    setCourseCache((prev) => ({ ...prev, [course.id]: { ...course, user_id: ownerId } }));
     setCourseResult(restored);
     setSavedCourseId(course.id);
     setEditingCourseTitle(course.title);
@@ -2329,7 +2331,7 @@ function HomePageContent() {
         showToast(error, "error");
         return;
       }
-      preserveSavedCourseIdRef.current = true;
+      viewingSavedCourseIdRef.current = editingCourseDraft.id;
       setCourseResult(editingCourseDraft.items.map(savedItemToCoursePlace));
       setEditingCourseTitle(trimmed);
       setMyCourses((prev) =>
@@ -3385,14 +3387,25 @@ function HomePageContent() {
     void openCourseShareModal(tempCourse);
   };
 
+  const activeViewedCourseId = savedCourseId ?? viewingSavedCourseIdRef.current;
+
+  const viewedCourseOwnerId = useMemo(() => {
+    if (viewedCourseUserId) return viewedCourseUserId;
+    if (!activeViewedCourseId) return null;
+    return courseCache[activeViewedCourseId]?.user_id ?? null;
+  }, [viewedCourseUserId, activeViewedCourseId, courseCache]);
+
   const showSaveToMyCoursesButton = Boolean(
-    user?.id && savedCourseId && viewedCourseUserId && viewedCourseUserId !== user.id,
+    user?.id &&
+      activeViewedCourseId &&
+      viewedCourseOwnerId &&
+      viewedCourseOwnerId !== user.id,
   );
 
   const courseAlreadyImported = useMemo(() => {
-    if (!savedCourseId || !user?.id || viewedCourseUserId === user.id) return false;
-    return myCourses.some((c) => c.cloned_from_id === savedCourseId);
-  }, [savedCourseId, viewedCourseUserId, user?.id, myCourses]);
+    if (!activeViewedCourseId || !user?.id || viewedCourseOwnerId === user.id) return false;
+    return myCourses.some((c) => c.cloned_from_id === activeViewedCourseId);
+  }, [activeViewedCourseId, viewedCourseOwnerId, user?.id, myCourses]);
 
   const handleImportCourse = async (originalCourseId: string) => {
     if (!user?.id || courseImporting) return;
@@ -3431,6 +3444,8 @@ function HomePageContent() {
     const perfScreen = "course:generate";
     dlog.perf.start(perfScreen);
     dlog.perf.fetchStart(perfScreen);
+    viewingSavedCourseIdRef.current = null;
+    setViewedCourseUserId(null);
     setCourseLoading(true);
     try {
       // 1. 출발지 좌표 결정
@@ -6342,14 +6357,14 @@ function HomePageContent() {
                       ))}
                     </div>
 
-                    {savedCourseId ? (
+                    {activeViewedCourseId ? (
                       <>
                         {showSaveToMyCoursesButton && (
                           <button
                             type="button"
                             disabled={courseImporting || courseAlreadyImported}
                             onClick={() => {
-                              if (savedCourseId) void handleImportCourse(savedCourseId);
+                              if (activeViewedCourseId) void handleImportCourse(activeViewedCourseId);
                             }}
                             style={{
                               width: "100%",
@@ -7295,6 +7310,7 @@ function HomePageContent() {
         onClick={() => {
           setShowCourseModal(true);
           setCourseResult(null);
+          viewingSavedCourseIdRef.current = null;
           setViewedCourseUserId(null);
           setIsReadOnlyCourse(false);
           setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
