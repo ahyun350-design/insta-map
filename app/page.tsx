@@ -1871,13 +1871,13 @@ function HomePageContent() {
       showToast(err instanceof Error ? err.message : "삭제에 실패했어요", "error");
     }
   };
-  const submitPost = async (post: FeedPost) => {
+  const submitPost = async (post: FeedPost): Promise<{ error: string | null }> => {
     if (!isCompanionTag(post.companionTag)) {
       alert("동행 태그를 선택해주세요.");
-      return;
+      return { error: "invalid_companion_tag" };
     }
     const coords = latLngFromRow(post);
-    await supabase.from("feed_posts").insert({
+    const { error } = await supabase.from("feed_posts").insert({
       id: post.id,
       user_id: user?.id || "",
       user_name: MY_USERNAME,
@@ -1891,9 +1891,14 @@ function HomePageContent() {
       images: post.images,
       companion_tag: post.companionTag,
       photo_place_tags: post.photoPlaceTags ?? null,
+      course_id: post.courseId ?? null,
       archived: false,
     });
-    setFeedPosts(prev => [post, ...prev]);
+    if (error) {
+      return { error: error.message };
+    }
+    setFeedPosts((prev) => [post, ...prev]);
+    return { error: null };
   };
   const openAppleMapsPlace = (placeName?: string, address?: string, latRaw?: string | number, lngRaw?: string | number) => {
     const lat = Number(latRaw);
@@ -3879,6 +3884,25 @@ function HomePageContent() {
     const postCoords = repTag
       ? { lat: repTag.lat, lng: repTag.lng }
       : coerceLatLng(postPlaceLat, postPlaceLng);
+
+    let linkedCourseId: string | null = null;
+    if (postSaveCourseChecked && user?.id) {
+      const courseItems = buildUniqueCourseItemsFromPhotoPlaceTags(postPhotoPlaceTags);
+      if (courseItems.length > 0) {
+        const { data: savedCourse, error: courseError } = await saveCourse(
+          user.id,
+          postCourseTitle,
+          courseItems,
+        );
+        if (courseError || !savedCourse) {
+          showToast(courseError ?? "코스를 저장하지 못했어요", "error");
+          return;
+        }
+        linkedCourseId = savedCourse.id;
+        setMyCourses((prev) => [savedCourse, ...prev.filter((c) => c.id !== savedCourse.id)]);
+      }
+    }
+
     const newPost: FeedPost = {
       id: Math.random().toString(36).substring(2) + Date.now().toString(36),
       user: MY_USERNAME,
@@ -3892,38 +3916,23 @@ function HomePageContent() {
       comment: postComment,
       companionTag: postCompanionTag,
       photoPlaceTags: postPhotoPlaceTags.length > 0 ? postPhotoPlaceTags : null,
+      courseId: linkedCourseId,
       images: imageUrls,
       createdAt: new Date().toISOString(),
       likes_count: 0,
       liked_by_me: false,
       comments: [],
     };
-    await submitPost(newPost);
-
-    if (postSaveCourseChecked && user?.id) {
-      const courseItems = buildUniqueCourseItemsFromPhotoPlaceTags(postPhotoPlaceTags);
-      if (courseItems.length > 0) {
-        const { data: savedCourse, error: courseError } = await saveCourse(
-          user.id,
-          postCourseTitle,
-          courseItems,
-        );
-        if (courseError || !savedCourse) {
-          showToast(
-            courseError ? `큐레이션은 등록됐어요. 코스 저장: ${courseError}` : "큐레이션은 등록됐어요. 코스 저장에 실패했어요",
-            "info",
-          );
-        } else {
-          setMyCourses((prev) => [savedCourse, ...prev.filter((c) => c.id !== savedCourse.id)]);
-          showToast("큐레이션과 코스가 등록됐어요 ✨", "success");
-        }
-      } else {
-        showToast("큐레이션이 등록됐어요 ✨", "success");
-      }
-    } else {
-      showToast("큐레이션이 등록됐어요 ✨", "success");
+    const { error: postError } = await submitPost(newPost);
+    if (postError) {
+      showToast(`큐레이션 등록에 실패했어요: ${postError}`, "error");
+      return;
     }
 
+    showToast(
+      linkedCourseId ? "큐레이션과 코스가 등록됐어요 ✨" : "큐레이션이 등록됐어요 ✨",
+      "success",
+    );
     setShowPostModal(false);
     setActiveTab("home");
   };

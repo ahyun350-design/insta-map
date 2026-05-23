@@ -48,6 +48,7 @@ export type FeedPost = {
   createdAt: string;
   companionTag?: CompanionTag | null;
   photoPlaceTags?: PhotoPlaceTag[] | null;
+  courseId?: string | null;
   archived?: boolean;
   likes_count: number;
   liked_by_me: boolean;
@@ -67,6 +68,7 @@ type FeedPostRow = {
   comment: string;
   companion_tag?: unknown;
   photo_place_tags?: unknown;
+  course_id?: string | null;
   images?: string[] | null;
   created_at: string;
   archived?: boolean | null;
@@ -169,6 +171,7 @@ export function parseFeedPostFromRow(row: FeedPostRow, options: ParseFeedPostOpt
     comment: row.comment,
     companionTag: isCompanionTag(row.companion_tag) ? row.companion_tag : null,
     photoPlaceTags: parsePhotoPlaceTagsFromRow(row.photo_place_tags),
+    courseId: row.course_id ?? null,
     images: row.images ?? [],
     createdAt: row.created_at,
     archived: row.archived ?? false,
