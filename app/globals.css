@@ -1240,6 +1240,34 @@ body {
   padding-top: 2px;
 }
 
+/* 확장 지도 — 이 지역 재검색 */
+.mapResearchAreaBtn {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 950;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14);
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a2a7a;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mapResearchAreaBtn:active {
+  transform: translateX(-50%) scale(0.98);
+}
+
 .screenTitle {
   margin: 0 0 4px;
   font-family: 'Playfair Display', serif;

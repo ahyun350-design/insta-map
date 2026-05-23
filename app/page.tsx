@@ -31,6 +31,7 @@ import { BottomTabBar } from "@/components/BottomTabBar";
 import { FeedPostCard } from "@/components/FeedPostCard";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
+import { MapResearchAreaButton } from "@/components/MapResearchAreaButton";
 import { feedPostToPlaceSheet, type PlaceSheetData } from "@/lib/placeSheet";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
@@ -213,6 +214,26 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** 이 지역 재검색 버튼 — 최소 이동 거리(m) 및 화면 높이 대비 비율 */
+const MAP_RESEARCH_MIN_DISTANCE_M = 600;
+const MAP_RESEARCH_VIEWPORT_RATIO = 0.25;
+
+function getMapResearchDistanceThresholdM(map: { getBounds?: () => { getNorthEast: () => { getLat: () => number }; getSouthWest: () => { getLat: () => number } } } | null): number {
+  try {
+    const bounds = map?.getBounds?.();
+    if (bounds) {
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      const latSpan = Math.abs(ne.getLat() - sw.getLat());
+      const visibleHeightM = latSpan * 111320;
+      return Math.max(MAP_RESEARCH_MIN_DISTANCE_M, visibleHeightM * MAP_RESEARCH_VIEWPORT_RATIO);
+    }
+  } catch {
+    /* noop */
+  }
+  return MAP_RESEARCH_MIN_DISTANCE_M;
 }
 
 /** 동명이 장소 큐레이션 매칭 — 같은 블록(약 100m) 또는 좌표 없을 때 주소 텍스트 fallback */
@@ -750,8 +771,14 @@ function HomePageContent() {
   selectedPlaceRef.current = selectedPlace;
   const [searchQuery, setSearchQuery] = useState("");
   const [mapSearchResults, setMapSearchResults] = useState<MapSearchPlaceResult[]>([]);
+  const mapSearchResultsRef = useRef<MapSearchPlaceResult[]>([]);
+  mapSearchResultsRef.current = mapSearchResults;
   const [mapSearchLabel, setMapSearchLabel] = useState("");
   const [isMapSearchSheetOpen, setIsMapSearchSheetOpen] = useState(false);
+  const [showMapResearchButton, setShowMapResearchButton] = useState(false);
+  const lastSearchCenterRef = useRef<{ lat: number; lng: number } | null>(null);
+  const mapSearchKeywordRef = useRef("");
+  const pendingSearchCenterSyncRef = useRef(false);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
   const [detailPostId, setDetailPostId] = useState<string | null>(
@@ -997,6 +1024,10 @@ function HomePageContent() {
     setMapSearchResults([]);
     setMapSearchLabel("");
     setIsMapSearchSheetOpen(false);
+    lastSearchCenterRef.current = null;
+    mapSearchKeywordRef.current = "";
+    pendingSearchCenterSyncRef.current = false;
+    setShowMapResearchButton(false);
   }, [clearSearchResultPins]);
 
   /** 확장 지도 카메라: panTo 우선(부드러운 이동), SDK 미지원 시 setCenter 폴백 */
@@ -4324,116 +4355,147 @@ function HomePageContent() {
     });
   }, []);
 
-  const handleSearch = () => {
-    console.log("[PindMap:search] search invoked", { query: searchQuery.trim() });
-    if (!searchQuery.trim()) {
-      console.log("[PindMap:search] search blocked - reason: empty_query");
-      return;
-    }
-    if (!expandedMapRef.current) {
-      console.log("[PindMap:search] search blocked - reason: expanded_map_not_ready");
-      return;
-    }
-    if (!window.kakao?.maps) {
-      console.log("[PindMap:search] search blocked - reason: kakao_not_ready");
-      return;
-    }
-    const ps = new window.kakao.maps.services.Places(); const geocoder = new window.kakao.maps.services.Geocoder();
-    const trimmed = searchQuery.trim();
-    const getExpandedSearchBiasLatLng = () => {
-      const cached = myLocationLatLngRef.current;
-      if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lng)) {
-        return new window.kakao.maps.LatLng(cached.lat, cached.lng);
-      }
-      const mapNow = expandedMapRef.current;
-      const center = mapNow?.getCenter?.();
-      if (center) return center;
-      return new window.kakao.maps.LatLng(37.5665, 126.978);
-    };
-    const fitExpandedMapToKeywordResults = (places: any[]) => {
-      const mapNow = expandedMapRef.current;
-      if (!mapNow || places.length === 0) return;
-      const valid = places.filter((p) => {
-        const y = parseFloat(p.y);
-        const x = parseFloat(p.x);
-        return Number.isFinite(y) && Number.isFinite(x);
-      });
-      if (valid.length === 0) return;
-      const bias = getExpandedSearchBiasLatLng();
-      const bLat = bias.getLat();
-      const bLng = bias.getLng();
-      const sorted = [...valid].sort(
-        (a, b) =>
-          distanceMeters(bLat, bLng, parseFloat(a.y), parseFloat(a.x)) -
-          distanceMeters(bLat, bLng, parseFloat(b.y), parseFloat(b.x)),
-      );
-      const fitPlaces = sorted.slice(0, 3);
-      if (fitPlaces.length === 1) {
-        const p = fitPlaces[0];
-        mapNow.setCenter(new window.kakao.maps.LatLng(parseFloat(p.y), parseFloat(p.x)));
-        mapNow.setLevel(3);
+  /** 확장 지도 검색 — 지도 center 기준 (GPS 아님) */
+  const getExpandedMapSearchCenter = useCallback(() => {
+    const mapNow = expandedMapRef.current;
+    const center = mapNow?.getCenter?.();
+    if (center) return center;
+    return new window.kakao.maps.LatLng(37.5665, 126.978);
+  }, []);
+
+  const runExpandedMapSearch = useCallback(
+    (keyword: string) => {
+      const trimmed = keyword.trim();
+      console.log("[PindMap:search] search invoked", { query: trimmed });
+      if (!trimmed) {
+        console.log("[PindMap:search] search blocked - reason: empty_query");
         return;
       }
-      const bounds = new window.kakao.maps.LatLngBounds();
-      fitPlaces.forEach((p) => bounds.extend(new window.kakao.maps.LatLng(parseFloat(p.y), parseFloat(p.x))));
-      mapNow.setBounds(bounds);
-    };
-    const doSearch = (data: any[], st: string) => {
-      if (st !== window.kakao.maps.services.Status.OK) {
-        showToast("검색 결과가 없어요", "info");
+      if (!expandedMapRef.current) {
+        console.log("[PindMap:search] search blocked - reason: expanded_map_not_ready");
         return;
       }
-      console.log("[PindMap:expandedMap] keywordSearch ok count=", data?.length ?? 0);
-      clearSearchResultPins();
-      addSearchResultPins(data, (place) => openExpandedSearchPlaceCard(place, "marker-keyword-click"));
-      setMapSearchResults(data);
-      setMapSearchLabel(trimmed);
-      setIsMapSearchSheetOpen(true);
-      fitExpandedMapToKeywordResults(data);
-      setSearchQuery("");
-    };
-    geocoder.addressSearch(trimmed, (result: any[], st: string) => {
-      if (st === window.kakao.maps.services.Status.OK && result[0]) {
-        const addr = result[0];
+      if (!window.kakao?.maps) {
+        console.log("[PindMap:search] search blocked - reason: kakao_not_ready");
+        return;
+      }
+
+      mapSearchKeywordRef.current = trimmed;
+      setShowMapResearchButton(false);
+      pendingSearchCenterSyncRef.current = true;
+
+      const searchCenter = getExpandedMapSearchCenter();
+      const searchCenterLat = searchCenter.getLat();
+      const searchCenterLng = searchCenter.getLng();
+      lastSearchCenterRef.current = { lat: searchCenterLat, lng: searchCenterLng };
+
+      const ps = new window.kakao.maps.services.Places();
+      const geocoder = new window.kakao.maps.services.Geocoder();
+
+      const fitExpandedMapToKeywordResults = (places: any[]) => {
+        const mapNow = expandedMapRef.current;
+        if (!mapNow || places.length === 0) return;
+        const valid = places.filter((p) => {
+          const y = parseFloat(p.y);
+          const x = parseFloat(p.x);
+          return Number.isFinite(y) && Number.isFinite(x);
+        });
+        if (valid.length === 0) return;
+        const sorted = [...valid].sort(
+          (a, b) =>
+            distanceMeters(searchCenterLat, searchCenterLng, parseFloat(a.y), parseFloat(a.x)) -
+            distanceMeters(searchCenterLat, searchCenterLng, parseFloat(b.y), parseFloat(b.x)),
+        );
+        const fitPlaces = sorted.slice(0, 3);
+        if (fitPlaces.length === 1) {
+          const p = fitPlaces[0];
+          mapNow.setCenter(new window.kakao.maps.LatLng(parseFloat(p.y), parseFloat(p.x)));
+          mapNow.setLevel(3);
+          return;
+        }
+        const bounds = new window.kakao.maps.LatLngBounds();
+        fitPlaces.forEach((p) => bounds.extend(new window.kakao.maps.LatLng(parseFloat(p.y), parseFloat(p.x))));
+        mapNow.setBounds(bounds);
+      };
+
+      const applyKeywordSearchResults = (data: any[], st: string) => {
+        if (st !== window.kakao.maps.services.Status.OK) {
+          showToast("검색 결과가 없어요", "info");
+          pendingSearchCenterSyncRef.current = false;
+          return;
+        }
+        console.log("[PindMap:expandedMap] keywordSearch ok count=", data?.length ?? 0);
         clearSearchResultPins();
-        const placeObj = {
-          id: `addr-${addr.x}-${addr.y}`,
-          place_name: trimmed || addr.place_name || addr.address_name || "위치",
-          category_name: "장소",
-          road_address_name: addr.road_address?.address_name ?? addr.address?.address_name ?? addr.address_name ?? "",
-          phone: "",
-          place_url: "",
-          y: addr.y,
-          x: addr.x,
-        };
-        console.log("[PindMap:expandedMap] addressSearch marker", placeObj.place_name);
-        addSearchResultPins([placeObj], (place) => openExpandedSearchPlaceCard(place, "marker-address-click"));
-        setMapSearchResults([placeObj]);
+        addSearchResultPins(data, (place) => openExpandedSearchPlaceCard(place, "marker-keyword-click"));
+        setMapSearchResults(data);
         setMapSearchLabel(trimmed);
         setIsMapSearchSheetOpen(true);
-        expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(addr.y, addr.x));
-        expandedMapRef.current.setLevel(3);
+        fitExpandedMapToKeywordResults(data);
         setSearchQuery("");
-      } else {
-        console.log("[PindMap:expandedMap] addressSearch fallback to keyword:", trimmed);
-        const bias = getExpandedSearchBiasLatLng();
+      };
+
+      const runKeywordSearchAtMapCenter = () => {
+        const bias = getExpandedMapSearchCenter();
         const SortBy = window.kakao.maps.services.SortBy;
         const keywordOpts: Record<string, unknown> = { location: bias };
         if (SortBy?.DISTANCE != null) {
           keywordOpts.sort = SortBy.DISTANCE;
         }
-        const handleKeyword = (data: any[], st: string) => {
-          const ok = st === window.kakao.maps.services.Status.OK && Array.isArray(data) && data.length > 0;
-          if (ok) {
-            doSearch(data, st);
-            return;
+        ps.keywordSearch(trimmed, applyKeywordSearchResults, keywordOpts);
+      };
+
+      geocoder.addressSearch(trimmed, (result: any[], st: string) => {
+        if (st === window.kakao.maps.services.Status.OK && result[0]) {
+          const addr = result[0];
+          clearSearchResultPins();
+          const placeObj = {
+            id: `addr-${addr.x}-${addr.y}`,
+            place_name: trimmed || addr.place_name || addr.address_name || "위치",
+            category_name: "장소",
+            road_address_name: addr.road_address?.address_name ?? addr.address?.address_name ?? addr.address_name ?? "",
+            phone: "",
+            place_url: "",
+            y: addr.y,
+            x: addr.x,
+          };
+          const addrLat = parseFloat(addr.y);
+          const addrLng = parseFloat(addr.x);
+          if (Number.isFinite(addrLat) && Number.isFinite(addrLng)) {
+            lastSearchCenterRef.current = { lat: addrLat, lng: addrLng };
           }
-          ps.keywordSearch(trimmed, doSearch);
-        };
-        ps.keywordSearch(trimmed, handleKeyword, keywordOpts);
-      }
-    });
+          console.log("[PindMap:expandedMap] addressSearch marker", placeObj.place_name);
+          addSearchResultPins([placeObj], (place) => openExpandedSearchPlaceCard(place, "marker-address-click"));
+          setMapSearchResults([placeObj]);
+          setMapSearchLabel(trimmed);
+          setIsMapSearchSheetOpen(true);
+          expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(addr.y, addr.x));
+          expandedMapRef.current.setLevel(3);
+          pendingSearchCenterSyncRef.current = true;
+          setSearchQuery("");
+        } else {
+          console.log("[PindMap:expandedMap] addressSearch fallback to keyword:", trimmed);
+          runKeywordSearchAtMapCenter();
+        }
+      });
+    },
+    [
+      addSearchResultPins,
+      clearSearchResultPins,
+      getExpandedMapSearchCenter,
+      openExpandedSearchPlaceCard,
+      showToast,
+    ],
+  );
+
+  const handleSearch = () => {
+    runExpandedMapSearch(searchQuery);
   };
+
+  const handleResearchThisArea = useCallback(() => {
+    const keyword = mapSearchKeywordRef.current.trim();
+    if (!keyword) return;
+    runExpandedMapSearch(keyword);
+  }, [runExpandedMapSearch]);
 
   // 카카오 스크립트 최초 로드 (DOM 준비와 무관하게 스크립트만 로드)
   useEffect(() => {
@@ -5118,9 +5180,46 @@ function HomePageContent() {
       mapContainerEl.addEventListener("touchstart", onTouchStart, { passive: true });
       mapContainerEl.addEventListener("touchend", onTouchEnd, { passive: true });
 
+      const updateResearchButtonVisibility = () => {
+        if (!lastSearchCenterRef.current || !mapSearchKeywordRef.current.trim()) {
+          setShowMapResearchButton(false);
+          return;
+        }
+        if (mapSearchResultsRef.current.length === 0) {
+          setShowMapResearchButton(false);
+          return;
+        }
+        if (pendingSearchCenterSyncRef.current) {
+          const c = map.getCenter();
+          if (c) {
+            lastSearchCenterRef.current = { lat: c.getLat(), lng: c.getLng() };
+          }
+          pendingSearchCenterSyncRef.current = false;
+          setShowMapResearchButton(false);
+          return;
+        }
+        const center = map.getCenter();
+        if (!center) return;
+        const dist = distanceMeters(
+          lastSearchCenterRef.current.lat,
+          lastSearchCenterRef.current.lng,
+          center.getLat(),
+          center.getLng(),
+        );
+        const threshold = getMapResearchDistanceThresholdM(map);
+        if (dist < threshold * 0.45) {
+          setShowMapResearchButton(false);
+        } else if (dist >= threshold) {
+          setShowMapResearchButton(true);
+        }
+      };
+
+      const listenerIdle = window.kakao.maps.event.addListener(map, "idle", updateResearchButtonVisibility);
+
       expandedMapInteractionCleanupRef.current = () => {
         try {
           window.kakao.maps.event.removeListener(listenerClick);
+          window.kakao.maps.event.removeListener(listenerIdle);
         } catch (err) {
           console.log("[PindMap:expandedMap] removeListener error", err);
         }
@@ -5167,6 +5266,10 @@ function HomePageContent() {
       setIsMapSearchSheetOpen(false);
       setMapSearchResults([]);
       setMapSearchLabel("");
+      setShowMapResearchButton(false);
+      lastSearchCenterRef.current = null;
+      mapSearchKeywordRef.current = "";
+      pendingSearchCenterSyncRef.current = false;
     }
   }, [mapExpanded]);
 
@@ -7086,6 +7189,7 @@ function HomePageContent() {
                     </div>
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
+                      <MapResearchAreaButton visible={showMapResearchButton} onResearch={handleResearchThisArea} />
                       {selectedPlace && renderPlaceCard()}
                       {isMapSearchSheetOpen && mapSearchResults.length > 0 && (
                         <MapSearchResultsSheet
