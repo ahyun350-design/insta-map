@@ -375,6 +375,62 @@ body {
   border-radius: 1px;
 }
 
+/* 큐레이션 Step 3 — 카테고리·동행 태그 pill 칩 */
+.curationStep3Form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.curationFormSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.curationFormLabel {
+  margin: 0;
+  font-size: 11px;
+  color: #1a2a7a;
+  letter-spacing: 1px;
+}
+
+.curationFormChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.curationFormChip {
+  margin: 0;
+  padding: 9px 15px;
+  border-radius: 20px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #888;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.curationFormChipSelected {
+  border-color: #1a2a7a;
+  background: #1a2a7a;
+  color: #fff;
+  font-weight: 600;
+}
+
+.curationFormValidationHint {
+  margin: 0;
+  font-size: 11px;
+  color: #e07070;
+  text-align: center;
+}
+
 .homeFeedScroll {
   flex: 1 1 0%;
   min-height: 0;

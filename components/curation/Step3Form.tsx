@@ -1,7 +1,9 @@
 "use client";
 
-import { COMPANION_TAG_OPTIONS, type CompanionTag } from "@/lib/companionTag";
+import { COMPANION_FILTER_CHIPS, type CompanionTag } from "@/lib/companionTag";
 import type { CurationCategory } from "@/components/curation/types";
+
+const COMPANION_STEP3_CHIPS = COMPANION_FILTER_CHIPS.filter((chip) => chip.value !== "all");
 
 type Props = {
   title: string;
@@ -25,8 +27,6 @@ export function Step3Form({
   category,
   onCategoryChange,
   categoryMainOrder,
-  categoryPin,
-  categoryColors,
   companionTag,
   onCompanionTagChange,
   comment,
@@ -35,9 +35,9 @@ export function Step3Form({
   onFieldFocus,
 }: Props) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div>
-        <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 6, marginTop: 0 }}>제목</p>
+    <div className="curationStep3Form">
+      <div className="curationFormSection">
+        <p className="curationFormLabel">제목</p>
         <input
           className="mapInput"
           placeholder="한 줄로 표현해보세요"
@@ -48,70 +48,50 @@ export function Step3Form({
         />
       </div>
 
-      <div>
-        <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 8, marginTop: 0 }}>카테고리</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
-          {categoryMainOrder.map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => onCategoryChange(cat)}
-              style={{
-                padding: "8px 6px",
-                borderRadius: 12,
-                border: `1px solid ${category === cat ? categoryColors[cat] : "#eee"}`,
-                background: category === cat ? categoryColors[cat] : "transparent",
-                color: category === cat ? "#fff" : "#888",
-                fontSize: 11,
-                cursor: "pointer",
-                textAlign: "center",
-                fontFamily: "inherit",
-                lineHeight: 1.25,
-              }}
-            >
-              {categoryPin[cat].emoji} {cat}
-            </button>
-          ))}
+      <div className="curationFormSection">
+        <p className="curationFormLabel">카테고리</p>
+        <div className="curationFormChips" role="radiogroup" aria-label="카테고리">
+          {categoryMainOrder.map((cat) => {
+            const selected = category === cat;
+            return (
+              <button
+                key={cat}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={selected ? "curationFormChip curationFormChipSelected" : "curationFormChip"}
+                onClick={() => onCategoryChange(cat)}
+              >
+                {cat}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div>
-        <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 8, marginTop: 0 }}>누구랑 갔어요?</p>
-        <div role="radiogroup" aria-label="동행 태그" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {COMPANION_TAG_OPTIONS.map((opt) => (
-            <label
-              key={opt.value}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "10px 12px",
-                borderRadius: 8,
-                border: `1px solid ${companionTag === opt.value ? "#1a2a7a" : "#eee"}`,
-                background: companionTag === opt.value ? "#f0f4ff" : "#fff",
-                cursor: "pointer",
-                fontSize: 13,
-                color: "#333",
-              }}
-            >
-              <input
-                type="radio"
-                name="postCompanionTag"
-                value={opt.value}
-                checked={companionTag === opt.value}
-                onChange={() => onCompanionTagChange(opt.value)}
-                style={{ accentColor: "#1a2a7a" }}
-              />
-              <span>
-                {opt.emoji} {opt.label}
-              </span>
-            </label>
-          ))}
+      <div className="curationFormSection">
+        <p className="curationFormLabel">누구랑 갔어요?</p>
+        <div className="curationFormChips" role="radiogroup" aria-label="동행 태그">
+          {COMPANION_STEP3_CHIPS.map((chip) => {
+            const selected = companionTag === chip.value;
+            return (
+              <button
+                key={chip.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={selected ? "curationFormChip curationFormChipSelected" : "curationFormChip"}
+                onClick={() => onCompanionTagChange(chip.value as CompanionTag)}
+              >
+                {chip.shortLabel}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div>
-        <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 6, marginTop: 0 }}>코멘트</p>
+      <div className="curationFormSection">
+        <p className="curationFormLabel">코멘트</p>
         <textarea
           placeholder="이 장소에 대한 느낌을 자유롭게 적어주세요 ✍️"
           value={comment}
@@ -133,9 +113,7 @@ export function Step3Form({
         />
       </div>
 
-      {validationHint && (
-        <p style={{ fontSize: 11, color: "#e07070", margin: 0, textAlign: "center" }}>{validationHint}</p>
-      )}
+      {validationHint && <p className="curationFormValidationHint">{validationHint}</p>}
     </div>
   );
 }
