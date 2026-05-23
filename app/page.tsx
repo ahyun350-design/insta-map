@@ -5910,7 +5910,7 @@ function HomePageContent() {
             </button>
             <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailPost.placeName}</span>
           </header>
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}>
+          <div className="detailPostScroll" style={{ flex: 1, minHeight: 0, background: "#fff" }}>
             <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p></div>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "12px 20px 0" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>

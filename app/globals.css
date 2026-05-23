@@ -851,14 +851,43 @@ body {
   cursor: wait;
 }
 
+/* 게시물 상세: 가로 흔들림 방지 — 내부만 overflow-x 허용(캐러셀 트랙) */
+.detailPostScroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .detailPostMediaWrap {
   margin: 12px -20px 0;
+  max-width: calc(100% + 40px);
+  box-sizing: border-box;
 }
 
 .detailPostMediaWrap .feedPostMedia {
   width: 100%;
+  max-width: 100%;
   margin-left: 0;
   margin-right: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.detailPostMediaWrap .feedPostMediaTrack {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.detailPostMediaWrap .feedPostMediaSlide {
+  flex: 0 0 100%;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* ── 장소 상세 바텀시트 (지도·홈 공통) ── */
