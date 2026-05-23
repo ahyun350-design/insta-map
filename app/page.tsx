@@ -60,6 +60,7 @@ import { parseFeedPostFromRow, type FeedPost, type PhotoPlaceTag } from "@/lib/f
 import {
   getDisplayPlaceForPhoto,
   getRepresentativePhotoPlaceTag,
+  hasPhotoPlaceTags,
   buildUniqueCourseItemsFromPhotoPlaceTags,
   mergeRelatedFeedPostsForPlaceSheet,
   type PlaceRefForPhotoTagMatch,
@@ -343,6 +344,9 @@ function placeRefFromFeedPost(post: FeedPost, photoIndex = 0): PlaceRefForPhotoT
       lat: display.lat,
       lng: display.lng,
     };
+  }
+  if (hasPhotoPlaceTags(post)) {
+    return { placeName: "", address: "", placeId: null };
   }
   return {
     placeName: post.placeName,
@@ -3886,8 +3890,9 @@ function HomePageContent() {
       return;
     }
     const repTag = getRepresentativePhotoPlaceTag(postPhotoPlaceTags);
-    const normalizedPlaceName = (repTag?.placeName ?? postPlaceName).trim();
-    const normalizedAddress = (repTag?.address ?? postAddress).trim();
+    const hasPhotoTags = postPhotoPlaceTags.length > 0;
+    const normalizedPlaceName = (repTag?.placeName ?? (hasPhotoTags ? postPlaceName : "")).trim();
+    const normalizedAddress = (repTag?.address ?? (hasPhotoTags ? postAddress : "")).trim();
     if (normalizedPlaceName) {
       const { data: existing } = await supabase
         .from("feed_posts")
@@ -3937,10 +3942,10 @@ function HomePageContent() {
       userId: user?.id || "",
       userAvatarUrl: user?.avatar_url,
       title: postTitle,
-      placeName: repTag?.placeName ?? postPlaceName,
-      address: repTag?.address ?? postAddress,
+      placeName: repTag?.placeName ?? (hasPhotoTags ? postPlaceName : ""),
+      address: repTag?.address ?? (hasPhotoTags ? postAddress : ""),
       ...(postCoords ? { lat: postCoords.lat, lng: postCoords.lng } : {}),
-      category: postCategory,
+      category: (repTag?.category as Category) ?? postCategory,
       comment: postComment,
       companionTag: postCompanionTag,
       photoPlaceTags: postPhotoPlaceTags.length > 0 ? postPhotoPlaceTags : null,

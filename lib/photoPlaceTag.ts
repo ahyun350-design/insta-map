@@ -63,7 +63,9 @@ export function hasPhotoPlaceTags(post: Pick<FeedPost, "photoPlaceTags">): boole
 }
 
 /**
- * 사진별 태그가 있으면 해당 인덱스 사용, 없으면 큐레이션 대표 장소 폴백, 둘 다 없으면 null.
+ * 사진별 표시 장소.
+ * - v2(photoPlaceTags 있음): 해당 photoIndex 태그만, 없으면 null (다른 사진 태그·대표 place_name 폴백 X)
+ * - legacy(photoPlaceTags 없음): feed_posts.place_name 대표 장소를 모든 사진에 폴백
  */
 export function getDisplayPlaceForPhoto(
   post: Pick<
@@ -84,6 +86,10 @@ export function getDisplayPlaceForPhoto(
       x: tag.x,
       y: tag.y,
     };
+  }
+
+  if (hasPhotoPlaceTags(post)) {
+    return null;
   }
 
   if (post.placeName.trim()) {
@@ -154,7 +160,9 @@ export function getRelatedPostImagesForPlace(
   placeRef: PlaceRefForPhotoTagMatch,
 ): string[] {
   const indices = getMatchingPhotoIndices(post, placeRef);
-  if (indices.length === 0) return post.images;
+  if (indices.length === 0) {
+    return hasPhotoPlaceTags(post) ? [] : post.images;
+  }
   return [...indices]
     .sort((a, b) => a - b)
     .map((i) => post.images[i])

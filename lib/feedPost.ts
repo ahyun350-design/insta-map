@@ -101,8 +101,14 @@ function parsePhotoPlaceTagItem(raw: unknown): PhotoPlaceTag | null {
   if (!raw || typeof raw !== "object") return null;
   const item = raw as Record<string, unknown>;
 
-  const photoIndex = item.photoIndex;
-  if (typeof photoIndex !== "number" || !Number.isInteger(photoIndex) || photoIndex < 0) {
+  const rawIndex = item.photoIndex;
+  const photoIndex =
+    typeof rawIndex === "number"
+      ? rawIndex
+      : typeof rawIndex === "string"
+        ? Number.parseInt(rawIndex, 10)
+        : NaN;
+  if (!Number.isInteger(photoIndex) || photoIndex < 0) {
     return null;
   }
 
