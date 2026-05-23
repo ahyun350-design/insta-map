@@ -868,6 +868,7 @@ function HomePageContent() {
   const [courseSaving, setCourseSaving] = useState(false);
   const [savedCourseId, setSavedCourseId] = useState<string | null>(null);
   const [isReadOnlyCourse, setIsReadOnlyCourse] = useState(false);
+  const [viewedCourseUserId, setViewedCourseUserId] = useState<string | null>(null);
   const [courseImporting, setCourseImporting] = useState(false);
   const [courseCache, setCourseCache] = useState<Record<string, SavedCourse>>({});
   const courseCacheRef = useRef<Record<string, SavedCourse>>({});
@@ -1300,7 +1301,10 @@ function HomePageContent() {
       }
       closeCourseSaveModal();
       showToast("코스를 저장했어요", "success");
-      if (data?.id) setSavedCourseId(data.id);
+      if (data?.id) {
+        setSavedCourseId(data.id);
+        setViewedCourseUserId(user.id);
+      }
       void refreshMyCourses();
     } finally {
       setCourseSaving(false);
@@ -2200,6 +2204,7 @@ function HomePageContent() {
     setIsEditingCourseTitleInline(false);
     setEditingCourseTitle("");
     setIsReadOnlyCourse(false);
+    setViewedCourseUserId(null);
     preserveSavedCourseIdRef.current = false;
     returnToCourseSheetRef.current = false;
   };
@@ -2233,6 +2238,7 @@ function HomePageContent() {
     }
     preserveSavedCourseIdRef.current = true;
     setIsReadOnlyCourse(options?.readOnly ?? false);
+    setViewedCourseUserId(course.user_id);
     setCourseResult(restored);
     setSavedCourseId(course.id);
     setEditingCourseTitle(course.title);
@@ -3379,10 +3385,14 @@ function HomePageContent() {
     void openCourseShareModal(tempCourse);
   };
 
+  const showSaveToMyCoursesButton = Boolean(
+    user?.id && savedCourseId && viewedCourseUserId && viewedCourseUserId !== user.id,
+  );
+
   const courseAlreadyImported = useMemo(() => {
-    if (!savedCourseId || !isReadOnlyCourse) return false;
+    if (!savedCourseId || !user?.id || viewedCourseUserId === user.id) return false;
     return myCourses.some((c) => c.cloned_from_id === savedCourseId);
-  }, [savedCourseId, isReadOnlyCourse, myCourses]);
+  }, [savedCourseId, viewedCourseUserId, user?.id, myCourses]);
 
   const handleImportCourse = async (originalCourseId: string) => {
     if (!user?.id || courseImporting) return;
@@ -3390,7 +3400,7 @@ function HomePageContent() {
     try {
       const { data, alreadyImported, error } = await importCourse(originalCourseId, user.id);
       if (alreadyImported) {
-        showToast("이미 가져온 코스예요", "info");
+        showToast("이미 내 코스에 저장된 코스예요", "info");
         return;
       }
       if (error) {
@@ -3398,7 +3408,7 @@ function HomePageContent() {
         return;
       }
       if (data) {
-        showToast("내 코스에 저장했어요", "success");
+        showToast("내 코스에 저장됐어요", "success");
         setMyCourses((prev) => [data, ...prev.filter((c) => c.id !== data.id)]);
         void refreshMyCourses();
       }
@@ -6334,7 +6344,7 @@ function HomePageContent() {
 
                     {savedCourseId ? (
                       <>
-                        {isReadOnlyCourse && (
+                        {showSaveToMyCoursesButton && (
                           <button
                             type="button"
                             disabled={courseImporting || courseAlreadyImported}
@@ -6346,7 +6356,7 @@ function HomePageContent() {
                               padding: "12px",
                               borderRadius: "12px",
                               border: "1px solid #1a2a7a",
-                              background: "#fff",
+                              background: courseAlreadyImported ? "#f4f5fb" : "#fff",
                               color: courseAlreadyImported ? "#888" : "#1a2a7a",
                               fontSize: "13px",
                               fontWeight: 600,
@@ -6356,10 +6366,10 @@ function HomePageContent() {
                             }}
                           >
                             {courseImporting
-                              ? "가져오는 중..."
+                              ? "저장 중..."
                               : courseAlreadyImported
-                                ? "✓ 가져왔어요"
-                                : "📥 내 코스로 가져오기"}
+                                ? "✓ 저장됨"
+                                : "내 코스로 저장"}
                           </button>
                         )}
                         <button
@@ -7285,6 +7295,8 @@ function HomePageContent() {
         onClick={() => {
           setShowCourseModal(true);
           setCourseResult(null);
+          setViewedCourseUserId(null);
+          setIsReadOnlyCourse(false);
           setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
         }}
         style={{
