@@ -6706,7 +6706,6 @@ function HomePageContent() {
                   onToggleLike={() => { void toggleLike(post.id); }}
                   onComment={() => { setDetailPostId(post.id); setScrollToComment(true); }}
                   onShare={() => { void openShareModal(post); }}
-                  onImageLightbox={setLightboxImg}
                   onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(post, placeRef)}
                   currentUserId={MY_USER}
                   ensureCourseLoaded={ensureCourseLoaded}

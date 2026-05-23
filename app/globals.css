@@ -608,6 +608,7 @@ body {
 }
 
 .feedPostMediaTrack {
+  cursor: pointer;
   display: flex;
   overflow-x: auto;
   scroll-snap-type: x mandatory;

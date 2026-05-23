@@ -50,7 +50,6 @@ type Props = {
   onToggleLike: () => void;
   onComment: () => void;
   onShare: () => void;
-  onImageLightbox: (url: string) => void;
   onPlaceOverlayClick?: (placeRef: PlaceRefForPhotoTagMatch) => void;
   currentUserId?: string;
   ensureCourseLoaded?: (courseId: string) => Promise<SavedCourse | null>;
@@ -64,10 +63,13 @@ function formatLikeCount(n: number): string {
   return n.toLocaleString("ko-KR");
 }
 
+const SWIPE_MOVE_PX = 10;
+const SWIPE_SCROLL_PX = 2;
+
 function FeedPostMedia({
   images,
   placeSource,
-  onImageLightbox,
+  onMediaClick,
   onPlaceOverlayClick,
 }: {
   images: string[];
@@ -75,18 +77,61 @@ function FeedPostMedia({
     FeedPostCardData,
     "placeName" | "address" | "category" | "lat" | "lng" | "photoPlaceTags"
   >;
-  onImageLightbox: (url: string) => void;
+  onMediaClick: () => void;
   onPlaceOverlayClick?: (placeRef: PlaceRefForPhotoTagMatch) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const multi = images.length > 1;
+  const pointerStartRef = useRef<{ x: number; y: number; scrollLeft: number } | null>(null);
+  const suppressTapRef = useRef(false);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el || el.clientWidth <= 0) return;
     setActiveIndex(Math.round(el.scrollLeft / el.clientWidth));
   }, []);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    pointerStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      scrollLeft: scrollRef.current?.scrollLeft ?? 0,
+    };
+    suppressTapRef.current = false;
+  }, []);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    const start = pointerStartRef.current;
+    if (!start) return;
+    const dx = Math.abs(e.clientX - start.x);
+    const dy = Math.abs(e.clientY - start.y);
+    const scrollDelta = Math.abs((scrollRef.current?.scrollLeft ?? 0) - start.scrollLeft);
+    if (dx > SWIPE_MOVE_PX || dy > SWIPE_MOVE_PX || scrollDelta > SWIPE_SCROLL_PX) {
+      suppressTapRef.current = true;
+    }
+  }, []);
+
+  const handlePointerEnd = useCallback(() => {
+    const start = pointerStartRef.current;
+    if (start && scrollRef.current) {
+      const scrollDelta = Math.abs(scrollRef.current.scrollLeft - start.scrollLeft);
+      if (scrollDelta > SWIPE_SCROLL_PX) suppressTapRef.current = true;
+    }
+    pointerStartRef.current = null;
+  }, []);
+
+  const handleMediaClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (suppressTapRef.current) {
+        suppressTapRef.current = false;
+        return;
+      }
+      e.stopPropagation();
+      onMediaClick();
+    },
+    [onMediaClick],
+  );
 
   const displayPlace = getDisplayPlaceForPhoto(
     {
@@ -115,17 +160,26 @@ function FeedPostMedia({
       <div
         ref={scrollRef}
         className="feedPostMediaTrack"
+        role="button"
+        tabIndex={0}
+        aria-label="게시물 상세 보기"
         onScroll={onScroll}
-        onClick={(e) => e.stopPropagation()}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        onClick={handleMediaClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            e.stopPropagation();
+            onMediaClick();
+          }
+        }}
       >
         {images.map((src, i) => (
           <div key={`${src}-${i}`} className="feedPostMediaSlide">
-            <img
-              src={src}
-              alt=""
-              className="feedPostMediaImg"
-              onClick={() => onImageLightbox(src)}
-            />
+            <img src={src} alt="" className="feedPostMediaImg" draggable={false} />
           </div>
         ))}
       </div>
@@ -185,7 +239,6 @@ export function FeedPostCard({
   onToggleLike,
   onComment,
   onShare,
-  onImageLightbox,
   onPlaceOverlayClick,
   currentUserId = "",
   ensureCourseLoaded,
@@ -255,7 +308,7 @@ export function FeedPostCard({
       <FeedPostMedia
         images={post.images}
         placeSource={post}
-        onImageLightbox={onImageLightbox}
+        onMediaClick={onCardClick}
         onPlaceOverlayClick={onPlaceOverlayClick}
       />
 
