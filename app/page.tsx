@@ -6683,6 +6683,10 @@ function HomePageContent() {
                   onShare={() => { void openShareModal(post); }}
                   onImageLightbox={setLightboxImg}
                   onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(post, placeRef)}
+                  currentUserId={MY_USER}
+                  ensureCourseLoaded={ensureCourseLoaded}
+                  onOpenLinkedCourse={(course, readOnly) => openSavedCourse(course, { readOnly })}
+                  onLinkedCourseUnavailable={() => showToast("코스를 불러올 수 없어요", "error")}
                 />
               ))}
               </div>

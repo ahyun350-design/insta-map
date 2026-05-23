@@ -827,6 +827,29 @@ body {
   color: #c7c7c7;
 }
 
+.feedPostLinkedCourse {
+  display: block;
+  width: 100%;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: #f4f5fb;
+  color: #1a2a7a;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  box-sizing: border-box;
+  line-height: 1.4;
+}
+
+.feedPostLinkedCourse:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 /* ── 장소 상세 바텀시트 (지도·홈 공통) ── */
 .placeDetailSheetBackdrop {
   position: fixed;

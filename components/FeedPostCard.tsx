@@ -4,7 +4,9 @@ import { useCallback, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
 import type { PhotoPlaceTag } from "@/lib/feedPost";
+import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { getDisplayPlaceForPhoto, type PlaceRefForPhotoTagMatch } from "@/lib/photoPlaceTag";
+import type { SavedCourse } from "@/lib/courses";
 
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -24,6 +26,7 @@ export type FeedPostCardData = {
   images: string[];
   createdAt: string;
   companionTag?: CompanionTag | null;
+  courseId?: string | null;
   likes_count: number;
   liked_by_me: boolean;
   comments: unknown[];
@@ -49,6 +52,10 @@ type Props = {
   onShare: () => void;
   onImageLightbox: (url: string) => void;
   onPlaceOverlayClick?: (placeRef: PlaceRefForPhotoTagMatch) => void;
+  currentUserId?: string;
+  ensureCourseLoaded?: (courseId: string) => Promise<SavedCourse | null>;
+  onOpenLinkedCourse?: (course: SavedCourse, readOnly: boolean) => void;
+  onLinkedCourseUnavailable?: () => void;
 };
 
 const CAPTION_PREVIEW_LEN = 100;
@@ -180,6 +187,10 @@ export function FeedPostCard({
   onShare,
   onImageLightbox,
   onPlaceOverlayClick,
+  currentUserId = "",
+  ensureCourseLoaded,
+  onOpenLinkedCourse,
+  onLinkedCourseUnavailable,
 }: Props) {
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const [likePop, setLikePop] = useState(false);
@@ -316,6 +327,16 @@ export function FeedPostCard({
               </button>
             )}
           </p>
+        )}
+
+        {post.courseId && ensureCourseLoaded && onOpenLinkedCourse && (
+          <FeedPostLinkedCourse
+            courseId={post.courseId}
+            currentUserId={currentUserId}
+            ensureCourseLoaded={ensureCourseLoaded}
+            onOpenCourse={onOpenLinkedCourse}
+            onCourseUnavailable={onLinkedCourseUnavailable}
+          />
         )}
 
         {(categoryLabel || companionLabel) && (
