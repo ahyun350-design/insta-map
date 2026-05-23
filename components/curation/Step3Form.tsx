@@ -17,6 +17,10 @@ type Props = {
   onCompanionTagChange: (tag: CompanionTag) => void;
   comment: string;
   onCommentChange: (value: string) => void;
+  saveCourseChecked: boolean;
+  onSaveCourseCheckedChange: (checked: boolean) => void;
+  courseTitle: string;
+  onCourseTitleChange: (value: string) => void;
   validationHint: string | null;
   onFieldFocus: (el: HTMLElement | null) => void;
 };
@@ -31,6 +35,10 @@ export function Step3Form({
   onCompanionTagChange,
   comment,
   onCommentChange,
+  saveCourseChecked,
+  onSaveCourseCheckedChange,
+  courseTitle,
+  onCourseTitleChange,
   validationHint,
   onFieldFocus,
 }: Props) {
@@ -111,6 +119,44 @@ export function Step3Form({
             color: "#333",
           }}
         />
+      </div>
+
+      <div className="curationFormSection">
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            cursor: "pointer",
+            userSelect: "none",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={saveCourseChecked}
+            onChange={(e) => onSaveCourseCheckedChange(e.target.checked)}
+            style={{ width: 18, height: 18, accentColor: "#1a2a7a", cursor: "pointer" }}
+          />
+          <span style={{ fontSize: 14, color: "#333", fontWeight: 500 }}>이 장소들을 코스로도 저장</span>
+        </label>
+        <div
+          style={{
+            maxHeight: saveCourseChecked ? 72 : 0,
+            opacity: saveCourseChecked ? 1 : 0,
+            overflow: "hidden",
+            transition: "max-height 0.28s ease, opacity 0.22s ease",
+            marginTop: saveCourseChecked ? 4 : 0,
+          }}
+        >
+          <input
+            className="mapInput"
+            placeholder="코스 이름을 입력하세요"
+            value={courseTitle}
+            onChange={(e) => onCourseTitleChange(e.target.value)}
+            onFocus={(e) => onFieldFocus(e.currentTarget)}
+            style={{ width: "100%", boxSizing: "border-box" }}
+          />
+        </div>
       </div>
 
       {validationHint && <p className="curationFormValidationHint">{validationHint}</p>}

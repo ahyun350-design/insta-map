@@ -37,6 +37,10 @@ type Props = {
   onCompanionTagChange: (tag: CompanionTag) => void;
   comment: string;
   onCommentChange: (value: string) => void;
+  saveCourseChecked: boolean;
+  onSaveCourseCheckedChange: (checked: boolean) => void;
+  courseTitle: string;
+  onCourseTitleChange: (value: string) => void;
 };
 
 const SLIDE_MS = 280;
@@ -120,6 +124,10 @@ export function NewCurationScreen({
   onCompanionTagChange,
   comment,
   onCommentChange,
+  saveCourseChecked,
+  onSaveCourseCheckedChange,
+  courseTitle,
+  onCourseTitleChange,
 }: Props) {
   const [mounted, setMounted] = useState(false);
   const [slideActive, setSlideActive] = useState(false);
@@ -307,6 +315,10 @@ export function NewCurationScreen({
             onCompanionTagChange={onCompanionTagChange}
             comment={comment}
             onCommentChange={onCommentChange}
+            saveCourseChecked={saveCourseChecked}
+            onSaveCourseCheckedChange={onSaveCourseCheckedChange}
+            courseTitle={courseTitle}
+            onCourseTitleChange={onCourseTitleChange}
             validationHint={validationHint}
             onFieldFocus={scrollFieldIntoView}
           />

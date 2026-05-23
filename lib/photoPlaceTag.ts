@@ -1,4 +1,5 @@
 import type { FeedPost, FeedPostCategory, PhotoPlaceTag } from "@/lib/feedPost";
+import type { SavedCourseItem } from "@/lib/courses";
 
 /** 카카오 `category_name` → PindMap 카테고리 */
 export function mapKakaoCategoryToPindMap(categoryName: string | undefined): FeedPostCategory {
@@ -209,4 +210,32 @@ export function validatePhotoPlaceTags(
   }
 
   return { ok: missing.length === 0, missing };
+}
+
+function photoPlaceTagDedupeKey(tag: PhotoPlaceTag): string {
+  if (tag.placeId) return `id:${tag.placeId}`;
+  return `name:${tag.placeName.trim()}|addr:${tag.address.trim()}`;
+}
+
+/** 사진 태그 순서 유지 + 동일 장소(placeId 또는 name+address) 첫 등장만 → 코스 items */
+export function buildUniqueCourseItemsFromPhotoPlaceTags(tags: PhotoPlaceTag[]): SavedCourseItem[] {
+  const sorted = [...tags].sort((a, b) => a.photoIndex - b.photoIndex);
+  const seen = new Set<string>();
+  const items: SavedCourseItem[] = [];
+
+  for (const tag of sorted) {
+    const key = photoPlaceTagDedupeKey(tag);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      id: tag.placeId ?? `curation-${tag.photoIndex}-${tag.lat}-${tag.lng}`,
+      name: tag.placeName,
+      address: tag.address,
+      category: tag.category,
+      lat: tag.lat,
+      lng: tag.lng,
+    });
+  }
+
+  return items;
 }

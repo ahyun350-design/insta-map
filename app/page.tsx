@@ -59,6 +59,7 @@ import { parseFeedPostFromRow, type FeedPost, type PhotoPlaceTag } from "@/lib/f
 import {
   getDisplayPlaceForPhoto,
   getRepresentativePhotoPlaceTag,
+  buildUniqueCourseItemsFromPhotoPlaceTags,
   mergeRelatedFeedPostsForPlaceSheet,
   type PlaceRefForPhotoTagMatch,
 } from "@/lib/photoPlaceTag";
@@ -805,6 +806,8 @@ function HomePageContent() {
   const [postSearchQuery, setPostSearchQuery] = useState("");
   const [postSearchResults, setPostSearchResults] = useState<any[]>([]);
   const [postPhotoPlaceTags, setPostPhotoPlaceTags] = useState<PhotoPlaceTag[]>([]);
+  const [postSaveCourseChecked, setPostSaveCourseChecked] = useState(false);
+  const [postCourseTitle, setPostCourseTitle] = useState("");
   const [postImages, setPostImages] = useState<PostImageItem[]>([]);
   const postImagesRef = useRef<PostImageItem[]>([]);
   postImagesRef.current = postImages;
@@ -1134,7 +1137,10 @@ function HomePageContent() {
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
   const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
   const canPost =
-    postTitle.trim().length > 0 && postImagesAllUploaded && postCompanionTag !== null;
+    postTitle.trim().length > 0 &&
+    postImagesAllUploaded &&
+    postCompanionTag !== null &&
+    (!postSaveCourseChecked || postCourseTitle.trim().length > 0);
   const postValidationHint = useMemo(() => {
     if (canPost) return null;
     if (!postTitle.trim()) return "제목을 입력해주세요";
@@ -1142,8 +1148,9 @@ function HomePageContent() {
     if (postImages.some((i) => i.status === "uploading")) return "사진 업로드가 완료될 때까지 기다려주세요";
     if (postImages.some((i) => i.status === "failed")) return "실패한 사진을 제거하거나 재시도해주세요";
     if (postCompanionTag === null) return "누구랑 갔는지 선택해주세요";
+    if (postSaveCourseChecked && !postCourseTitle.trim()) return "코스 제목을 입력해주세요";
     return "모든 사진 업로드가 끝나야 등록할 수 있어요";
-  }, [canPost, postTitle, postImages, postCompanionTag]);
+  }, [canPost, postTitle, postImages, postCompanionTag, postSaveCourseChecked, postCourseTitle]);
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
 
   const closeDetailPost = useCallback(() => {
@@ -3892,7 +3899,31 @@ function HomePageContent() {
       comments: [],
     };
     await submitPost(newPost);
-    showToast("큐레이션이 등록됐어요 ✨", "success");
+
+    if (postSaveCourseChecked && user?.id) {
+      const courseItems = buildUniqueCourseItemsFromPhotoPlaceTags(postPhotoPlaceTags);
+      if (courseItems.length > 0) {
+        const { data: savedCourse, error: courseError } = await saveCourse(
+          user.id,
+          postCourseTitle,
+          courseItems,
+        );
+        if (courseError || !savedCourse) {
+          showToast(
+            courseError ? `큐레이션은 등록됐어요. 코스 저장: ${courseError}` : "큐레이션은 등록됐어요. 코스 저장에 실패했어요",
+            "info",
+          );
+        } else {
+          setMyCourses((prev) => [savedCourse, ...prev.filter((c) => c.id !== savedCourse.id)]);
+          showToast("큐레이션과 코스가 등록됐어요 ✨", "success");
+        }
+      } else {
+        showToast("큐레이션이 등록됐어요 ✨", "success");
+      }
+    } else {
+      showToast("큐레이션이 등록됐어요 ✨", "success");
+    }
+
     setShowPostModal(false);
     setActiveTab("home");
   };
@@ -3914,6 +3945,8 @@ function HomePageContent() {
     setPostSearchQuery("");
     setPostSearchResults([]);
     setPostPhotoPlaceTags([]);
+    setPostSaveCourseChecked(false);
+    setPostCourseTitle("");
   }, []);
   const closePostScreen = () => setShowPostModal(false);
   const resetModal = () => {
@@ -6554,6 +6587,10 @@ function HomePageContent() {
             onCompanionTagChange={setPostCompanionTag}
             comment={postComment}
             onCommentChange={setPostComment}
+            saveCourseChecked={postSaveCourseChecked}
+            onSaveCourseCheckedChange={setPostSaveCourseChecked}
+            courseTitle={postCourseTitle}
+            onCourseTitleChange={setPostCourseTitle}
           />
 
           {activeTab === "home" && (
