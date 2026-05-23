@@ -30,6 +30,7 @@ import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { FeedPostCard } from "@/components/FeedPostCard";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
+import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
 import { feedPostToPlaceSheet, type PlaceSheetData } from "@/lib/placeSheet";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
@@ -748,6 +749,9 @@ function HomePageContent() {
   const selectedPlaceRef = useRef<any>(null);
   selectedPlaceRef.current = selectedPlace;
   const [searchQuery, setSearchQuery] = useState("");
+  const [mapSearchResults, setMapSearchResults] = useState<MapSearchPlaceResult[]>([]);
+  const [mapSearchLabel, setMapSearchLabel] = useState("");
+  const [isMapSearchSheetOpen, setIsMapSearchSheetOpen] = useState(false);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
   const [detailPostId, setDetailPostId] = useState<string | null>(
@@ -878,7 +882,10 @@ function HomePageContent() {
   const mapRef = useRef<any>(null); const expandedMapRef = useRef<any>(null);
   const geocoderRef = useRef<any>(null); const markersRef = useRef<any[]>([]);
   const expandedMarkersRef = useRef<any[]>([]); const feedMarkersRef = useRef<any[]>([]);
-  const searchMarkersRef = useRef<any[]>([]); const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
+  const searchMarkersRef = useRef<any[]>([]);
+  /** 확장 지도 키워드 검색 결과 핀 전용 — 코스 마커(searchMarkersRef)와 분리 */
+  const mapSearchResultPinsRef = useRef<any[]>([]);
+  const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
   const placePinsRunIdRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
   const locationRenderTokenRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
   /** 확장 지도 직접 검색 시 Location bias — addMyLocation 성공 시 저장, 없으면 지도 center */
@@ -953,18 +960,44 @@ function HomePageContent() {
     }, 4000);
   }, []);
 
-  /** 확장 지도 검색 마커·픽셀 매칭 후보 제거 — WKWebView에서 잔여 검색 레이어가 저장 핀 터치를 가리는 문제 완화 */
-  const clearSearchMarkers = useCallback(() => {
-    searchMarkersRef.current.forEach((m) => {
+  /** 확장 지도 검색 결과 핀·픽셀 매칭 후보 제거 — 검색 초기화·새 검색 시에만 호출 */
+  const clearSearchResultPins = useCallback(() => {
+    mapSearchResultPinsRef.current.forEach((m) => {
       try {
         m.setMap(null);
       } catch {
         /* noop */
       }
     });
-    searchMarkersRef.current = [];
+    mapSearchResultPinsRef.current = [];
     lastExpandedSearchPlacesRef.current = [];
   }, []);
+
+  const addSearchResultPins = useCallback(
+    (places: any[], onMarkerClick: (place: any) => void) => {
+      if (!expandedMapRef.current || !window.kakao?.maps) return;
+      places.forEach((place) => {
+        const marker = new window.kakao.maps.Marker({
+          map: expandedMapRef.current,
+          position: new window.kakao.maps.LatLng(place.y, place.x),
+          clickable: true,
+        });
+        if (marker.setClickable) marker.setClickable(true);
+        window.kakao.maps.event.addListener(marker, "click", () => onMarkerClick(place));
+        mapSearchResultPinsRef.current.push(marker);
+      });
+      lastExpandedSearchPlacesRef.current = places.slice();
+    },
+    [],
+  );
+
+  const handleClearMapSearch = useCallback(() => {
+    setSearchQuery("");
+    clearSearchResultPins();
+    setMapSearchResults([]);
+    setMapSearchLabel("");
+    setIsMapSearchSheetOpen(false);
+  }, [clearSearchResultPins]);
 
   /** 확장 지도 카메라: panTo 우선(부드러운 이동), SDK 미지원 시 setCenter 폴백 */
   const applyExpandedMapCameraLatLng = (lat: number, lng: number, level: number = 3) => {
@@ -4351,29 +4384,20 @@ function HomePageContent() {
         return;
       }
       console.log("[PindMap:expandedMap] keywordSearch ok count=", data?.length ?? 0);
-      searchMarkersRef.current.forEach((m) => m.setMap(null));
-      searchMarkersRef.current = [];
-      lastExpandedSearchPlacesRef.current = data.slice();
-      data.forEach((place) => {
-        const marker = new window.kakao.maps.Marker({
-          map: expandedMapRef.current,
-          position: new window.kakao.maps.LatLng(place.y, place.x),
-          clickable: true,
-        });
-        if (marker.setClickable) marker.setClickable(true);
-        window.kakao.maps.event.addListener(marker, "click", () =>
-          openExpandedSearchPlaceCard(place, "marker-keyword-click"),
-        );
-        searchMarkersRef.current.push(marker);
-      });
+      clearSearchResultPins();
+      addSearchResultPins(data, (place) => openExpandedSearchPlaceCard(place, "marker-keyword-click"));
+      setMapSearchResults(data);
+      setMapSearchLabel(trimmed);
+      setIsMapSearchSheetOpen(true);
       fitExpandedMapToKeywordResults(data);
       setSearchQuery("");
     };
     geocoder.addressSearch(trimmed, (result: any[], st: string) => {
       if (st === window.kakao.maps.services.Status.OK && result[0]) {
         const addr = result[0];
-        searchMarkersRef.current.forEach((m) => m.setMap(null)); searchMarkersRef.current = [];
+        clearSearchResultPins();
         const placeObj = {
+          id: `addr-${addr.x}-${addr.y}`,
           place_name: trimmed || addr.place_name || addr.address_name || "위치",
           category_name: "장소",
           road_address_name: addr.road_address?.address_name ?? addr.address?.address_name ?? addr.address_name ?? "",
@@ -4382,19 +4406,14 @@ function HomePageContent() {
           y: addr.y,
           x: addr.x,
         };
-        lastExpandedSearchPlacesRef.current = [placeObj];
         console.log("[PindMap:expandedMap] addressSearch marker", placeObj.place_name);
-        const marker = new window.kakao.maps.Marker({
-          map: expandedMapRef.current,
-          position: new window.kakao.maps.LatLng(addr.y, addr.x),
-          clickable: true,
-        });
-        if (marker.setClickable) marker.setClickable(true);
-        window.kakao.maps.event.addListener(marker, "click", () =>
-          openExpandedSearchPlaceCard(placeObj, "marker-address-click"),
-        );
-        searchMarkersRef.current.push(marker);
-        expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(addr.y, addr.x)); expandedMapRef.current.setLevel(3); setSearchQuery("");
+        addSearchResultPins([placeObj], (place) => openExpandedSearchPlaceCard(place, "marker-address-click"));
+        setMapSearchResults([placeObj]);
+        setMapSearchLabel(trimmed);
+        setIsMapSearchSheetOpen(true);
+        expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(addr.y, addr.x));
+        expandedMapRef.current.setLevel(3);
+        setSearchQuery("");
       } else {
         console.log("[PindMap:expandedMap] addressSearch fallback to keyword:", trimmed);
         const bias = getExpandedSearchBiasLatLng();
@@ -5117,14 +5136,14 @@ function HomePageContent() {
       window.clearTimeout(tid);
       expandedMapInteractionCleanupRef.current?.();
       lastExpandedSearchPlacesRef.current = [];
-      searchMarkersRef.current.forEach((m) => {
+      mapSearchResultPinsRef.current.forEach((m) => {
         try {
           m.setMap(null);
         } catch {
           /* noop */
         }
       });
-      searchMarkersRef.current = [];
+      mapSearchResultPinsRef.current = [];
       myLocationMarkerRef.current.expanded = null;
     };
   }, [mapExpanded, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace]);
@@ -5142,6 +5161,14 @@ function HomePageContent() {
       returnToCourseSheetRef.current = false;
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!mapExpanded) {
+      setIsMapSearchSheetOpen(false);
+      setMapSearchResults([]);
+      setMapSearchLabel("");
+    }
+  }, [mapExpanded]);
 
   useEffect(() => { if (!openMenuId) return; const handler = () => setOpenMenuId(null); document.addEventListener("click", handler); return () => document.removeEventListener("click", handler); }, [openMenuId]);
 
@@ -5296,7 +5323,6 @@ function HomePageContent() {
         onClose={() => {
           setSelectedPlace(null);
           setSelectedMapPlace(null);
-          clearSearchMarkers();
         }}
         onToggleSave={() => {
           void togglePlaceSheetSave(placeData, () => {
@@ -5307,7 +5333,6 @@ function HomePageContent() {
             } else {
               focusExpandedMapOnAddress(selectedPlace.road_address_name || selectedPlace.address_name || "", 3);
             }
-            clearSearchMarkers();
           });
         }}
         onCurationClick={(postId) => {
@@ -7017,17 +7042,42 @@ function HomePageContent() {
                         gap: "8px",
                         background: "#fff",
                         flexShrink: 0,
+                        alignItems: "center",
                       }}
                     >
-                      <input
-                        className="mapInput"
-                        placeholder="장소명으로 검색"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                        style={{ flex: 1 }}
-                      />
-                      <button className="primaryButton" onClick={handleSearch} type="button" disabled={!searchQuery.trim()} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "0 16px" }}>
+                      <div style={{ position: "relative", flex: 1, display: "flex", alignItems: "center" }}>
+                        <input
+                          className="mapInput"
+                          placeholder="장소명으로 검색"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                          style={{ flex: 1, paddingRight: searchQuery.trim() || mapSearchResults.length > 0 ? 36 : undefined }}
+                        />
+                        {(searchQuery.trim() || mapSearchResults.length > 0) && (
+                          <button
+                            type="button"
+                            aria-label="검색 지우기"
+                            onClick={handleClearMapSearch}
+                            style={{
+                              position: "absolute",
+                              right: 8,
+                              border: "none",
+                              background: "transparent",
+                              color: "#999",
+                              fontSize: 18,
+                              cursor: "pointer",
+                              width: 28,
+                              height: 28,
+                              lineHeight: 1,
+                              padding: 0,
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                      <button className="primaryButton" onClick={handleSearch} type="button" disabled={!searchQuery.trim()} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "0 16px", flexShrink: 0 }}>
                         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                           <circle cx="6" cy="6" r="4.5" stroke="white" strokeWidth="1.3" />
                           <line x1="9.5" y1="9.5" x2="13" y2="13" stroke="white" strokeWidth="1.3" strokeLinecap="round" />
@@ -7037,6 +7087,23 @@ function HomePageContent() {
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
                       {selectedPlace && renderPlaceCard()}
+                      {isMapSearchSheetOpen && mapSearchResults.length > 0 && (
+                        <MapSearchResultsSheet
+                          open={isMapSearchSheetOpen}
+                          queryLabel={mapSearchLabel}
+                          results={mapSearchResults}
+                          userLocation={myLocationLatLngRef.current}
+                          onSelect={(place) => {
+                            const py = parseFloat(String(place.y ?? ""));
+                            const px = parseFloat(String(place.x ?? ""));
+                            if (Number.isFinite(py) && Number.isFinite(px)) {
+                              applyExpandedMapCameraLatLng(py, px, 3);
+                            }
+                            openExpandedSearchPlaceCard(place, "sheet-list-tap");
+                          }}
+                          onClose={() => setIsMapSearchSheetOpen(false)}
+                        />
+                      )}
                     </div>
                   </div>,
                   document.body,
@@ -7429,7 +7496,6 @@ function HomePageContent() {
               onClick={() => {
                 setSelectedPlace(null);
                 setSelectedMapPlace(null);
-                clearSearchMarkers();
               }}
             />
             <PlaceDetailSheet
@@ -7443,7 +7509,6 @@ function HomePageContent() {
               onClose={() => {
                 setSelectedPlace(null);
                 setSelectedMapPlace(null);
-                clearSearchMarkers();
               }}
               onToggleSave={() => { void togglePlaceSheetSave(selectedPlace as PlaceSheetData); }}
               onCurationClick={(postId) => {
