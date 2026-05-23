@@ -19,6 +19,7 @@ type Props = {
   onCommentChange: (value: string) => void;
   saveCourseChecked: boolean;
   onSaveCourseCheckedChange: (checked: boolean) => void;
+  canSaveAsCourse: boolean;
   courseTitle: string;
   onCourseTitleChange: (value: string) => void;
   validationHint: string | null;
@@ -37,6 +38,7 @@ export function Step3Form({
   onCommentChange,
   saveCourseChecked,
   onSaveCourseCheckedChange,
+  canSaveAsCourse,
   courseTitle,
   onCourseTitleChange,
   validationHint,
@@ -127,18 +129,25 @@ export function Step3Form({
             display: "flex",
             alignItems: "center",
             gap: 10,
-            cursor: "pointer",
+            cursor: canSaveAsCourse ? "pointer" : "not-allowed",
             userSelect: "none",
+            opacity: canSaveAsCourse ? 1 : 0.55,
           }}
         >
           <input
             type="checkbox"
             checked={saveCourseChecked}
+            disabled={!canSaveAsCourse}
             onChange={(e) => onSaveCourseCheckedChange(e.target.checked)}
-            style={{ width: 18, height: 18, accentColor: "#1a2a7a", cursor: "pointer" }}
+            style={{ width: 18, height: 18, accentColor: "#1a2a7a", cursor: canSaveAsCourse ? "pointer" : "not-allowed" }}
           />
           <span style={{ fontSize: 14, color: "#333", fontWeight: 500 }}>이 장소들을 코스로도 저장</span>
         </label>
+        {!canSaveAsCourse && (
+          <p style={{ margin: "6px 0 0", fontSize: 12, color: "#888", lineHeight: 1.45 }}>
+            장소 태그를 1개 이상 추가하면 코스로 저장할 수 있어요
+          </p>
+        )}
         <div
           style={{
             maxHeight: saveCourseChecked ? 72 : 0,

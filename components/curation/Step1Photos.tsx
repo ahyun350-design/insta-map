@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, type ChangeEvent } from "react";
-import type { PostImageItem } from "@/components/curation/types";
+import { MAX_CURATION_PHOTOS, type PostImageItem } from "@/components/curation/types";
 
 type Props = {
   images: PostImageItem[];
@@ -16,7 +16,7 @@ export function Step1Photos({ images, onImagesChange, onImageUpload, onRetryImag
   return (
     <div>
       <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: 8, marginTop: 0 }}>
-        사진 추가 (최대 6장)
+        사진 추가 (최대 {MAX_CURATION_PHOTOS}장)
       </p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {images.map((img) => {
@@ -117,7 +117,7 @@ export function Step1Photos({ images, onImagesChange, onImageUpload, onRetryImag
             </div>
           );
         })}
-        {images.length < 6 && (
+        {images.length < MAX_CURATION_PHOTOS && (
           <button
             type="button"
             onClick={() => imageInputRef.current?.click()}

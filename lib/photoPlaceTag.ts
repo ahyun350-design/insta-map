@@ -198,6 +198,7 @@ export function mergeRelatedFeedPostsForPlaceSheet(
   return dedupeFeedPostsById([...tagMatched, ...legacyMatched]);
 }
 
+/** 전 사진 태그 필수 검증 (레거시·관리용). Step 2는 선택 태그로 진행 가능. */
 export function validatePhotoPlaceTags(
   photos: string[],
   tags: PhotoPlaceTag[],

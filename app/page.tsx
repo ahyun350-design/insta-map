@@ -18,6 +18,7 @@ import { FollowListModal, type FollowListType } from "@/components/FollowListMod
 import { ChatCourseCard } from "@/components/ChatCourseCard";
 import { CourseEditScreen } from "@/components/CourseEditScreen";
 import { NewCurationScreen } from "@/components/NewCurationScreen";
+import { MAX_CURATION_PHOTOS } from "@/components/curation/types";
 import {
   companionFilterChipLabel,
   isCompanionTag,
@@ -3806,7 +3807,7 @@ function HomePageContent() {
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []).slice(0, 6 - postImages.length);
+    const files = Array.from(e.target.files ?? []).slice(0, MAX_CURATION_PHOTOS - postImages.length);
     e.target.value = "";
     if (files.length === 0) return;
 
@@ -3913,7 +3914,9 @@ function HomePageContent() {
     let linkedCourseId: string | null = null;
     if (postSaveCourseChecked && user?.id) {
       const courseItems = buildUniqueCourseItemsFromPhotoPlaceTags(postPhotoPlaceTags);
-      if (courseItems.length > 0) {
+      if (courseItems.length === 0) {
+        showToast("장소 태그가 없어 코스는 저장하지 않았어요", "info");
+      } else {
         const { data: savedCourse, error: courseError } = await saveCourse(
           user.id,
           postCourseTitle,

@@ -23,7 +23,6 @@ type Props = {
   images: PostImageItem[];
   photoPlaceTags: PhotoPlaceTag[];
   onPhotoPlaceTagsChange: (tags: PhotoPlaceTag[]) => void;
-  stepHint: string | null;
   keyboardInset?: number;
 };
 
@@ -38,7 +37,6 @@ export function Step2PlaceTags({
   images,
   photoPlaceTags,
   onPhotoPlaceTagsChange,
-  stepHint,
   keyboardInset = 0,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -125,11 +123,11 @@ export function Step2PlaceTags({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12, margin: "0 -4px" }}>
-      {!activeHasTag && (
-        <p style={{ margin: 0, fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.5 }}>
-          사진을 탭해서 장소를 추가하세요
-        </p>
-      )}
+      <p style={{ margin: 0, fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.5 }}>
+        {activeHasTag
+          ? "📍 표시를 탭하면 장소를 변경하거나 삭제할 수 있어요"
+          : "사진을 탭해서 장소를 추가하세요 (선택)"}
+      </p>
 
       <div className="curationPhotoCarousel">
         <div ref={scrollRef} className="curationPhotoCarouselTrack" onScroll={onScroll}>
@@ -176,10 +174,6 @@ export function Step2PlaceTags({
             취소
           </button>
         </div>
-      )}
-
-      {stepHint && (
-        <p style={{ margin: 0, fontSize: 12, color: "#e07070", textAlign: "center" }}>{stepHint}</p>
       )}
 
       <PlaceSearchModal

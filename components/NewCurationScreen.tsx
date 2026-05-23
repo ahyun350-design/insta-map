@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import type { CompanionTag } from "@/lib/companionTag";
 import type { PhotoPlaceTag } from "@/lib/feedPost";
-import { validatePhotoPlaceTags } from "@/lib/photoPlaceTag";
 import { Step1Photos } from "@/components/curation/Step1Photos";
 import { Step2PlaceTags } from "@/components/curation/Step2PlaceTags";
 import { Step3Form } from "@/components/curation/Step3Form";
@@ -191,16 +190,14 @@ export function NewCurationScreen({
   }, [mounted]);
 
   const canGoNextStep1 = images.length >= 1;
+  const canGoNextStep2 = images.length >= 1;
+  const canSaveAsCourse = photoPlaceTags.length > 0;
 
-  const step2Validation = useMemo(
-    () => validatePhotoPlaceTags(images.map(() => "x"), photoPlaceTags),
-    [images, photoPlaceTags],
-  );
-  const canGoNextStep2 = step2Validation.ok;
-  const step2Hint =
-    !step2Validation.ok && step2Validation.missing.length > 0
-      ? `${step2Validation.missing[0] + 1}번 사진에 장소를 추가하세요`
-      : null;
+  useEffect(() => {
+    if (!canSaveAsCourse && saveCourseChecked) {
+      onSaveCourseCheckedChange(false);
+    }
+  }, [canSaveAsCourse, saveCourseChecked, onSaveCourseCheckedChange]);
 
   const isLastStep = currentStep === 3;
 
@@ -298,7 +295,6 @@ export function NewCurationScreen({
             images={images}
             photoPlaceTags={photoPlaceTags}
             onPhotoPlaceTagsChange={onPhotoPlaceTagsChange}
-            stepHint={step2Hint}
             keyboardInset={keyboardInset}
           />
         )}
@@ -317,6 +313,7 @@ export function NewCurationScreen({
             onCommentChange={onCommentChange}
             saveCourseChecked={saveCourseChecked}
             onSaveCourseCheckedChange={onSaveCourseCheckedChange}
+            canSaveAsCourse={canSaveAsCourse}
             courseTitle={courseTitle}
             onCourseTitleChange={onCourseTitleChange}
             validationHint={validationHint}
