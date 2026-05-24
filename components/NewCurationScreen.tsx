@@ -270,7 +270,7 @@ export function NewCurationScreen({
         ref={scrollRef}
         className={currentStep === 3 ? "curationScreenBody curationScreenBodyStep3" : "curationScreenBody"}
         style={{
-          paddingBottom: `calc(28px + ${keyboardInset}px + env(safe-area-inset-bottom, 0px))`,
+          paddingBottom: `calc(${currentStep === 3 ? 40 : 28}px + ${keyboardInset}px + env(safe-area-inset-bottom, 0px))`,
         }}
       >
         {currentStep === 1 && (

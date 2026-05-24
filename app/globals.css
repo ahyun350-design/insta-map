@@ -388,7 +388,7 @@ body {
 }
 
 .curationScreenBodyStep3 {
-  padding: 20px 22px 28px;
+  padding: 28px 28px 40px;
   gap: 0;
 }
 
@@ -434,21 +434,28 @@ body {
 .curationStep3Form {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 40px;
+  padding-top: 4px;
 }
 
 .curationFormSection {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+}
+
+.curationFormSection + .curationFormSection {
+  padding-top: 2px;
 }
 
 .curationFormSectionCourse {
-  margin-top: 4px;
+  margin-top: 0;
+  padding-top: 6px;
 }
 
 .curationFormLabel {
   margin: 0;
+  padding-top: 2px;
   font-size: 13px;
   font-weight: 600;
   color: #262626;
