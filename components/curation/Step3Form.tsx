@@ -58,6 +58,18 @@ export function Step3Form({
       </section>
 
       <section className="curationFormSection">
+        <p className="curationFormLabel">코멘트</p>
+        <textarea
+          className="curationFormField curationFormTextarea"
+          placeholder="이 장소에 대한 느낌을 자유롭게 적어주세요"
+          value={comment}
+          onChange={(e) => onCommentChange(e.target.value)}
+          onFocus={(e) => onFieldFocus(e.currentTarget)}
+          rows={5}
+        />
+      </section>
+
+      <section className="curationFormSection">
         <p className="curationFormLabel">카테고리</p>
         <div className="curationFormChips" role="radiogroup" aria-label="카테고리">
           {categoryMainOrder.map((cat) => {
@@ -97,18 +109,6 @@ export function Step3Form({
             );
           })}
         </div>
-      </section>
-
-      <section className="curationFormSection">
-        <p className="curationFormLabel">코멘트</p>
-        <textarea
-          className="curationFormField curationFormTextarea"
-          placeholder="이 장소에 대한 느낌을 자유롭게 적어주세요"
-          value={comment}
-          onChange={(e) => onCommentChange(e.target.value)}
-          onFocus={(e) => onFieldFocus(e.currentTarget)}
-          rows={5}
-        />
       </section>
 
       <section className="curationFormSection curationFormSectionCourse">
