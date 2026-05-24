@@ -801,6 +801,7 @@ body {
   line-height: 1.45;
   color: #262626;
   word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .feedPostCaptionUser {
@@ -815,6 +816,15 @@ body {
   color: #8e8e8e;
   cursor: pointer;
   font-family: inherit;
+}
+
+.detailPostComment {
+  margin: 0;
+  font-size: 14px;
+  color: #333;
+  line-height: 1.9;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .feedPostTags {

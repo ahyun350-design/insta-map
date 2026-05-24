@@ -5990,7 +5990,7 @@ function HomePageContent() {
                 />
               </div>
             )}
-            <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontSize: "14px", color: "#333", lineHeight: 1.9 }}>{detailPost.comment}</p></div>
+            <div style={{ padding: "16px 20px 0" }}><p className="detailPostComment">{detailPost.comment}</p></div>
             {detailPost.courseId && (
               <div style={{ padding: "12px 20px 0" }}>
                 <FeedPostLinkedCourse
