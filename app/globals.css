@@ -2023,6 +2023,30 @@ body {
   padding-right: max(20px, env(safe-area-inset-right, 0px));
 }
 
+/* 코스 모달 bottom sheet — 상태바/노치 아래로 헤더·닫기 버튼 */
+.courseModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+}
+
+.courseModalSheet {
+  background: #fff;
+  width: 100%;
+  border-radius: 20px 20px 0 0;
+  padding: calc(24px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) calc(40px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: min(90vh, calc(100dvh - env(safe-area-inset-top, 0px) - 8px));
+  overflow-y: auto;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* 전체 지도: 외곽에서 env(top)을 주면 내부 행은 일반 패딩만 */
 .fullscreenMapHeaderRow {
   box-sizing: border-box;

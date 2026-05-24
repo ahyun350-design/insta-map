@@ -5879,6 +5879,466 @@ function HomePageContent() {
     </div>
   );
 
+  const courseModalLayerEl =
+    (showCourseModal || showCourseEditScreen || showCourseSaveModal) &&
+    typeof document !== "undefined"
+      ? createPortal(
+          <>
+            {showCourseModal && (
+                        <div className="courseModalBackdrop">
+                          <div className="courseModalSheet">
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                {savedCourseId ? (
+                                  isEditingCourseTitleInline && !isReadOnlyCourse ? (
+                                    <div>
+                                      <input
+                                        ref={courseTitleInlineInputRef}
+                                        className="profileEditField"
+                                        value={editingCourseTitle}
+                                        maxLength={60}
+                                        onChange={(e) => setEditingCourseTitle(e.target.value)}
+                                        style={{
+                                          width: "100%",
+                                          boxSizing: "border-box",
+                                          borderRadius: 12,
+                                          padding: "10px 12px",
+                                          fontSize: 14,
+                                        }}
+                                      />
+                                      <p style={{ margin: "4px 0 0", fontSize: 11, color: "#999", textAlign: "right" }}>
+                                        {editingCourseTitle.length}/60
+                                      </p>
+                                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                                        <button
+                                          type="button"
+                                          disabled={courseTitleSaving}
+                                          onClick={() => { void handleSaveCourseTitleInline(); }}
+                                          style={{
+                                            padding: "8px 14px",
+                                            borderRadius: 8,
+                                            border: "none",
+                                            background: "#1a2a7a",
+                                            color: "#fff",
+                                            fontSize: 12,
+                                            fontWeight: 600,
+                                            cursor: courseTitleSaving ? "wait" : "pointer",
+                                            fontFamily: "inherit",
+                                            opacity: courseTitleSaving ? 0.7 : 1,
+                                          }}
+                                        >
+                                          {courseTitleSaving ? "저장 중..." : "저장"}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={courseTitleSaving}
+                                          onClick={() => {
+                                            setEditingCourseTitle(courseTitleOriginalRef.current);
+                                            setIsEditingCourseTitleInline(false);
+                                          }}
+                                          style={{
+                                            padding: "8px 14px",
+                                            borderRadius: 8,
+                                            border: "1px solid #ddd",
+                                            background: "#fff",
+                                            color: "#666",
+                                            fontSize: 12,
+                                            cursor: courseTitleSaving ? "wait" : "pointer",
+                                            fontFamily: "inherit",
+                                          }}
+                                        >
+                                          취소
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                                      <span
+                                        style={{
+                                          fontSize: 17,
+                                          fontWeight: 600,
+                                          color: "#000",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                          whiteSpace: "nowrap",
+                                          flex: 1,
+                                          minWidth: 0,
+                                        }}
+                                      >
+                                        {editingCourseTitle}
+                                      </span>
+                                      {!isReadOnlyCourse && (
+                                        <button
+                                          type="button"
+                                          aria-label="제목 수정"
+                                          onClick={() => {
+                                            courseTitleOriginalRef.current = editingCourseTitle;
+                                            setIsEditingCourseTitleInline(true);
+                                          }}
+                                          style={{
+                                            flexShrink: 0,
+                                            border: "none",
+                                            borderRadius: 6,
+                                            background: "transparent",
+                                            color: "#1a2a7a",
+                                            fontSize: 13,
+                                            fontWeight: 500,
+                                            padding: "4px 8px",
+                                            cursor: "pointer",
+                                            fontFamily: "inherit",
+                                          }}
+                                          onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = "#f0f0f5";
+                                          }}
+                                          onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = "transparent";
+                                          }}
+                                          onMouseDown={(e) => {
+                                            e.currentTarget.style.background = "#f0f0f5";
+                                          }}
+                                          onMouseUp={(e) => {
+                                            e.currentTarget.style.background = "#f0f0f5";
+                                          }}
+                                        >
+                                          편집
+                                        </button>
+                                      )}
+                                    </div>
+                                  )
+                                ) : (
+                                  <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>
+                                    {courseResult ? "✨ 추천 코스" : "🗺️ 코스 만들기"}
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={closeCourseModal}
+                                style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: "pointer", flexShrink: 0, padding: 0, lineHeight: 1 }}
+                              >
+                                ×
+                              </button>
+                            </div>
+            
+                            {!courseResult && (
+                              <>
+                                <div>
+                                  <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>출발지 / 지역</p>
+                                  <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                                    <button type="button" onClick={() => setCourseOriginMode("current")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: courseOriginMode === "current" ? "1px solid #1a2a7a" : "1px solid #ddd", background: courseOriginMode === "current" ? "#1a2a7a" : "#fff", color: courseOriginMode === "current" ? "#fff" : "#666", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>📍 현재 위치</button>
+                                    <button type="button" onClick={() => setCourseOriginMode("manual")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: courseOriginMode === "manual" ? "1px solid #1a2a7a" : "1px solid #ddd", background: courseOriginMode === "manual" ? "#1a2a7a" : "#fff", color: courseOriginMode === "manual" ? "#fff" : "#666", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>✏️ 직접 입력</button>
+                                  </div>
+                                  {courseOriginMode === "manual" && (
+                                    <input className="mapInput" placeholder="예: 성수역, 망원동" value={courseOriginAddress} onChange={(e) => setCourseOriginAddress(e.target.value)} style={{ width: "100%", boxSizing: "border-box" }} />
+                                  )}
+                                  {courseOriginMode === "current" && (
+                                    <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888" }}>
+                                      {courseLocationLoading
+                                        ? "📍 현재 위치를 확인하는 중..."
+                                        : courseCurrentLocation
+                                          ? `📍 현재 위치 반경 ${COURSE_WALK_RADIUS_KM}km 이내 장소(${courseBasePlaces.length}곳)로 코스를 짤게요`
+                                          : `📍 위치 권한을 허용하면 반경 ${COURSE_WALK_RADIUS_KM}km 이내 장소로 코스를 짤 수 있어요`}
+                                    </p>
+                                  )}
+                                </div>
+            
+                                <div>
+                                  <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "10px", marginTop: 0 }}>몇 곳을 방문할까요?</p>
+                                  {CATEGORY_COURSE_MODAL_ORDER.map((cat) => {
+                                    const available = courseAvailableByCategory[cat];
+                                    const max = available;
+                                    return (
+                                      <div key={cat} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 0", borderBottom: "0.5px solid #f5f5f5" }}>
+                                        <div style={{ flex: 1 }}>
+                                          <span style={{ fontSize: "14px", color: "#1a1a2e" }}>{CATEGORY_PIN[cat].emoji} {cat}</span>
+                                          <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "6px" }}>
+                                            {courseOriginMode === "manual" && courseRegionKeyword
+                                              ? `(${courseRegionKeyword}에 ${available}곳)`
+                                              : courseOriginMode === "current"
+                                                ? `(주변에 ${available}곳)`
+                                                : `(저장 ${available}곳)`}
+                                          </span>
+                                        </div>
+                                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                          <button type="button" disabled={courseCounts[cat] === 0} onClick={() => setCourseCounts(prev => ({ ...prev, [cat]: Math.max(0, prev[cat] - 1) }))} style={{ width: "28px", height: "28px", borderRadius: "50%", border: "1px solid #ddd", background: "#fff", color: "#1a2a7a", fontSize: "14px", cursor: courseCounts[cat] === 0 ? "not-allowed" : "pointer", opacity: courseCounts[cat] === 0 ? 0.4 : 1 }}>−</button>
+                                          <span style={{ fontSize: "14px", color: "#1a2a7a", fontWeight: 600, minWidth: "20px", textAlign: "center" }}>{courseCounts[cat]}</span>
+                                          <button type="button" disabled={courseCounts[cat] >= max} onClick={() => setCourseCounts(prev => ({ ...prev, [cat]: Math.min(max, prev[cat] + 1) }))} style={{ width: "28px", height: "28px", borderRadius: "50%", border: "1px solid #ddd", background: "#fff", color: "#1a2a7a", fontSize: "14px", cursor: courseCounts[cat] >= max ? "not-allowed" : "pointer", opacity: courseCounts[cat] >= max ? 0.4 : 1 }}>＋</button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+            
+                                <button type="button" onClick={generateCourse} disabled={courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0)} style={{ width: "100%", padding: "14px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "14px", letterSpacing: "1px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0) ? 0.6 : 1 }}>
+                                  {courseLoading ? "코스를 짜는 중..." : "코스 만들기"}
+                                </button>
+                                {courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0 && (
+                                  <p style={{ margin: 0, textAlign: "center", fontSize: "11px", color: "#999" }}>주변에 저장된 장소가 없어요. 다른 방식으로 시도해보세요</p>
+                                )}
+                              </>
+                            )}
+            
+                            {courseResult && (
+                              <>
+                                <p style={{ margin: 0, fontSize: "12px", color: "#888", lineHeight: 1.5 }}>📍 출발지에서 가까운 순서로 동선을 짜드렸어요. 시간에 여유 두고 다녀오세요!</p>
+            
+                                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                  {courseResult.map((place, idx) => (
+                                    <div key={`${place.id}-${idx}`} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px", background: "#f8f8fc", borderRadius: "10px" }}>
+                                      <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: 700, flexShrink: 0 }}>{idx + 1}</div>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{place.name}</p>
+                                        <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{CATEGORY_PIN[place.category].emoji} {place.category} · {place.address}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+            
+                                {activeViewedCourseId ? (
+                                  <>
+                                    {showSaveToMyCoursesButton && (
+                                      <button
+                                        type="button"
+                                        disabled={courseImporting || courseAlreadyImported}
+                                        onClick={() => {
+                                          if (activeViewedCourseId) void handleImportCourse(activeViewedCourseId);
+                                        }}
+                                        style={{
+                                          width: "100%",
+                                          padding: "12px",
+                                          borderRadius: "12px",
+                                          border: "1px solid #1a2a7a",
+                                          background: courseAlreadyImported ? "#f4f5fb" : "#fff",
+                                          color: courseAlreadyImported ? "#888" : "#1a2a7a",
+                                          fontSize: "13px",
+                                          fontWeight: 600,
+                                          cursor: courseImporting || courseAlreadyImported ? "not-allowed" : "pointer",
+                                          fontFamily: "inherit",
+                                          opacity: courseImporting || courseAlreadyImported ? 0.7 : 1,
+                                        }}
+                                      >
+                                        {courseImporting
+                                          ? "저장 중..."
+                                          : courseAlreadyImported
+                                            ? "✓ 저장됨"
+                                            : "내 코스로 저장"}
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={openCourseShareFromSheet}
+                                      style={{
+                                        width: "100%",
+                                        padding: "12px",
+                                        borderRadius: "12px",
+                                        border: "1px solid #1a2a7a",
+                                        background: "#fff",
+                                        color: "#1a2a7a",
+                                        fontSize: "13px",
+                                        fontWeight: 600,
+                                        cursor: "pointer",
+                                        fontFamily: "inherit",
+                                      }}
+                                    >
+                                      📤 코스 공유
+                                    </button>
+                                    {!isReadOnlyCourse && (
+                                      <button
+                                        type="button"
+                                        onClick={openCourseEditScreen}
+                                        style={{
+                                          width: "100%",
+                                          padding: "12px",
+                                          borderRadius: "12px",
+                                          border: "1px solid #ddd",
+                                          background: "#fff",
+                                          color: "#333",
+                                          fontSize: "13px",
+                                          fontWeight: 500,
+                                          cursor: "pointer",
+                                          fontFamily: "inherit",
+                                        }}
+                                      >
+                                        ✏️ 코스 수정
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={showCourseOnMap}
+                                      style={{
+                                        width: "100%",
+                                        padding: "12px",
+                                        borderRadius: "8px",
+                                        border: "none",
+                                        background: "#1a2a7a",
+                                        color: "#fff",
+                                        fontSize: "13px",
+                                        cursor: "pointer",
+                                        fontFamily: "inherit",
+                                      }}
+                                    >
+                                      🗺️ 지도에서 경로 보기
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={!!savedCourseId}
+                                      onClick={() => setShowCourseSaveModal(true)}
+                                      style={{
+                                        width: "100%",
+                                        padding: "12px",
+                                        borderRadius: "12px",
+                                        border: "1px solid #1a2a7a",
+                                        background: "#fff",
+                                        color: "#1a2a7a",
+                                        fontSize: "13px",
+                                        fontWeight: 600,
+                                        cursor: "pointer",
+                                        fontFamily: "inherit",
+                                      }}
+                                    >
+                                      💾 코스 저장
+                                    </button>
+            
+                                    <div style={{ display: "flex", gap: "8px" }}>
+                                      <button type="button" onClick={() => { void generateCourse(); }} disabled={courseLoading} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: "13px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading ? 0.6 : 1 }}>{courseLoading ? "다시 짜는 중..." : "다시 만들기"}</button>
+                                      <button type="button" onClick={showCourseOnMap} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={openAppleMapsCourseRoute}
+                                      style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #d6ddf2", background: "#fff", color: "#1a2a7a", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}
+                                    >
+                                      🗺 Apple 지도에서 경로 보기
+                                    </button>
+                                  </>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {showCourseEditScreen && editingCourseDraft && (
+                        <CourseEditScreen
+                          draft={editingCourseDraft}
+                          saving={courseEditSaving}
+                          showAddPlace={showAddPlaceSheet}
+                          addablePlaces={addableSavedPlacesForCourseEdit}
+                          categoryPin={CATEGORY_PIN}
+                          categoryColors={CATEGORY_COLORS}
+                          onCloseRequest={requestCloseCourseEditScreen}
+                          onSave={() => { void handleSaveCourseEdit(); }}
+                          onTitleChange={(title) =>
+                            setEditingCourseDraft((prev) => (prev ? { ...prev, title } : prev))
+                          }
+                          onOpenAddPlace={() => setShowAddPlaceSheet(true)}
+                          onCloseAddPlace={() => setShowAddPlaceSheet(false)}
+                          onMoveItem={moveCourseEditItem}
+                          onRemoveItem={removeCourseEditItem}
+                          onAddPlace={addPlaceToCourseEdit}
+                        />
+                      )}
+                      {showCourseSaveModal && (
+                        <div
+                          style={{
+                            position: "fixed",
+                            inset: 0,
+                            zIndex: 100000,
+                            background: "rgba(0,0,0,0.45)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "24px",
+                            boxSizing: "border-box",
+                          }}
+                          onClick={closeCourseSaveModal}
+                        >
+                          <div
+                            role="dialog"
+                            aria-labelledby="course-save-title"
+                            style={{
+                              width: "100%",
+                              maxWidth: "340px",
+                              background: "#fff",
+                              borderRadius: "16px",
+                              padding: "24px 20px",
+                              boxSizing: "border-box",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "16px",
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <p id="course-save-title" style={{ margin: 0, fontSize: "16px", fontWeight: 600, color: "#1a1a2e" }}>
+                              💾 코스 저장
+                            </p>
+                            <div>
+                              <input
+                                ref={courseSaveInputRef}
+                                className="profileEditField"
+                                placeholder="코스 이름 (예: 성수동 데이트)"
+                                value={courseSaveTitle}
+                                maxLength={60}
+                                onChange={(e) => setCourseSaveTitle(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && !courseSaving) void handleSaveCourse();
+                                }}
+                                style={{ width: "100%", boxSizing: "border-box" }}
+                              />
+                              <p style={{ margin: "6px 0 0", fontSize: "11px", color: "#8f93a6", textAlign: "right" }}>
+                                {courseSaveTitle.length}/60
+                              </p>
+                            </div>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button
+                                type="button"
+                                onClick={closeCourseSaveModal}
+                                disabled={courseSaving}
+                                style={{
+                                  flex: 1,
+                                  padding: "12px",
+                                  borderRadius: "10px",
+                                  border: "1px solid #ddd",
+                                  background: "#fff",
+                                  color: "#666",
+                                  fontSize: "13px",
+                                  cursor: courseSaving ? "wait" : "pointer",
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                취소
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { void handleSaveCourse(); }}
+                                disabled={courseSaving}
+                                style={{
+                                  flex: 1,
+                                  padding: "12px",
+                                  borderRadius: "10px",
+                                  border: "none",
+                                  background: "#1a2a7a",
+                                  color: "#fff",
+                                  fontSize: "13px",
+                                  fontWeight: 600,
+                                  cursor: courseSaving ? "wait" : "pointer",
+                                  fontFamily: "inherit",
+                                  opacity: courseSaving ? 0.7 : 1,
+                                }}
+                              >
+                                {courseSaving ? "저장 중..." : "저장하기"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+          </>,
+          document.body,
+        )
+      : null;
+
   if (detailPostId && !detailPost) {
     return (
       <main className="mobileRoot">
@@ -6060,6 +6520,7 @@ function HomePageContent() {
             </div>
           </div>
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
+          {courseModalLayerEl}
           {courseShareModalEl}
           {sharePostModalEl}
           {notificationModalEl}
@@ -6176,456 +6637,8 @@ function HomePageContent() {
             </div>
           )}
 
-{showCourseModal && (
-            <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
-              <div style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    {savedCourseId ? (
-                      isEditingCourseTitleInline && !isReadOnlyCourse ? (
-                        <div>
-                          <input
-                            ref={courseTitleInlineInputRef}
-                            className="profileEditField"
-                            value={editingCourseTitle}
-                            maxLength={60}
-                            onChange={(e) => setEditingCourseTitle(e.target.value)}
-                            style={{
-                              width: "100%",
-                              boxSizing: "border-box",
-                              borderRadius: 12,
-                              padding: "10px 12px",
-                              fontSize: 14,
-                            }}
-                          />
-                          <p style={{ margin: "4px 0 0", fontSize: 11, color: "#999", textAlign: "right" }}>
-                            {editingCourseTitle.length}/60
-                          </p>
-                          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                            <button
-                              type="button"
-                              disabled={courseTitleSaving}
-                              onClick={() => { void handleSaveCourseTitleInline(); }}
-                              style={{
-                                padding: "8px 14px",
-                                borderRadius: 8,
-                                border: "none",
-                                background: "#1a2a7a",
-                                color: "#fff",
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: courseTitleSaving ? "wait" : "pointer",
-                                fontFamily: "inherit",
-                                opacity: courseTitleSaving ? 0.7 : 1,
-                              }}
-                            >
-                              {courseTitleSaving ? "저장 중..." : "저장"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={courseTitleSaving}
-                              onClick={() => {
-                                setEditingCourseTitle(courseTitleOriginalRef.current);
-                                setIsEditingCourseTitleInline(false);
-                              }}
-                              style={{
-                                padding: "8px 14px",
-                                borderRadius: 8,
-                                border: "1px solid #ddd",
-                                background: "#fff",
-                                color: "#666",
-                                fontSize: 12,
-                                cursor: courseTitleSaving ? "wait" : "pointer",
-                                fontFamily: "inherit",
-                              }}
-                            >
-                              취소
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                          <span
-                            style={{
-                              fontSize: 17,
-                              fontWeight: 600,
-                              color: "#000",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                              flex: 1,
-                              minWidth: 0,
-                            }}
-                          >
-                            {editingCourseTitle}
-                          </span>
-                          {!isReadOnlyCourse && (
-                            <button
-                              type="button"
-                              aria-label="제목 수정"
-                              onClick={() => {
-                                courseTitleOriginalRef.current = editingCourseTitle;
-                                setIsEditingCourseTitleInline(true);
-                              }}
-                              style={{
-                                flexShrink: 0,
-                                border: "none",
-                                borderRadius: 6,
-                                background: "transparent",
-                                color: "#1a2a7a",
-                                fontSize: 13,
-                                fontWeight: 500,
-                                padding: "4px 8px",
-                                cursor: "pointer",
-                                fontFamily: "inherit",
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.background = "#f0f0f5";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.background = "transparent";
-                              }}
-                              onMouseDown={(e) => {
-                                e.currentTarget.style.background = "#f0f0f5";
-                              }}
-                              onMouseUp={(e) => {
-                                e.currentTarget.style.background = "#f0f0f5";
-                              }}
-                            >
-                              편집
-                            </button>
-                          )}
-                        </div>
-                      )
-                    ) : (
-                      <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>
-                        {courseResult ? "✨ 추천 코스" : "🗺️ 코스 만들기"}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={closeCourseModal}
-                    style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: "pointer", flexShrink: 0, padding: 0, lineHeight: 1 }}
-                  >
-                    ×
-                  </button>
-                </div>
+          {courseModalLayerEl}
 
-                {!courseResult && (
-                  <>
-                    <div>
-                      <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>출발지 / 지역</p>
-                      <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
-                        <button type="button" onClick={() => setCourseOriginMode("current")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: courseOriginMode === "current" ? "1px solid #1a2a7a" : "1px solid #ddd", background: courseOriginMode === "current" ? "#1a2a7a" : "#fff", color: courseOriginMode === "current" ? "#fff" : "#666", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>📍 현재 위치</button>
-                        <button type="button" onClick={() => setCourseOriginMode("manual")} style={{ flex: 1, padding: "10px", borderRadius: "8px", border: courseOriginMode === "manual" ? "1px solid #1a2a7a" : "1px solid #ddd", background: courseOriginMode === "manual" ? "#1a2a7a" : "#fff", color: courseOriginMode === "manual" ? "#fff" : "#666", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>✏️ 직접 입력</button>
-                      </div>
-                      {courseOriginMode === "manual" && (
-                        <input className="mapInput" placeholder="예: 성수역, 망원동" value={courseOriginAddress} onChange={(e) => setCourseOriginAddress(e.target.value)} style={{ width: "100%", boxSizing: "border-box" }} />
-                      )}
-                      {courseOriginMode === "current" && (
-                        <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888" }}>
-                          {courseLocationLoading
-                            ? "📍 현재 위치를 확인하는 중..."
-                            : courseCurrentLocation
-                              ? `📍 현재 위치 반경 ${COURSE_WALK_RADIUS_KM}km 이내 장소(${courseBasePlaces.length}곳)로 코스를 짤게요`
-                              : `📍 위치 권한을 허용하면 반경 ${COURSE_WALK_RADIUS_KM}km 이내 장소로 코스를 짤 수 있어요`}
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "10px", marginTop: 0 }}>몇 곳을 방문할까요?</p>
-                      {CATEGORY_COURSE_MODAL_ORDER.map((cat) => {
-                        const available = courseAvailableByCategory[cat];
-                        const max = available;
-                        return (
-                          <div key={cat} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 0", borderBottom: "0.5px solid #f5f5f5" }}>
-                            <div style={{ flex: 1 }}>
-                              <span style={{ fontSize: "14px", color: "#1a1a2e" }}>{CATEGORY_PIN[cat].emoji} {cat}</span>
-                              <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "6px" }}>
-                                {courseOriginMode === "manual" && courseRegionKeyword
-                                  ? `(${courseRegionKeyword}에 ${available}곳)`
-                                  : courseOriginMode === "current"
-                                    ? `(주변에 ${available}곳)`
-                                    : `(저장 ${available}곳)`}
-                              </span>
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                              <button type="button" disabled={courseCounts[cat] === 0} onClick={() => setCourseCounts(prev => ({ ...prev, [cat]: Math.max(0, prev[cat] - 1) }))} style={{ width: "28px", height: "28px", borderRadius: "50%", border: "1px solid #ddd", background: "#fff", color: "#1a2a7a", fontSize: "14px", cursor: courseCounts[cat] === 0 ? "not-allowed" : "pointer", opacity: courseCounts[cat] === 0 ? 0.4 : 1 }}>−</button>
-                              <span style={{ fontSize: "14px", color: "#1a2a7a", fontWeight: 600, minWidth: "20px", textAlign: "center" }}>{courseCounts[cat]}</span>
-                              <button type="button" disabled={courseCounts[cat] >= max} onClick={() => setCourseCounts(prev => ({ ...prev, [cat]: Math.min(max, prev[cat] + 1) }))} style={{ width: "28px", height: "28px", borderRadius: "50%", border: "1px solid #ddd", background: "#fff", color: "#1a2a7a", fontSize: "14px", cursor: courseCounts[cat] >= max ? "not-allowed" : "pointer", opacity: courseCounts[cat] >= max ? 0.4 : 1 }}>＋</button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <button type="button" onClick={generateCourse} disabled={courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0)} style={{ width: "100%", padding: "14px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "14px", letterSpacing: "1px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0) ? 0.6 : 1 }}>
-                      {courseLoading ? "코스를 짜는 중..." : "코스 만들기"}
-                    </button>
-                    {courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0 && (
-                      <p style={{ margin: 0, textAlign: "center", fontSize: "11px", color: "#999" }}>주변에 저장된 장소가 없어요. 다른 방식으로 시도해보세요</p>
-                    )}
-                  </>
-                )}
-
-                {courseResult && (
-                  <>
-                    <p style={{ margin: 0, fontSize: "12px", color: "#888", lineHeight: 1.5 }}>📍 출발지에서 가까운 순서로 동선을 짜드렸어요. 시간에 여유 두고 다녀오세요!</p>
-
-                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                      {courseResult.map((place, idx) => (
-                        <div key={`${place.id}-${idx}`} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px", background: "#f8f8fc", borderRadius: "10px" }}>
-                          <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#1a2a7a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: 700, flexShrink: 0 }}>{idx + 1}</div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{place.name}</p>
-                            <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{CATEGORY_PIN[place.category].emoji} {place.category} · {place.address}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {activeViewedCourseId ? (
-                      <>
-                        {showSaveToMyCoursesButton && (
-                          <button
-                            type="button"
-                            disabled={courseImporting || courseAlreadyImported}
-                            onClick={() => {
-                              if (activeViewedCourseId) void handleImportCourse(activeViewedCourseId);
-                            }}
-                            style={{
-                              width: "100%",
-                              padding: "12px",
-                              borderRadius: "12px",
-                              border: "1px solid #1a2a7a",
-                              background: courseAlreadyImported ? "#f4f5fb" : "#fff",
-                              color: courseAlreadyImported ? "#888" : "#1a2a7a",
-                              fontSize: "13px",
-                              fontWeight: 600,
-                              cursor: courseImporting || courseAlreadyImported ? "not-allowed" : "pointer",
-                              fontFamily: "inherit",
-                              opacity: courseImporting || courseAlreadyImported ? 0.7 : 1,
-                            }}
-                          >
-                            {courseImporting
-                              ? "저장 중..."
-                              : courseAlreadyImported
-                                ? "✓ 저장됨"
-                                : "내 코스로 저장"}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={openCourseShareFromSheet}
-                          style={{
-                            width: "100%",
-                            padding: "12px",
-                            borderRadius: "12px",
-                            border: "1px solid #1a2a7a",
-                            background: "#fff",
-                            color: "#1a2a7a",
-                            fontSize: "13px",
-                            fontWeight: 600,
-                            cursor: "pointer",
-                            fontFamily: "inherit",
-                          }}
-                        >
-                          📤 코스 공유
-                        </button>
-                        {!isReadOnlyCourse && (
-                          <button
-                            type="button"
-                            onClick={openCourseEditScreen}
-                            style={{
-                              width: "100%",
-                              padding: "12px",
-                              borderRadius: "12px",
-                              border: "1px solid #ddd",
-                              background: "#fff",
-                              color: "#333",
-                              fontSize: "13px",
-                              fontWeight: 500,
-                              cursor: "pointer",
-                              fontFamily: "inherit",
-                            }}
-                          >
-                            ✏️ 코스 수정
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={showCourseOnMap}
-                          style={{
-                            width: "100%",
-                            padding: "12px",
-                            borderRadius: "8px",
-                            border: "none",
-                            background: "#1a2a7a",
-                            color: "#fff",
-                            fontSize: "13px",
-                            cursor: "pointer",
-                            fontFamily: "inherit",
-                          }}
-                        >
-                          🗺️ 지도에서 경로 보기
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          disabled={!!savedCourseId}
-                          onClick={() => setShowCourseSaveModal(true)}
-                          style={{
-                            width: "100%",
-                            padding: "12px",
-                            borderRadius: "12px",
-                            border: "1px solid #1a2a7a",
-                            background: "#fff",
-                            color: "#1a2a7a",
-                            fontSize: "13px",
-                            fontWeight: 600,
-                            cursor: "pointer",
-                            fontFamily: "inherit",
-                          }}
-                        >
-                          💾 코스 저장
-                        </button>
-
-                        <div style={{ display: "flex", gap: "8px" }}>
-                          <button type="button" onClick={() => { void generateCourse(); }} disabled={courseLoading} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: "13px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading ? 0.6 : 1 }}>{courseLoading ? "다시 짜는 중..." : "다시 만들기"}</button>
-                          <button type="button" onClick={showCourseOnMap} style={{ flex: 1, padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={openAppleMapsCourseRoute}
-                          style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #d6ddf2", background: "#fff", color: "#1a2a7a", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}
-                        >
-                          🗺 Apple 지도에서 경로 보기
-                        </button>
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-          {showCourseEditScreen && editingCourseDraft && (
-            <CourseEditScreen
-              draft={editingCourseDraft}
-              saving={courseEditSaving}
-              showAddPlace={showAddPlaceSheet}
-              addablePlaces={addableSavedPlacesForCourseEdit}
-              categoryPin={CATEGORY_PIN}
-              categoryColors={CATEGORY_COLORS}
-              onCloseRequest={requestCloseCourseEditScreen}
-              onSave={() => { void handleSaveCourseEdit(); }}
-              onTitleChange={(title) =>
-                setEditingCourseDraft((prev) => (prev ? { ...prev, title } : prev))
-              }
-              onOpenAddPlace={() => setShowAddPlaceSheet(true)}
-              onCloseAddPlace={() => setShowAddPlaceSheet(false)}
-              onMoveItem={moveCourseEditItem}
-              onRemoveItem={removeCourseEditItem}
-              onAddPlace={addPlaceToCourseEdit}
-            />
-          )}
-          {showCourseSaveModal && (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                zIndex: 100000,
-                background: "rgba(0,0,0,0.45)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "24px",
-                boxSizing: "border-box",
-              }}
-              onClick={closeCourseSaveModal}
-            >
-              <div
-                role="dialog"
-                aria-labelledby="course-save-title"
-                style={{
-                  width: "100%",
-                  maxWidth: "340px",
-                  background: "#fff",
-                  borderRadius: "16px",
-                  padding: "24px 20px",
-                  boxSizing: "border-box",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "16px",
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <p id="course-save-title" style={{ margin: 0, fontSize: "16px", fontWeight: 600, color: "#1a1a2e" }}>
-                  💾 코스 저장
-                </p>
-                <div>
-                  <input
-                    ref={courseSaveInputRef}
-                    className="profileEditField"
-                    placeholder="코스 이름 (예: 성수동 데이트)"
-                    value={courseSaveTitle}
-                    maxLength={60}
-                    onChange={(e) => setCourseSaveTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !courseSaving) void handleSaveCourse();
-                    }}
-                    style={{ width: "100%", boxSizing: "border-box" }}
-                  />
-                  <p style={{ margin: "6px 0 0", fontSize: "11px", color: "#8f93a6", textAlign: "right" }}>
-                    {courseSaveTitle.length}/60
-                  </p>
-                </div>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    type="button"
-                    onClick={closeCourseSaveModal}
-                    disabled={courseSaving}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      borderRadius: "10px",
-                      border: "1px solid #ddd",
-                      background: "#fff",
-                      color: "#666",
-                      fontSize: "13px",
-                      cursor: courseSaving ? "wait" : "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    취소
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { void handleSaveCourse(); }}
-                    disabled={courseSaving}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      borderRadius: "10px",
-                      border: "none",
-                      background: "#1a2a7a",
-                      color: "#fff",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      cursor: courseSaving ? "wait" : "pointer",
-                      fontFamily: "inherit",
-                      opacity: courseSaving ? 0.7 : 1,
-                    }}
-                  >
-                    {courseSaving ? "저장 중..." : "저장하기"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
           <NewCurationScreen
             open={showPostModal}
             onClose={closePostScreen}
