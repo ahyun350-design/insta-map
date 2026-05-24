@@ -375,35 +375,129 @@ body {
   border-radius: 1px;
 }
 
-/* 큐레이션 Step 3 — 카테고리·동행 태그 pill 칩 */
+/* 큐레이션 작성 화면 — 헤더·본문 */
+.curationScreenBody {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-sizing: border-box;
+}
+
+.curationScreenBodyStep3 {
+  padding: 20px 22px 28px;
+  gap: 0;
+}
+
+.curationHeaderAction {
+  border: none;
+  border-radius: 20px;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1.2;
+  flex-shrink: 0;
+  min-width: 64px;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.curationHeaderActionRegister {
+  background: #1a2a7a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.curationHeaderActionRegisterDisabled {
+  background: #e8e8ec;
+  color: #aaa;
+  cursor: default;
+}
+
+.curationHeaderActionNext {
+  background: #1a2a7a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.curationHeaderActionNextDisabled {
+  background: #e8e8ec;
+  color: #aaa;
+  cursor: default;
+}
+
+/* 큐레이션 Step 3 — 세부 정보 */
 .curationStep3Form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 28px;
 }
 
 .curationFormSection {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+}
+
+.curationFormSectionCourse {
+  margin-top: 4px;
 }
 
 .curationFormLabel {
   margin: 0;
-  font-size: 11px;
-  color: #1a2a7a;
-  letter-spacing: 1px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #262626;
+  letter-spacing: -0.01em;
+}
+
+.curationFormField {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #e8e8ec;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 15px;
+  font-family: inherit;
+  color: #262626;
+  background: #fafafa;
+  outline: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.curationFormField:focus {
+  border-color: #1a2a7a;
+  background: #fff;
+}
+
+.curationFormField::placeholder {
+  color: #aaa;
+}
+
+.curationFormField:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.curationFormTextarea {
+  min-height: 128px;
+  resize: none;
+  line-height: 1.55;
 }
 
 .curationFormChips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 
 .curationFormChip {
   margin: 0;
-  padding: 9px 15px;
+  padding: 10px 16px;
   border-radius: 20px;
   border: 1px solid #e5e7eb;
   background: #fff;
@@ -424,11 +518,73 @@ body {
   font-weight: 600;
 }
 
-.curationFormValidationHint {
+.curationFormCourseBox {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #f8f9fc;
+  border: 1px solid #eef0f5;
+}
+
+.curationFormCourseBoxDisabled {
+  opacity: 0.72;
+}
+
+.curationFormCourseCheck {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.curationFormCourseBoxDisabled .curationFormCourseCheck {
+  cursor: not-allowed;
+}
+
+.curationFormCourseCheckbox {
+  width: 18px;
+  height: 18px;
   margin: 0;
-  font-size: 11px;
+  accent-color: #1a2a7a;
+  flex-shrink: 0;
+}
+
+.curationFormCourseCheckLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  line-height: 1.35;
+}
+
+.curationFormCourseHint {
+  margin: 0;
+  font-size: 12px;
+  color: #888;
+  line-height: 1.45;
+}
+
+.curationFormCourseTitleWrap {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.28s ease, opacity 0.22s ease, margin-top 0.22s ease;
+}
+
+.curationFormCourseTitleWrapOpen {
+  max-height: 72px;
+  opacity: 1;
+  margin-top: 2px;
+}
+
+.curationFormValidationHint {
+  margin: 4px 0 0;
+  font-size: 12px;
   color: #e07070;
   text-align: center;
+  line-height: 1.45;
 }
 
 .homeFeedScroll {

@@ -86,18 +86,16 @@ const headerBtnBase: CSSProperties = {
   flexShrink: 0,
 };
 
-const actionBtnBase = (enabled: boolean): CSSProperties => ({
-  border: "none",
-  background: "transparent",
-  cursor: enabled ? "pointer" : "default",
-  padding: "8px 4px",
-  fontSize: 15,
-  fontWeight: 600,
-  color: enabled ? "#1a2a7a" : "#bbb",
-  fontFamily: "inherit",
-  flexShrink: 0,
-  minWidth: 40,
-});
+function headerActionClass(isLastStep: boolean, enabled: boolean): string {
+  if (isLastStep) {
+    return enabled
+      ? "curationHeaderAction curationHeaderActionRegister"
+      : "curationHeaderAction curationHeaderActionRegisterDisabled";
+  }
+  return enabled
+    ? "curationHeaderAction curationHeaderActionNext"
+    : "curationHeaderAction curationHeaderActionNextDisabled";
+}
 
 export function NewCurationScreen({
   open,
@@ -262,7 +260,7 @@ export function NewCurationScreen({
           type="button"
           onClick={handleRightAction}
           disabled={!rightActionEnabled}
-          style={actionBtnBase(rightActionEnabled)}
+          className={headerActionClass(isLastStep, rightActionEnabled)}
         >
           {rightActionLabel}
         </button>
@@ -270,16 +268,9 @@ export function NewCurationScreen({
 
       <div
         ref={scrollRef}
+        className={currentStep === 3 ? "curationScreenBody curationScreenBodyStep3" : "curationScreenBody"}
         style={{
-          flex: 1,
-          overflowY: "auto",
-          WebkitOverflowScrolling: "touch",
-          padding: "16px 20px 24px",
-          paddingBottom: `calc(24px + ${keyboardInset}px + env(safe-area-inset-bottom, 0px))`,
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
-          boxSizing: "border-box",
+          paddingBottom: `calc(28px + ${keyboardInset}px + env(safe-area-inset-bottom, 0px))`,
         }}
       >
         {currentStep === 1 && (
