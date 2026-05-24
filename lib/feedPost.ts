@@ -2,7 +2,7 @@ import { isCompanionTag, type CompanionTag } from "@/lib/companionTag";
 
 export type FeedPostCategory = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
-const FEED_POST_CATEGORIES: readonly FeedPostCategory[] = [
+export const FEED_POST_CATEGORIES: readonly FeedPostCategory[] = [
   "맛집",
   "카페",
   "쇼핑",
@@ -43,6 +43,7 @@ export type FeedPost = {
   lat?: number;
   lng?: number;
   category: FeedPostCategory;
+  categories?: string[] | null;
   comment: string;
   images: string[];
   createdAt: string;
@@ -65,6 +66,7 @@ type FeedPostRow = {
   lat?: unknown;
   lng?: unknown;
   category: string;
+  categories?: string[] | null;
   comment: string;
   companion_tag?: unknown;
   photo_place_tags?: unknown;
@@ -174,6 +176,7 @@ export function parseFeedPostFromRow(row: FeedPostRow, options: ParseFeedPostOpt
     address: row.address,
     ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
     category,
+    categories: row.categories ?? null,
     comment: row.comment,
     companionTag: isCompanionTag(row.companion_tag) ? row.companion_tag : null,
     photoPlaceTags: parsePhotoPlaceTagsFromRow(row.photo_place_tags),
