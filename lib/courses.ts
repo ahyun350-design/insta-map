@@ -203,6 +203,13 @@ export async function fetchCourseById(
   return { data: mapCourseRow(data as Record<string, unknown>), error: null };
 }
 
+/** F-1a 웹 공유 — anon RLS(courses_public_read). fetchCourseById와 동일 조회. */
+export async function fetchPublicCourseById(
+  courseId: string,
+): Promise<{ data: SavedCourse | null; error: string | null }> {
+  return fetchCourseById(courseId);
+}
+
 export async function importCourse(
   originalCourseId: string,
   userId: string,
