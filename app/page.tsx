@@ -3298,8 +3298,15 @@ function HomePageContent() {
     setCourseShareSendingRoomId(null);
   };
 
+  const activeViewedCourseId = savedCourseId ?? viewingSavedCourseIdRef.current;
+
   const openCourseShareModal = async (course: SavedCourse) => {
-    if (!user) return;
+    if (!user) {
+      console.log("[PindMap:course-share] open modal blocked: no user");
+      showToast("로그인 후 코스를 공유할 수 있어요", "info");
+      return;
+    }
+    console.log("[PindMap:course-share] open modal", course.id);
     setSharingCourse(course);
     setShowCourseShareModal(true);
     const { data: roomsData } = await supabase
@@ -3330,6 +3337,7 @@ function HomePageContent() {
       }),
     );
     setCourseShareFriendRooms(rooms);
+    console.log("[PindMap:course-share] friend rooms", rooms.length);
   };
 
   const sendCourseToFriend = async (room: FriendRoom) => {
@@ -3386,20 +3394,39 @@ function HomePageContent() {
   };
 
   const openCourseShareFromSheet = () => {
-    if (!savedCourseId || !user?.id || !courseResult?.length) return;
+    const courseId = activeViewedCourseId;
+    if (!courseId) {
+      console.log("[PindMap:course-share] blocked: no course id", {
+        savedCourseId,
+        refId: viewingSavedCourseIdRef.current,
+      });
+      showToast("코스 정보를 불러오는 중이에요. 잠시 후 다시 시도해주세요", "info");
+      return;
+    }
+    if (!user?.id) {
+      console.log("[PindMap:course-share] blocked: no user", courseId);
+      showToast("로그인 후 코스를 공유할 수 있어요", "info");
+      return;
+    }
+    if (!courseResult?.length) {
+      console.log("[PindMap:course-share] blocked: empty places", courseId);
+      showToast("공유할 장소가 없어요", "info");
+      return;
+    }
+    const ownerId =
+      viewedCourseUserId ?? courseCache[courseId]?.user_id ?? user.id;
     const tempCourse: SavedCourse = {
-      id: savedCourseId,
-      user_id: user.id,
+      id: courseId,
+      user_id: ownerId,
       title: editingCourseTitle,
       items: courseResult.map(coursePlaceToSavedItem),
       place_count: courseResult.length,
       created_at: "",
       updated_at: "",
     };
+    console.log("[PindMap:course-share] open from sheet", courseId, courseResult.length);
     void openCourseShareModal(tempCourse);
   };
-
-  const activeViewedCourseId = savedCourseId ?? viewingSavedCourseIdRef.current;
 
   const viewedCourseOwnerId = useMemo(() => {
     if (viewedCourseUserId) return viewedCourseUserId;
