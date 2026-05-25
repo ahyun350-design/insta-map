@@ -1,5 +1,7 @@
 import { supabase } from "./supabase";
 
+export type CourseSource = "manual" | "curation";
+
 export type SavedCourseItem = {
   id: string;
   name: string;
@@ -18,6 +20,7 @@ export type SavedCourse = {
   created_at: string;
   updated_at: string;
   cloned_from_id?: string | null;
+  source?: CourseSource;
 };
 
 function mapDbError(error: { code?: string; message?: string }, fallback: string): string {
@@ -43,6 +46,7 @@ function mapCourseRow(row: Record<string, unknown>): SavedCourse {
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
     cloned_from_id: (row.cloned_from_id as string | null | undefined) ?? null,
+    source: (row.source === "curation" ? "curation" : "manual") as CourseSource,
   };
 }
 
@@ -64,6 +68,7 @@ export async function fetchMyCourses(
     .from("courses")
     .select("*")
     .eq("user_id", userId)
+    .neq("source", "curation")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -145,6 +150,7 @@ export async function saveCourse(
   userId: string,
   title: string,
   items: SavedCourseItem[],
+  source: CourseSource = "manual",
 ): Promise<{ data: SavedCourse | null; error: string | null }> {
   const trimmed = title.trim();
   const validationError = validateCourseTitle(trimmed);
@@ -162,6 +168,7 @@ export async function saveCourse(
       title: trimmed,
       items,
       place_count: items.length,
+      source,
     })
     .select("*")
     .single();
@@ -170,7 +177,7 @@ export async function saveCourse(
     return { data: null, error: mapInsertError(error) };
   }
 
-  return { data: data as SavedCourse, error: null };
+  return { data: mapCourseRow(data as Record<string, unknown>), error: null };
 }
 
 /** 채팅 공유용 스냅샷 텍스트 + [course:id] 마커 */
@@ -241,6 +248,7 @@ export async function importCourse(
       items: original.items,
       place_count: original.place_count,
       cloned_from_id: originalCourseId,
+      source: "manual",
     })
     .select("*")
     .single();
@@ -249,5 +257,5 @@ export async function importCourse(
     return { data: null, alreadyImported: false, error: mapInsertError(error) };
   }
 
-  return { data: data as SavedCourse, alreadyImported: false, error: null };
+  return { data: mapCourseRow(data as Record<string, unknown>), alreadyImported: false, error: null };
 }

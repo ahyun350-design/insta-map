@@ -3960,13 +3960,13 @@ function HomePageContent() {
           user.id,
           postCourseTitle,
           courseItems,
+          "curation",
         );
         if (courseError || !savedCourse) {
           showToast(courseError ?? "코스를 저장하지 못했어요", "error");
           return;
         }
         linkedCourseId = savedCourse.id;
-        setMyCourses((prev) => [savedCourse, ...prev.filter((c) => c.id !== savedCourse.id)]);
       }
     }
 
