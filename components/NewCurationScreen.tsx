@@ -7,6 +7,7 @@ import type { PhotoPlaceTag } from "@/lib/feedPost";
 import { Step1Photos } from "@/components/curation/Step1Photos";
 import { Step2PlaceTags } from "@/components/curation/Step2PlaceTags";
 import { Step3Form } from "@/components/curation/Step3Form";
+import { extractCategoriesFromPhotoTags } from "@/lib/categoryUtil";
 import type { CurationCategory, CurationStep, PostImageItem } from "@/components/curation/types";
 
 export type { PostImageItem } from "@/components/curation/types";
@@ -21,8 +22,9 @@ type Props = {
   validationHint: string | null;
   title: string;
   onTitleChange: (value: string) => void;
-  category: CurationCategory;
-  onCategoryChange: (category: CurationCategory) => void;
+  categories: CurationCategory[];
+  onCategoriesChange: (categories: CurationCategory[]) => void;
+  onCategoryToggle: (category: CurationCategory) => void;
   categoryMainOrder: CurationCategory[];
   categoryPin: Record<CurationCategory, { color: string; emoji: string }>;
   categoryColors: Record<CurationCategory, string>;
@@ -106,8 +108,9 @@ export function NewCurationScreen({
   validationHint,
   title,
   onTitleChange,
-  category,
-  onCategoryChange,
+  categories,
+  onCategoriesChange,
+  onCategoryToggle,
   categoryMainOrder,
   categoryPin,
   categoryColors,
@@ -217,6 +220,11 @@ export function NewCurationScreen({
     }
     if (currentStep === 1 && !canGoNextStep1) return;
     if (currentStep === 2 && !canGoNextStep2) return;
+    if (currentStep === 2) {
+      onCategoriesChange(extractCategoriesFromPhotoTags(photoPlaceTags));
+      setCurrentStep(3);
+      return;
+    }
     setCurrentStep((s) => (s < 3 ? ((s + 1) as CurationStep) : s));
   };
 
@@ -293,11 +301,9 @@ export function NewCurationScreen({
           <Step3Form
             title={title}
             onTitleChange={onTitleChange}
-            category={category}
-            onCategoryChange={onCategoryChange}
+            categories={categories}
+            onCategoryToggle={onCategoryToggle}
             categoryMainOrder={categoryMainOrder}
-            categoryPin={categoryPin}
-            categoryColors={categoryColors}
             companionTag={companionTag}
             onCompanionTagChange={onCompanionTagChange}
             comment={comment}

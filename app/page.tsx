@@ -804,7 +804,9 @@ function HomePageContent() {
   const [debouncedHomeSearchQuery, setDebouncedHomeSearchQuery] = useState("");
   const [homePlaceSheet, setHomePlaceSheet] = useState<PlaceSheetData | null>(null);
   const [postTitle, setPostTitle] = useState(""); const [postPlaceName, setPostPlaceName] = useState("");
-  const [postAddress, setPostAddress] = useState(""); const [postCategory, setPostCategory] = useState<Category>("카페");
+  const [postAddress, setPostAddress] = useState("");
+  const [postCategory, setPostCategory] = useState<Category>("카페");
+  const [postCategories, setPostCategories] = useState<Category[]>([]);
   const [postPlaceLat, setPostPlaceLat] = useState<number | undefined>(undefined);
   const [postPlaceLng, setPostPlaceLng] = useState<number | undefined>(undefined);
   const [postComment, setPostComment] = useState("");
@@ -1897,6 +1899,7 @@ function HomePageContent() {
       lat: coords?.lat ?? null,
       lng: coords?.lng ?? null,
       category: post.category,
+      categories: post.categories?.length ? post.categories : null,
       comment: post.comment,
       images: post.images,
       companion_tag: post.companionTag,
@@ -3937,6 +3940,12 @@ function HomePageContent() {
       }
     }
 
+    const savedCategories = postCategories.length > 0 ? [...postCategories] : null;
+    const legacyCategory: Category =
+      (savedCategories?.[0] as Category | undefined) ??
+      (repTag?.category as Category | undefined) ??
+      postCategory;
+
     const newPost: FeedPost = {
       id: Math.random().toString(36).substring(2) + Date.now().toString(36),
       user: MY_USERNAME,
@@ -3946,7 +3955,8 @@ function HomePageContent() {
       placeName: repTag?.placeName ?? (hasPhotoTags ? postPlaceName : ""),
       address: repTag?.address ?? (hasPhotoTags ? postAddress : ""),
       ...(postCoords ? { lat: postCoords.lat, lng: postCoords.lng } : {}),
-      category: (repTag?.category as Category) ?? postCategory,
+      category: legacyCategory,
+      categories: savedCategories,
       comment: postComment,
       companionTag: postCompanionTag,
       photoPlaceTags: postPhotoPlaceTags.length > 0 ? postPhotoPlaceTags : null,
@@ -3970,6 +3980,12 @@ function HomePageContent() {
     setShowPostModal(false);
     setActiveTab("home");
   };
+  const togglePostCategory = useCallback((cat: Category) => {
+    setPostCategories((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat],
+    );
+  }, []);
+
   const resetPostForm = useCallback(() => {
     setPostTitle("");
     setPostPlaceName("");
@@ -3979,6 +3995,7 @@ function HomePageContent() {
     setPostComment("");
     setPostCompanionTag(null);
     setPostCategory("카페");
+    setPostCategories([]);
     setPostImages((prev) => {
       prev.forEach((img) => {
         if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
@@ -6648,8 +6665,9 @@ function HomePageContent() {
             validationHint={postValidationHint}
             title={postTitle}
             onTitleChange={setPostTitle}
-            category={postCategory}
-            onCategoryChange={setPostCategory}
+            categories={postCategories}
+            onCategoriesChange={setPostCategories}
+            onCategoryToggle={togglePostCategory}
             categoryMainOrder={CATEGORY_MAIN_ORDER}
             categoryPin={CATEGORY_PIN}
             categoryColors={CATEGORY_COLORS}

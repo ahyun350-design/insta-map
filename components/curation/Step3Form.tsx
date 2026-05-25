@@ -8,11 +8,9 @@ const COMPANION_STEP3_CHIPS = COMPANION_FILTER_CHIPS.filter((chip) => chip.value
 type Props = {
   title: string;
   onTitleChange: (value: string) => void;
-  category: CurationCategory;
-  onCategoryChange: (category: CurationCategory) => void;
+  categories: CurationCategory[];
+  onCategoryToggle: (category: CurationCategory) => void;
   categoryMainOrder: CurationCategory[];
-  categoryPin: Record<CurationCategory, { color: string; emoji: string }>;
-  categoryColors: Record<CurationCategory, string>;
   companionTag: CompanionTag | null;
   onCompanionTagChange: (tag: CompanionTag) => void;
   comment: string;
@@ -29,8 +27,8 @@ type Props = {
 export function Step3Form({
   title,
   onTitleChange,
-  category,
-  onCategoryChange,
+  categories,
+  onCategoryToggle,
   categoryMainOrder,
   companionTag,
   onCompanionTagChange,
@@ -71,17 +69,16 @@ export function Step3Form({
 
       <section className="curationFormSection">
         <p className="curationFormLabel">카테고리</p>
-        <div className="curationFormChips" role="radiogroup" aria-label="카테고리">
+        <div className="curationFormChips" role="group" aria-label="카테고리">
           {categoryMainOrder.map((cat) => {
-            const selected = category === cat;
+            const selected = categories.includes(cat);
             return (
               <button
                 key={cat}
                 type="button"
-                role="radio"
-                aria-checked={selected}
+                aria-pressed={selected}
                 className={selected ? "curationFormChip curationFormChipSelected" : "curationFormChip"}
-                onClick={() => onCategoryChange(cat)}
+                onClick={() => onCategoryToggle(cat)}
               >
                 {cat}
               </button>
