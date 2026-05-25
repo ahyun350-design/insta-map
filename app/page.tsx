@@ -28,6 +28,8 @@ import {
 import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
 import { HomeFeedTopBar } from "@/components/HomeFeedTopBar";
 import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
+import { feedPostMatchesCategoryFilter, getDisplayCategories } from "@/lib/categoryUtil";
+import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { FeedPostCard, FeedPostMedia } from "@/components/FeedPostCard";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
@@ -800,6 +802,7 @@ function HomePageContent() {
   const [editComment, setEditComment] = useState("");
   const [showPostModal, setShowPostModal] = useState(false);
   const [selectedCompanionTag, setSelectedCompanionTag] = useState<CompanionTagFilter>("all");
+  const [selectedHomeCategory, setSelectedHomeCategory] = useState<HomeCategoryFilter>("all");
   const [homeSearchQuery, setHomeSearchQuery] = useState("");
   const [debouncedHomeSearchQuery, setDebouncedHomeSearchQuery] = useState("");
   const [homePlaceSheet, setHomePlaceSheet] = useState<PlaceSheetData | null>(null);
@@ -5396,12 +5399,15 @@ function HomePageContent() {
     if (selectedCompanionTag !== "all") {
       result = result.filter((p) => p.companionTag === selectedCompanionTag);
     }
+    if (selectedHomeCategory !== "all") {
+      result = result.filter((p) => feedPostMatchesCategoryFilter(p, selectedHomeCategory));
+    }
     const q = debouncedHomeSearchQuery.trim();
     if (q) {
       result = result.filter((p) => feedPostMatchesHomeSearch(p, q));
     }
     return result;
-  }, [visibleFeedPosts, selectedCompanionTag, debouncedHomeSearchQuery]);
+  }, [visibleFeedPosts, selectedCompanionTag, selectedHomeCategory, debouncedHomeSearchQuery]);
 
   const myMypagePosts = useMemo(() => {
     if (!user?.id) return [];
@@ -6468,6 +6474,19 @@ function HomePageContent() {
               </div>
             )}
             <div style={{ padding: "16px 20px 0" }}><p className="detailPostComment">{detailPost.comment}</p></div>
+            {getDisplayCategories(detailPost).length > 0 && (
+              <div className="detailPostCategories" style={{ padding: "12px 20px 0" }}>
+                {getDisplayCategories(detailPost).map((cat) => (
+                  <span
+                    key={cat}
+                    className="detailPostCategoryBadge"
+                    style={{ background: CATEGORY_COLORS[cat as Category] ?? "#1a2a7a" }}
+                  >
+                    {CATEGORY_PIN[cat as Category]?.emoji ?? "📍"} {cat}
+                  </span>
+                ))}
+              </div>
+            )}
             {detailPost.courseId && (
               <div style={{ padding: "12px 20px 0" }}>
                 <FeedPostLinkedCourse
@@ -6704,6 +6723,10 @@ function HomePageContent() {
                       value={selectedCompanionTag}
                       onChange={setSelectedCompanionTag}
                     />
+                    <HomeCategoryFilterChips
+                      value={selectedHomeCategory}
+                      onChange={setSelectedHomeCategory}
+                    />
                   </div>
                 </div>
               )}
@@ -6737,12 +6760,14 @@ function HomePageContent() {
                   title={
                     debouncedHomeSearchQuery.trim()
                       ? `'${debouncedHomeSearchQuery.trim()}'에 대한 큐레이션이 없어요`
-                      : `아직 ${companionFilterChipLabel(selectedCompanionTag)} 큐레이션이 없어요`
+                      : selectedHomeCategory !== "all"
+                        ? `아직 ${selectedHomeCategory} 큐레이션이 없어요`
+                        : `아직 ${companionFilterChipLabel(selectedCompanionTag)} 큐레이션이 없어요`
                   }
                   description={
                     debouncedHomeSearchQuery.trim()
                       ? "다른 키워드로 검색하거나 필터를 바꿔보세요"
-                      : "다른 태그를 선택하거나 새 큐레이션을 올려보세요"
+                      : "다른 필터를 선택하거나 새 큐레이션을 올려보세요"
                   }
                 />
               )}

@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
 import type { PhotoPlaceTag } from "@/lib/feedPost";
+import { formatDisplayCategoriesForUi } from "@/lib/categoryUtil";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { getDisplayPlaceForPhoto, type PlaceRefForPhotoTagMatch } from "@/lib/photoPlaceTag";
 import type { SavedCourse } from "@/lib/courses";
@@ -21,6 +22,7 @@ export type FeedPostCardData = {
   lat?: number;
   lng?: number;
   category: Category;
+  categories?: string[] | null;
   comment: string;
   photoPlaceTags?: PhotoPlaceTag[] | null;
   images: string[];
@@ -260,7 +262,8 @@ export function FeedPostCard({
     captionExpanded || !needsCaptionExpand
       ? commentText
       : `${commentText.slice(0, CAPTION_PREVIEW_LEN).trimEnd()}…`;
-  const categoryLabel = `${categoryPin[post.category].emoji} ${post.category}`;
+  const { visible: visibleCategories, extraCount: extraCategoryCount } =
+    formatDisplayCategoriesForUi(post);
   const companionLabel =
     post.companionTag && isCompanionTag(post.companionTag)
       ? companionTagDisplayLabel(post.companionTag)
@@ -396,16 +399,30 @@ export function FeedPostCard({
           />
         )}
 
-        {(categoryLabel || companionLabel) && (
-          <p className="feedPostTags" aria-label="카테고리 및 동행 태그">
-            {categoryLabel}
-            {companionLabel && (
-              <>
-                <span className="feedPostTagsSep" aria-hidden> · </span>
-                {companionLabel}
-              </>
+        {(visibleCategories.length > 0 || companionLabel) && (
+          <div className="feedPostTags" aria-label="카테고리 및 동행 태그">
+            {visibleCategories.length > 0 && (
+              <div className="feedPostCategoryBadges">
+                {visibleCategories.map((cat) => {
+                  const pin = categoryPin[cat as Category];
+                  if (!pin) return null;
+                  return (
+                    <span key={cat} className="feedPostCategoryBadge">
+                      {pin.emoji} {cat}
+                    </span>
+                  );
+                })}
+                {extraCategoryCount > 0 && (
+                  <span className="feedPostCategoryBadge feedPostCategoryBadgeMore">
+                    외 {extraCategoryCount}개
+                  </span>
+                )}
+              </div>
             )}
-          </p>
+            {companionLabel && (
+              <p className="feedPostCompanionTag">{companionLabel}</p>
+            )}
+          </div>
         )}
       </div>
     </article>

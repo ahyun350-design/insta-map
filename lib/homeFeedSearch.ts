@@ -1,12 +1,12 @@
+import { getDisplayCategories, type FeedPostCategorySource } from "@/lib/categoryUtil";
 import { COMPANION_TAG_OPTIONS, type CompanionTag } from "@/lib/companionTag";
 
-export type HomeFeedSearchablePost = {
+export type HomeFeedSearchablePost = FeedPostCategorySource & {
   title: string;
   comment: string;
   placeName: string;
   address: string;
   user: string;
-  category: string;
   companionTag?: CompanionTag | null;
 };
 
@@ -41,7 +41,8 @@ export function feedPostMatchesHomeSearch(post: HomeFeedSearchablePost, query: s
   }
 
   const simpleQ = rawQ.toLowerCase();
-  const simpleFields = [post.category, companionTagSearchLabel(post.companionTag)].map(
+  const categoryFields = getDisplayCategories(post).map((c) => c.toLowerCase());
+  const simpleFields = [...categoryFields, companionTagSearchLabel(post.companionTag)].map(
     (field) => (field ?? "").toLowerCase(),
   );
 

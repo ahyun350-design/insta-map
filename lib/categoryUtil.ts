@@ -27,8 +27,10 @@ export function extractCategoriesFromPhotoTags(
   return order.filter((cat) => fromTags.has(cat));
 }
 
+export type FeedPostCategorySource = Pick<FeedPost, "category" | "categories">;
+
 /** 큐레이션 게시글(feed_posts) 표시용 카테고리 — places·photo_place_tags.category와 무관 */
-export function getDisplayCategories(post: FeedPost): string[] {
+export function getDisplayCategories(post: FeedPostCategorySource): string[] {
   if (post.categories && post.categories.length > 0) {
     return post.categories;
   }
@@ -36,4 +38,22 @@ export function getDisplayCategories(post: FeedPost): string[] {
     return [post.category];
   }
   return [];
+}
+
+/** 홈 카테고리 필터: 선택 카테고리가 큐레이션 categories에 포함되는지 */
+export function feedPostMatchesCategoryFilter(post: FeedPostCategorySource, filter: string): boolean {
+  if (filter === "all") return true;
+  return getDisplayCategories(post).includes(filter);
+}
+
+/** 카드·상세 등: 최대 maxVisible개 + 나머지 개수 */
+export function formatDisplayCategoriesForUi(
+  post: FeedPostCategorySource,
+  maxVisible = 3,
+): { visible: string[]; extraCount: number } {
+  const all = getDisplayCategories(post);
+  if (all.length <= maxVisible) {
+    return { visible: all, extraCount: 0 };
+  }
+  return { visible: all.slice(0, maxVisible), extraCount: all.length - maxVisible };
 }
