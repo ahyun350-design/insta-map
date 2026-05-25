@@ -2333,6 +2333,30 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* 코스 공유하기(친구 선택) — 코스 모달 위 */
+.courseShareModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+}
+
+.courseShareModalSheet {
+  background: #fff;
+  width: 100%;
+  border-radius: 20px 20px 0 0;
+  padding: 24px 20px calc(40px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 70vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* 전체 지도: 외곽에서 env(top)을 주면 내부 행은 일반 패딩만 */
 .fullscreenMapHeaderRow {
   box-sizing: border-box;

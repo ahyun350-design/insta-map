@@ -5696,17 +5696,18 @@ function HomePageContent() {
     );
   }
 
-  const courseShareModalEl = showCourseShareModal && sharingCourse && (
-    <div
-      onClick={() => {
-        if (!courseShareLoading) closeCourseShareModal();
-      }}
-      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "12px", maxHeight: "70vh", overflowY: "auto", boxSizing: "border-box" }}
-      >
+  const courseShareModalEl =
+    showCourseShareModal &&
+    sharingCourse &&
+    typeof document !== "undefined"
+      ? createPortal(
+          <div
+            className="courseShareModalBackdrop"
+            onClick={() => {
+              if (!courseShareLoading) closeCourseShareModal();
+            }}
+          >
+            <div className="courseShareModalSheet" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>코스 공유하기</span>
           <button
@@ -5758,9 +5759,11 @@ function HomePageContent() {
             </button>
           );
         })}
-      </div>
-    </div>
-  );
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
 
   const sharePostModalEl = sharePost && (
     <div onClick={() => { if (!shareLoading) { setSharePost(null); setFriendRooms([]); } }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
