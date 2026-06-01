@@ -59,7 +59,9 @@ import {
   getCurrentPositionForMapStage2,
   isGeolocationPermissionDenied,
 } from "@/lib/getCurrentPositionForMap";
+import { MessageUserSearchRow } from "@/components/MessageUserSearchRow";
 import { getDisplayFriendName } from "@/lib/friendDisplay";
+import { searchUsersByUsername, type UserSearchHit } from "@/lib/userSearch";
 import {
   copyTextToClipboard,
   getCourseShareUrl,
@@ -853,10 +855,12 @@ function HomePageContent() {
   const [newMessage, setNewMessage] = useState("");
   /** iOS/WKWebView 키보드와 하단 입력줄 사이 여백 보정 (visualViewport) */
   const [chatKeyboardOverlap, setChatKeyboardOverlap] = useState(0);
-  const [friendSearch, setFriendSearch] = useState("");
-  const [friendSearchResult, setFriendSearchResult] = useState<{ id: string; username: string; avatar_url?: string } | null>(null);
-  const [friendSearchError, setFriendSearchError] = useState("");
-  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [messageUserSearchQuery, setMessageUserSearchQuery] = useState("");
+  const [messageUserSearchResults, setMessageUserSearchResults] = useState<UserSearchHit[]>([]);
+  const [messageUserSearchLoading, setMessageUserSearchLoading] = useState(false);
+  const [messageUserSearchFollowLoadingId, setMessageUserSearchFollowLoadingId] = useState<string | null>(null);
+  const [messagesListKeyboardInset, setMessagesListKeyboardInset] = useState(0);
+  const messageUserSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
   const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
@@ -2647,49 +2651,35 @@ function HomePageContent() {
     console.log("[PindMap:message] subscription mounted", roomId);
   }, [unmountRoomSubscription]);
 
-  const searchFriend = async () => {
-    if (!friendSearch.trim()) return;
-    setFriendSearchError("");
-    setFriendSearchResult(null);
-    const { data } = await supabase
-      .from("users")
-      .select("*")
-      .eq("username", friendSearch.trim())
-      .neq("id", MY_USER)
-      .single();
-    console.log("[PindMap:message] search filter (self excluded)", friendSearch.trim(), !!data);
-    if (!data) { setFriendSearchError("유저를 찾을 수 없어요."); return; }
-    if (data.username === MY_USER) { setFriendSearchError("나 자신은 추가할 수 없어요."); return; }
-    userAvatarCacheRef.current.setFromRow({ id: data.id, username: data.username, avatar_url: data.avatar_url });
-    setFriendSearchResult({
-      id: data.id,
-      username: data.username,
-      avatar_url: normalizeAvatarUrl(data.avatar_url),
-    });
-  };
+  const clearMessageUserSearch = useCallback(() => {
+    setMessageUserSearchQuery("");
+    setMessageUserSearchResults([]);
+    setMessageUserSearchLoading(false);
+  }, []);
 
-  const addFriend = async () => {
-    if (!friendSearchResult) return;
-    // 기존 채팅방 확인
-    const { data: existing } = await supabase.from("chat_rooms").select("*")
-      .or(`and(user1_id.eq.${MY_USER},user2_id.eq.${friendSearchResult.id}),and(user1_id.eq.${friendSearchResult.id},user2_id.eq.${MY_USER})`);
-    let roomId = existing?.[0]?.id;
-    if (!roomId) {
-      roomId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      await supabase.from("chat_rooms").insert({ id: roomId, user1_id: MY_USER, user2_id: friendSearchResult.id });
+  const openMessageSearchProfile = useCallback(
+    (username: string) => {
+      router.push(`/profile/${encodeURIComponent(username)}`);
+    },
+    [router],
+  );
+
+  const toggleMessageSearchFollow = async (hit: UserSearchHit, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (messageUserSearchFollowLoadingId) return;
+    setMessageUserSearchFollowLoadingId(hit.id);
+    try {
+      if (hit.isFollowing) {
+        await unfollowUser(hit.username);
+      } else {
+        await followUser(hit.username);
+      }
+      setMessageUserSearchResults((prev) =>
+        prev.map((u) => (u.id === hit.id ? { ...u, isFollowing: !hit.isFollowing } : u)),
+      );
+    } finally {
+      setMessageUserSearchFollowLoadingId(null);
     }
-    const newRoom: ChatRoom = {
-      id: roomId,
-      friendId: friendSearchResult.id,
-      friendName: friendSearchResult.username,
-      friendAvatarUrl: friendSearchResult.avatar_url,
-      lastMessage: "",
-      lastTime: new Date().toISOString(),
-      unreadCount: 0,
-    };
-    setChatRooms((prev) => sortChatRoomsByRecency([newRoom, ...prev.filter((r) => r.id !== roomId)]));
-    setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null);
-    setActiveChatRoom(newRoom);
   };
 
   const openChat = async (room: ChatRoom) => {
@@ -5101,6 +5091,71 @@ function HomePageContent() {
   }, [activeTab, activeChatRoom?.id, resetWindowScrollAfterChatKeyboard]);
 
   useEffect(() => {
+    if (activeTab !== "messages" || activeChatRoom) {
+      setMessagesListKeyboardInset(0);
+      return;
+    }
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      setMessagesListKeyboardInset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      setMessagesListKeyboardInset(0);
+    };
+  }, [activeTab, activeChatRoom?.id]);
+
+  useEffect(() => {
+    if (activeTab !== "messages" || activeChatRoom) {
+      clearMessageUserSearch();
+    }
+  }, [activeTab, activeChatRoom?.id, clearMessageUserSearch]);
+
+  useEffect(() => {
+    const q = messageUserSearchQuery.trim();
+    if (!q || activeTab !== "messages" || activeChatRoom || !user?.id) {
+      setMessageUserSearchResults([]);
+      setMessageUserSearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setMessageUserSearchLoading(true);
+        const { data, error } = await searchUsersByUsername(q, user.id, followingIds);
+        if (cancelled) return;
+        if (error) showToast(error, "error");
+        for (const hit of data) {
+          userAvatarCacheRef.current.setFromRow({
+            id: hit.id,
+            username: hit.username,
+            avatar_url: hit.avatar_url,
+          });
+        }
+        setMessageUserSearchResults(data);
+        setMessageUserSearchLoading(false);
+      })();
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [messageUserSearchQuery, activeTab, activeChatRoom, user?.id, showToast]);
+
+  useEffect(() => {
+    setMessageUserSearchResults((prev) =>
+      prev.length === 0
+        ? prev
+        : prev.map((h) => ({ ...h, isFollowing: followingIds.includes(h.id) })),
+    );
+  }, [followingIds]);
+
+  useEffect(() => {
     if (
       prevActiveTabRef.current === "messages" &&
       activeTab !== "messages" &&
@@ -7203,58 +7258,113 @@ function HomePageContent() {
         </div>
       </>
     ) : (
-      <>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+      <div
+        className="messagesListScreen"
+        style={{
+          paddingBottom: messagesListKeyboardInset > 0 ? `${messagesListKeyboardInset}px` : undefined,
+        }}
+      >
+        <div className="messagesListHeader">
           <p className="screenTitle" style={{ margin: 0 }}>메시지</p>
-          <button onClick={() => setShowAddFriend(true)} style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "20px", padding: "6px 14px", fontSize: "12px", cursor: "pointer" }}>+ 팔로우</button>
         </div>
-        {showAddFriend && (
-          <div style={{ background: "#fff", borderRadius: "14px", padding: "16px", marginBottom: "16px", boxShadow: "0 6px 20px rgba(20, 30, 80, 0.06)", border: "0.5px solid #eef0f6" }}>
-            <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>새 친구 찾기</p>
-            <p style={{ margin: "6px 0 12px", fontSize: "11px", color: "#8a90a6", lineHeight: 1.5 }}>유저명을 정확히 입력해 주세요</p>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <input placeholder="🔍 유저명으로 검색" value={friendSearch} onChange={e => setFriendSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchFriend()} style={{ flex: 1, height: "36px", border: "0.5px solid #dde2f0", borderRadius: "999px", padding: "0 12px", fontSize: "12px", color: "#333", outline: "none", fontFamily: "inherit", background: "#fbfcff" }} />
-              <button onClick={searchFriend} type="button" style={{ height: "36px", border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "999px", padding: "0 14px", fontSize: "12px", cursor: "pointer", fontFamily: "inherit", letterSpacing: "0.3px" }}>검색</button>
-            </div>
-            {friendSearchError && <p style={{ color: "#e07070", fontSize: "11px", marginTop: "6px" }}>{friendSearchError}</p>}
-            {friendSearchResult && (
-              <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "10px", padding: "12px", background: "#f7f9ff", borderRadius: "10px", border: "0.5px solid #e1e7f7" }}>
-                <ProfileAvatar avatarUrl={friendSearchResult.avatar_url} username={friendSearchResult.username} size={34} fontSize={13} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{friendSearchResult.username}</p>
-                  <p style={{ margin: "3px 0 0", fontSize: "10px", color: "#9ca3b6" }}>검색 결과</p>
-                </div>
-                <button onClick={addFriend} type="button" style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "16px", padding: "7px 12px", fontSize: "11px", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>팔로우</button>
-              </div>
+        <div className="messagesUserSearchSticky">
+          <div className="messagesUserSearchWrap">
+            <input
+              ref={messageUserSearchInputRef}
+              type="search"
+              className="messagesUserSearchInput"
+              placeholder="친구 검색"
+              value={messageUserSearchQuery}
+              onChange={(e) => setMessageUserSearchQuery(e.target.value)}
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              aria-label="친구 검색"
+            />
+            {messageUserSearchQuery.length > 0 && (
+              <button
+                type="button"
+                className="messagesUserSearchClear"
+                onClick={clearMessageUserSearch}
+                aria-label="검색어 지우기"
+              >
+                ×
+              </button>
             )}
-            <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
-              <button onClick={() => { setShowAddFriend(false); setFriendSearch(""); setFriendSearchResult(null); setFriendSearchError(""); }} style={{ border: "0.5px solid #d9deec", background: "#fff", color: "#76809a", borderRadius: "999px", fontSize: "11px", cursor: "pointer", padding: "6px 12px", fontFamily: "inherit" }}>닫기</button>
-            </div>
           </div>
+        </div>
+        {messageUserSearchQuery.trim() ? (
+          <div className="messagesUserSearchResults">
+            {messageUserSearchLoading && (
+              <p className="messagesUserSearchLoading">검색 중...</p>
+            )}
+            {!messageUserSearchLoading && messageUserSearchResults.length === 0 && (
+              <p className="messagesUserSearchEmpty">검색 결과가 없어요</p>
+            )}
+            {!messageUserSearchLoading &&
+              messageUserSearchResults.map((hit) => (
+                <MessageUserSearchRow
+                  key={hit.id}
+                  hit={hit}
+                  followLoading={messageUserSearchFollowLoadingId === hit.id}
+                  onOpenProfile={openMessageSearchProfile}
+                  onToggleFollow={toggleMessageSearchFollow}
+                />
+              ))}
+          </div>
+        ) : (
+          <>
+            {chatRooms.length === 0 && (
+              <EmptyState
+                icon="💌"
+                title="아직 메시지가 없어요"
+                description="위에서 친구를 검색해 첫 대화를 시작해보세요"
+                action={{
+                  label: "친구 검색하기",
+                  onClick: () => messageUserSearchInputRef.current?.focus(),
+                }}
+              />
+            )}
+            {chatRooms.map((room) => (
+              <article
+                key={room.id}
+                className="chatItem"
+                onClick={() => openChat(room)}
+                style={{ cursor: "pointer" }}
+              >
+                <ProfileAvatar avatarUrl={room.friendAvatarUrl} username={room.friendName} size={38} className="avatar" />
+                <div className="chatBody">
+                  <p className="chatName">{room.friendName}</p>
+                  <p className="chatPreview">{room.lastMessage || "대화를 시작해보세요"}</p>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+                  <span className="chatTime">{room.lastTime ? timeAgo(room.lastTime) : ""}</span>
+                  {room.unreadCount > 0 && (
+                    <span
+                      style={{
+                        background: "#e05555",
+                        color: "#fff",
+                        borderRadius: "10px",
+                        minWidth: "18px",
+                        height: "18px",
+                        padding: "0 6px",
+                        fontSize: "10px",
+                        fontWeight: 600,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {room.unreadCount}
+                    </span>
+                  )}
+                </div>
+              </article>
+            ))}
+          </>
         )}
-        {chatRooms.length === 0 && !showAddFriend && (
-  <EmptyState
-    icon="💌"
-    title="아직 메시지가 없어요"
-    description="친구를 추가해 첫 대화를 시작해보세요"
-    action={{ label: "친구 추가하기", onClick: () => setShowAddFriend(true) }}
-  />
-)}
-        {chatRooms.map(room => (
-          <article key={room.id} className="chatItem" onClick={() => openChat(room)} style={{ cursor: "pointer" }}>
-            <ProfileAvatar avatarUrl={room.friendAvatarUrl} username={room.friendName} size={38} className="avatar" />
-            <div className="chatBody"><p className="chatName">{room.friendName}</p><p className="chatPreview">{room.lastMessage || "대화를 시작해보세요"}</p></div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
-              <span className="chatTime">{room.lastTime ? timeAgo(room.lastTime) : ""}</span>
-              {room.unreadCount > 0 && (
-                <span style={{ background: "#e05555", color: "#fff", borderRadius: "10px", minWidth: "18px", height: "18px", padding: "0 6px", fontSize: "10px", fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {room.unreadCount}
-                </span>
-              )}
-            </div>
-          </article>
-        ))}
-      </>
+      </div>
     )}
   </div>
 )}

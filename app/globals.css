@@ -1957,6 +1957,173 @@ body {
   letter-spacing: 0.3px;
 }
 
+/* 메시지 탭 — 사용자 검색 */
+.messagesListScreen {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.messagesListHeader {
+  flex-shrink: 0;
+  margin-bottom: 12px;
+}
+
+.messagesUserSearchSticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  background: #fff;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+}
+
+.messagesUserSearchWrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0.5px solid #dde2f0;
+  border-radius: 12px;
+  padding: 0 12px;
+  background: #fbfcff;
+  min-height: 44px;
+}
+
+.messagesUserSearchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-family: inherit;
+  color: #1a1a2e;
+  outline: none;
+  padding: 10px 0;
+}
+
+.messagesUserSearchInput::placeholder {
+  color: #9ca3b6;
+}
+
+.messagesUserSearchClear {
+  flex-shrink: 0;
+  border: none;
+  background: #e8eaf0;
+  color: #5c6478;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+
+.messagesUserSearchResults {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.messagesUserSearchEmpty {
+  text-align: center;
+  color: #bbb;
+  font-size: 13px;
+  padding: 28px 12px;
+  margin: 0;
+}
+
+.messagesUserSearchLoading {
+  text-align: center;
+  color: #888;
+  font-size: 12px;
+  padding: 20px 0;
+  margin: 0;
+}
+
+.messageUserSearchRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.messageUserSearchRowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: none;
+  background: transparent;
+  padding: 6px 4px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  border-radius: 10px;
+}
+
+.messageUserSearchRowMain:active {
+  background: #f4f5f9;
+}
+
+.messageUserSearchRowText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.messageUserSearchRowUsername {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.messageUserSearchRowSubtitle {
+  font-size: 12px;
+  color: #8a90a6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.messageUserSearchFollowBtn {
+  flex-shrink: 0;
+  min-width: 72px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  background: #1a2a7a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.messageUserSearchFollowBtn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.messageUserSearchFollowBtnFollowing {
+  background: #fff;
+  color: #1a2a7a;
+  border: 1px solid #c5c9d6;
+}
+
 /* ── 지도 입력 ── */
 .mapInputWrap {
   display: grid;
