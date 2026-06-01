@@ -59,7 +59,12 @@ import {
   getCurrentPositionForMapStage2,
   isGeolocationPermissionDenied,
 } from "@/lib/getCurrentPositionForMap";
-import { copyTextToClipboard, getCourseShareUrl } from "@/lib/pindmapLinks";
+import { getDisplayFriendName } from "@/lib/friendDisplay";
+import {
+  copyTextToClipboard,
+  getCourseShareUrl,
+  shareViaNavigatorShare,
+} from "@/lib/pindmapLinks";
 import { parseFeedPostFromRow, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
 import {
   getDisplayPlaceForPhoto,
@@ -739,6 +744,8 @@ function HomePageContent() {
   const [courseShareFriendRooms, setCourseShareFriendRooms] = useState<FriendRoom[]>([]);
   const [courseShareLoading, setCourseShareLoading] = useState(false);
   const [courseShareSendingRoomId, setCourseShareSendingRoomId] = useState<string | null>(null);
+  const [courseShareSearchQuery, setCourseShareSearchQuery] = useState("");
+  const [courseShareSentRoomIds, setCourseShareSentRoomIds] = useState<string[]>([]);
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [profileEditName, setProfileEditName] = useState("");
   const [profileEditBio, setProfileEditBio] = useState("");
@@ -1165,6 +1172,13 @@ function HomePageContent() {
     if (postSaveCourseChecked && !postCourseTitle.trim()) return "코스 제목을 입력해주세요";
     return "모든 사진 업로드가 끝나야 등록할 수 있어요";
   }, [canPost, postTitle, postImages, postCompanionTag, postSaveCourseChecked, postCourseTitle]);
+
+  const courseShareFilteredRooms = useMemo(() => {
+    const q = courseShareSearchQuery.trim().toLowerCase();
+    if (!q) return courseShareFriendRooms;
+    return courseShareFriendRooms.filter((r) => r.friendName.toLowerCase().includes(q));
+  }, [courseShareFriendRooms, courseShareSearchQuery]);
+
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
 
   const closeDetailPost = useCallback(() => {
@@ -3297,6 +3311,8 @@ function HomePageContent() {
     setSharingCourse(null);
     setCourseShareFriendRooms([]);
     setCourseShareSendingRoomId(null);
+    setCourseShareSearchQuery("");
+    setCourseShareSentRoomIds([]);
   };
 
   const handleCopyCourseShareLink = async () => {
@@ -3305,6 +3321,24 @@ function HomePageContent() {
     const ok = await copyTextToClipboard(url);
     if (ok) {
       showToast("링크가 복사되었어요", "success");
+    } else {
+      showToast("복사할 수 없어요", "error");
+    }
+  };
+
+  const handleShareCourseViaSystem = async () => {
+    if (!sharingCourse || courseShareLoading) return;
+    const url = getCourseShareUrl(sharingCourse.id);
+    const placeCount = sharingCourse.place_count ?? sharingCourse.items.length;
+    const result = await shareViaNavigatorShare({
+      title: sharingCourse.title,
+      text: `PindMap에서 ${placeCount}곳 코스 보기`,
+      url,
+    });
+    if (result === "shared" || result === "cancelled") return;
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
+      showToast("공유를 지원하지 않아 링크를 복사했어요", "info");
     } else {
       showToast("복사할 수 없어요", "error");
     }
@@ -3321,6 +3355,8 @@ function HomePageContent() {
     console.log("[PindMap:course-share] open modal", course.id);
     setSharingCourse(course);
     setShowCourseShareModal(true);
+    setCourseShareSearchQuery("");
+    setCourseShareSentRoomIds([]);
     const { data: roomsData } = await supabase
       .from("chat_rooms")
       .select("*")
@@ -3343,7 +3379,7 @@ function HomePageContent() {
         return {
           id: r.id,
           friendId,
-          friendName: friendData?.username ?? friendId,
+          friendName: getDisplayFriendName(friendData?.username, friendId),
           friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
         };
       }),
@@ -3353,7 +3389,7 @@ function HomePageContent() {
   };
 
   const sendCourseToFriend = async (room: FriendRoom) => {
-    if (!user || !sharingCourse || courseShareLoading) return;
+    if (!user || !sharingCourse || courseShareLoading || courseShareSentRoomIds.includes(room.id)) return;
     setCourseShareLoading(true);
     setCourseShareSendingRoomId(room.id);
     try {
@@ -3393,10 +3429,10 @@ function HomePageContent() {
           () => {},
           () => {},
         );
-      setShowCourseShareModal(false);
-      setSharingCourse(null);
-      setCourseShareFriendRooms([]);
-      showToast(`${room.friendName}님에게 공유했어요`, "success");
+      setCourseShareSentRoomIds((prev) =>
+        prev.includes(room.id) ? prev : [...prev, room.id],
+      );
+      showToast(`${room.friendName}에게 보냈어요`, "success");
     } catch {
       showToast("공유에 실패했어요. 다시 시도해주세요", "error");
     } finally {
@@ -5720,71 +5756,105 @@ function HomePageContent() {
             }}
           >
             <div className="courseShareModalSheet" onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-          <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>코스 공유하기</span>
-          <button
-            type="button"
-            onClick={closeCourseShareModal}
-            disabled={courseShareLoading}
-            style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: courseShareLoading ? "wait" : "pointer" }}
-          >
-            ×
-          </button>
-        </div>
-        <div style={{ padding: "12px", background: "#f7f7f7", borderRadius: "12px" }}>
-          <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 500 }}>
-            📍 {sharingCourse.title} · {sharingCourse.place_count ?? sharingCourse.items.length}곳
-          </p>
-        </div>
-        {courseShareFriendRooms.length === 0 && (
-          <p style={{ textAlign: "center", color: "#bbb", fontSize: "12px", padding: "20px 0" }}>
-            대화 중인 친구가 없어요. 메시지 탭에서 먼저 친구를 추가해주세요
-          </p>
-        )}
-        {courseShareFriendRooms.map((room) => {
-          const isSending = courseShareSendingRoomId === room.id;
-          return (
-            <button
-              key={room.id}
-              type="button"
-              onClick={() => void sendCourseToFriend(room)}
-              disabled={courseShareLoading}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                padding: "10px 12px",
-                border: "0.5px solid #eee",
-                borderRadius: "10px",
-                background: "#fff",
-                cursor: courseShareLoading ? "wait" : "pointer",
-                fontFamily: "inherit",
-                textAlign: "left",
-                opacity: courseShareLoading && !isSending ? 0.6 : 1,
-              }}
-            >
-              <ProfileAvatar avatarUrl={room.friendAvatarUrl} username={room.friendName} size={32} fontSize={13} />
-              <span style={{ fontSize: "13px", color: "#1a1a2e", flex: 1 }}>{room.friendName}</span>
-              <span style={{ fontSize: "11px", color: "#1a2a7a", fontWeight: 500 }}>
-                {isSending ? "보내는 중..." : "보내기 →"}
-              </span>
-            </button>
-          );
-        })}
-        <div className="courseShareModalDivider" role="separator" />
-        <button
-          type="button"
-          className="courseShareModalLinkBtn"
-          onClick={() => void handleCopyCourseShareLink()}
-          disabled={courseShareLoading}
-          aria-label="코스 공유 링크 복사"
-        >
-          <span className="courseShareModalLinkIcon" aria-hidden>
-            📋
-          </span>
-          <span className="courseShareModalLinkLabel">링크 복사</span>
-          <span className="courseShareModalLinkHint">웹에서 보기</span>
-        </button>
+              <div className="courseShareModalHeader">
+                <span className="courseShareModalTitle">코스 공유하기</span>
+                <button
+                  type="button"
+                  className="courseShareModalClose"
+                  onClick={closeCourseShareModal}
+                  disabled={courseShareLoading}
+                  aria-label="닫기"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="courseShareModalCourseBox">
+                <p className="courseShareModalCourseText">
+                  📍 {sharingCourse.title} · {sharingCourse.place_count ?? sharingCourse.items.length}곳
+                </p>
+              </div>
+              <input
+                type="search"
+                className="courseShareModalSearch"
+                placeholder="친구 검색"
+                value={courseShareSearchQuery}
+                onChange={(e) => setCourseShareSearchQuery(e.target.value)}
+                disabled={courseShareLoading}
+                aria-label="친구 검색"
+              />
+              <div className="courseShareModalGridScroll">
+                {courseShareFriendRooms.length === 0 ? (
+                  <p className="courseShareModalEmpty">아직 친구가 없어요</p>
+                ) : courseShareFilteredRooms.length === 0 ? (
+                  <p className="courseShareModalEmpty">검색 결과가 없어요</p>
+                ) : (
+                  <div className="courseShareModalGrid" role="list">
+                    {courseShareFilteredRooms.map((room) => {
+                      const isSending = courseShareSendingRoomId === room.id;
+                      const isSent = courseShareSentRoomIds.includes(room.id);
+                      return (
+                        <button
+                          key={room.id}
+                          type="button"
+                          role="listitem"
+                          className={
+                            isSent
+                              ? "courseShareModalFriendCell courseShareModalFriendCellSent"
+                              : "courseShareModalFriendCell"
+                          }
+                          onClick={() => void sendCourseToFriend(room)}
+                          disabled={courseShareLoading || isSent}
+                          aria-label={`${room.friendName}에게 코스 보내기`}
+                        >
+                          <span className="courseShareModalFriendAvatarWrap">
+                            <ProfileAvatar
+                              avatarUrl={room.friendAvatarUrl}
+                              username={room.friendName}
+                              size={72}
+                              fontSize={22}
+                            />
+                            {isSent && (
+                              <span className="courseShareModalFriendCheck" aria-hidden>
+                                ✓
+                              </span>
+                            )}
+                            {isSending && (
+                              <span className="courseShareModalFriendSending" aria-hidden>
+                                ···
+                              </span>
+                            )}
+                          </span>
+                          <span className="courseShareModalFriendName">{room.friendName}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div className="courseShareModalActionBar">
+                <button
+                  type="button"
+                  className="courseShareModalActionBtn"
+                  onClick={() => void handleCopyCourseShareLink()}
+                  disabled={courseShareLoading}
+                >
+                  <span className="courseShareModalActionIcon" aria-hidden>
+                    📋
+                  </span>
+                  <span>링크 복사</span>
+                </button>
+                <button
+                  type="button"
+                  className="courseShareModalActionBtn"
+                  onClick={() => void handleShareCourseViaSystem()}
+                  disabled={courseShareLoading}
+                >
+                  <span className="courseShareModalActionIcon" aria-hidden>
+                    📤
+                  </span>
+                  <span>공유</span>
+                </button>
+              </div>
             </div>
           </div>,
           document.body,

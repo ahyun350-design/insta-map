@@ -18,6 +18,25 @@ export function getCourseShareUrl(courseId: string): string {
 }
 
 /** 클립보드 복사 — clipboard API 우선, 실패 시 textarea fallback */
+export type NavigatorShareResult = "shared" | "cancelled" | "unsupported";
+
+/** 시스템 공유 시트 (카톡·문자 등). 미지원/실패 시 unsupported */
+export async function shareViaNavigatorShare(
+  data: ShareData,
+): Promise<NavigatorShareResult> {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
+    return "unsupported";
+  }
+  try {
+    await navigator.share(data);
+    return "shared";
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") return "cancelled";
+    if (e instanceof Error && e.name === "AbortError") return "cancelled";
+    return "unsupported";
+  }
+}
+
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     try {

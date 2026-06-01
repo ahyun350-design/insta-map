@@ -2347,65 +2347,219 @@ body {
   background: #fff;
   width: 100%;
   border-radius: 20px 20px 0 0;
-  padding: 24px 20px calc(40px + env(safe-area-inset-bottom, 0px));
+  padding: 20px 16px calc(12px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: 70vh;
-  overflow-y: auto;
+  max-height: min(82vh, calc(100dvh - env(safe-area-inset-top, 0px) - 24px));
+  overflow: hidden;
   box-sizing: border-box;
-  -webkit-overflow-scrolling: touch;
 }
 
-.courseShareModalDivider {
-  height: 1px;
-  background: #eee;
-  margin: 4px 0;
-  flex-shrink: 0;
-}
-
-.courseShareModalLinkBtn {
+.courseShareModalHeader {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px 12px;
-  border: 0.5px solid #eee;
-  border-radius: 10px;
-  background: #fff;
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-  box-sizing: border-box;
+  justify-content: space-between;
   flex-shrink: 0;
 }
 
-.courseShareModalLinkBtn:active:not(:disabled) {
-  background: #f7f7f7;
+.courseShareModalTitle {
+  font-family: "Playfair Display", serif;
+  font-size: 18px;
+  color: #1a2a7a;
 }
 
-.courseShareModalLinkBtn:disabled {
+.courseShareModalClose {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  color: #bbb;
+  cursor: pointer;
+  padding: 4px 6px;
+  font-family: inherit;
+}
+
+.courseShareModalClose:disabled {
   cursor: wait;
   opacity: 0.6;
 }
 
-.courseShareModalLinkIcon {
-  font-size: 18px;
-  line-height: 1;
+.courseShareModalCourseBox {
+  padding: 12px;
+  background: #f7f7f7;
+  border-radius: 12px;
   flex-shrink: 0;
 }
 
-.courseShareModalLinkLabel {
+.courseShareModalCourseText {
+  margin: 0;
   font-size: 13px;
-  color: #1a1a2e;
-  flex: 1;
-}
-
-.courseShareModalLinkHint {
-  font-size: 11px;
   color: #1a2a7a;
   font-weight: 500;
+}
+
+.courseShareModalSearch {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0.5px solid #e5e5e5;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fafafa;
+  color: #1a1a2e;
   flex-shrink: 0;
+}
+
+.courseShareModalSearch:focus {
+  outline: none;
+  border-color: #1a2a7a;
+  background: #fff;
+}
+
+.courseShareModalSearch:disabled {
+  opacity: 0.6;
+}
+
+.courseShareModalGridScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -4px;
+  padding: 4px 2px;
+}
+
+.courseShareModalEmpty {
+  text-align: center;
+  color: #bbb;
+  font-size: 13px;
+  padding: 28px 12px;
+  margin: 0;
+}
+
+.courseShareModalGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 10px;
+}
+
+.courseShareModalFriendCell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  min-width: 0;
+}
+
+.courseShareModalFriendCell:active:not(:disabled) {
+  opacity: 0.85;
+}
+
+.courseShareModalFriendCell:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.courseShareModalFriendAvatarWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.courseShareModalFriendCheck {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #1a2a7a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  box-sizing: border-box;
+}
+
+.courseShareModalFriendSending {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a2a7a;
+  letter-spacing: 2px;
+}
+
+.courseShareModalFriendCellSent .courseShareModalFriendName {
+  color: #1a2a7a;
+  font-weight: 600;
+}
+
+.courseShareModalFriendName {
+  font-size: 11px;
+  color: #333;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.25;
+}
+
+.courseShareModalActionBar {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.courseShareModalActionBtn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border: 0.5px solid #eee;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  color: #1a1a2e;
+  font-weight: 500;
+}
+
+.courseShareModalActionBtn:active:not(:disabled) {
+  background: #f7f7f7;
+}
+
+.courseShareModalActionBtn:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.courseShareModalActionIcon {
+  font-size: 20px;
+  line-height: 1;
 }
 
 /* 전체 지도: 외곽에서 env(top)을 주면 내부 행은 일반 패딩만 */
