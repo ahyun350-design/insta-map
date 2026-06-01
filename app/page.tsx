@@ -59,6 +59,7 @@ import {
   getCurrentPositionForMapStage2,
   isGeolocationPermissionDenied,
 } from "@/lib/getCurrentPositionForMap";
+import { copyTextToClipboard, getCourseShareUrl } from "@/lib/pindmapLinks";
 import { parseFeedPostFromRow, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
 import {
   getDisplayPlaceForPhoto,
@@ -3298,6 +3299,17 @@ function HomePageContent() {
     setCourseShareSendingRoomId(null);
   };
 
+  const handleCopyCourseShareLink = async () => {
+    if (!sharingCourse || courseShareLoading) return;
+    const url = getCourseShareUrl(sharingCourse.id);
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
+      showToast("링크가 복사되었어요", "success");
+    } else {
+      showToast("복사할 수 없어요", "error");
+    }
+  };
+
   const activeViewedCourseId = savedCourseId ?? viewingSavedCourseIdRef.current;
 
   const openCourseShareModal = async (course: SavedCourse) => {
@@ -5759,6 +5771,20 @@ function HomePageContent() {
             </button>
           );
         })}
+        <div className="courseShareModalDivider" role="separator" />
+        <button
+          type="button"
+          className="courseShareModalLinkBtn"
+          onClick={() => void handleCopyCourseShareLink()}
+          disabled={courseShareLoading}
+          aria-label="코스 공유 링크 복사"
+        >
+          <span className="courseShareModalLinkIcon" aria-hidden>
+            📋
+          </span>
+          <span className="courseShareModalLinkLabel">링크 복사</span>
+          <span className="courseShareModalLinkHint">웹에서 보기</span>
+        </button>
             </div>
           </div>,
           document.body,
