@@ -2,6 +2,7 @@ import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import Providers from "@/components/Providers";
 import DebugBoxLoader from "@/components/DebugBoxLoader";
+import KeyboardAccessoryBarInit from "@/components/KeyboardAccessoryBarInit";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://pindmap.com"),
@@ -28,6 +29,7 @@ export default function RootLayout({
     <html lang="ko">
       <body>
         <DebugBoxLoader />
+        <KeyboardAccessoryBarInit />
         <Providers>{children}</Providers>
       </body>
     </html>
