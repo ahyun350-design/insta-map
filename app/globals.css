@@ -170,10 +170,113 @@ body {
   padding-bottom: 8px;
 }
 
+/* N-1: 지도 탭 풀스크린 — 헤더·패딩 제거, 지도가 탭 콘텐츠 전체 */
+.appContentMapTab {
+  padding: 0 !important;
+}
+
 .appContent > .mapTabUnified {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  position: relative;
+  padding-bottom: 0;
+}
+
+.appContentMapTab > .mapTabUnified,
+.appContent > .screenMapTab.mapTabUnified {
+  overflow: hidden !important;
+  overflow-y: hidden !important;
+}
+
+.mapTabMapSlotFullscreen {
+  position: absolute;
+  inset: 0;
+  flex: none;
+  min-height: 0;
+}
+
+.mapTabMapSlotFullscreen .mapTabMapLoading {
+  border: none;
+  border-radius: 0;
+}
+
+.mapTabChromeFloating {
+  position: fixed;
+  z-index: 200001;
+  box-sizing: border-box;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 8px;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mapTabChromeFloating > * {
+  pointer-events: auto;
+}
+
+.mapTabJobsRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mapTabJobsPill {
+  border: 0.5px solid #d9deec;
+  border-radius: 999px;
+  background: #f7f9ff;
+  color: #1a2a7a;
+  font-size: 11px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.mapTabStatusBox {
+  background: rgba(255, 255, 255, 0.92);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.mapTabStatusHint {
+  margin: 0;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.mapTabFloatingFooter {
+  position: fixed;
+  z-index: 200001;
+  box-sizing: border-box;
+  padding: 8px 16px;
+  pointer-events: none;
+  max-height: min(28vh, 180px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mapTabFloatingFooter > * {
+  pointer-events: auto;
+}
+
+.mapTabHiddenNotice {
+  text-align: center;
+  margin: 0;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.mapTabHiddenNoticeBtn {
+  border: none;
+  background: none;
+  color: #1a2a7a;
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: underline;
+  font-family: inherit;
+  padding: 0;
 }
 
 .mapTabChrome {
@@ -298,7 +401,8 @@ body {
   overflow: hidden;
 }
 
-.mapTabUnified .miniList {
+.mapTabUnified .miniList,
+.mapTabFloatingFooter.miniList {
   flex-shrink: 0;
   max-height: min(28vh, 180px);
   overflow-y: auto;
@@ -3038,6 +3142,17 @@ body {
     justify-content: flex-start !important;
     align-items: stretch !important;
     padding: 12px 16px 16px !important;
+  }
+
+  .appContentMapTab {
+    padding: 0 !important;
+  }
+
+  /* fixed 탭바가 콘텐츠 위에 겹치므로 지도 슬롯 하단 여백 */
+  .appContent > .mapTabUnified {
+    padding-bottom: var(--tab-bar-scroll-padding) !important;
+    overflow: hidden !important;
+    overflow-y: hidden !important;
   }
 
   .appContent > *:not(.homeFeed) {
