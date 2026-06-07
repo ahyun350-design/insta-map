@@ -6893,7 +6893,7 @@ function HomePageContent() {
     )}
     <main className="mobileRoot">
       <section className="phoneFrame">
-        {activeTab !== "home" && activeTab !== "map" && (
+        {activeTab !== "home" && (
         <header className="appHeader">
         <h1 className="appTitle" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
   <svg width="22" height="22" viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
@@ -6945,7 +6945,7 @@ function HomePageContent() {
           </div>
         </header>
         )}
-        <section className={`appContent${activeTab === "map" ? " appContentMapTab" : ""}`}>
+        <section className="appContent">
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
 
           {editingPost && (
@@ -7489,9 +7489,94 @@ function HomePageContent() {
               minHeight: 0,
             }}
           >
+              <div className="mapTabChrome">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <p className="screenTitle" style={{ marginBottom: 0 }}>지도</p>
+                  {activeJobs.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowJobsModal(true)}
+                      style={{ border: "0.5px solid #d9deec", borderRadius: "999px", background: "#f7f9ff", color: "#1a2a7a", fontSize: "11px", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      분석 중인 작업: {activeJobs.length}개
+                    </button>
+                  )}
+                </div>
+                {courseMapReturnOpen && (
+                  <button
+                    type="button"
+                    className="mapTabCourseReturnBtn"
+                    onClick={handleCourseMapReturn}
+                  >
+                    ← 코스로 돌아가기
+                  </button>
+                )}
+                <div className="mapUnifiedInputRow">
+                  <input
+                    className="mapInput mapUnifiedInput"
+                    placeholder="장소 검색 또는 인스타 URL 붙여넣기"
+                    value={mapUnifiedInput}
+                    onChange={(e) => setMapUnifiedInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && mapUnifiedActionEnabled) {
+                        handleMapUnifiedSubmit();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className={`primaryButton mapUnifiedActionBtn${mapUnifiedActionEnabled ? "" : " mapUnifiedActionBtnDisabled"}`}
+                    onClick={handleMapUnifiedSubmit}
+                    disabled={!mapUnifiedActionEnabled}
+                  >
+                    {mapUnifiedInputMode === "url"
+                      ? isSubmitting
+                        ? "분석 중..."
+                        : "핀 추가"
+                      : "검색"}
+                  </button>
+                  <div className="mapTabMenuWrap" ref={mapTabMenuRef}>
+                    <button
+                      type="button"
+                      className="mapTabMenuBtn"
+                      aria-label="지도 메뉴"
+                      aria-expanded={showMapTabMenu}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowMapTabMenu((v) => !v);
+                      }}
+                    >
+                      ⋯
+                    </button>
+                    {showMapTabMenu && (
+                      <div className="mapTabMenuDropdown" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="mapTabMenuItem"
+                          disabled={savedPlaces.length === 0}
+                          onClick={handleHideAllMapPins}
+                        >
+                          🗑 검색 기록 삭제
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {isAnalyzing && (
+                  <div style={{ marginTop: "6px" }}>
+                    <p style={{ margin: 0, color: "#1a2a7a", fontSize: "12px" }}>{analyzingMainText}</p>
+                    <p style={{ margin: "3px 0 0", color: "#888", fontSize: "11px" }}>{analyzingSubText}</p>
+                  </div>
+                )}
+                {!isAnalyzing && status && <p className="hintText">{status}</p>}
+                {error && <p className="emptyText">{error}</p>}
+                {kakaoStatus === "loading" && <p className="hintText">카카오맵 SDK를 불러오는 중입니다</p>}
+                {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}
+              </div>
               <div
                 ref={mapTabMapSlotRef}
-                className="mapTabMapSlot mapTabMapSlotFullscreen"
+                className="mapTabMapSlot"
                 aria-hidden={!mapExpanded}
               >
                 {(kakaoStatus === "idle" || kakaoStatus === "loading" || (kakaoStatus === "ready" && mapExpanded && !expandedMapRef.current)) && (
@@ -7551,97 +7636,7 @@ function HomePageContent() {
                   </div>,
                   document.body,
                 )}
-              <div
-                className="mapTabChromeFloating"
-                style={{
-                  top: mapPortalLayout.top,
-                  left: mapPortalLayout.left,
-                  width: mapPortalLayout.width,
-                }}
-              >
-                {activeJobs.length > 0 && (
-                  <div className="mapTabJobsRow">
-                    <button type="button" onClick={() => setShowJobsModal(true)} className="mapTabJobsPill">
-                      분석 중인 작업: {activeJobs.length}개
-                    </button>
-                  </div>
-                )}
-                {courseMapReturnOpen && (
-                  <button type="button" className="mapTabCourseReturnBtn" onClick={handleCourseMapReturn}>
-                    ← 코스로 돌아가기
-                  </button>
-                )}
-                <div className="mapUnifiedInputRow">
-                  <input
-                    className="mapInput mapUnifiedInput"
-                    placeholder="장소 검색 또는 인스타 URL 붙여넣기"
-                    value={mapUnifiedInput}
-                    onChange={(e) => setMapUnifiedInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && mapUnifiedActionEnabled) {
-                        handleMapUnifiedSubmit();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className={`primaryButton mapUnifiedActionBtn${mapUnifiedActionEnabled ? "" : " mapUnifiedActionBtnDisabled"}`}
-                    onClick={handleMapUnifiedSubmit}
-                    disabled={!mapUnifiedActionEnabled}
-                  >
-                    {mapUnifiedInputMode === "url"
-                      ? isSubmitting
-                        ? "분석 중..."
-                        : "핀 추가"
-                      : "검색"}
-                  </button>
-                  <div className="mapTabMenuWrap" ref={mapTabMenuRef}>
-                    <button
-                      type="button"
-                      className="mapTabMenuBtn"
-                      aria-label="지도 메뉴"
-                      aria-expanded={showMapTabMenu}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowMapTabMenu((v) => !v);
-                      }}
-                    >
-                      ⋯
-                    </button>
-                    {showMapTabMenu && (
-                      <div className="mapTabMenuDropdown" role="menu">
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="mapTabMenuItem"
-                          disabled={savedPlaces.length === 0}
-                          onClick={handleHideAllMapPins}
-                        >
-                          🗑 검색 기록 삭제
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {isAnalyzing && (
-                  <div className="mapTabStatusBox">
-                    <p style={{ margin: 0, color: "#1a2a7a", fontSize: "12px" }}>{analyzingMainText}</p>
-                    <p style={{ margin: "3px 0 0", color: "#888", fontSize: "11px" }}>{analyzingSubText}</p>
-                  </div>
-                )}
-                {!isAnalyzing && status && <p className="hintText mapTabStatusHint">{status}</p>}
-                {error && <p className="emptyText mapTabStatusHint">{error}</p>}
-                {kakaoStatus === "loading" && <p className="hintText mapTabStatusHint">카카오맵 SDK를 불러오는 중입니다</p>}
-                {kakaoStatus === "error" && <p className="emptyText mapTabStatusHint">카카오맵 로딩에 실패했습니다.</p>}
-              </div>
-              <div
-                className="mapTabFloatingFooter miniList"
-                style={{
-                  left: mapPortalLayout.left,
-                  width: mapPortalLayout.width,
-                  bottom: mapPortalLayout.bottom,
-                }}
-              >
+              <div className="miniList">
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).map((place) => (
                   <article key={place.id} className="miniItem" onClick={() => handleMiniListClick(place)} style={{ cursor: "pointer" }}>
                     <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[place.category], flexShrink: 0, display: "inline-block" }} />
@@ -7649,17 +7644,8 @@ function HomePageContent() {
                     <button onClick={(e) => { e.stopPropagation(); hideFromMap(place.id); }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
                   </article>
                 ))}
-                {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (
-                  <p className="hintText mapTabHiddenNotice">
-                    모든 장소가 숨겨졌어요.{" "}
-                    <button type="button" onClick={resetHiddenPlaces} className="mapTabHiddenNoticeBtn">
-                      다시 보기
-                    </button>
-                  </p>
-                )}
-                {savedPlaces.length === 0 && (
-                  <p className="emptyText mapTabHiddenNotice">아직 핀이 없습니다. URL을 입력해 시작해보세요.</p>
-                )}
+                {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={resetHiddenPlaces} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
+                {savedPlaces.length === 0 && <p className="emptyText">아직 핀이 없습니다. URL을 입력해 시작해보세요.</p>}
               </div>
               {showJobsModal && (
                 <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "flex-end" }}>
