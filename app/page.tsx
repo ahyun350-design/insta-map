@@ -518,6 +518,16 @@ function cleanInstagramUrl(url: string): string {
   return url;
 }
 
+/** 지도 통합 입력창 — URL(핀 추가) vs 장소 검색 자동 판별 */
+function isMapUnifiedUrlInput(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (/^https?:\/\//i.test(t)) return true;
+  if (t.includes("instagram.com")) return true;
+  if (/^www\./i.test(t)) return true;
+  return false;
+}
+
 // 두 좌표 사이의 직선거리 (km) - Haversine 공식
 function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // 지구 반지름 (km)
@@ -769,6 +779,12 @@ function HomePageContent() {
     searchParams?.get("from") === "mypage" ? "mypage" : "map",
   );
   const [instagramUrl, setInstagramUrl] = useState("");
+  const [mapUnifiedInput, setMapUnifiedInput] = useState("");
+  const [showMapTabMenu, setShowMapTabMenu] = useState(false);
+  const [courseMapReturnOpen, setCourseMapReturnOpen] = useState(false);
+  const mapTabMapSlotRef = useRef<HTMLDivElement | null>(null);
+  const mapTabMenuRef = useRef<HTMLDivElement | null>(null);
+  const [mapPortalLayout, setMapPortalLayout] = useState({ top: 0, left: 0, width: 0, bottom: 72 });
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
   const [status, setStatus] = useState(""); const [error, setError] = useState("");
@@ -1160,6 +1176,11 @@ function HomePageContent() {
   }, [savedPlaces]);
 
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
+  const mapUnifiedInputMode = useMemo(
+    () => (isMapUnifiedUrlInput(mapUnifiedInput) ? "url" : "search"),
+    [mapUnifiedInput],
+  );
+  const mapUnifiedActionEnabled = mapUnifiedInput.trim().length > 0 && !(mapUnifiedInputMode === "url" && isSubmitting);
   const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
   const canPost =
     postTitle.trim().length > 0 &&
@@ -3654,6 +3675,7 @@ function HomePageContent() {
   const showCourseOnMap = async () => {
     if (!courseResult || courseResult.length === 0) return;
     returnToCourseSheetRef.current = true;
+    setCourseMapReturnOpen(true);
     setShowCourseModal(false);
     setShowCourseRoute(true);
     setMapExpanded(true);
@@ -3726,8 +3748,9 @@ function HomePageContent() {
     routePolylineRef.current.setMap(expandedMapRef.current);
     expandedMapRef.current.setBounds(bounds);
   };
-  const handleAddFromInstagram = async () => {
-    if (!canSubmit) return;
+  const handleAddFromInstagram = async (urlOverride?: string) => {
+    const rawUrl = (urlOverride ?? instagramUrl).trim();
+    if (!rawUrl || isSubmitting) return;
     if (!user?.id) {
       showToast("로그인이 필요합니다.", "error");
       return;
@@ -3735,7 +3758,7 @@ function HomePageContent() {
     if (handleAddSubmittingRef.current) return;
     handleAddSubmittingRef.current = true;
     try {
-    const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
+    const trimmedUrl = cleanInstagramUrl(rawUrl);
     const perfScreen = "extract:start";
     dlog.perf.start(perfScreen);
     const controller = new AbortController();
@@ -3772,6 +3795,7 @@ function HomePageContent() {
       };
       setActiveJobs((prev) => [newJob, ...prev.filter((job) => job.jobId !== newJob.jobId)]);
       setInstagramUrl("");
+      setMapUnifiedInput("");
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
       console.log("[PindMap:url] extraction message shown");
       showToast("분석 작업을 백그라운드에서 시작했어요", "success");
@@ -4593,6 +4617,7 @@ function HomePageContent() {
         setIsMapSearchSheetOpen(true);
         fitExpandedMapToKeywordResults(data);
         setSearchQuery("");
+        setMapUnifiedInput("");
       };
 
       const runKeywordSearchAtMapCenter = () => {
@@ -4633,6 +4658,7 @@ function HomePageContent() {
           expandedMapRef.current.setLevel(3);
           pendingSearchCenterSyncRef.current = true;
           setSearchQuery("");
+          setMapUnifiedInput("");
         } else {
           console.log("[PindMap:expandedMap] addressSearch fallback to keyword:", trimmed);
           runKeywordSearchAtMapCenter();
@@ -4649,7 +4675,30 @@ function HomePageContent() {
   );
 
   const handleSearch = () => {
-    runExpandedMapSearch(searchQuery);
+    runExpandedMapSearch(mapUnifiedInput.trim() ? mapUnifiedInput : searchQuery);
+  };
+
+  const handleMapUnifiedSubmit = () => {
+    const text = mapUnifiedInput.trim();
+    if (!text) return;
+    if (mapUnifiedInputMode === "url") {
+      void handleAddFromInstagram(text);
+      return;
+    }
+    runExpandedMapSearch(text);
+  };
+
+  const handleHideAllMapPins = () => {
+    setHiddenIds(new Set(savedPlaces.map((p) => p.id)));
+    setShowMapTabMenu(false);
+  };
+
+  const handleCourseMapReturn = () => {
+    returnToCourseSheetRef.current = false;
+    setCourseMapReturnOpen(false);
+    clearRoute();
+    setShowCourseRoute(false);
+    setShowCourseModal(true);
   };
 
   const handleResearchThisArea = useCallback(() => {
@@ -5488,6 +5537,64 @@ function HomePageContent() {
   useEffect(() => {
     if (activeTab !== "map") {
       returnToCourseSheetRef.current = false;
+      setCourseMapReturnOpen(false);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "map") {
+      setMapExpanded(true);
+    } else {
+      setMapExpanded(false);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "map" && !detailPostId) {
+      setMapExpanded(true);
+    }
+  }, [activeTab, detailPostId]);
+
+  useLayoutEffect(() => {
+    if (activeTab !== "map" || !mapExpanded) return;
+    const updateLayout = () => {
+      const slot = mapTabMapSlotRef.current;
+      if (!slot) return;
+      const rect = slot.getBoundingClientRect();
+      setMapPortalLayout({
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        bottom: Math.max(0, window.innerHeight - rect.bottom),
+      });
+    };
+    updateLayout();
+    const raf = window.requestAnimationFrame(updateLayout);
+    window.addEventListener("resize", updateLayout);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", updateLayout);
+    vv?.addEventListener("scroll", updateLayout);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", updateLayout);
+      vv?.removeEventListener("resize", updateLayout);
+      vv?.removeEventListener("scroll", updateLayout);
+    };
+  }, [activeTab, mapExpanded, isAnalyzing, status, error, courseMapReturnOpen, savedPlaces.length, hiddenIds.size]);
+
+  useEffect(() => {
+    if (!showMapTabMenu) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (mapTabMenuRef.current?.contains(e.target as Node)) return;
+      setShowMapTabMenu(false);
+    };
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [showMapTabMenu]);
+
+  useEffect(() => {
+    if (activeTab !== "map") {
+      setShowMapTabMenu(false);
     }
   }, [activeTab]);
 
@@ -7373,220 +7480,138 @@ function HomePageContent() {
   </div>
 )}
 
-          <div className="screen screenMapTab" style={{ display: activeTab === "map" ? "flex" : "none", flexDirection: "column" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <p className="screenTitle" style={{ marginBottom: 0 }}>지도</p>
-                {activeJobs.length > 0 && (
+          <div
+            className="screen screenMapTab mapTabUnified"
+            style={{
+              display: activeTab === "map" ? "flex" : "none",
+              flexDirection: "column",
+              flex: 1,
+              minHeight: 0,
+            }}
+          >
+              <div className="mapTabChrome">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <p className="screenTitle" style={{ marginBottom: 0 }}>지도</p>
+                  {activeJobs.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowJobsModal(true)}
+                      style={{ border: "0.5px solid #d9deec", borderRadius: "999px", background: "#f7f9ff", color: "#1a2a7a", fontSize: "11px", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      분석 중인 작업: {activeJobs.length}개
+                    </button>
+                  )}
+                </div>
+                {courseMapReturnOpen && (
                   <button
                     type="button"
-                    onClick={() => setShowJobsModal(true)}
-                    style={{ border: "0.5px solid #d9deec", borderRadius: "999px", background: "#f7f9ff", color: "#1a2a7a", fontSize: "11px", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit" }}
+                    className="mapTabCourseReturnBtn"
+                    onClick={handleCourseMapReturn}
                   >
-                    분석 중인 작업: {activeJobs.length}개
+                    ← 코스로 돌아가기
                   </button>
                 )}
-              </div>
-              {showJobsModal && (
-                <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "flex-end" }}>
-                  <div style={{ width: "100%", background: "#fff", borderRadius: "18px 18px 0 0", padding: "18px 16px 24px", maxHeight: "62vh", overflowY: "auto" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                      <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", color: "#1a2a7a", fontSize: "18px" }}>분석 작업 상태</p>
-                      <button type="button" onClick={() => setShowJobsModal(false)} style={{ border: "none", background: "transparent", color: "#bbb", cursor: "pointer", fontSize: "20px" }}>×</button>
-                    </div>
-                    {activeJobs.length === 0 && <p style={{ margin: 0, fontSize: "12px", color: "#aaa", textAlign: "center", padding: "16px 0" }}>진행 중인 작업이 없어요</p>}
-                    {activeJobs.map((job) => (
-                      <article key={job.jobId} style={{ border: "0.5px solid #eceff7", borderRadius: "10px", padding: "10px 12px", marginBottom: "8px", background: "#fafbff" }}>
-                        <p style={{ margin: 0, fontSize: "11px", color: "#8b93aa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.instagramUrl}</p>
-                        <p style={{ margin: "6px 0 0", fontSize: "12px", color: "#1a2a7a" }}>{job.progressStep || "대기 중"}</p>
-                      </article>
-                    ))}
+                <div className="mapUnifiedInputRow">
+                  <input
+                    className="mapInput mapUnifiedInput"
+                    placeholder="장소 검색 또는 인스타 URL 붙여넣기"
+                    value={mapUnifiedInput}
+                    onChange={(e) => setMapUnifiedInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && mapUnifiedActionEnabled) {
+                        handleMapUnifiedSubmit();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className={`primaryButton mapUnifiedActionBtn${mapUnifiedActionEnabled ? "" : " mapUnifiedActionBtnDisabled"}`}
+                    onClick={handleMapUnifiedSubmit}
+                    disabled={!mapUnifiedActionEnabled}
+                  >
+                    {mapUnifiedInputMode === "url"
+                      ? isSubmitting
+                        ? "분석 중..."
+                        : "핀 추가"
+                      : "검색"}
+                  </button>
+                  <div className="mapTabMenuWrap" ref={mapTabMenuRef}>
+                    <button
+                      type="button"
+                      className="mapTabMenuBtn"
+                      aria-label="지도 메뉴"
+                      aria-expanded={showMapTabMenu}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowMapTabMenu((v) => !v);
+                      }}
+                    >
+                      ⋯
+                    </button>
+                    {showMapTabMenu && (
+                      <div className="mapTabMenuDropdown" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="mapTabMenuItem"
+                          disabled={savedPlaces.length === 0}
+                          onClick={handleHideAllMapPins}
+                        >
+                          🗑 검색 기록 삭제
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
-              <div className="mapInputWrap">
-                <input className="mapInput" placeholder="Instagram 릴스/게시물 URL 붙여넣기" value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} />
-                <button className="primaryButton" onClick={handleAddFromInstagram} type="button" disabled={!canSubmit}>{isSubmitting ? "분석 중..." : "핀 추가"}</button>
-              </div>
-              {isAnalyzing && (
-                <div style={{ marginTop: "6px" }}>
-                  <p style={{ margin: 0, color: "#1a2a7a", fontSize: "12px" }}>{analyzingMainText}</p>
-                  <p style={{ margin: "3px 0 0", color: "#888", fontSize: "11px" }}>{analyzingSubText}</p>
-                </div>
-              )}
-              {!isAnalyzing && status && <p className="hintText">{status}</p>}
-              {error && <p className="emptyText">{error}</p>}
-              {kakaoStatus === "loading" && <p className="hintText">카카오맵 SDK를 불러오는 중입니다</p>}
-              {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", marginBottom: "6px" }}>
-                <button onClick={() => setMapExpanded(true)} style={{ background: "transparent", border: "0.5px solid #ddd", borderRadius: "4px", padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "0.5px", fontFamily: "'Inter', sans-serif" }}>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 5V1H5M7 1H11V5M11 7V11H7M5 11H1V7" stroke="#1a2a7a" strokeWidth="1.2" strokeLinecap="round"/></svg>전체화면
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHiddenIds(new Set(savedPlaces.map((p) => p.id)))}
-                  disabled={savedPlaces.length === 0}
-                  style={{ background: "transparent", border: "0.5px solid #ddd", borderRadius: "4px", padding: "6px 12px", cursor: savedPlaces.length === 0 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "0.5px", fontFamily: "'Inter', sans-serif", opacity: savedPlaces.length === 0 ? 0.5 : 1 }}
-                >
-                  🗑️ 검색기록 삭제
-                </button>
-              </div>
-              <div style={{ position: "relative", width: "100%", minHeight: 220 }}>
-                {(kakaoStatus === "idle" || kakaoStatus === "loading" || (kakaoStatus === "ready" && !compactMapReady)) && (
-                  <div
-                    aria-hidden={compactMapReady}
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      zIndex: 4,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "10px",
-                      background: "linear-gradient(180deg, #f7f9ff 0%, #eef1fb 100%)",
-                      border: "0.5px solid #e4e9f7",
-                      borderRadius: "8px",
-                      minHeight: 220,
-                    }}
-                  >
-                    <span style={{ fontSize: "28px", lineHeight: 1 }}>🗺️</span>
-                    <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 600, letterSpacing: "0.3px" }}>지도를 불러오는 중...</p>
-                    <p style={{ margin: 0, fontSize: "11px", color: "#7a849e", textAlign: "center", paddingInline: "12px" }}>
-                      {kakaoStatus !== "ready" ? "카카오맵 SDK를 불러오고 있어요" : "지도를 그리고 있어요"}
-                    </p>
+                {isAnalyzing && (
+                  <div style={{ marginTop: "6px" }}>
+                    <p style={{ margin: 0, color: "#1a2a7a", fontSize: "12px" }}>{analyzingMainText}</p>
+                    <p style={{ margin: "3px 0 0", color: "#888", fontSize: "11px" }}>{analyzingSubText}</p>
                   </div>
                 )}
-                <div
-                  ref={mapContainerRef}
-                  className="kakaoMap"
-                  style={{ position: "relative", zIndex: 1 }}
-                />
+                {!isAnalyzing && status && <p className="hintText">{status}</p>}
+                {error && <p className="emptyText">{error}</p>}
+                {kakaoStatus === "loading" && <p className="hintText">카카오맵 SDK를 불러오는 중입니다</p>}
+                {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}
               </div>
+              <div
+                ref={mapTabMapSlotRef}
+                className="mapTabMapSlot"
+                aria-hidden={!mapExpanded}
+              >
+                {(kakaoStatus === "idle" || kakaoStatus === "loading" || (kakaoStatus === "ready" && mapExpanded && !expandedMapRef.current)) && (
+                  <div className="mapTabMapLoading">
+                    <span style={{ fontSize: "28px", lineHeight: 1 }}>🗺️</span>
+                    <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 600 }}>지도를 불러오는 중...</p>
+                  </div>
+                )}
+              </div>
+              <div
+                ref={mapContainerRef}
+                className="kakaoMap mapTabCompactMapHost"
+                aria-hidden
+                style={{ display: "none" }}
+              />
               {mapExpanded &&
+                activeTab === "map" &&
                 typeof document !== "undefined" &&
                 createPortal(
                   <div
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label="전체 지도"
+                    className="mapExpandedPortal"
+                    role="region"
+                    aria-label="지도"
                     style={{
                       position: "fixed",
-                      inset: 0,
+                      top: mapPortalLayout.top,
+                      left: mapPortalLayout.left,
+                      width: mapPortalLayout.width,
+                      bottom: mapPortalLayout.bottom,
                       zIndex: 200000,
                       background: "#fff",
-                      display: "flex",
-                      flexDirection: "column",
                       boxSizing: "border-box",
-                      paddingTop: "env(safe-area-inset-top, 0px)",
-                      paddingBottom: "env(safe-area-inset-bottom, 0px)",
-                      paddingLeft: "env(safe-area-inset-left, 0px)",
-                      paddingRight: "env(safe-area-inset-right, 0px)",
                     }}
                   >
-                    <div
-                      className="fullscreenMapHeaderRow"
-                      style={{
-                        borderBottom: "0.5px solid #efefef",
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        background: "#fff",
-                        position: "relative",
-                        flexShrink: 0,
-                        minHeight: 48,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        aria-label="전체 지도 닫기"
-                        onClick={() => {
-                          if (returnToCourseSheetRef.current) {
-                            returnToCourseSheetRef.current = false;
-                            setMapExpanded(false);
-                            clearRoute();
-                            setShowCourseRoute(false);
-                            setShowCourseModal(true);
-                            return;
-                          }
-                          setMapExpanded(false);
-                          setSelectedPlace(null);
-                        }}
-                        style={{
-                          position: "absolute",
-                          left: "max(12px, env(safe-area-inset-left, 0px))",
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          border: "none",
-                          background: "transparent",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          minWidth: 44,
-                          minHeight: 44,
-                          padding: 0,
-                          WebkitTapHighlightColor: "transparent",
-                        }}
-                      >
-                        <svg width="22" height="22" viewBox="0 0 20 20" fill="none" aria-hidden>
-                          <path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </button>
-                      <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
-                    </div>
-                    <div
-                      style={{
-                        padding: "12px 20px",
-                        paddingLeft: "max(20px, env(safe-area-inset-left, 0px))",
-                        paddingRight: "max(20px, env(safe-area-inset-right, 0px))",
-                        borderBottom: "0.5px solid #efefef",
-                        display: "flex",
-                        gap: "8px",
-                        background: "#fff",
-                        flexShrink: 0,
-                        alignItems: "center",
-                      }}
-                    >
-                      <div style={{ position: "relative", flex: 1, display: "flex", alignItems: "center" }}>
-                        <input
-                          className="mapInput"
-                          placeholder="장소명으로 검색"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                          style={{ flex: 1, paddingRight: searchQuery.trim() || mapSearchResults.length > 0 ? 36 : undefined }}
-                        />
-                        {(searchQuery.trim() || mapSearchResults.length > 0) && (
-                          <button
-                            type="button"
-                            aria-label="검색 지우기"
-                            onClick={handleClearMapSearch}
-                            style={{
-                              position: "absolute",
-                              right: 8,
-                              border: "none",
-                              background: "transparent",
-                              color: "#999",
-                              fontSize: 18,
-                              cursor: "pointer",
-                              width: 28,
-                              height: 28,
-                              lineHeight: 1,
-                              padding: 0,
-                            }}
-                          >
-                            ×
-                          </button>
-                        )}
-                      </div>
-                      <button className="primaryButton" onClick={handleSearch} type="button" disabled={!searchQuery.trim()} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "0 16px", flexShrink: 0 }}>
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                          <circle cx="6" cy="6" r="4.5" stroke="white" strokeWidth="1.3" />
-                          <line x1="9.5" y1="9.5" x2="13" y2="13" stroke="white" strokeWidth="1.3" strokeLinecap="round" />
-                        </svg>
-                      </button>
-                    </div>
-                    <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+                    <div className="mapExpandedPortalInner">
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
                       <MapResearchAreaButton visible={showMapResearchButton} onResearch={handleResearchThisArea} />
                       {selectedPlace && renderPlaceCard()}
@@ -7622,6 +7647,23 @@ function HomePageContent() {
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={resetHiddenPlaces} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
                 {savedPlaces.length === 0 && <p className="emptyText">아직 핀이 없습니다. URL을 입력해 시작해보세요.</p>}
               </div>
+              {showJobsModal && (
+                <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "flex-end" }}>
+                  <div style={{ width: "100%", background: "#fff", borderRadius: "18px 18px 0 0", padding: "18px 16px 24px", maxHeight: "62vh", overflowY: "auto" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                      <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", color: "#1a2a7a", fontSize: "18px" }}>분석 작업 상태</p>
+                      <button type="button" onClick={() => setShowJobsModal(false)} style={{ border: "none", background: "transparent", color: "#bbb", cursor: "pointer", fontSize: "20px" }}>×</button>
+                    </div>
+                    {activeJobs.length === 0 && <p style={{ margin: 0, fontSize: "12px", color: "#aaa", textAlign: "center", padding: "16px 0" }}>진행 중인 작업이 없어요</p>}
+                    {activeJobs.map((job) => (
+                      <article key={job.jobId} style={{ border: "0.5px solid #eceff7", borderRadius: "10px", padding: "10px 12px", marginBottom: "8px", background: "#fafbff" }}>
+                        <p style={{ margin: 0, fontSize: "11px", color: "#8b93aa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.instagramUrl}</p>
+                        <p style={{ margin: "6px 0 0", fontSize: "12px", color: "#1a2a7a" }}>{job.progressStep || "대기 중"}</p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
           </div>
 
           {activeTab === "saved" && (
