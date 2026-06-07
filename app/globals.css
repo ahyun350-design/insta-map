@@ -191,10 +191,7 @@ body {
 
 .mapTabMapSlotFullscreen {
   position: absolute;
-  top: env(safe-area-inset-top, 0px);
-  bottom: var(--tab-bar-scroll-padding, 0px);
-  left: 0;
-  right: 0;
+  inset: 0;
   flex: none;
   min-height: 0;
 }
@@ -208,10 +205,7 @@ body {
   position: fixed;
   z-index: 200001;
   box-sizing: border-box;
-  padding-top: calc(8px + env(safe-area-inset-top, 0px));
-  padding-bottom: 8px;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 8px;
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -407,11 +401,6 @@ body {
   overflow: hidden;
 }
 
-.mapExpandedPortalInner .kakaoMap {
-  width: 100% !important;
-  height: 100% !important;
-}
-
 .mapTabUnified .miniList,
 .mapTabFloatingFooter.miniList {
   flex-shrink: 0;
@@ -422,14 +411,10 @@ body {
 
 .mapTabCompactMapHost {
   position: absolute;
-  display: none !important;
-  visibility: hidden;
   width: 0;
   height: 0;
   overflow: hidden;
   pointer-events: none;
-  clip: rect(0, 0, 0, 0);
-  clip-path: inset(50%);
 }
 
 /* 홈 탭 피드 — 칩 바 고정 + 목록만 스크롤 */
@@ -3163,7 +3148,9 @@ body {
     padding: 0 !important;
   }
 
+  /* fixed 탭바가 콘텐츠 위에 겹치므로 지도 슬롯 하단 여백 */
   .appContent > .mapTabUnified {
+    padding-bottom: var(--tab-bar-scroll-padding) !important;
     overflow: hidden !important;
     overflow-y: hidden !important;
   }

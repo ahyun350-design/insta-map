@@ -5583,25 +5583,6 @@ function HomePageContent() {
   }, [activeTab, mapExpanded, isAnalyzing, status, error, courseMapReturnOpen, savedPlaces.length, hiddenIds.size]);
 
   useEffect(() => {
-    if (activeTab !== "map" || !mapExpanded) return;
-    const map = expandedMapRef.current;
-    if (!map?.relayout) return;
-    map.relayout();
-    const raf = window.requestAnimationFrame(() => {
-      expandedMapRef.current?.relayout?.();
-    });
-    return () => window.cancelAnimationFrame(raf);
-  }, [
-    activeTab,
-    mapExpanded,
-    mapPortalLayout.top,
-    mapPortalLayout.left,
-    mapPortalLayout.width,
-    mapPortalLayout.bottom,
-    expandedMapPinsTick,
-  ]);
-
-  useEffect(() => {
     if (!showMapTabMenu) return;
     const onDocClick = (e: MouseEvent) => {
       if (mapTabMenuRef.current?.contains(e.target as Node)) return;
