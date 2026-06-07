@@ -321,9 +321,15 @@ export default function ProfilePage() {
         <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
           <button
             onClick={() => {
-              const fromChat = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("fromChat") : null;
+              const params =
+                typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+              const fromChat = params?.get("fromChat");
               if (fromChat) {
                 router.push(`/?openChatRoom=${encodeURIComponent(fromChat)}`);
+                return;
+              }
+              if (params?.get("from") === "messages") {
+                router.push("/?tab=messages");
                 return;
               }
               router.back();

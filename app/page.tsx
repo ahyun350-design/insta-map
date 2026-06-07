@@ -2659,7 +2659,7 @@ function HomePageContent() {
 
   const openMessageSearchProfile = useCallback(
     (username: string) => {
-      router.push(`/profile/${encodeURIComponent(username)}`);
+      router.push(`/profile/${encodeURIComponent(username)}?from=messages`);
     },
     [router],
   );
@@ -4879,6 +4879,10 @@ function HomePageContent() {
   useEffect(() => {
     if (searchParams?.get("tab") === "mypage") {
       setActiveTab("mypage");
+      window.history.replaceState({}, "", "/");
+    }
+    if (searchParams?.get("tab") === "messages") {
+      setActiveTab("messages");
       window.history.replaceState({}, "", "/");
     }
   }, [searchParams]);
