@@ -6553,7 +6553,16 @@ function HomePageContent() {
             </button>
             <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailPost.placeName}</span>
           </header>
-          <div className="detailPostScroll" style={{ flex: 1, minHeight: 0, background: "#fff" }}>
+          <div
+            className="detailPostScroll"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              background: "#fff",
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight : undefined,
+              transition: "padding-bottom 0.25s ease",
+            }}
+          >
             <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p></div>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "12px 20px 0" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
@@ -7577,6 +7586,7 @@ function HomePageContent() {
                           queryLabel={mapSearchLabel}
                           results={mapSearchResults}
                           userLocation={myLocationLatLngRef.current}
+                          keyboardHeight={keyboardHeight}
                           onSelect={(place) => {
                             const py = parseFloat(String(place.y ?? ""));
                             const px = parseFloat(String(place.x ?? ""));
@@ -8293,7 +8303,23 @@ function HomePageContent() {
           </div>
         )}
         {showProfileEditModal && (
-          <div onClick={closeProfileEditModal} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
+          <div
+            onClick={closeProfileEditModal}
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 99999,
+              background: "rgba(0,0,0,0.4)",
+              display: "flex",
+              alignItems: "flex-end",
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight : 0,
+              transition: "padding-bottom 0.25s ease",
+              boxSizing: "border-box",
+            }}
+          >
             <div
               onClick={(e) => e.stopPropagation()}
               style={{
@@ -8303,7 +8329,7 @@ function HomePageContent() {
                 display: "flex",
                 flexDirection: "column",
                 boxSizing: "border-box",
-                padding: "0 20px calc(16px + env(safe-area-inset-bottom, 0px))",
+                padding: keyboardHeight > 0 ? "0 20px 16px" : "0 20px calc(16px + env(safe-area-inset-bottom, 0px))",
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 16 }}>

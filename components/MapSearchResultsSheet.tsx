@@ -19,6 +19,7 @@ type Props = {
   userLocation?: { lat: number; lng: number } | null;
   onSelect: (place: MapSearchPlaceResult) => void;
   onClose: () => void;
+  keyboardHeight?: number;
 };
 
 function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -53,6 +54,7 @@ export function MapSearchResultsSheet({
   userLocation,
   onSelect,
   onClose,
+  keyboardHeight = 0,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [dragDelta, setDragDelta] = useState(0);
@@ -106,6 +108,7 @@ export function MapSearchResultsSheet({
   if (!open || results.length === 0) return null;
 
   const sheetHeight = expanded ? "70vh" : "30vh";
+  const sheetBottom = keyboardHeight > 0 ? keyboardHeight : 0;
   const dragStyle =
     dragDelta !== 0
       ? {
@@ -117,7 +120,12 @@ export function MapSearchResultsSheet({
   return (
     <div
       className="mapSearchResultsSheet"
-      style={{ height: sheetHeight, ...dragStyle }}
+      style={{
+        height: sheetHeight,
+        bottom: sheetBottom,
+        transition: dragDelta !== 0 ? "none" : "height 0.22s ease, transform 0.22s ease, bottom 0.25s ease",
+        ...dragStyle,
+      }}
       aria-label="검색 결과"
       onClick={(e) => e.stopPropagation()}
     >
