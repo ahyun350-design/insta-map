@@ -1,4 +1,6 @@
+/// <reference types="@capacitor/keyboard" />
 import type { CapacitorConfig } from '@capacitor/cli';
+import { KeyboardResize } from '@capacitor/keyboard';
 
 const config: CapacitorConfig = {
   appId: 'com.pindmap.app',
@@ -13,7 +15,7 @@ const config: CapacitorConfig = {
   },
   plugins: {
     Keyboard: {
-      resize: 'none',
+      resize: KeyboardResize.None,
     },
   },
 };
