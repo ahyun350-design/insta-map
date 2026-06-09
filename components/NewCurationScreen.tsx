@@ -8,6 +8,7 @@ import { Step1Photos } from "@/components/curation/Step1Photos";
 import { Step2PlaceTags } from "@/components/curation/Step2PlaceTags";
 import { Step3Form } from "@/components/curation/Step3Form";
 import { extractCategoriesFromPhotoTags } from "@/lib/categoryUtil";
+import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
 import type { CurationCategory, CurationStep, PostImageItem } from "@/components/curation/types";
 
 export type { PostImageItem } from "@/components/curation/types";
@@ -131,7 +132,7 @@ export function NewCurationScreen({
 }: Props) {
   const [mounted, setMounted] = useState(false);
   const [slideActive, setSlideActive] = useState(false);
-  const [keyboardInset, setKeyboardInset] = useState(0);
+  const { height: keyboardHeight } = useNativeKeyboard();
   const [currentStep, setCurrentStep] = useState<CurationStep>(1);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const wasOpenRef = useRef(false);
@@ -170,25 +171,10 @@ export function NewCurationScreen({
     };
   }, [mounted]);
 
-  useEffect(() => {
-    if (!mounted) {
-      setKeyboardInset(0);
-      return;
-    }
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const update = () => {
-      setKeyboardInset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
-    };
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-      setKeyboardInset(0);
-    };
-  }, [mounted]);
+  const scrollBodyPaddingBottom =
+    keyboardHeight > 0
+      ? `calc(${currentStep === 3 ? 40 : 28}px + ${keyboardHeight}px)`
+      : `calc(${currentStep === 3 ? 40 : 28}px + env(safe-area-inset-bottom, 0px))`;
 
   const canGoNextStep1 = images.length >= 1;
   const canGoNextStep2 = images.length >= 1;
@@ -278,7 +264,8 @@ export function NewCurationScreen({
         ref={scrollRef}
         className={currentStep === 3 ? "curationScreenBody curationScreenBodyStep3" : "curationScreenBody"}
         style={{
-          paddingBottom: `calc(${currentStep === 3 ? 40 : 28}px + ${keyboardInset}px + env(safe-area-inset-bottom, 0px))`,
+          paddingBottom: scrollBodyPaddingBottom,
+          transition: "padding-bottom 0.25s ease",
         }}
       >
         {currentStep === 1 && (
@@ -294,7 +281,7 @@ export function NewCurationScreen({
             images={images}
             photoPlaceTags={photoPlaceTags}
             onPhotoPlaceTagsChange={onPhotoPlaceTagsChange}
-            keyboardInset={keyboardInset}
+            keyboardHeight={keyboardHeight}
           />
         )}
         {currentStep === 3 && (

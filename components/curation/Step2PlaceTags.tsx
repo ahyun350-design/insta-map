@@ -23,7 +23,7 @@ type Props = {
   images: PostImageItem[];
   photoPlaceTags: PhotoPlaceTag[];
   onPhotoPlaceTagsChange: (tags: PhotoPlaceTag[]) => void;
-  keyboardInset?: number;
+  keyboardHeight?: number;
 };
 
 function kakaoYXToLatLng(y?: unknown, x?: unknown): { lat: number; lng: number } | null {
@@ -37,7 +37,7 @@ export function Step2PlaceTags({
   images,
   photoPlaceTags,
   onPhotoPlaceTagsChange,
-  keyboardInset = 0,
+  keyboardHeight = 0,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -184,7 +184,7 @@ export function Step2PlaceTags({
         onSearch={runSearch}
         results={searchResults}
         onSelect={handleSelectPlace}
-        keyboardInset={keyboardInset}
+        keyboardHeight={keyboardHeight}
       />
     </div>
   );

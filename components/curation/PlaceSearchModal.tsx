@@ -21,7 +21,7 @@ type Props = {
   onSearch: () => void;
   results: KakaoPlaceSearchResult[];
   onSelect: (place: KakaoPlaceSearchResult) => void;
-  keyboardInset?: number;
+  keyboardHeight?: number;
 };
 
 export function PlaceSearchModal({
@@ -32,8 +32,12 @@ export function PlaceSearchModal({
   onSearch,
   results,
   onSelect,
-  keyboardInset = 0,
+  keyboardHeight = 0,
 }: Props) {
+  const modalPaddingBottom =
+    keyboardHeight > 0
+      ? `calc(12px + ${keyboardHeight}px)`
+      : "calc(12px + env(safe-area-inset-bottom, 0px))";
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -75,7 +79,8 @@ export function PlaceSearchModal({
           maxHeight: "min(78vh, 520px)",
           display: "flex",
           flexDirection: "column",
-          paddingBottom: `calc(12px + ${keyboardInset}px + env(safe-area-inset-bottom, 0px))`,
+          paddingBottom: modalPaddingBottom,
+          transition: "padding-bottom 0.25s ease",
           boxShadow: "0 -8px 32px rgba(0,0,0,0.12)",
         }}
         onClick={(e) => e.stopPropagation()}
