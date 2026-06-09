@@ -2834,7 +2834,6 @@ body {
   html,
   body {
     overflow: hidden !important;
-    overscroll-behavior: none;
     width: 100% !important;
     height: 100% !important;
     height: 100dvh !important;
