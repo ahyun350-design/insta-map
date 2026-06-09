@@ -6068,7 +6068,14 @@ function HomePageContent() {
       ? createPortal(
           <>
             {showCourseModal && (
-                        <div className="courseModalBackdrop">
+                        <div
+                          className="courseModalBackdrop"
+                          style={{
+                            paddingBottom: keyboardHeight > 0 ? keyboardHeight : 0,
+                            transition: "padding-bottom 0.25s ease",
+                            boxSizing: "border-box",
+                          }}
+                        >
                           <div className="courseModalSheet">
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                               <div style={{ flex: 1, minWidth: 0 }}>
@@ -6407,6 +6414,7 @@ function HomePageContent() {
                         <CourseEditScreen
                           draft={editingCourseDraft}
                           saving={courseEditSaving}
+                          keyboardHeight={keyboardHeight}
                           showAddPlace={showAddPlaceSheet}
                           addablePlaces={addableSavedPlacesForCourseEdit}
                           categoryPin={CATEGORY_PIN}
@@ -6434,6 +6442,8 @@ function HomePageContent() {
                             alignItems: "center",
                             justifyContent: "center",
                             padding: "24px",
+                            paddingBottom: keyboardHeight > 0 ? 24 + keyboardHeight : 24,
+                            transition: "padding-bottom 0.25s ease",
                             boxSizing: "border-box",
                           }}
                           onClick={closeCourseSaveModal}
@@ -6826,8 +6836,34 @@ function HomePageContent() {
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
 
           {editingPost && (
-            <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end" }}>
-              <div style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "24px 20px 40px", display: "flex", flexDirection: "column", gap: "16px", boxSizing: "border-box" }}>
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 99999,
+                background: "rgba(0,0,0,0.4)",
+                display: "flex",
+                alignItems: "flex-end",
+                paddingBottom: keyboardHeight > 0 ? keyboardHeight : 0,
+                transition: "padding-bottom 0.25s ease",
+                boxSizing: "border-box",
+              }}
+            >
+              <div
+                style={{
+                  background: "#fff",
+                  width: "100%",
+                  borderRadius: "20px 20px 0 0",
+                  padding: keyboardHeight > 0 ? "24px 20px 16px" : "24px 20px 40px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "16px",
+                  boxSizing: "border-box",
+                }}
+              >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>코멘트 수정</span>
                   <button onClick={() => setEditingPost(null)} style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: "pointer" }}>×</button>
@@ -7617,6 +7653,13 @@ function HomePageContent() {
 
           {activeTab === "saved" && (
   <div className="screen">
+  <div
+    style={{
+      paddingBottom: keyboardHeight > 0 ? keyboardHeight : 0,
+      transition: "padding-bottom 0.25s ease",
+      boxSizing: "border-box",
+    }}
+  >
   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
     <p className="screenTitle" style={{ margin: 0 }}>저장한 장소</p>
     {savedPlaces.length > 0 && (
@@ -7727,6 +7770,7 @@ function HomePageContent() {
         </div>
       ));
     })()}
+  </div>
   </div>
 )}
 
@@ -8432,7 +8476,25 @@ function HomePageContent() {
           </div>
         )}
         {showDeleteAccountFinalModal && (
-          <div onClick={() => { if (!deleteAccountLoading) closeDeleteAccountFlow(); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div
+            onClick={() => { if (!deleteAccountLoading) closeDeleteAccountFlow(); }}
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 99999,
+              background: "rgba(0,0,0,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "20px",
+              paddingBottom: keyboardHeight > 0 ? 20 + keyboardHeight : 20,
+              transition: "padding-bottom 0.25s ease",
+              boxSizing: "border-box",
+            }}
+          >
             <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", maxWidth: "400px", borderRadius: "16px", padding: "24px 20px", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "14px" }}>
               <p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a1a2e" }}>최종 확인</p>
               <label style={{ display: "flex", flexDirection: "column", gap: "8px" }}>

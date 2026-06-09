@@ -21,6 +21,7 @@ export type CourseEditDraft = {
 type Props = {
   draft: CourseEditDraft;
   saving: boolean;
+  keyboardHeight?: number;
   showAddPlace: boolean;
   addablePlaces: Place[];
   categoryPin: Record<Category, { emoji: string }>;
@@ -50,6 +51,7 @@ const rootStyle: CSSProperties = {
 export function CourseEditScreen({
   draft,
   saving,
+  keyboardHeight = 0,
   showAddPlace,
   addablePlaces,
   categoryPin,
@@ -118,7 +120,16 @@ export function CourseEditScreen({
         </button>
       </header>
 
-      <section style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px" }}>
+      <section
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          padding: "16px",
+          paddingBottom: keyboardHeight > 0 ? 16 + keyboardHeight : 16,
+          transition: "padding-bottom 0.25s ease",
+        }}
+      >
         <p style={{ margin: "0 0 8px", fontSize: 12, color: "#666", fontWeight: 500 }}>제목</p>
         <input
           className="profileEditField"
