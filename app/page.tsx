@@ -6687,7 +6687,7 @@ function HomePageContent() {
     )}
     <main className="mobileRoot">
       <section className="phoneFrame">
-        {activeTab !== "home" && activeTab !== "saved" && activeTab !== "mypage" && (
+        {activeTab !== "home" && activeTab !== "saved" && activeTab !== "mypage" && activeTab !== "map" && (
         <header className="appHeader">
         <h1 className="appTitle" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
   <svg width="22" height="22" viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
@@ -7306,7 +7306,15 @@ function HomePageContent() {
   </div>
 )}
 
-          <div className="screen screenMapTab" style={{ display: activeTab === "map" ? "flex" : "none", flexDirection: "column" }}>
+          <div
+            className="screen screenMapTab"
+            style={{
+              display: activeTab === "map" ? "flex" : "none",
+              flexDirection: "column",
+              paddingTop: "env(safe-area-inset-top, 0px)",
+              boxSizing: "border-box",
+            }}
+          >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <p className="screenTitle" style={{ marginBottom: 0 }}>지도</p>
                 {activeJobs.length > 0 && (
