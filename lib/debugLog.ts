@@ -1,26 +1,3 @@
-export type KbResetAttempt = {
-  n: number;
-  docScroll: number;
-  vvOffset: number | null;
-  htmlReflow?: boolean;
-};
-
-export type KbResetDiag = {
-  at: number;
-  scrollY: number;
-  docScroll: number;
-  bodyScroll: number | null;
-  vvOffset: number | null;
-  blurredActive: string | null;
-  after1: {
-    scrollY: number;
-    docScroll: number;
-    bodyScroll: number | null;
-    vvOffset: number | null;
-  } | null;
-  attempts: KbResetAttempt[];
-};
-
 export type DebugLogState = {
   bgEnteredAt: number | null;
   bgDurationMs: number | null;
@@ -34,7 +11,6 @@ export type DebugLogState = {
   lastGetSession: { ok: boolean; ms: number; at: number } | null;
   sendSteps: Array<{ step: string; at: number; ms?: number }>;
   realtimeStatus: string | null;
-  kbReset: KbResetDiag | null;
 };
 
 const INITIAL_STATE: DebugLogState = {
@@ -50,7 +26,6 @@ const INITIAL_STATE: DebugLogState = {
   lastGetSession: null,
   sendSteps: [],
   realtimeStatus: null,
-  kbReset: null,
 };
 
 let state: DebugLogState = { ...INITIAL_STATE };
