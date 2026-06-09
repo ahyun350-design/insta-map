@@ -163,6 +163,7 @@ body {
 .mypageTabScroll {
   padding-bottom: var(--tab-bar-scroll-padding);
   box-sizing: border-box;
+  transition: padding-bottom 0.25s ease;
 }
 
 /* 지도 탭: 지도는 탭바 아래까지 자연스럽게, 미니 리스트만 추가 여유 */
@@ -611,6 +612,7 @@ body {
   gap: 0;
   padding-top: 0;
   padding-bottom: var(--tab-bar-scroll-padding);
+  transition: padding-bottom 0.25s ease;
 }
 
 .homeFeedScroll::-webkit-scrollbar {
@@ -2953,6 +2955,13 @@ body {
     justify-content: flex-start !important;
     width: 100% !important;
     max-width: 100% !important;
+  }
+
+  /* V-2b 보완: 키보드 표시 시 탭바용 padding-bottom 제거 (흰 빈 공간 방지) */
+  .appContent.keyboardOpenContent > .screen:not(.messagesChatShell),
+  .appContent.keyboardOpenContent .mypageTabScroll,
+  .appContent.keyboardOpenContent .homeFeedScroll {
+    padding-bottom: 0 !important;
   }
 
   .appHeader {
