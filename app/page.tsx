@@ -854,14 +854,12 @@ function HomePageContent() {
   const [chatLoadingOlder, setChatLoadingOlder] = useState(false);
   const [chatRoomLoading, setChatRoomLoading] = useState(false);
   const [newMessage, setNewMessage] = useState("");
-  /** iOS/WKWebView 키보드와 하단 입력줄 사이 여백 보정 (visualViewport) */
-  const [chatKeyboardOverlap, setChatKeyboardOverlap] = useState(0);
   const [messageUserSearchQuery, setMessageUserSearchQuery] = useState("");
   const [messageUserSearchResults, setMessageUserSearchResults] = useState<UserSearchHit[]>([]);
   const [messageUserSearchLoading, setMessageUserSearchLoading] = useState(false);
   const [messageUserSearchFollowLoadingId, setMessageUserSearchFollowLoadingId] = useState<string | null>(null);
   const [messagesListKeyboardInset, setMessagesListKeyboardInset] = useState(0);
-  const { isVisible: keyboardVisible, willShow: keyboardWillShow } = useNativeKeyboard();
+  const { isVisible: keyboardVisible, willShow: keyboardWillShow, height: keyboardHeight } = useNativeKeyboard();
   const tabBarHiddenByKeyboard = keyboardVisible || keyboardWillShow;
   const messageUserSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
@@ -929,7 +927,7 @@ function HomePageContent() {
   const completedJobIdsRef = useRef<Set<string>>(new Set());
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
   const chatComposerInputRef = useRef<HTMLInputElement | null>(null);
-  const prevChatKeyboardOverlapRef = useRef(0);
+  const prevKeyboardVisibleForChatRef = useRef(false);
   const lastKbResetAtRef = useRef(0);
   /** 사용자가 위로 스크롤해 과거 메시지를 보면 false — 새 수신 시 자동 스크롤 안 함 */
   const chatStickToBottomRef = useRef(true);
@@ -5064,38 +5062,33 @@ function HomePageContent() {
 
   useEffect(() => {
     if (activeTab !== "messages" || !activeChatRoom) {
-      setChatKeyboardOverlap(0);
-      prevChatKeyboardOverlapRef.current = 0;
+      prevKeyboardVisibleForChatRef.current = false;
       return;
     }
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const update = () => {
-      const next = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      const prev = prevChatKeyboardOverlapRef.current;
-      setChatKeyboardOverlap(next);
-
-      if (
-        prev > 60 &&
-        next < 10 &&
-        Date.now() - lastKbResetAtRef.current > 500
-      ) {
+    const wasVisible = prevKeyboardVisibleForChatRef.current;
+    if (wasVisible && !keyboardVisible) {
+      if (Date.now() - lastKbResetAtRef.current > 500) {
         lastKbResetAtRef.current = Date.now();
         resetWindowScrollAfterChatKeyboard();
       }
+    }
+    prevKeyboardVisibleForChatRef.current = keyboardVisible;
+  }, [activeTab, activeChatRoom?.id, keyboardVisible, resetWindowScrollAfterChatKeyboard]);
 
-      prevChatKeyboardOverlapRef.current = next;
+  useEffect(() => {
+    if (activeTab !== "messages" || !activeChatRoom) return;
+    if (!chatStickToBottomRef.current) return;
+    if (keyboardHeight <= 0 && !keyboardWillShow) return;
+
+    const scrollToBottom = () => {
+      const el = chatMessagesContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
     };
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-      setChatKeyboardOverlap(0);
-      prevChatKeyboardOverlapRef.current = 0;
-    };
-  }, [activeTab, activeChatRoom?.id, resetWindowScrollAfterChatKeyboard]);
+
+    scrollToBottom();
+    const raf = window.requestAnimationFrame(scrollToBottom);
+    return () => window.cancelAnimationFrame(raf);
+  }, [activeTab, activeChatRoom?.id, keyboardHeight, keyboardWillShow]);
 
   useEffect(() => {
     if (activeTab !== "messages" || activeChatRoom) {
@@ -7069,7 +7062,11 @@ function HomePageContent() {
             flexDirection: "column",
             gap: "6px",
             padding: "8px 16px",
-            paddingBottom: "calc(8px + 52px + env(safe-area-inset-bottom, 0px))",
+            paddingBottom:
+              keyboardHeight > 0
+                ? `calc(8px + 52px + ${keyboardHeight}px)`
+                : "calc(8px + 52px + env(safe-area-inset-bottom, 0px))",
+            transition: "padding-bottom 0.25s ease",
           }}
         >
           {chatRoomLoading && messages.length === 0 && (
@@ -7192,13 +7189,14 @@ function HomePageContent() {
             position: "fixed",
             left: 0,
             right: 0,
-            bottom: chatKeyboardOverlap,
+            bottom: keyboardHeight,
             zIndex: 80,
             boxSizing: "border-box",
             paddingLeft: "max(12px, env(safe-area-inset-left, 0px))",
             paddingRight: "max(12px, env(safe-area-inset-right, 0px))",
             paddingTop: 6,
-            paddingBottom: chatKeyboardOverlap > 0 ? 8 : "max(8px, env(safe-area-inset-bottom, 0px))",
+            paddingBottom: keyboardHeight > 0 ? 8 : "max(8px, env(safe-area-inset-bottom, 0px))",
+            transition: "bottom 0.25s ease",
             background: "#eceef2",
             borderTop: "0.5px solid #dfe2e8",
             display: "flex",
