@@ -2833,7 +2833,6 @@ body {
   /* WKWebView 키보드 인셋이 html을 밀지 못하게 lock — 스크롤은 .appContent 등 자식에서만 */
   html,
   body {
-    overflow: hidden !important;
     width: 100% !important;
     height: 100% !important;
     height: 100dvh !important;
