@@ -6687,58 +6687,6 @@ function HomePageContent() {
     )}
     <main className="mobileRoot">
       <section className="phoneFrame">
-        {activeTab !== "home" && activeTab !== "saved" && activeTab !== "mypage" && activeTab !== "map" && (
-        <header className="appHeader">
-        <h1 className="appTitle" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-  <svg width="22" height="22" viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
-    <rect width="32" height="32" rx="6" fill="#1a2a7a"/>
-    <path d="M16 6C12 6 9 9 9 13C9 18 16 25 16 25S23 18 23 13C23 9 20 6 16 6Z" fill="white"/>
-    <circle cx="16" cy="13" r="3" fill="#1a2a7a"/>
-  </svg>
-  PindMap
-</h1>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
-            <button
-              type="button"
-              onClick={() => setShowNotifications(true)}
-              style={{
-                position: "relative",
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                padding: "4px",
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              {unreadNotificationCount > 0 && (
-                <span style={{
-                  position: "absolute",
-                  top: "0px",
-                  right: "0px",
-                  background: "#e53935",
-                  color: "#fff",
-                  fontSize: "10px",
-                  fontWeight: 600,
-                  borderRadius: "10px",
-                  minWidth: "16px",
-                  height: "16px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "0 4px",
-                }}>
-                  {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
-                </span>
-              )}
-            </button>
-          </div>
-        </header>
-        )}
         <section className={`appContent${tabBarHiddenByKeyboard ? " keyboardOpenContent" : ""}`}>
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
 
@@ -6917,7 +6865,11 @@ function HomePageContent() {
           {activeTab === "messages" && (
   <div
     className={activeChatRoom ? "screen messagesChatShell" : "screen"}
-    style={activeChatRoom ? { display: "flex", flexDirection: "column", padding: 0, minHeight: 0, flex: 1 } : undefined}
+    style={{
+      paddingTop: "env(safe-area-inset-top, 0px)",
+      boxSizing: "border-box",
+      ...(activeChatRoom ? { display: "flex", flexDirection: "column", minHeight: 0, flex: 1 } : {}),
+    }}
   >
     {activeChatRoom ? (
       <>
@@ -7203,6 +7155,48 @@ function HomePageContent() {
       >
         <div className="messagesListHeader">
           <p className="screenTitle" style={{ margin: 0 }}>메시지</p>
+          <button
+            type="button"
+            onClick={() => setShowNotifications(true)}
+            aria-label="알림"
+            style={{
+              position: "relative",
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              padding: "4px",
+              display: "flex",
+              alignItems: "center",
+              flexShrink: 0,
+            }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            {unreadNotificationCount > 0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "0px",
+                  right: "0px",
+                  background: "#e53935",
+                  color: "#fff",
+                  fontSize: "10px",
+                  fontWeight: 600,
+                  borderRadius: "10px",
+                  minWidth: "16px",
+                  height: "16px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "0 4px",
+                }}
+              >
+                {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+              </span>
+            )}
+          </button>
         </div>
         <div className="messagesUserSearchSticky">
           <div className="messagesUserSearchWrap">
