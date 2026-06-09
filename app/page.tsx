@@ -7690,8 +7690,18 @@ function HomePageContent() {
 )}
 
           {activeTab === "mypage" && (
-            <div className="screen" style={{ padding: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              <div style={{ flexShrink: 0, padding: "calc(12px + env(safe-area-inset-top, 0px)) 16px 0", position: "relative", boxSizing: "border-box" }}>
+            <div
+              className="screen"
+              style={{
+                padding: 0,
+                paddingTop: "env(safe-area-inset-top, 0px)",
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+                boxSizing: "border-box",
+              }}
+            >
+              <div style={{ flexShrink: 0, padding: "12px 16px 0", position: "relative", boxSizing: "border-box" }}>
                 <button
                   type="button"
                   onClick={() => setShowMypageSettingsSheet(true)}
