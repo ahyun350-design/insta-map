@@ -2835,11 +2835,6 @@ body {
   body {
     overflow: hidden !important;
     overscroll-behavior: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
     width: 100% !important;
     height: 100% !important;
     height: 100dvh !important;
