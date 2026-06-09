@@ -6687,7 +6687,7 @@ function HomePageContent() {
     )}
     <main className="mobileRoot">
       <section className="phoneFrame">
-        {activeTab !== "home" && (
+        {activeTab !== "home" && activeTab !== "saved" && activeTab !== "mypage" && (
         <header className="appHeader">
         <h1 className="appTitle" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
   <svg width="22" height="22" viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
@@ -7559,7 +7559,7 @@ function HomePageContent() {
           </div>
 
           {activeTab === "saved" && (
-  <div className="screen">
+  <div className="screen" style={{ paddingTop: "env(safe-area-inset-top, 0px)", boxSizing: "border-box" }}>
   <div
     style={{
       paddingBottom: keyboardHeight > 0 ? keyboardHeight : 0,
@@ -7683,7 +7683,7 @@ function HomePageContent() {
 
           {activeTab === "mypage" && (
             <div className="screen" style={{ padding: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              <div style={{ flexShrink: 0, padding: "12px 16px 0", position: "relative" }}>
+              <div style={{ flexShrink: 0, padding: "calc(12px + env(safe-area-inset-top, 0px)) 16px 0", position: "relative", boxSizing: "border-box" }}>
                 <button
                   type="button"
                   onClick={() => setShowMypageSettingsSheet(true)}
