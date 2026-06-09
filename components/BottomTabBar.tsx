@@ -88,17 +88,26 @@ const TABS: TabDef[] = [
 type Props = {
   activeTab: BottomTabId;
   onTabChange: (tab: BottomTabId) => void;
+  /** 채팅방 등 — 즉시 숨김 (display:none) */
   hidden?: boolean;
+  /** 키보드 표시 중 — 슬라이드 아웃 (V-2b) */
+  keyboardHidden?: boolean;
   messageUnreadCount?: number;
 };
 
-export function BottomTabBar({ activeTab, onTabChange, hidden = false, messageUnreadCount = 0 }: Props) {
+export function BottomTabBar({
+  activeTab,
+  onTabChange,
+  hidden = false,
+  keyboardHidden = false,
+  messageUnreadCount = 0,
+}: Props) {
   const showMessageBadge = messageUnreadCount > 0;
 
   return (
     <nav
-      className={`tabBar${hidden ? " tabBarHidden" : ""}`}
-      aria-hidden={hidden ? true : undefined}
+      className={`tabBar${hidden ? " tabBarHidden" : ""}${keyboardHidden && !hidden ? " tabBarKeyboardHidden" : ""}`}
+      aria-hidden={hidden || keyboardHidden ? true : undefined}
     >
       <div className="tabBarPill" role="tablist" aria-label="Main navigation">
         {TABS.map((tab) => {

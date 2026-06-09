@@ -2434,6 +2434,13 @@ body {
   background: transparent;
   border: none;
   pointer-events: auto;
+  transition: transform 0.25s ease;
+}
+
+/* V-2b: 키보드 올라올 때 iOS 애니메이션(~0.25s)과 동기화 슬라이드 아웃 */
+.tabBar.tabBarKeyboardHidden {
+  transform: translateY(100%);
+  pointer-events: none !important;
 }
 
 .tabBarPill {

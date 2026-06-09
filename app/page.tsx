@@ -31,6 +31,7 @@ import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
 import { feedPostMatchesCategoryFilter, getDisplayCategories } from "@/lib/categoryUtil";
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
 import { BottomTabBar } from "@/components/BottomTabBar";
+import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
 import { FeedPostCard, FeedPostMedia } from "@/components/FeedPostCard";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
@@ -860,6 +861,8 @@ function HomePageContent() {
   const [messageUserSearchLoading, setMessageUserSearchLoading] = useState(false);
   const [messageUserSearchFollowLoadingId, setMessageUserSearchFollowLoadingId] = useState<string | null>(null);
   const [messagesListKeyboardInset, setMessagesListKeyboardInset] = useState(0);
+  const { isVisible: keyboardVisible, willShow: keyboardWillShow } = useNativeKeyboard();
+  const tabBarHiddenByKeyboard = keyboardVisible || keyboardWillShow;
   const messageUserSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
@@ -7993,6 +7996,7 @@ function HomePageContent() {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           hidden={activeTab === "messages" && !!activeChatRoom}
+          keyboardHidden={tabBarHiddenByKeyboard}
           messageUnreadCount={messageUnreadTotal}
         />
         {selectedPlace && !mapExpanded && (
