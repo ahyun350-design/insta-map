@@ -858,7 +858,6 @@ function HomePageContent() {
   const [messageUserSearchResults, setMessageUserSearchResults] = useState<UserSearchHit[]>([]);
   const [messageUserSearchLoading, setMessageUserSearchLoading] = useState(false);
   const [messageUserSearchFollowLoadingId, setMessageUserSearchFollowLoadingId] = useState<string | null>(null);
-  const [messagesListKeyboardInset, setMessagesListKeyboardInset] = useState(0);
   const { isVisible: keyboardVisible, willShow: keyboardWillShow, height: keyboardHeight } = useNativeKeyboard();
   const tabBarHiddenByKeyboard = keyboardVisible || keyboardWillShow;
   const messageUserSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -5092,26 +5091,6 @@ function HomePageContent() {
 
   useEffect(() => {
     if (activeTab !== "messages" || activeChatRoom) {
-      setMessagesListKeyboardInset(0);
-      return;
-    }
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const update = () => {
-      setMessagesListKeyboardInset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
-    };
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-      setMessagesListKeyboardInset(0);
-    };
-  }, [activeTab, activeChatRoom?.id]);
-
-  useEffect(() => {
-    if (activeTab !== "messages" || activeChatRoom) {
       clearMessageUserSearch();
     }
   }, [activeTab, activeChatRoom?.id, clearMessageUserSearch]);
@@ -7266,7 +7245,8 @@ function HomePageContent() {
       <div
         className="messagesListScreen"
         style={{
-          paddingBottom: messagesListKeyboardInset > 0 ? `${messagesListKeyboardInset}px` : undefined,
+          paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 8}px` : undefined,
+          transition: "padding-bottom 0.25s ease",
         }}
       >
         <div className="messagesListHeader">
