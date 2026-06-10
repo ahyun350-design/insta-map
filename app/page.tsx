@@ -139,6 +139,10 @@ type Message = { id: string; senderId: string; text: string; createdAt: string; 
 
 const CHAT_MESSAGES_PAGE_SIZE = 50;
 const PROFILE_BIO_MAX_LENGTH = 150;
+const REALTIME_REMOUNT_DEBOUNCE_MS = 1000;
+const REALTIME_REMOUNT_BACKOFFS_MS = [1000, 3000, 10000] as const;
+const REALTIME_REMOUNT_MAX_RETRIES = 5;
+const REALTIME_ERROR_STATUSES = new Set(["CHANNEL_ERROR", "CLOSED", "TIMED_OUT"]);
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string, abort?: AbortController): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -1000,6 +1004,10 @@ function HomePageContent() {
   const chatOlderHasMoreRef = useRef(false);
   const realtimeResubTimerRef = useRef<number | null>(null);
   const lastVisibilityHiddenAtRef = useRef<number | null>(null);
+  const notificationsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const realtimeRemountRetryCountRef = useRef<Map<string, number>>(new Map());
+  const realtimeRemountDebounceRef = useRef<Map<string, number>>(new Map());
+  const realtimeRemountBackoffRef = useRef<Map<string, number>>(new Map());
   const placeExtractionToastTimerRef = useRef<number | null>(null);
   const [showPlaceExtractionToast, setShowPlaceExtractionToast] = useState(false);
 
@@ -1536,35 +1544,6 @@ function HomePageContent() {
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [homeLoadError, user, userLoading, sessionChecked]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-
-    const channel = supabase
-      .channel(`notifications-${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${user.id}`
-        },
-        (payload) => {
-          const newNotification = payload.new as Notification;
-          void (async () => {
-            await userAvatarCacheRef.current.prefetchByIds([newNotification.actor_id]);
-            const actorAvatarUrl = userAvatarCacheRef.current.getByUserId(newNotification.actor_id);
-            setNotifications((prev) => [{ ...newNotification, actorAvatarUrl }, ...prev]);
-          })();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user?.id]);
 
   useEffect(() => {
     syncCurrentUserToAvatarCache();
@@ -2569,6 +2548,61 @@ function HomePageContent() {
     setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: p.comments.filter(c => c.id !== commentId) } : p));
   };
 
+  const resetRealtimeRemountCounters = useCallback(() => {
+    realtimeRemountRetryCountRef.current.clear();
+    for (const timer of realtimeRemountDebounceRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    realtimeRemountDebounceRef.current.clear();
+    for (const timer of realtimeRemountBackoffRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    realtimeRemountBackoffRef.current.clear();
+  }, []);
+
+  const scheduleRealtimeRemount = useCallback((channelKey: string, remountFn: () => void) => {
+    const existingDebounce = realtimeRemountDebounceRef.current.get(channelKey);
+    if (existingDebounce !== undefined) {
+      window.clearTimeout(existingDebounce);
+    }
+    const debounceTimer = window.setTimeout(() => {
+      realtimeRemountDebounceRef.current.delete(channelKey);
+      const retryCount = realtimeRemountRetryCountRef.current.get(channelKey) ?? 0;
+      if (retryCount >= REALTIME_REMOUNT_MAX_RETRIES) {
+        console.warn("[PindMap:realtime] remount gave up", { channelKey, retries: retryCount });
+        return;
+      }
+      const backoffMs =
+        REALTIME_REMOUNT_BACKOFFS_MS[Math.min(retryCount, REALTIME_REMOUNT_BACKOFFS_MS.length - 1)]!;
+      const existingBackoff = realtimeRemountBackoffRef.current.get(channelKey);
+      if (existingBackoff !== undefined) {
+        window.clearTimeout(existingBackoff);
+      }
+      const backoffTimer = window.setTimeout(() => {
+        realtimeRemountBackoffRef.current.delete(channelKey);
+        realtimeRemountRetryCountRef.current.set(channelKey, retryCount + 1);
+        console.log("[PindMap:realtime] remount attempt", { channelKey, attempt: retryCount + 1 });
+        remountFn();
+      }, backoffMs);
+      realtimeRemountBackoffRef.current.set(channelKey, backoffTimer);
+    }, REALTIME_REMOUNT_DEBOUNCE_MS);
+    realtimeRemountDebounceRef.current.set(channelKey, debounceTimer);
+  }, []);
+
+  const handleRealtimeChannelStatus = useCallback(
+    (logPrefix: string, channelKey: string, status: string, remountFn: () => void) => {
+      try {
+        debugLog.set({ realtimeStatus: `${logPrefix}:${status}` });
+      } catch {
+        /* ignore */
+      }
+      if (!REALTIME_ERROR_STATUSES.has(status)) return;
+      console.warn("[PindMap:realtime] channel error status", { channelKey, status });
+      scheduleRealtimeRemount(channelKey, remountFn);
+    },
+    [scheduleRealtimeRemount],
+  );
+
   const unmountRoomSubscription = useCallback((reason: string) => {
     activeChatRoomIdRef.current = null;
     if (!roomChannelRef.current) return;
@@ -2582,6 +2616,45 @@ function HomePageContent() {
     supabase.removeChannel(globalMessagesChannelRef.current);
     globalMessagesChannelRef.current = null;
   }, []);
+
+  const unmountNotificationsSubscription = useCallback(() => {
+    if (!notificationsChannelRef.current) return;
+    supabase.removeChannel(notificationsChannelRef.current);
+    notificationsChannelRef.current = null;
+  }, []);
+
+  const mountNotificationsSubscription = useCallback(
+    (userId: string) => {
+      unmountNotificationsSubscription();
+      const channelKey = `notifications-${userId}`;
+      const channel = supabase
+        .channel(channelKey)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            const newNotification = payload.new as Notification;
+            void (async () => {
+              await userAvatarCacheRef.current.prefetchByIds([newNotification.actor_id]);
+              const actorAvatarUrl = userAvatarCacheRef.current.getByUserId(newNotification.actor_id);
+              setNotifications((prev) => [{ ...newNotification, actorAvatarUrl }, ...prev]);
+            })();
+          },
+        )
+        .subscribe((status) => {
+          handleRealtimeChannelStatus("notifications", channelKey, status, () => {
+            mountNotificationsSubscription(userId);
+          });
+        });
+      notificationsChannelRef.current = channel;
+    },
+    [unmountNotificationsSubscription, handleRealtimeChannelStatus],
+  );
 
   const mountGlobalMessagesSubscription = useCallback(() => {
     if (!MY_USER) return;
@@ -2614,14 +2687,13 @@ function HomePageContent() {
         },
       )
       .subscribe((status) => {
-        try {
-          debugLog.set({ realtimeStatus: `global:${status}` });
-        } catch {
-          /* ignore */
-        }
+        const channelKey = `global-messages-${MY_USER}`;
+        handleRealtimeChannelStatus("global", channelKey, status, () => {
+          mountGlobalMessagesSubscription();
+        });
       });
     globalMessagesChannelRef.current = channel;
-  }, [MY_USER, unmountGlobalMessagesSubscription]);
+  }, [MY_USER, unmountGlobalMessagesSubscription, handleRealtimeChannelStatus]);
 
   const mountRoomSubscription = useCallback((roomId: string) => {
     unmountRoomSubscription("replace");
@@ -2640,16 +2712,16 @@ function HomePageContent() {
         setMessages(prev => prev.map(msg => msg.id === m.id ? { ...msg, read: m.read } : msg));
       })
       .subscribe((status) => {
-        try {
-          debugLog.set({ realtimeStatus: `room:${status}` });
-        } catch {
-          /* ignore */
-        }
+        const channelKey = `room-${roomId}`;
+        handleRealtimeChannelStatus("room", channelKey, status, () => {
+          if (activeChatRoomRef.current?.id !== roomId) return;
+          mountRoomSubscription(roomId);
+        });
       });
     roomChannelRef.current = channel;
     activeChatRoomIdRef.current = roomId;
     console.log("[PindMap:message] subscription mounted", roomId);
-  }, [unmountRoomSubscription]);
+  }, [unmountRoomSubscription, handleRealtimeChannelStatus]);
 
   const clearMessageUserSearch = useCallback(() => {
     setMessageUserSearchQuery("");
@@ -4885,6 +4957,17 @@ function HomePageContent() {
     refreshRooms();
   }, [activeTab, activeChatRoom]);
 
+  useEffect(() => {
+    if (!user?.id) {
+      unmountNotificationsSubscription();
+      return;
+    }
+    mountNotificationsSubscription(user.id);
+    return () => {
+      unmountNotificationsSubscription();
+    };
+  }, [user?.id, mountNotificationsSubscription, unmountNotificationsSubscription]);
+
   // 전역 메시지 구독 — mountGlobalMessagesSubscription 단일 경로 (포그라운드 재구독과 공유)
   useEffect(() => {
     if (!MY_USER) {
@@ -4897,6 +4980,12 @@ function HomePageContent() {
     };
   }, [MY_USER, mountGlobalMessagesSubscription]);
 
+  useEffect(() => {
+    return () => {
+      resetRealtimeRemountCounters();
+    };
+  }, [resetRealtimeRemountCounters]);
+
   /** 백그라운드 복귀 시 Realtime 재구독 (짧은 전환은 스킵) */
   useEffect(() => {
     const onVis = () => {
@@ -4904,6 +4993,7 @@ function HomePageContent() {
         lastVisibilityHiddenAtRef.current = Date.now();
         return;
       }
+      resetRealtimeRemountCounters();
       const hiddenAt = lastVisibilityHiddenAtRef.current;
       if (hiddenAt !== null) {
         const bgMs = Date.now() - hiddenAt;
@@ -4932,7 +5022,7 @@ function HomePageContent() {
         realtimeResubTimerRef.current = null;
       }
     };
-  }, [MY_USER, mountRoomSubscription, mountGlobalMessagesSubscription]);
+  }, [MY_USER, mountRoomSubscription, mountGlobalMessagesSubscription, resetRealtimeRemountCounters]);
 
   useEffect(() => {
     chatStickToBottomRef.current = true;
