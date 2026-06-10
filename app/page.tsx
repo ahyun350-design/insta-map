@@ -958,7 +958,17 @@ function HomePageContent() {
   const chatStickToBottomRef = useRef(true);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
   const commentSectionRef = useRef<HTMLDivElement | null>(null);
+  const commentInputFocusedRef = useRef(false);
   const [scrollToComment, setScrollToComment] = useState(false);
+
+  const scrollToCommentSection = useCallback(() => {
+    commentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, []);
+
+  const scheduleScrollToCommentSection = useCallback(() => {
+    window.setTimeout(() => scrollToCommentSection(), 100);
+    window.setTimeout(() => scrollToCommentSection(), 280);
+  }, [scrollToCommentSection]);
   const mapContainerRef = useRef<HTMLDivElement | null>(null); const mapExpandedRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null); const expandedMapRef = useRef<any>(null);
   const geocoderRef = useRef<any>(null); const markersRef = useRef<any[]>([]);
@@ -2564,6 +2574,7 @@ function HomePageContent() {
       }
     }
     setNewComment("");
+    scheduleScrollToCommentSection();
   };
   const deleteComment = async (postId: string, commentId: string) => {
     await supabase.from("comments").delete().eq("id", commentId);
@@ -5638,12 +5649,18 @@ function HomePageContent() {
   useEffect(() => {
     if (detailPostId && scrollToComment) {
       setTimeout(() => {
-        commentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        scrollToCommentSection();
         commentInputRef.current?.focus();
         setScrollToComment(false);
       }, 200);
     }
-  }, [detailPostId, scrollToComment]);
+  }, [detailPostId, scrollToComment, scrollToCommentSection]);
+
+  useEffect(() => {
+    if (!commentInputFocusedRef.current || keyboardHeight <= 0) return;
+    const t = window.setTimeout(() => scrollToCommentSection(), 50);
+    return () => window.clearTimeout(t);
+  }, [keyboardHeight, scrollToCommentSection]);
 
   const visibleFeedPosts = useMemo(() => {
     return feedPosts
@@ -6936,6 +6953,13 @@ function HomePageContent() {
               placeholder="댓글 달기..."
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
+              onFocus={() => {
+                commentInputFocusedRef.current = true;
+                scheduleScrollToCommentSection();
+              }}
+              onBlur={() => {
+                commentInputFocusedRef.current = false;
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                   addComment(detailPost.id);
