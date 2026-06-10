@@ -6692,6 +6692,7 @@ function HomePageContent() {
   if (detailPost) {
     const liked = detailPost.liked_by_me;
     const detailIsLegacyPlace = !hasPhotoPlaceTags(detailPost) && !!detailPost.placeName.trim();
+    const detailCommentComposerHeight = 56;
     return (
       <>
       <main className="mobileRoot">
@@ -6708,7 +6709,10 @@ function HomePageContent() {
               flex: 1,
               minHeight: 0,
               background: "#fff",
-              paddingBottom: keyboardHeight > 0 ? keyboardHeight : undefined,
+              paddingBottom:
+                keyboardHeight > 0
+                  ? `calc(${detailCommentComposerHeight}px + ${keyboardHeight}px)`
+                  : `calc(${detailCommentComposerHeight}px + env(safe-area-inset-bottom, 0px))`,
               transition: "padding-bottom 0.25s ease",
             }}
           >
@@ -6887,10 +6891,31 @@ function HomePageContent() {
               ))}
               {detailPost.comments.length === 0 && <p style={{ fontSize: "12px", color: "#ccc", textAlign: "center", padding: "10px 0" }}>첫 댓글을 남겨보세요 💬</p>}
             </div>
-            <div ref={commentSectionRef} style={{ padding: "14px 20px 30px", display: "flex", gap: "8px" }}>
-              <input ref={commentInputRef} className="mapInput" placeholder="댓글을 입력하세요..." value={newComment} onChange={(e) => setNewComment(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { addComment(detailPost.id); } }} style={{ flex: 1 }} />
-              <button className="primaryButton" type="button" disabled={!newComment.trim()} onClick={() => addComment(detailPost.id)} style={{ padding: "0 16px", opacity: newComment.trim() ? 1 : 0.4 }}>등록</button>
-            </div>
+            <div ref={commentSectionRef} aria-hidden style={{ height: 1, flexShrink: 0 }} />
+          </div>
+          <div
+            className="detailPostCommentComposer"
+            style={{
+              position: "fixed",
+              left: 0,
+              right: 0,
+              bottom: keyboardHeight,
+              zIndex: 80,
+              boxSizing: "border-box",
+              paddingLeft: "max(20px, env(safe-area-inset-left, 0px))",
+              paddingRight: "max(20px, env(safe-area-inset-right, 0px))",
+              paddingTop: 10,
+              paddingBottom: keyboardHeight > 0 ? 8 : "max(10px, env(safe-area-inset-bottom, 0px))",
+              transition: "bottom 0.25s ease, padding-bottom 0.25s ease",
+              background: "#fff",
+              borderTop: "0.5px solid #efefef",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <input ref={commentInputRef} className="mapInput" placeholder="댓글을 입력하세요..." value={newComment} onChange={(e) => setNewComment(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { addComment(detailPost.id); } }} style={{ flex: 1 }} />
+            <button className="primaryButton" type="button" disabled={!newComment.trim()} onClick={() => addComment(detailPost.id)} style={{ padding: "0 16px", opacity: newComment.trim() ? 1 : 0.4 }}>등록</button>
           </div>
           {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
           {courseModalLayerEl}
