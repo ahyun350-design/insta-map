@@ -958,11 +958,14 @@ function HomePageContent() {
   const chatStickToBottomRef = useRef(true);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
   const commentSectionRef = useRef<HTMLDivElement | null>(null);
+  const detailPostScrollRef = useRef<HTMLDivElement | null>(null);
   const commentInputFocusedRef = useRef(false);
   const [scrollToComment, setScrollToComment] = useState(false);
 
   const scrollToCommentSection = useCallback(() => {
-    commentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const scrollContainer = detailPostScrollRef.current;
+    if (!scrollContainer) return;
+    scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: "smooth" });
   }, []);
 
   const scheduleScrollToCommentSection = useCallback(() => {
@@ -6735,6 +6738,7 @@ function HomePageContent() {
             <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailPost.placeName}</span>
           </header>
           <div
+            ref={detailPostScrollRef}
             className="detailPostScroll"
             style={{
               flex: 1,
