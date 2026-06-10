@@ -785,9 +785,13 @@ function HomePageContent() {
   const [deleteAccountPhraseInput, setDeleteAccountPhraseInput] = useState("");
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<TabId>(() =>
-    searchParams?.get("from") === "mypage" ? "mypage" : "map",
-  );
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    const tab = searchParams?.get("tab");
+    if (tab === "home") return "home";
+    if (tab === "messages") return "messages";
+    if (tab === "mypage" || searchParams?.get("from") === "mypage") return "mypage";
+    return "map";
+  });
   const [instagramUrl, setInstagramUrl] = useState("");
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
@@ -5008,6 +5012,10 @@ function HomePageContent() {
       setActiveTab("messages");
       window.history.replaceState({}, "", "/");
     }
+    if (searchParams?.get("tab") === "home" && !searchParams?.get("postId")) {
+      setActiveTab("home");
+      window.history.replaceState({}, "", "/");
+    }
   }, [searchParams]);
 
   useLayoutEffect(() => {
@@ -5023,6 +5031,9 @@ function HomePageContent() {
     setDetailReturnTo(parseDetailReturnTo(searchParams));
     if (searchParams.get("from") === "mypage") {
       setActiveTab("mypage");
+    }
+    if (searchParams.get("tab") === "home") {
+      setActiveTab("home");
     }
   }, [searchParams]);
 
@@ -6720,7 +6731,11 @@ function HomePageContent() {
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "12px 20px 0" }}>
               <button
                 type="button"
-                onClick={() => router.push(`/profile/${encodeURIComponent(detailPost.user)}`)}
+                onClick={() =>
+                  router.push(
+                    `/profile/${encodeURIComponent(detailPost.user)}?from=detail&postId=${encodeURIComponent(detailPost.id)}`,
+                  )
+                }
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -6866,7 +6881,11 @@ function HomePageContent() {
                 <div key={c.id} style={{ display: "flex", gap: "10px", marginBottom: "14px", alignItems: "flex-start" }}>
                   <button
                     type="button"
-                    onClick={() => router.push(`/profile/${encodeURIComponent(c.user)}`)}
+                    onClick={() =>
+                      router.push(
+                        `/profile/${encodeURIComponent(c.user)}?from=detail&postId=${encodeURIComponent(detailPost.id)}`,
+                      )
+                    }
                     style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, flexShrink: 0 }}
                   >
                     <ProfileAvatar avatarUrl={c.avatarUrl} username={c.user} size={30} fontSize={12} />
@@ -6875,7 +6894,11 @@ function HomePageContent() {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                       <button
                         type="button"
-                        onClick={() => router.push(`/profile/${encodeURIComponent(c.user)}`)}
+                        onClick={() =>
+                          router.push(
+                            `/profile/${encodeURIComponent(c.user)}?from=detail&postId=${encodeURIComponent(detailPost.id)}`,
+                          )
+                        }
                         style={{ fontSize: "12px", fontWeight: 600, color: "#1a1a2e", border: "none", background: "transparent", cursor: "pointer", padding: 0 }}
                       >
                         {c.user}
@@ -7117,7 +7140,9 @@ function HomePageContent() {
                       showUsername
                       showMultiIcon
                       username={post.user}
-                      onProfileClick={() => router.push(`/profile/${encodeURIComponent(post.user)}`)}
+                      onProfileClick={() =>
+                        router.push(`/profile/${encodeURIComponent(post.user)}?from=feed`)
+                      }
                       onClick={() => setDetailPostId(post.id)}
                     />
                   ))}

@@ -332,6 +332,16 @@ export default function ProfilePage() {
                 router.push("/?tab=messages");
                 return;
               }
+              const from = params?.get("from");
+              const postId = params?.get("postId");
+              if (from === "detail" && postId) {
+                router.push(`/?postId=${encodeURIComponent(postId)}&tab=home`);
+                return;
+              }
+              if (from === "feed") {
+                router.push("/?tab=home");
+                return;
+              }
               router.back();
             }}
             style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}

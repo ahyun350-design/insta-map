@@ -43,8 +43,7 @@ export function PostGridCell({
   const isHome = variant === "home";
   const thumb = imageUrl?.trim();
   const region = extractRegion(address);
-  const displayTitle = (titleLine || placeName || "").trim() || "—";
-  const displayPlace = (placeName || titleLine || "").trim() || "—";
+  const primaryLabel = (titleLine.trim() || placeName.trim() || "").trim() || "—";
   const multi = showMultiIcon && imageCount > 1;
 
   return (
@@ -94,7 +93,7 @@ export function PostGridCell({
               overflow: "hidden",
             }}
           >
-            {displayTitle}
+            {primaryLabel}
           </span>
         )}
         {multi && (
@@ -171,7 +170,7 @@ export function PostGridCell({
           </button>
         ) : null}
         {isHome ? (
-          <p className="postGridCellHomeTitle">{displayTitle}</p>
+          <p className="postGridCellHomeTitle">{primaryLabel}</p>
         ) : (
           <p
             style={{
@@ -185,7 +184,7 @@ export function PostGridCell({
               lineHeight: 1.3,
             }}
           >
-            {displayPlace}
+            {primaryLabel}
           </p>
         )}
         {!isHome && region ? (
