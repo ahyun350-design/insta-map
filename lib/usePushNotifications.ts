@@ -72,7 +72,7 @@ export function usePushNotifications(userId: string | undefined) {
           if (data?.type === "message" && data?.room_id) {
             window.location.href = `/?openChatRoom=${encodeURIComponent(data.room_id)}`;
           } else if ((data?.type === "like" || data?.type === "comment") && data?.post_id) {
-            window.location.href = `/?openPost=${encodeURIComponent(data.post_id)}`;
+            window.location.href = `/?postId=${encodeURIComponent(data.post_id)}`;
           } else if (data?.type === "follow" && data?.actor_username) {
             window.location.href = `/profile/${encodeURIComponent(data.actor_username)}`;
           }

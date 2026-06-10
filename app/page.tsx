@@ -8,6 +8,13 @@ import { debugLog, dlog } from "@/lib/debugLog";
 import { withAutoRetry, withAutoRetryAndMessageSendRecovery } from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
 import { usePushNotifications } from "@/lib/usePushNotifications";
+import { InAppNotificationToast } from "@/components/InAppNotificationToast";
+import {
+  formatInAppNotificationFromRow,
+  formatMessageInAppText,
+  type InAppNotificationItem,
+} from "@/lib/inAppNotification";
+import { useInAppNotifications } from "@/lib/useInAppNotifications";
 import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
@@ -739,6 +746,13 @@ function HomePageContent() {
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const {
+    current: inAppNotificationCurrent,
+    enqueue: enqueueInAppNotification,
+    handleDismiss: handleInAppNotificationDismiss,
+  } = useInAppNotifications();
+  const enqueueInAppNotificationRef = useRef<(item: InAppNotificationItem) => void>(() => {});
+  enqueueInAppNotificationRef.current = enqueueInAppNotification;
   const unreadNotificationCount = useMemo(
     () => notifications.filter((n) => !n.read).length,
     [notifications],
@@ -808,6 +822,8 @@ function HomePageContent() {
   const [detailPostId, setDetailPostId] = useState<string | null>(
     () => searchParams?.get("postId") ?? null,
   );
+  const detailPostIdRef = useRef<string | null>(null);
+  detailPostIdRef.current = detailPostId;
   const [detailReturnTo, setDetailReturnTo] = useState<
     { type: "mypage" } | { type: "profile"; username: string } | null
   >(() => parseDetailReturnTo(searchParams));
@@ -846,6 +862,8 @@ function HomePageContent() {
   }, []);
   const [loading, setLoading] = useState(true);
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const chatRoomsRef = useRef<ChatRoom[]>([]);
+  chatRoomsRef.current = chatRooms;
   const messageUnreadTotal = useMemo(
     () => chatRooms.reduce((sum, r) => sum + (r.unreadCount ?? 0), 0),
     [chatRooms],
@@ -2643,6 +2661,27 @@ function HomePageContent() {
               await userAvatarCacheRef.current.prefetchByIds([newNotification.actor_id]);
               const actorAvatarUrl = userAvatarCacheRef.current.getByUserId(newNotification.actor_id);
               setNotifications((prev) => [{ ...newNotification, actorAvatarUrl }, ...prev]);
+
+              if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+              if (newNotification.actor_id === userIdRef.current) return;
+              if (
+                (newNotification.type === "like" || newNotification.type === "comment") &&
+                newNotification.target_id &&
+                detailPostIdRef.current === newNotification.target_id
+              ) {
+                return;
+              }
+              enqueueInAppNotificationRef.current({
+                id: `notify-${newNotification.id}-${Date.now()}`,
+                type: newNotification.type,
+                actorName: newNotification.actor_username,
+                actorUsername: newNotification.actor_username,
+                actorId: newNotification.actor_id,
+                actorAvatarUrl,
+                text: formatInAppNotificationFromRow(newNotification),
+                targetId: newNotification.target_id,
+                notificationId: newNotification.id,
+              });
             })();
           },
         )
@@ -2668,10 +2707,10 @@ function HomePageContent() {
           const m = payload.new;
           if (m.sender_id === MY_USER) return;
           const viewingRoomId = activeChatRoomRef.current?.id ?? null;
+          const isViewing = viewingRoomId === m.room_id;
           setChatRooms((prev) => {
             const room = prev.find((r) => r.id === m.room_id);
             if (!room) return prev;
-            const isViewing = viewingRoomId === m.room_id;
             const next = prev.map((r) =>
               r.id === m.room_id
                 ? {
@@ -2684,6 +2723,39 @@ function HomePageContent() {
             );
             return sortChatRoomsByRecency(next);
           });
+
+          if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+          if (isViewing) return;
+
+          void (async () => {
+            const listed = chatRoomsRef.current.find((r) => r.id === m.room_id);
+            let actorName = listed?.friendName ?? "";
+            let actorAvatarUrl = listed?.friendAvatarUrl;
+            let actorUsername = actorName;
+            if (!actorName) {
+              await userAvatarCacheRef.current.prefetchByIds([m.sender_id]);
+              const { data: senderData } = await supabase
+                .from("users")
+                .select("username, avatar_url")
+                .eq("id", m.sender_id)
+                .maybeSingle();
+              actorName = senderData?.username ?? "알 수 없음";
+              actorUsername = senderData?.username ?? "";
+              actorAvatarUrl =
+                normalizeAvatarUrl(senderData?.avatar_url) ??
+                userAvatarCacheRef.current.getByUserId(m.sender_id);
+            }
+            enqueueInAppNotificationRef.current({
+              id: `msg-${m.id}-${Date.now()}`,
+              type: "message",
+              actorName,
+              actorUsername,
+              actorId: m.sender_id,
+              actorAvatarUrl,
+              text: formatMessageInAppText(actorName, m.text ?? ""),
+              targetId: m.room_id,
+            });
+          })();
         },
       )
       .subscribe((status) => {
@@ -2851,6 +2923,67 @@ function HomePageContent() {
       }
     }
   };
+
+  const resolveChatRoomForId = useCallback(async (roomId: string): Promise<ChatRoom | null> => {
+    const existing = chatRoomsRef.current.find((r) => r.id === roomId);
+    if (existing) return existing;
+    const uid = userIdRef.current;
+    if (!uid) return null;
+    const { data } = await supabase.from("chat_rooms").select("*").eq("id", roomId).maybeSingle();
+    if (!data) return null;
+    const friendId = data.user1_id === uid ? data.user2_id : data.user1_id;
+    const { data: friendData } = await supabase
+      .from("users")
+      .select("username, avatar_url")
+      .eq("id", friendId)
+      .maybeSingle();
+    if (friendData) {
+      userAvatarCacheRef.current.setFromRow({
+        id: friendId,
+        username: friendData.username,
+        avatar_url: friendData.avatar_url,
+      });
+    }
+    const room: ChatRoom = {
+      id: data.id,
+      friendId,
+      friendName: friendData?.username ?? friendId,
+      friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
+      lastMessage: "",
+      lastTime: data.created_at,
+      unreadCount: 0,
+    };
+    setChatRooms((prev) =>
+      sortChatRoomsByRecency(prev.some((r) => r.id === room.id) ? prev : [room, ...prev]),
+    );
+    return room;
+  }, []);
+
+  const navigateFromInAppNotification = useCallback(
+    async (item: InAppNotificationItem) => {
+      if (item.notificationId) {
+        await supabase.from("notifications").update({ read: true }).eq("id", item.notificationId);
+        setNotifications((prev) =>
+          prev.map((x) => (x.id === item.notificationId ? { ...x, read: true } : x)),
+        );
+      }
+      setShowNotifications(false);
+      if (item.type === "like" || item.type === "comment") {
+        if (item.targetId) setDetailPostId(item.targetId);
+        return;
+      }
+      if (item.type === "follow") {
+        router.push(`/profile/${encodeURIComponent(item.actorUsername)}`);
+        return;
+      }
+      if (item.type === "message" && item.targetId) {
+        setActiveTab("messages");
+        const room = await resolveChatRoomForId(item.targetId);
+        if (room) await openChat(room);
+      }
+    },
+    [openChat, resolveChatRoomForId, router],
+  );
 
   const loadOlderMessages = useCallback(async () => {
     const room = activeChatRoomRef.current;
@@ -5953,40 +6086,20 @@ function HomePageContent() {
     </div>
   );
 
-  const getNotificationMessage = (n: Notification): string => {
-    switch (n.type) {
-      case "like":
-        return `${n.actor_username}님이 회원님의 글에 좋아요를 눌렀어요`;
-      case "comment":
-        return `${n.actor_username}님이 댓글을 남겼어요`;
-      case "follow":
-        return `${n.actor_username}님이 회원님을 팔로우했어요`;
-      case "message":
-        return `${n.actor_username}님이 메시지를 보냈어요`;
-      default:
-        return `${n.actor_username}님의 활동이 있어요`;
-    }
-  };
+  const getNotificationMessage = (n: Notification): string => formatInAppNotificationFromRow(n);
 
   const handleNotificationClick = async (n: Notification) => {
-    if (!n.read) {
-      await supabase.from("notifications").update({ read: true }).eq("id", n.id);
-      setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
-    }
-
-    setShowNotifications(false);
-
-    if (n.type === "like" || n.type === "comment") {
-      if (n.target_id) setDetailPostId(n.target_id);
-    } else if (n.type === "follow") {
-      router.push(`/profile/${encodeURIComponent(n.actor_username)}`);
-    } else if (n.type === "message") {
-      setActiveTab("messages");
-      if (n.target_id) {
-        const room = chatRooms.find(r => r.id === n.target_id);
-        if (room) setActiveChatRoom(room);
-      }
-    }
+    await navigateFromInAppNotification({
+      id: n.id,
+      type: n.type,
+      actorName: n.actor_username,
+      actorUsername: n.actor_username,
+      actorId: n.actor_id,
+      actorAvatarUrl: n.actorAvatarUrl,
+      text: getNotificationMessage(n),
+      targetId: n.target_id,
+      notificationId: n.id,
+    });
   };
 
   const markAllNotificationsRead = async () => {
@@ -8569,6 +8682,22 @@ function HomePageContent() {
         )}
       </section>
     </main>
+    {inAppNotificationCurrent &&
+      typeof document !== "undefined" &&
+      createPortal(
+        <InAppNotificationToast
+          key={inAppNotificationCurrent.id}
+          type={inAppNotificationCurrent.type}
+          actorName={inAppNotificationCurrent.actorName}
+          actorAvatarUrl={inAppNotificationCurrent.actorAvatarUrl}
+          text={inAppNotificationCurrent.text}
+          onClick={() => {
+            void navigateFromInAppNotification(inAppNotificationCurrent);
+          }}
+          onDismiss={handleInAppNotificationDismiss}
+        />,
+        document.body,
+      )}
     </>
   );
 }
