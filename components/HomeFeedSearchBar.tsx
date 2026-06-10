@@ -5,6 +5,9 @@ type Props = {
   onChange: (value: string) => void;
   /** 홈 상단 툴바 한 줄 배치 시 바깥 패딩 제거 */
   variant?: "default" | "inline";
+  /** true면 입력 없이 탭 시 검색 화면만 연다 */
+  triggerOnly?: boolean;
+  onOpenSearch?: () => void;
 };
 
 function IconSearch() {
@@ -16,8 +19,18 @@ function IconSearch() {
   );
 }
 
-export function HomeFeedSearchBar({ value, onChange, variant = "default" }: Props) {
-  const showClear = value.length > 0;
+export function HomeFeedSearchBar({
+  value,
+  onChange,
+  variant = "default",
+  triggerOnly = false,
+  onOpenSearch,
+}: Props) {
+  const showClear = !triggerOnly && value.length > 0;
+
+  const openSearch = () => {
+    onOpenSearch?.();
+  };
 
   return (
     <div className={variant === "inline" ? "homeFeedSearchWrap homeFeedSearchWrapInline" : "homeFeedSearchWrap"}>
@@ -26,8 +39,21 @@ export function HomeFeedSearchBar({ value, onChange, variant = "default" }: Prop
         <input
           type="search"
           className="homeFeedSearchInput"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+          value={triggerOnly ? "" : value}
+          readOnly={triggerOnly}
+          onChange={(e) => {
+            if (triggerOnly) return;
+            onChange(e.target.value);
+          }}
+          onFocus={(e) => {
+            if (!triggerOnly) return;
+            e.preventDefault();
+            e.currentTarget.blur();
+            openSearch();
+          }}
+          onClick={() => {
+            if (triggerOnly) openSearch();
+          }}
           placeholder="장소·키워드 검색"
           enterKeyHint="search"
           autoComplete="off"

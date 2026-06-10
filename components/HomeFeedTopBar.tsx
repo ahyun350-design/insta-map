@@ -5,6 +5,7 @@ import { HomeFeedSearchBar } from "@/components/HomeFeedSearchBar";
 type Props = {
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  onOpenSearch?: () => void;
   unreadNotificationCount: number;
   onNotificationsClick: () => void;
   onAddClick: () => void;
@@ -13,13 +14,20 @@ type Props = {
 export function HomeFeedTopBar({
   searchQuery,
   onSearchChange,
+  onOpenSearch,
   unreadNotificationCount,
   onNotificationsClick,
   onAddClick,
 }: Props) {
   return (
     <div className="homeFeedToolbar">
-      <HomeFeedSearchBar value={searchQuery} onChange={onSearchChange} variant="inline" />
+      <HomeFeedSearchBar
+        value={searchQuery}
+        onChange={onSearchChange}
+        variant="inline"
+        triggerOnly
+        onOpenSearch={onOpenSearch}
+      />
       <button
         type="button"
         className="homeFeedToolbarBtn homeFeedToolbarBtnNotify"

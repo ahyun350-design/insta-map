@@ -34,6 +34,7 @@ import {
 } from "@/lib/companionTag";
 import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
 import { HomeFeedTopBar } from "@/components/HomeFeedTopBar";
+import { HomeSearchScreen } from "@/components/HomeSearchScreen";
 import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
 import { feedPostMatchesCategoryFilter, getDisplayCategories } from "@/lib/categoryUtil";
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
@@ -836,6 +837,7 @@ function HomePageContent() {
   const [selectedHomeCategory, setSelectedHomeCategory] = useState<HomeCategoryFilter>("all");
   const [homeSearchQuery, setHomeSearchQuery] = useState("");
   const [debouncedHomeSearchQuery, setDebouncedHomeSearchQuery] = useState("");
+  const [isHomeSearchOpen, setIsHomeSearchOpen] = useState(false);
   const [homePlaceSheet, setHomePlaceSheet] = useState<PlaceSheetData | null>(null);
   const [postTitle, setPostTitle] = useState(""); const [postPlaceName, setPostPlaceName] = useState("");
   const [postAddress, setPostAddress] = useState("");
@@ -845,8 +847,6 @@ function HomePageContent() {
   const [postPlaceLng, setPostPlaceLng] = useState<number | undefined>(undefined);
   const [postComment, setPostComment] = useState("");
   const [postCompanionTag, setPostCompanionTag] = useState<CompanionTag | null>(null);
-  const [postSearchQuery, setPostSearchQuery] = useState("");
-  const [postSearchResults, setPostSearchResults] = useState<any[]>([]);
   const [postPhotoPlaceTags, setPostPhotoPlaceTags] = useState<PhotoPlaceTag[]>([]);
   const [postSaveCourseChecked, setPostSaveCourseChecked] = useState(false);
   const [postCourseTitle, setPostCourseTitle] = useState("");
@@ -4080,23 +4080,6 @@ function HomePageContent() {
       void loadOlderMessages();
     }
   };
-  const handlePostSearch = () => {
-    if (!postSearchQuery.trim() || !window.kakao?.maps?.services) return;
-    new window.kakao.maps.services.Places().keywordSearch(postSearchQuery.trim(), (data: any[], st: string) => {
-      if (st === window.kakao.maps.services.Status.OK) setPostSearchResults(data.slice(0, 5)); else showToast("검색 결과가 없어요", "info");
-    });
-  };
-  const handleSelectPostPlace = (place: any) => {
-    setPostPlaceName(place.place_name);
-    setPostAddress(place.road_address_name || place.address_name || "");
-    const coords = kakaoYXToLatLng(place.y, place.x);
-    setPostPlaceLat(coords?.lat);
-    setPostPlaceLng(coords?.lng);
-    const cat = inferCategoryFromKakaoCategoryName(place.category_name);
-    setPostCategory(cat);
-    setPostSearchResults([]);
-    setPostSearchQuery("");
-  };
   const handleSubmitPost = async () => {
     if (!canPost) return;
     if (!isCompanionTag(postCompanionTag)) {
@@ -4212,8 +4195,6 @@ function HomePageContent() {
       });
       return [];
     });
-    setPostSearchQuery("");
-    setPostSearchResults([]);
     setPostPhotoPlaceTags([]);
     setPostSaveCourseChecked(false);
     setPostCourseTitle("");
@@ -5671,12 +5652,30 @@ function HomePageContent() {
     if (selectedHomeCategory !== "all") {
       result = result.filter((p) => feedPostMatchesCategoryFilter(p, selectedHomeCategory));
     }
-    const q = debouncedHomeSearchQuery.trim();
-    if (q) {
-      result = result.filter((p) => feedPostMatchesHomeSearch(p, q));
-    }
     return result;
-  }, [visibleFeedPosts, selectedCompanionTag, selectedHomeCategory, debouncedHomeSearchQuery]);
+  }, [visibleFeedPosts, selectedCompanionTag, selectedHomeCategory]);
+
+  const homeSearchResultPosts = useMemo(() => {
+    const q = debouncedHomeSearchQuery.trim();
+    if (!q) return [];
+    return visibleFeedPosts.filter((p) => feedPostMatchesHomeSearch(p, q));
+  }, [visibleFeedPosts, debouncedHomeSearchQuery]);
+
+  const openHomeSearch = useCallback(() => {
+    setIsHomeSearchOpen(true);
+  }, []);
+
+  const closeHomeSearch = useCallback(() => {
+    setIsHomeSearchOpen(false);
+    setHomeSearchQuery("");
+    setDebouncedHomeSearchQuery("");
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "home" && isHomeSearchOpen) {
+      closeHomeSearch();
+    }
+  }, [activeTab, isHomeSearchOpen, closeHomeSearch]);
 
   const myMypagePosts = useMemo(() => {
     if (!user?.id) return [];
@@ -7007,6 +7006,7 @@ function HomePageContent() {
                   <HomeFeedTopBar
                     searchQuery={homeSearchQuery}
                     onSearchChange={setHomeSearchQuery}
+                    onOpenSearch={openHomeSearch}
                     unreadNotificationCount={unreadNotificationCount}
                     onNotificationsClick={() => setShowNotifications(true)}
                     onAddClick={() => setShowPostModal(true)}
@@ -7051,17 +7051,11 @@ function HomePageContent() {
                   variant="feed"
                   icon="🔍"
                   title={
-                    debouncedHomeSearchQuery.trim()
-                      ? `'${debouncedHomeSearchQuery.trim()}'에 대한 큐레이션이 없어요`
-                      : selectedHomeCategory !== "all"
-                        ? `아직 ${selectedHomeCategory} 큐레이션이 없어요`
-                        : `아직 ${companionFilterChipLabel(selectedCompanionTag)} 큐레이션이 없어요`
+                    selectedHomeCategory !== "all"
+                      ? `아직 ${selectedHomeCategory} 큐레이션이 없어요`
+                      : `아직 ${companionFilterChipLabel(selectedCompanionTag)} 큐레이션이 없어요`
                   }
-                  description={
-                    debouncedHomeSearchQuery.trim()
-                      ? "다른 키워드로 검색하거나 필터를 바꿔보세요"
-                      : "다른 필터를 선택하거나 새 큐레이션을 올려보세요"
-                  }
+                  description="다른 필터를 선택하거나 새 큐레이션을 올려보세요"
                 />
               )}
               {filteredHomeFeedPosts.map((post) => (
@@ -8682,6 +8676,60 @@ function HomePageContent() {
         )}
       </section>
     </main>
+    {isHomeSearchOpen && activeTab === "home" && (
+      <HomeSearchScreen
+        isOpen={isHomeSearchOpen}
+        query={homeSearchQuery}
+        onQueryChange={setHomeSearchQuery}
+        debouncedQuery={debouncedHomeSearchQuery}
+        onClose={closeHomeSearch}
+        resultCount={homeSearchResultPosts.length}
+      >
+        {debouncedHomeSearchQuery.trim() && homeSearchResultPosts.length === 0 ? (
+          <EmptyState
+            variant="feed"
+            icon="🔍"
+            title={`'${debouncedHomeSearchQuery.trim()}'에 대한 큐레이션이 없어요`}
+            description="다른 키워드로 검색해보세요"
+          />
+        ) : (
+          homeSearchResultPosts.map((post) => (
+            <FeedPostCard
+              key={post.id}
+              post={post}
+              myUsername={MY_USERNAME}
+              isFollowing={!!post.userId && followingIds.includes(post.userId)}
+              menuOpen={openMenuId === post.id}
+              timeAgoLabel={timeAgo(post.createdAt)}
+              categoryPin={CATEGORY_PIN}
+              onCardClick={() => setDetailPostId(post.id)}
+              onProfileClick={() => router.push(`/profile/${encodeURIComponent(post.user)}`)}
+              onFollow={() => followUser(post.user)}
+              onUnfollow={() => unfollowUser(post.user)}
+              onToggleMenu={() => setOpenMenuId(openMenuId === post.id ? null : post.id)}
+              onEdit={() => openEdit(post)}
+              onArchive={() => toggleArchive(post.id)}
+              onDelete={() => deletePost(post.id)}
+              onToggleLike={() => {
+                void toggleLike(post.id);
+              }}
+              onComment={() => {
+                setDetailPostId(post.id);
+                setScrollToComment(true);
+              }}
+              onShare={() => {
+                void openShareModal(post);
+              }}
+              onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(post, placeRef)}
+              currentUserId={MY_USER}
+              ensureCourseLoaded={ensureCourseLoaded}
+              onOpenLinkedCourse={(course, readOnly) => openSavedCourse(course, { readOnly })}
+              onLinkedCourseUnavailable={() => showToast("코스를 불러올 수 없어요", "error")}
+            />
+          ))
+        )}
+      </HomeSearchScreen>
+    )}
     {inAppNotificationCurrent &&
       typeof document !== "undefined" &&
       createPortal(
