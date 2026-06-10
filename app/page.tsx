@@ -6714,10 +6714,29 @@ function HomePageContent() {
           >
             <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p></div>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "12px 20px 0" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
+              <button
+                type="button"
+                onClick={() => router.push(`/profile/${encodeURIComponent(detailPost.user)}`)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  flex: 1,
+                  minWidth: 0,
+                  border: "none",
+                  background: "transparent",
+                  padding: 0,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontFamily: "inherit",
+                }}
+              >
                 <ProfileAvatar avatarUrl={detailPost.userAvatarUrl} username={detailPost.user} size={38} className="avatar" />
-                <div><p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#1a1a2e" }}>{detailPost.user}</p><p style={{ margin: 0, fontSize: "11px", color: "#aaa" }}>{timeAgo(detailPost.createdAt)}</p></div>
-              </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#1a1a2e" }}>{detailPost.user}</p>
+                  <p style={{ margin: 0, fontSize: "11px", color: "#aaa" }}>{timeAgo(detailPost.createdAt)}</p>
+                </div>
+              </button>
               <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
                 {detailPost.user !== MY_USERNAME && detailPost.userId && !followingIds.includes(detailPost.userId) && (
                   <button
