@@ -663,6 +663,33 @@ body {
   flex-shrink: 0;
 }
 
+/* 홈 피드 2열 그리드 (KREAM 스타일 — appContent 패딩 안) */
+.homeFeedGrid {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+}
+
+.postGridCellHomeTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1c1c1e;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.homeFeedGridSkeleton {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 /* ── 홈 피드 인스타 스타일 카드 ── */
 .feedPostCard {
   background: #fff;

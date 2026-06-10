@@ -7036,7 +7036,7 @@ function HomePageContent() {
                   </button>
                 </div>
               )}
-              {loading && <FeedSkeleton />}
+              {loading && <FeedSkeleton variant="grid" columns={2} />}
               {!loading && !homeLoadError && visibleFeedPosts.length === 0 && (
                 <EmptyState
                   variant="feed"
@@ -7058,33 +7058,27 @@ function HomePageContent() {
                   description="다른 필터를 선택하거나 새 큐레이션을 올려보세요"
                 />
               )}
-              {filteredHomeFeedPosts.map((post) => (
-                <FeedPostCard
-                  key={post.id}
-                  post={post}
-                  myUsername={MY_USERNAME}
-                  isFollowing={!!post.userId && followingIds.includes(post.userId)}
-                  menuOpen={openMenuId === post.id}
-                  timeAgoLabel={timeAgo(post.createdAt)}
-                  categoryPin={CATEGORY_PIN}
-                  onCardClick={() => setDetailPostId(post.id)}
-                  onProfileClick={() => router.push(`/profile/${encodeURIComponent(post.user)}`)}
-                  onFollow={() => followUser(post.user)}
-                  onUnfollow={() => unfollowUser(post.user)}
-                  onToggleMenu={() => setOpenMenuId(openMenuId === post.id ? null : post.id)}
-                  onEdit={() => openEdit(post)}
-                  onArchive={() => toggleArchive(post.id)}
-                  onDelete={() => deletePost(post.id)}
-                  onToggleLike={() => { void toggleLike(post.id); }}
-                  onComment={() => { setDetailPostId(post.id); setScrollToComment(true); }}
-                  onShare={() => { void openShareModal(post); }}
-                  onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(post, placeRef)}
-                  currentUserId={MY_USER}
-                  ensureCourseLoaded={ensureCourseLoaded}
-                  onOpenLinkedCourse={(course, readOnly) => openSavedCourse(course, { readOnly })}
-                  onLinkedCourseUnavailable={() => showToast("코스를 불러올 수 없어요", "error")}
-                />
-              ))}
+              {filteredHomeFeedPosts.length > 0 && (
+                <PostGrid columns={2} className="homeFeedGrid">
+                  {filteredHomeFeedPosts.map((post) => (
+                    <PostGridCell
+                      key={post.id}
+                      variant="home"
+                      imageUrl={post.images[0]}
+                      titleLine={(post.title || post.comment || post.placeName || "").trim()}
+                      placeName={post.placeName}
+                      address={post.address}
+                      likeCount={post.likes_count}
+                      imageCount={post.images.length}
+                      showUsername
+                      showMultiIcon
+                      username={post.user}
+                      onProfileClick={() => router.push(`/profile/${encodeURIComponent(post.user)}`)}
+                      onClick={() => setDetailPostId(post.id)}
+                    />
+                  ))}
+                </PostGrid>
+              )}
               </div>
             </div>
           )}
