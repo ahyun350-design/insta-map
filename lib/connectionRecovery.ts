@@ -3,8 +3,8 @@ import { debugLog } from "./debugLog";
 
 const WARMUP_TIMEOUT_MS = 5_000;
 const REFRESH_RETRY_TIMEOUT_MS = 5_000;
-const DEFAULT_RETRY_TIMEOUTS = [2000, 2000, 4000] as const;
-const DEFAULT_RETRY_BACKOFFS_MS = [0, 300] as const;
+const DEFAULT_RETRY_TIMEOUTS = [3000, 3000, 5000] as const;
+const DEFAULT_RETRY_BACKOFFS_MS = [0, 1000] as const;
 
 /** 내부 측정용 — 사용자 노출 없음 */
 export const connectionFailureCountRef = { current: 0 };
@@ -119,7 +119,7 @@ export async function withAutoRetry<T>(
   throw lastError;
 }
 
-const MESSAGE_SEND_AUTO_RETRY_DELAY_MS = 500;
+const MESSAGE_SEND_AUTO_RETRY_DELAY_MS = 1500;
 
 export function isNavigatorOnline(): boolean {
   return typeof navigator === "undefined" || navigator.onLine;
@@ -130,7 +130,7 @@ export type MessageSendRecoveryOptions = {
   onBeforeAutoRetry?: () => void;
 };
 
-/** withAutoRetry 1회 소진 후 연결 OK면 0.5초 대기 뒤 withAutoRetry 1회 추가 (메시지 전송 거짓 실패 완화) */
+/** withAutoRetry 1회 소진 후 연결 OK면 1.5초 대기 뒤 withAutoRetry 1회 추가 (메시지 전송 거짓 실패 완화) */
 export async function withAutoRetryAndMessageSendRecovery<T>(
   fn: (signal: AbortSignal) => Promise<T>,
   opts?: MessageSendRecoveryOptions,
