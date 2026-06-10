@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
 
@@ -27,6 +27,20 @@ export function HomeSearchScreen({
   const { height: keyboardHeight } = useNativeKeyboard();
   const trimmedDebounced = debouncedQuery.trim();
   const hasQuery = trimmedDebounced.length > 0;
+
+  const dismissKeyboard = useCallback(() => {
+    if (document.activeElement === inputRef.current) {
+      inputRef.current?.blur();
+    }
+  }, []);
+
+  const handleSearchSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      inputRef.current?.blur();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -98,9 +112,10 @@ export function HomeSearchScreen({
               />
             </svg>
           </button>
-          <label
+          <form
             className="homeFeedSearchField"
             style={{ flex: 1, minWidth: 0, margin: 0 }}
+            onSubmit={handleSearchSubmit}
           >
             <svg className="homeFeedSearchIcon" width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
               <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.75" />
@@ -112,6 +127,12 @@ export function HomeSearchScreen({
               className="homeFeedSearchInput"
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  inputRef.current?.blur();
+                }
+              }}
               placeholder="장소·키워드 검색"
               enterKeyHint="search"
               autoComplete="off"
@@ -128,7 +149,7 @@ export function HomeSearchScreen({
                 ×
               </button>
             )}
-          </label>
+          </form>
           <button
             type="button"
             onClick={onClose}
@@ -150,6 +171,8 @@ export function HomeSearchScreen({
       </header>
 
       <div
+        onScroll={dismissKeyboard}
+        onTouchStart={dismissKeyboard}
         style={{
           flex: 1,
           minHeight: 0,
