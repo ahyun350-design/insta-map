@@ -119,6 +119,35 @@ export async function withAutoRetry<T>(
   throw lastError;
 }
 
+const MESSAGE_SEND_AUTO_RETRY_DELAY_MS = 1500;
+
+export function isNavigatorOnline(): boolean {
+  return typeof navigator === "undefined" || navigator.onLine;
+}
+
+export type MessageSendRecoveryOptions = {
+  isConnectionLikelyOk?: () => boolean | Promise<boolean>;
+  onBeforeAutoRetry?: () => void;
+};
+
+/** withAutoRetry 1회 소진 후 연결 OK면 1.5초 대기 뒤 withAutoRetry 1회 추가 (메시지 전송 거짓 실패 완화) */
+export async function withAutoRetryAndMessageSendRecovery<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  opts?: MessageSendRecoveryOptions,
+): Promise<T> {
+  try {
+    return await withAutoRetry(fn);
+  } catch (firstErr) {
+    const ok = opts?.isConnectionLikelyOk
+      ? await Promise.resolve(opts.isConnectionLikelyOk())
+      : isNavigatorOnline();
+    if (!ok) throw firstErr;
+    opts?.onBeforeAutoRetry?.();
+    await delay(MESSAGE_SEND_AUTO_RETRY_DELAY_MS);
+    return await withAutoRetry(fn);
+  }
+}
+
 export async function runExtraRefreshSession(): Promise<void> {
   const refreshT = Date.now();
   try {

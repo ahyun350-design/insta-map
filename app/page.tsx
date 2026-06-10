@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { debugLog, dlog } from "@/lib/debugLog";
-import { withAutoRetry } from "@/lib/connectionRecovery";
+import { withAutoRetry, withAutoRetryAndMessageSendRecovery } from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import FeedSkeleton from "@/components/FeedSkeleton";
@@ -2912,6 +2912,28 @@ function HomePageContent() {
     chatOlderHasMoreRef.current = chatOlderHasMore;
   }, [messages, chatOlderHasMore]);
 
+  /** A: navigator.onLine + C: 채팅 Realtime 채널 joined 여부 (가벼운 health check) */
+  const isMessageSendConnectionLikelyOk = useCallback((): boolean => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+    const channels = [globalMessagesChannelRef.current, roomChannelRef.current].filter(Boolean) as {
+      state?: string;
+    }[];
+    if (channels.length === 0) return true;
+    return channels.some((ch) => ch.state === "joined");
+  }, []);
+
+  const insertMessageWithSendRecovery = useCallback(
+    (
+      insertFn: (signal: AbortSignal) => Promise<unknown>,
+      onBeforeAutoRetry?: () => void,
+    ) =>
+      withAutoRetryAndMessageSendRecovery(insertFn, {
+        isConnectionLikelyOk: isMessageSendConnectionLikelyOk,
+        onBeforeAutoRetry,
+      }),
+    [isMessageSendConnectionLikelyOk],
+  );
+
   /** WKWebView 키보드 후 window/document 스크롤만 리셋. 메시지 목록(overflow-y)은 별도 컨테이너라 영향 없음. */
   const resetWindowScrollAfterChatKeyboard = useCallback(() => {
     chatComposerInputRef.current?.blur();
@@ -2962,16 +2984,24 @@ function HomePageContent() {
       } catch {
         /* ignore */
       }
-      await withAutoRetry((signal) =>
-        Promise.resolve(
-          supabase
-            .from("messages")
-            .insert({ id, room_id: roomId, sender_id: senderId, text, read: false })
-            .abortSignal(signal),
-        ).then((r) => {
-          if (r.error) throw r.error;
-          return r;
-        }),
+      await insertMessageWithSendRecovery(
+        (signal) =>
+          Promise.resolve(
+            supabase
+              .from("messages")
+              .insert({ id, room_id: roomId, sender_id: senderId, text, read: false })
+              .abortSignal(signal),
+          ).then((r) => {
+            if (r.error) throw r.error;
+            return r;
+          }),
+        () => {
+          try {
+            debugLog.pushSendStep("auto_retry_wait");
+          } catch {
+            /* ignore */
+          }
+        },
       );
       try {
         debugLog.pushSendStep("insert_ok", Date.now() - insertT);
@@ -3364,7 +3394,7 @@ function HomePageContent() {
     try {
       const shareText = buildCourseShareText(sharingCourse);
       const msgId = Date.now().toString();
-      await withAutoRetry((signal) =>
+      await insertMessageWithSendRecovery((signal) =>
         Promise.resolve(
           supabase
             .from("messages")
