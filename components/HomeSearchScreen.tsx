@@ -55,15 +55,7 @@ export function HomeSearchScreen({
       role="dialog"
       aria-modal="true"
       aria-label="큐레이션 검색"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 100000,
-        background: "#fff",
-        display: "flex",
-        flexDirection: "column",
-        boxSizing: "border-box",
-      }}
+      className="homeSearchScreen"
     >
       <header
         style={{
@@ -171,13 +163,10 @@ export function HomeSearchScreen({
       </header>
 
       <div
+        className="homeSearchScroll"
         onScroll={dismissKeyboard}
         onTouchStart={dismissKeyboard}
         style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          WebkitOverflowScrolling: "touch",
           paddingBottom:
             keyboardHeight > 0
               ? `${keyboardHeight + 16}px`
