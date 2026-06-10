@@ -17,6 +17,9 @@ const config: CapacitorConfig = {
     Keyboard: {
       resize: KeyboardResize.None,
     },
+    FirebaseMessaging: {
+      presentationOptions: [],
+    },
   },
 };
 
