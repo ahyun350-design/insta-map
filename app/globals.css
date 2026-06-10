@@ -671,6 +671,11 @@ body {
   padding: 0;
 }
 
+.homeSearchFeedGrid {
+  padding: 0 16px 8px;
+  box-sizing: border-box;
+}
+
 .postGridCellHomeTitle {
   margin: 0;
   font-size: 13px;

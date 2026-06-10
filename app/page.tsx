@@ -40,7 +40,7 @@ import { feedPostMatchesCategoryFilter, getDisplayCategories } from "@/lib/categ
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
-import { FeedPostCard, FeedPostMedia } from "@/components/FeedPostCard";
+import { FeedPostMedia } from "@/components/FeedPostCard";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
@@ -5014,6 +5014,9 @@ function HomePageContent() {
     }
     if (searchParams?.get("tab") === "home" && !searchParams?.get("postId")) {
       setActiveTab("home");
+      if (searchParams.get("openHomeSearch") === "1") {
+        setIsHomeSearchOpen(true);
+      }
       window.history.replaceState({}, "", "/");
     }
   }, [searchParams]);
@@ -8764,40 +8767,27 @@ function HomePageContent() {
             description="다른 키워드로 검색해보세요"
           />
         ) : (
-          homeSearchResultPosts.map((post) => (
-            <FeedPostCard
-              key={post.id}
-              post={post}
-              myUsername={MY_USERNAME}
-              isFollowing={!!post.userId && followingIds.includes(post.userId)}
-              menuOpen={openMenuId === post.id}
-              timeAgoLabel={timeAgo(post.createdAt)}
-              categoryPin={CATEGORY_PIN}
-              onCardClick={() => setDetailPostId(post.id)}
-              onProfileClick={() => router.push(`/profile/${encodeURIComponent(post.user)}`)}
-              onFollow={() => followUser(post.user)}
-              onUnfollow={() => unfollowUser(post.user)}
-              onToggleMenu={() => setOpenMenuId(openMenuId === post.id ? null : post.id)}
-              onEdit={() => openEdit(post)}
-              onArchive={() => toggleArchive(post.id)}
-              onDelete={() => deletePost(post.id)}
-              onToggleLike={() => {
-                void toggleLike(post.id);
-              }}
-              onComment={() => {
-                setDetailPostId(post.id);
-                setScrollToComment(true);
-              }}
-              onShare={() => {
-                void openShareModal(post);
-              }}
-              onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(post, placeRef)}
-              currentUserId={MY_USER}
-              ensureCourseLoaded={ensureCourseLoaded}
-              onOpenLinkedCourse={(course, readOnly) => openSavedCourse(course, { readOnly })}
-              onLinkedCourseUnavailable={() => showToast("코스를 불러올 수 없어요", "error")}
-            />
-          ))
+          <PostGrid columns={2} className="homeFeedGrid homeSearchFeedGrid">
+            {homeSearchResultPosts.map((post) => (
+              <PostGridCell
+                key={post.id}
+                variant="home"
+                imageUrl={post.images[0]}
+                titleLine={(post.title || post.comment || post.placeName || "").trim()}
+                placeName={post.placeName}
+                address={post.address}
+                likeCount={post.likes_count}
+                imageCount={post.images.length}
+                showUsername
+                showMultiIcon
+                username={post.user}
+                onProfileClick={() =>
+                  router.push(`/profile/${encodeURIComponent(post.user)}?from=search`)
+                }
+                onClick={() => setDetailPostId(post.id)}
+              />
+            ))}
+          </PostGrid>
         )}
       </HomeSearchScreen>
     )}

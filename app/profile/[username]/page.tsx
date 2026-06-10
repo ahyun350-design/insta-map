@@ -342,6 +342,10 @@ export default function ProfilePage() {
                 router.push("/?tab=home");
                 return;
               }
+              if (from === "search") {
+                router.push("/?tab=home&openHomeSearch=1");
+                return;
+              }
               router.back();
             }}
             style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
