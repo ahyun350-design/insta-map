@@ -8,3 +8,6 @@ yarn-error.log*
 pnpm-debug.log*
 app/page.tsx.backup
 app/page.tsx.backup2
+ios/App/App/KakaoMapKeys.plist
+spike/v7-native-map/plugin/.build
+spike/v7-native-map/plugin/.swiftpm
