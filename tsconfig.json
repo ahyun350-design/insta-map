@@ -19,7 +19,8 @@
     "incremental": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@pindmap/native-map": ["./spike/v7-native-map/plugin/src/index.ts"]
     },
     "plugins": [
       {
