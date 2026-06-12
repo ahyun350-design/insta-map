@@ -108,13 +108,39 @@ export function __setNativeMapPluginResolverForTests(resolver: PluginResolver | 
   pluginResolver = resolver ?? (() => PindmapNativeMap);
 }
 
+export type NativeMapDiagnostics = {
+  available: boolean;
+  isBrowser: boolean;
+  isNativePlatform: boolean;
+  platform: string;
+};
+
 /**
  * iOS Capacitor app with PindmapNativeMap plugin linked.
  * False on web, SSR, and non-iOS native shells.
  */
 export function isNativeMapAvailable(): boolean {
-  if (!isBrowser()) return false;
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "ios";
+  return getNativeMapDiagnostics().available;
+}
+
+/** V-7-1 debug: Safari Web Inspector / on-screen strip */
+export function getNativeMapDiagnostics(): NativeMapDiagnostics {
+  if (!isBrowser()) {
+    return {
+      available: false,
+      isBrowser: false,
+      isNativePlatform: false,
+      platform: "ssr",
+    };
+  }
+  const isNativePlatform = Capacitor.isNativePlatform();
+  const platform = Capacitor.getPlatform();
+  return {
+    available: isNativePlatform && platform === "ios",
+    isBrowser: true,
+    isNativePlatform,
+    platform,
+  };
 }
 
 /**

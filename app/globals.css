@@ -2868,6 +2868,98 @@ body {
   padding-right: max(20px, env(safe-area-inset-right, 0px));
 }
 
+/* V-7-1: 확장 지도 Kakao Native 비교 슬롯 (상단 50%, JS API 하단과 병행) */
+.extendedNativeMapSlot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 50%;
+  z-index: 2;
+  pointer-events: none;
+  background: transparent;
+}
+
+.extendedNativeMapDivider {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(26, 42, 122, 0.35), transparent);
+}
+
+.extendedNativeMapBadge {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  pointer-events: none;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a2a7a;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.expandedNativeMapToggle {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  border-radius: 20px;
+  padding: 0 12px;
+  min-height: 40px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.expandedNativeMapToggleOn {
+  border-color: #1a2a7a;
+  background: #1a2a7a;
+  color: #fff;
+}
+
+/* V-7-1 debug: 토글·번들 확인용 (검증 후 제거 가능) */
+.expandedNativeMapDebugStrip {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #7c2d12;
+  background: #fff7ed;
+  border-bottom: 1px solid #fdba74;
+  text-align: center;
+}
+
+.expandedNativeMapDebugHint {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.expandedNativeMapToggleDebug {
+  border-width: 2px;
+  border-color: #e11d48;
+  min-width: 76px;
+  min-height: 44px;
+  font-size: 13px;
+}
+
+.expandedNativeMapToggleDebug:disabled {
+  opacity: 0.55;
+  border-color: #9ca3af;
+  color: #6b7280;
+  background: #f3f4f6;
+  cursor: not-allowed;
+}
+
 .tabItem {
   flex: 1 1 0;
   min-width: 0;

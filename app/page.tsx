@@ -19,6 +19,14 @@ import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
+import {
+  createNativeMap,
+  destroyNativeMap,
+  getNativeMapDiagnostics,
+  isNativeMapAvailable,
+  setNativeCamera,
+  setNativeMapDebug,
+} from "@/lib/nativeMap";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
@@ -125,6 +133,62 @@ function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): C
 }
 type Place = { id: string; name: string; address: string; category: Category; lat?: number; lng?: number };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
+
+/** autoload=false: script onload 후 maps.load() 완료 전에는 LatLng 등이 없음 */
+function isKakaoMapsApiReady(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return typeof window.kakao?.maps?.LatLng === "function";
+  } catch {
+    return false;
+  }
+}
+
+/** maps.load 콜백·readyState 폴링 (LAN IP origin silent fail 진단용) */
+function beginKakaoMapsLoad(onReady: () => void): void {
+  if (!window.kakao?.maps) {
+    console.error("[PindMap:kakao] beginKakaoMapsLoad — no window.kakao.maps");
+    return;
+  }
+  const origin = window.location.origin;
+  const readyState = (window.kakao.maps as { readyState?: number }).readyState;
+  console.log("[PindMap:kakao] calling maps.load()", { origin, readyState });
+
+  let polls = 0;
+  const pollId = window.setInterval(() => {
+    polls += 1;
+    const rs = (window.kakao?.maps as { readyState?: number })?.readyState;
+    console.log("[PindMap:kakao] maps.load poll", {
+      polls,
+      readyState: rs,
+      hasLatLng: isKakaoMapsApiReady(),
+      origin,
+    });
+    if (isKakaoMapsApiReady()) {
+      window.clearInterval(pollId);
+    } else if (polls >= 30) {
+      window.clearInterval(pollId);
+      console.error("[PindMap:kakao] maps.load stalled 30s — origin may be blocked by Kakao domain auth", {
+        origin,
+        hint: "Use Railway HTTPS staging, not http://192.168.x.x LAN IP",
+      });
+    }
+  }, 1000);
+
+  try {
+    window.kakao.maps.load(() => {
+      window.clearInterval(pollId);
+      console.log("[PindMap:kakao] maps.load callback fired", {
+        hasLatLng: isKakaoMapsApiReady(),
+        readyState: (window.kakao?.maps as { readyState?: number })?.readyState,
+      });
+      onReady();
+    });
+  } catch (err) {
+    window.clearInterval(pollId);
+    console.error("[PindMap:kakao] maps.load threw", err);
+  }
+}
 type Comment = { id: string; user: string; userId?: string; avatarUrl?: string; text: string; createdAt: string };
 type PostImageItem = {
   id: string;
@@ -805,6 +869,10 @@ function HomePageContent() {
   /** 지도 탭 작은 지도 패널에 Map 인스턴스 생성까지 완료 */
   const [compactMapReady, setCompactMapReady] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
+  /** V-7-1: 확장 지도 상단 50% Kakao Native 오버레이 (iOS만, JS API와 병행) */
+  const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
+  const [expandedNativeMapId, setExpandedNativeMapId] = useState<string | null>(null);
+  const [expandedNativeMapDiag, setExpandedNativeMapDiag] = useState(() => getNativeMapDiagnostics());
   /** 확장 지도 인스턴스가 생길 때마다 증가 — 핀만 별도 effect에서 단일 경로로 그리기 */
   const [expandedMapPinsTick, setExpandedMapPinsTick] = useState(0);
   const [showJobsModal, setShowJobsModal] = useState(false);
@@ -1002,6 +1070,8 @@ function HomePageContent() {
   const lastExpandedSearchPlacesRef = useRef<any[]>([]);
   /** effect 정리 시 DOM/카카오 리스너 제거 */
   const expandedMapInteractionCleanupRef = useRef<(() => void) | null>(null);
+  const expandedNativeMapIdRef = useRef<string | null>(null);
+  expandedNativeMapIdRef.current = expandedNativeMapId;
   const feedPostsRef = useRef<FeedPost[]>(feedPosts);
   feedPostsRef.current = feedPosts;
   const savedPlacesRef = useRef<Place[]>(savedPlaces);
@@ -4807,13 +4877,15 @@ function HomePageContent() {
       return;
     }
     const notifySdkReady = () => {
+      console.log("[PindMap:kakao] maps.load ready", {
+        hasLatLng: isKakaoMapsApiReady(),
+        origin: typeof window !== "undefined" ? window.location.origin : "ssr",
+      });
       setIsKakaoMapLoaded(true);
       setKakaoStatus("ready");
     };
     if (window.kakao?.maps) {
-      window.kakao.maps.load(() => {
-        notifySdkReady();
-      });
+      beginKakaoMapsLoad(notifySdkReady);
       return;
     }
     const existing = document.querySelector<HTMLScriptElement>("script[data-pindmap-kakao]");
@@ -4824,9 +4896,7 @@ function HomePageContent() {
           setKakaoStatus("error");
           return;
         }
-        window.kakao.maps.load(() => {
-          notifySdkReady();
-        });
+        beginKakaoMapsLoad(notifySdkReady);
       };
       if (window.kakao?.maps || existing.getAttribute("data-loaded") === "1") {
         done();
@@ -4841,8 +4911,17 @@ function HomePageContent() {
     script.setAttribute("data-pindmap-kakao", "1");
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${mapKey}&autoload=false&libraries=services`;
     script.async = true;
+    console.log("[PindMap:kakao] injecting sdk.js", {
+      origin: window.location.origin,
+      hasKey: Boolean(mapKey),
+    });
     const failTimer = window.setTimeout(() => {
-      if (!window.kakao?.maps) {
+      if (!isKakaoMapsApiReady()) {
+        console.error("[PindMap:kakao] sdk load timeout (25s)", {
+          hasKakao: Boolean(window.kakao),
+          hasMaps: Boolean(window.kakao?.maps),
+          hasLatLng: isKakaoMapsApiReady(),
+        });
         setIsKakaoMapLoaded(false);
         setKakaoStatus("error");
       }
@@ -4850,17 +4929,20 @@ function HomePageContent() {
     script.onload = () => {
       window.clearTimeout(failTimer);
       script.setAttribute("data-loaded", "1");
+      console.log("[PindMap:kakao] script onload", {
+        hasMaps: Boolean(window.kakao?.maps),
+        hasLatLng: isKakaoMapsApiReady(),
+      });
       if (!window.kakao?.maps) {
         setIsKakaoMapLoaded(false);
         setKakaoStatus("error");
         return;
       }
-      window.kakao.maps.load(() => {
-        notifySdkReady();
-      });
+      beginKakaoMapsLoad(notifySdkReady);
     };
-    script.onerror = () => {
+    script.onerror = (event) => {
       window.clearTimeout(failTimer);
+      console.error("[PindMap:kakao] script onerror", event);
       setIsKakaoMapLoaded(false);
       setKakaoStatus("error");
     };
@@ -4932,10 +5014,10 @@ function HomePageContent() {
 
   // 탭 전환 시 지도 relayout
   useEffect(() => {
-    if (activeTab !== "map" || !mapRef.current) return;
+    if (activeTab !== "map" || !mapRef.current || kakaoStatus !== "ready") return;
     const relayoutTimers = [100, 300, 600].map((delay) => setTimeout(() => {
       const map = mapRef.current;
-      if (!map) return;
+      if (!map || !isKakaoMapsApiReady()) return;
       map.relayout();
       const container = mapContainerRef.current;
       const parent = container?.parentElement;
@@ -4945,7 +5027,7 @@ function HomePageContent() {
       }
     }, delay));
     return () => relayoutTimers.forEach(clearTimeout);
-  }, [activeTab]);
+  }, [activeTab, kakaoStatus]);
 
   useEffect(() => {
     if (activeTab !== "map") return;
@@ -5440,11 +5522,13 @@ function HomePageContent() {
   }, [mapExpanded]);
 
   useEffect(() => {
-    if (!mapExpanded || !mapExpandedRef.current || !window.kakao?.maps) return undefined;
+    if (!mapExpanded || !mapExpandedRef.current || kakaoStatus !== "ready" || !isKakaoMapsApiReady()) {
+      return undefined;
+    }
 
     let cancelled = false;
     const tid = window.setTimeout(() => {
-      if (cancelled || !mapExpandedRef.current) return;
+      if (cancelled || !mapExpandedRef.current || !isKakaoMapsApiReady()) return;
       const mapContainerEl = mapExpandedRef.current;
       expandedMapRef.current = new window.kakao.maps.Map(mapContainerEl, {
         center: mapRef.current?.getCenter() ?? new window.kakao.maps.LatLng(37.5665, 126.978),
@@ -5619,7 +5703,7 @@ function HomePageContent() {
       mapSearchResultPinsRef.current = [];
       myLocationMarkerRef.current.expanded = null;
     };
-  }, [mapExpanded, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace]);
+  }, [mapExpanded, kakaoStatus, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace]);
 
   useEffect(() => {
     console.log("[expanded effect]", "tick:", expandedMapPinsTick, "savedPlaces.length:", savedPlaces.length);
@@ -5644,8 +5728,124 @@ function HomePageContent() {
       lastSearchCenterRef.current = null;
       mapSearchKeywordRef.current = "";
       pendingSearchCenterSyncRef.current = false;
+      setExpandedNativeMapEnabled(false);
+      setExpandedNativeMapId(null);
     }
   }, [mapExpanded]);
+
+  /** V-7-1 debug: 확장 지도 진입 시 Capacitor 환경 로그 (Safari Web Inspector) */
+  useEffect(() => {
+    if (!mapExpanded) return;
+    setNativeMapDebug(true);
+    const diag = getNativeMapDiagnostics();
+    setExpandedNativeMapDiag(diag);
+    console.log("[V7-1 nativeMap] expanded map open", diag);
+  }, [mapExpanded]);
+
+  /** V-7-1: 확장 지도 Native 슬롯 mount / unmount */
+  useEffect(() => {
+    const EXTENDED_NATIVE_MAP_SLOT_ID = "extended-map-slot";
+
+    if (!mapExpanded || !expandedNativeMapEnabled || !isNativeMapAvailable()) {
+      const staleId = expandedNativeMapIdRef.current;
+      if (staleId) {
+        void destroyNativeMap(staleId);
+        setExpandedNativeMapId(null);
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    const mountNativeMap = () => {
+      if (cancelled) return;
+      const map = expandedMapRef.current;
+      let lat = 37.5665;
+      let lng = 126.978;
+      let zoom = 9;
+      try {
+        if (map?.getCenter) {
+          const center = map.getCenter();
+          lat = center.getLat();
+          lng = center.getLng();
+          zoom = typeof map.getLevel === "function" ? map.getLevel() : 9;
+        }
+      } catch {
+        /* noop */
+      }
+
+      void createNativeMap({
+        elementId: EXTENDED_NATIVE_MAP_SLOT_ID,
+        lat,
+        lng,
+        zoom,
+        provider: "kakao",
+      }).then((result) => {
+        if (cancelled) {
+          void destroyNativeMap(result.mapId);
+          return;
+        }
+        setExpandedNativeMapId(result.mapId);
+      });
+    };
+
+    const tid = window.setTimeout(mountNativeMap, 280);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(tid);
+      const id = expandedNativeMapIdRef.current;
+      setExpandedNativeMapId(null);
+      if (id) void destroyNativeMap(id);
+    };
+  }, [mapExpanded, expandedNativeMapEnabled]);
+
+  /** V-7-1: JS 카카오맵 pan/zoom → Native 카메라 (단방향, idle) */
+  useEffect(() => {
+    if (
+      !mapExpanded ||
+      !expandedNativeMapEnabled ||
+      !expandedNativeMapId ||
+      expandedNativeMapId === "unavailable" ||
+      !expandedMapRef.current ||
+      !window.kakao?.maps
+    ) {
+      return undefined;
+    }
+
+    const map = expandedMapRef.current;
+    const mapId = expandedNativeMapId;
+
+    const syncJsCameraToNative = () => {
+      try {
+        const center = map.getCenter();
+        if (!center) return;
+        void setNativeCamera(
+          mapId,
+          {
+            lat: center.getLat(),
+            lng: center.getLng(),
+            zoom: map.getLevel(),
+            animated: false,
+          },
+          { silent: true },
+        );
+      } catch {
+        /* noop */
+      }
+    };
+
+    syncJsCameraToNative();
+    const listener = window.kakao.maps.event.addListener(map, "idle", syncJsCameraToNative);
+
+    return () => {
+      try {
+        window.kakao.maps.event.removeListener(listener);
+      } catch {
+        /* noop */
+      }
+    };
+  }, [mapExpanded, expandedNativeMapEnabled, expandedNativeMapId]);
 
   useEffect(() => { if (!openMenuId) return; const handler = () => setOpenMenuId(null); document.addEventListener("click", handler); return () => document.removeEventListener("click", handler); }, [openMenuId]);
 
@@ -7718,6 +7918,12 @@ function HomePageContent() {
                     <p style={{ margin: 0, fontSize: "11px", color: "#7a849e", textAlign: "center", paddingInline: "12px" }}>
                       {kakaoStatus !== "ready" ? "카카오맵 SDK를 불러오고 있어요" : "지도를 그리고 있어요"}
                     </p>
+                    {kakaoStatus !== "ready" && (
+                      <p style={{ margin: 0, fontSize: "10px", color: "#b45309", textAlign: "center", paddingInline: "8px" }}>
+                        V7-1 debug · kakao={kakaoStatus} · jsKey={mapKey ? "set" : "MISSING"} · latLng=
+                        {isKakaoMapsApiReady() ? "ready" : "wait"}
+                      </p>
+                    )}
                   </div>
                 )}
                 <div
@@ -7798,6 +8004,21 @@ function HomePageContent() {
                       </button>
                       <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
                     </div>
+                    <div className="expandedNativeMapDebugStrip" aria-live="polite">
+                      V7-1 · JS번들 확인 · native=
+                      {expandedNativeMapDiag.available ? "true" : "false"} · platform=
+                      {expandedNativeMapDiag.platform} · capNative=
+                      {expandedNativeMapDiag.isNativePlatform ? "true" : "false"} · kakao=
+                      {kakaoStatus} · latLng={isKakaoMapsApiReady() ? "ready" : "wait"} · jsKey=
+                      {mapKey ? "set" : "MISSING"} · nativeToggle=
+                      {expandedNativeMapEnabled ? "ON" : "OFF"}
+                      {!expandedNativeMapDiag.available && (
+                        <span className="expandedNativeMapDebugHint">
+                          {" "}
+                          (Railway 배포 또는 server.url 끄고 재빌드 필요할 수 있음)
+                        </span>
+                      )}
+                    </div>
                     <div
                       style={{
                         padding: "12px 20px",
@@ -7849,9 +8070,38 @@ function HomePageContent() {
                           <line x1="9.5" y1="9.5" x2="13" y2="13" stroke="white" strokeWidth="1.3" strokeLinecap="round" />
                         </svg>
                       </button>
+                      <button
+                        type="button"
+                        className={
+                          expandedNativeMapEnabled
+                            ? "expandedNativeMapToggle expandedNativeMapToggleOn expandedNativeMapToggleDebug"
+                            : "expandedNativeMapToggle expandedNativeMapToggleDebug"
+                        }
+                        aria-pressed={expandedNativeMapEnabled}
+                        disabled={!expandedNativeMapDiag.available}
+                        title={
+                          expandedNativeMapDiag.available
+                            ? "Kakao Native 지도 (상단 50%)"
+                            : `Native unavailable (platform=${expandedNativeMapDiag.platform})`
+                        }
+                        onClick={() => {
+                          if (!expandedNativeMapDiag.available) return;
+                          setExpandedNativeMapEnabled((on) => !on);
+                        }}
+                        style={{ flexShrink: 0 }}
+                      >
+                        {expandedNativeMapEnabled ? "Native ON" : "Native"}
+                      </button>
                     </div>
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
+                      {expandedNativeMapEnabled && isNativeMapAvailable() && (
+                        <>
+                          <div id="extended-map-slot" className="extendedNativeMapSlot" aria-hidden />
+                          <div className="extendedNativeMapDivider" aria-hidden />
+                          <span className="extendedNativeMapBadge">Kakao Native · 상단 50%</span>
+                        </>
+                      )}
                       <MapResearchAreaButton visible={showMapResearchButton} onResearch={handleResearchThisArea} />
                       {selectedPlace && renderPlaceCard()}
                       {isMapSearchSheetOpen && mapSearchResults.length > 0 && (
