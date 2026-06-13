@@ -1404,7 +1404,9 @@ function HomePageContent() {
     try {
       const destLat = Number(destination.lat);
       const destLng = Number(destination.lng);
-      if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) return;
+      if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+        return;
+      }
 
       const fetchAndDrawRoute = async (origin: { lat: number; lng: number }) => {
         const res = await fetch("/api/directions", {
