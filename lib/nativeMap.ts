@@ -5,11 +5,21 @@ import type {
   MarkerInput,
   NativeMapProvider,
   PindmapNativeMapPlugin,
+  PresentFullscreenMapOptions,
   SetCameraOptions,
+  SetFullscreenCameraOptions,
+  UpdateFullscreenMarkersOptions,
 } from "@pindmap/native-map";
 
 /** Re-export plugin types for Step 3 consumers */
-export type { NativeMapProvider, CreateMapOptions, SetCameraOptions };
+export type {
+  NativeMapProvider,
+  CreateMapOptions,
+  SetCameraOptions,
+  PresentFullscreenMapOptions,
+  UpdateFullscreenMarkersOptions,
+  SetFullscreenCameraOptions,
+};
 
 export type CreateNativeMapOptions = {
   elementId: string;
@@ -51,6 +61,8 @@ export type NativeMarkerInput = {
   lat: number;
   lng: number;
   title?: string;
+  address?: string;
+  category?: string;
 };
 
 const DEFAULT_PROVIDER: NativeMapProvider = "kakao";
@@ -319,9 +331,17 @@ export function setNativeMarkerClickHandler(id: string, cb: (id: string) => void
   ensureMarkerClickListener();
 }
 
-/** Clear all native marker click handlers (does not remove the plugin listener). */
-export function clearNativeMarkerClickHandlers(): void {
-  markerClickHandlers.clear();
+/** Clear native marker click handlers (does not remove the plugin listener). */
+export function clearNativeMarkerClickHandlers(prefix?: string): void {
+  if (!prefix) {
+    markerClickHandlers.clear();
+    return;
+  }
+  for (const id of markerClickHandlers.keys()) {
+    if (id.startsWith(prefix)) {
+      markerClickHandlers.delete(id);
+    }
+  }
 }
 
 /**
@@ -379,10 +399,14 @@ export async function removeNativeMarkers(
 }
 
 /**
- * Remove all native markers from the overlay.
+ * Remove native markers from the overlay.
+ * When `prefix` is set, only markers whose id starts with that prefix are removed.
  * No-op on web / SSR when `silent` is true (default).
  */
-export async function clearNativeMarkers(callOptions: NativeMapCallOptions = {}): Promise<void> {
+export async function clearNativeMarkers(
+  prefix?: string,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
   const silent = callOptions.silent ?? true;
 
   if (!isNativeMapAvailable()) {
@@ -391,10 +415,103 @@ export async function clearNativeMarkers(callOptions: NativeMapCallOptions = {})
   }
 
   try {
-    nativeMapLog("clearNativeMarkers");
-    await getPlugin().clearMarkers();
+    nativeMapLog("clearNativeMarkers", prefix ? { prefix } : undefined);
+    await getPlugin().clearMarkers(prefix ? { prefix } : {});
   } catch (err) {
     nativeMapWarn("clearNativeMarkers failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/**
+ * Present full-screen native map VC (verified lifecycle path — not WebView overlay).
+ */
+export async function presentFullscreenNativeMap(
+  options: PresentFullscreenMapOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "presentFullscreenNativeMap skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("presentFullscreenNativeMap", options);
+    await getPlugin().presentFullscreenMap(options);
+  } catch (err) {
+    nativeMapWarn("presentFullscreenNativeMap failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Dismiss the full-screen native map VC if presented. */
+export async function dismissFullscreenNativeMap(
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "dismissFullscreenNativeMap skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("dismissFullscreenNativeMap");
+    await getPlugin().dismissFullscreenMap();
+  } catch (err) {
+    nativeMapWarn("dismissFullscreenNativeMap failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Update markers on the full-screen native map VC. */
+export async function updateFullscreenNativeMarkers(
+  options: UpdateFullscreenMarkersOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "updateFullscreenNativeMarkers skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("updateFullscreenNativeMarkers", { count: options.markers.length, clearPrefix: options.clearPrefix });
+    await getPlugin().updateFullscreenMarkers(options);
+  } catch (err) {
+    nativeMapWarn("updateFullscreenNativeMarkers failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Move camera on the full-screen native map VC. */
+export async function setFullscreenNativeCamera(
+  options: SetFullscreenCameraOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "setFullscreenNativeCamera skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("setFullscreenNativeCamera", options);
+    await getPlugin().setFullscreenCamera(options);
+  } catch (err) {
+    nativeMapWarn("setFullscreenNativeCamera failed", err);
     if (!silent) {
       return Promise.reject(err);
     }

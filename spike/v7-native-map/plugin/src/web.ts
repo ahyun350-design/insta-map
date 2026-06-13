@@ -2,11 +2,17 @@ import { WebPlugin } from '@capacitor/core';
 import type { PluginListenerHandle } from '@capacitor/core';
 import type {
   AddMarkersOptions,
+  ClearMarkersOptions,
   CreateMapOptions,
   MarkerClickEvent,
+  FullscreenSearchEvent,
+  FullscreenMapDismissedEvent,
   PindmapNativeMapPlugin,
+  PresentFullscreenMapOptions,
   RemoveMarkersOptions,
   SetCameraOptions,
+  SetFullscreenCameraOptions,
+  UpdateFullscreenMarkersOptions,
 } from './definitions';
 
 /** Web fallback — spike UI only; production map stays Kakao JS API */
@@ -38,13 +44,36 @@ export class PindmapNativeMapWeb extends WebPlugin implements PindmapNativeMapPl
     console.warn('[PindmapNativeMap] web stub — removeMarkers noop');
   }
 
-  async clearMarkers(): Promise<void> {
+  async clearMarkers(_options?: ClearMarkersOptions): Promise<void> {
     console.warn('[PindmapNativeMap] web stub — clearMarkers noop');
   }
 
+  async presentNativeMapTest(): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — presentNativeMapTest noop (iOS only)');
+  }
+
+  async presentFullscreenMap(_options: PresentFullscreenMapOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — presentFullscreenMap noop (iOS only)');
+  }
+
+  async dismissFullscreenMap(): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — dismissFullscreenMap noop (iOS only)');
+  }
+
+  async updateFullscreenMarkers(_options: UpdateFullscreenMarkersOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — updateFullscreenMarkers noop (iOS only)');
+  }
+
+  async setFullscreenCamera(_options: SetFullscreenCameraOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — setFullscreenCamera noop (iOS only)');
+  }
+
   addListener(
-    eventName: 'markerClick',
-    listenerFunc: (event: MarkerClickEvent) => void,
+    eventName: 'markerClick' | 'fullscreenSearch' | 'fullscreenMapDismissed',
+    listenerFunc:
+      | ((event: MarkerClickEvent) => void)
+      | ((event: FullscreenSearchEvent) => void)
+      | ((event: FullscreenMapDismissedEvent) => void),
   ): Promise<PluginListenerHandle> & PluginListenerHandle {
     return super.addListener(eventName, listenerFunc) as Promise<PluginListenerHandle> & PluginListenerHandle;
   }

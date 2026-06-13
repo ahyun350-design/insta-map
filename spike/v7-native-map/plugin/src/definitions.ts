@@ -24,6 +24,7 @@ export interface MarkerInput {
   lat: number;
   lng: number;
   title?: string;
+  address?: string;
   category?: string;
 }
 
@@ -35,8 +36,40 @@ export interface RemoveMarkersOptions {
   ids: string[];
 }
 
+export interface ClearMarkersOptions {
+  prefix?: string;
+}
+
 export interface MarkerClickEvent {
   id: string;
+}
+
+export interface FullscreenSearchEvent {
+  query: string;
+}
+
+export interface FullscreenMapDismissedEvent {
+  /** Reserved for future dismiss reason */
+  reason?: string;
+}
+
+export interface PresentFullscreenMapOptions {
+  lat: number;
+  lng: number;
+  zoom?: number;
+  markers?: MarkerInput[];
+}
+
+export interface UpdateFullscreenMarkersOptions {
+  markers: MarkerInput[];
+  clearPrefix?: string;
+}
+
+export interface SetFullscreenCameraOptions {
+  lat: number;
+  lng: number;
+  zoom?: number;
+  animated?: boolean;
 }
 
 export interface PindmapNativeMapPlugin {
@@ -47,9 +80,24 @@ export interface PindmapNativeMapPlugin {
   getDebugInfo(): Promise<{ provider: string; frame: string }>;
   addMarkers(options: AddMarkersOptions): Promise<{ added: number }>;
   removeMarkers(options: RemoveMarkersOptions): Promise<void>;
-  clearMarkers(): Promise<void>;
+  clearMarkers(options?: ClearMarkersOptions): Promise<void>;
   addListener(
     eventName: 'markerClick',
     listenerFunc: (event: MarkerClickEvent) => void,
   ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'fullscreenSearch',
+    listenerFunc: (event: FullscreenSearchEvent) => void,
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'fullscreenMapDismissed',
+    listenerFunc: (event: FullscreenMapDismissedEvent) => void,
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  /** V-7-2 prototype: modal full-screen map with normal VC lifecycle (overlay-independent) */
+  presentNativeMapTest(): Promise<void>;
+  /** V-7-2 production: full-screen native map VC (verified lifecycle path) */
+  presentFullscreenMap(options: PresentFullscreenMapOptions): Promise<void>;
+  dismissFullscreenMap(): Promise<void>;
+  updateFullscreenMarkers(options: UpdateFullscreenMarkersOptions): Promise<void>;
+  setFullscreenCamera(options: SetFullscreenCameraOptions): Promise<void>;
 }

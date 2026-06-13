@@ -26,9 +26,14 @@ import {
   createNativeMap,
   destroyNativeMap,
   isNativeMapAvailable,
+  presentFullscreenNativeMap,
+  dismissFullscreenNativeMap,
+  updateFullscreenNativeMarkers,
+  setFullscreenNativeCamera,
   setNativeCamera,
   setNativeMarkerClickHandler,
 } from "@/lib/nativeMap";
+import { PindmapNativeMap } from "@pindmap/native-map";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
@@ -873,6 +878,10 @@ function HomePageContent() {
   const [mapExpanded, setMapExpanded] = useState(false);
   /** V-7-1: 확장 지도 상단 50% Kakao Native 오버레이 (iOS만, JS API와 병행) */
   const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
+  const fullscreenSearchListenerRegisteredRef = useRef(false);
+  const fullscreenDismissListenerRegisteredRef = useRef(false);
+  const fullscreenAutoOpenedRef = useRef(false);
+  const fullscreenGeocodeRunRef = useRef(0);
   const [expandedNativeMapId, setExpandedNativeMapId] = useState<string | null>(null);
   /** 확장 지도 인스턴스가 생길 때마다 증가 — 핀만 별도 effect에서 단일 경로로 그리기 */
   const [expandedMapPinsTick, setExpandedMapPinsTick] = useState(0);
@@ -1052,6 +1061,8 @@ function HomePageContent() {
   const searchPinPlaceByIdRef = useRef<Map<string, any>>(new Map());
   /** Native 검색 핀 id 목록 — clear 시 추적용 */
   const searchResultNativePinIdsRef = useRef<string[]>([]);
+  /** Native 저장 장소 핀 id → place (markerClick 복원용) */
+  const placePinByIdRef = useRef<Map<string, Place>>(new Map());
   const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
   const placePinsRunIdRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
   const locationRenderTokenRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
@@ -1146,8 +1157,8 @@ function HomePageContent() {
     lastExpandedSearchPlacesRef.current = [];
     searchPinPlaceByIdRef.current.clear();
     searchResultNativePinIdsRef.current = [];
-    void clearNativeMarkers();
-    clearNativeMarkerClickHandlers();
+    void clearNativeMarkers("search-");
+    clearNativeMarkerClickHandlers("search-");
   }, []);
 
   const addSearchResultPins = useCallback(
@@ -1159,7 +1170,7 @@ function HomePageContent() {
           lng: Number(place.x),
         }));
         searchPinPlaceByIdRef.current.clear();
-        clearNativeMarkerClickHandlers();
+        clearNativeMarkerClickHandlers("search-");
         nativeMarkers.forEach(({ id }, index) => {
           searchPinPlaceByIdRef.current.set(id, places[index]);
           setNativeMarkerClickHandler(id, () => {
@@ -1249,6 +1260,249 @@ function HomePageContent() {
       /* noop */
     }
   };
+
+  const runFullscreenNativeSearch = useCallback(async (query: string) => {
+    try {
+      const trimmed = query.trim();
+      if (!trimmed) return;
+      if (!window.kakao?.maps) return;
+
+      let biasLat = 37.5665;
+      let biasLng = 126.978;
+      try {
+        const map = expandedMapRef.current;
+        if (map?.getCenter) {
+          const center = map.getCenter();
+          biasLat = center.getLat();
+          biasLng = center.getLng();
+        } else if (myLocationLatLngRef.current) {
+          biasLat = myLocationLatLngRef.current.lat;
+          biasLng = myLocationLatLngRef.current.lng;
+        }
+      } catch {
+        /* noop */
+      }
+
+      const ps = new window.kakao.maps.services.Places();
+      const bias = new window.kakao.maps.LatLng(biasLat, biasLng);
+      const SortBy = window.kakao.maps.services.SortBy;
+      const keywordOpts: Record<string, unknown> = { location: bias };
+      if (SortBy?.DISTANCE != null) {
+        keywordOpts.sort = SortBy.DISTANCE;
+      }
+
+      await new Promise<void>((resolve) => {
+        ps.keywordSearch(trimmed, (data: any[], st: string) => {
+          void (async () => {
+            try {
+              if (st !== window.kakao.maps.services.Status.OK || !data?.length) {
+                resolve();
+                return;
+              }
+
+              const markers = data.slice(0, 15).flatMap((place, index) => {
+                const lat = Number(place.y);
+                const lng = Number(place.x);
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+                return [{
+                  id: `search-${index}`,
+                  lat,
+                  lng,
+                  title: String(place.place_name ?? ""),
+                  address: String(place.road_address_name || place.address_name || ""),
+                }];
+              });
+
+              if (markers.length === 0) {
+                resolve();
+                return;
+              }
+
+              await updateFullscreenNativeMarkers(
+                { markers, clearPrefix: "search-" },
+                { silent: false },
+              );
+
+              await setFullscreenNativeCamera({
+                lat: markers[0].lat,
+                lng: markers[0].lng,
+                zoom: 5,
+                animated: true,
+              });
+            } catch (err) {
+              console.error("[fullscreen] search post-process failed", err);
+            }
+            resolve();
+          })();
+        }, keywordOpts);
+      });
+    } catch (err) {
+      console.error("[fullscreen] search failed", err);
+    }
+  }, []);
+
+  const handleOpenFullscreenNativeMap = useCallback(async () => {
+    try {
+      const resolvePlaceCoords = (place: Place): LatLng | null => {
+        const stored = latLngFromRow(place);
+        if (stored) return stored;
+        const cached = savedPlaceCoordsRef.current[place.id];
+        if (
+          cached &&
+          typeof cached.lat === "number" &&
+          typeof cached.lng === "number" &&
+          Number.isFinite(cached.lat) &&
+          Number.isFinite(cached.lng)
+        ) {
+          return cached;
+        }
+        return null;
+      };
+
+      const placeToMarker = (place: Place, coords: LatLng) => ({
+        id: `place-${place.id}`,
+        lat: coords.lat,
+        lng: coords.lng,
+        category: place.category,
+        title: place.name,
+        address: place.address,
+      });
+
+      const initialMarkers = savedPlaces.flatMap((place) => {
+        const coords = resolvePlaceCoords(place);
+        return coords ? [placeToMarker(place, coords)] : [];
+      });
+
+      let lat = 37.5665;
+      let lng = 126.978;
+      const map = expandedMapRef.current;
+      try {
+        if (map?.getCenter) {
+          const center = map.getCenter();
+          lat = center.getLat();
+          lng = center.getLng();
+        } else if (initialMarkers.length > 0) {
+          lat = initialMarkers[0].lat;
+          lng = initialMarkers[0].lng;
+        }
+      } catch {
+        if (initialMarkers.length > 0) {
+          lat = initialMarkers[0].lat;
+          lng = initialMarkers[0].lng;
+        }
+      }
+
+      if (!fullscreenSearchListenerRegisteredRef.current) {
+        fullscreenSearchListenerRegisteredRef.current = true;
+        void PindmapNativeMap.addListener("fullscreenSearch", (e) => {
+          void runFullscreenNativeSearch(e.query);
+        }).catch((err) => {
+          fullscreenSearchListenerRegisteredRef.current = false;
+          console.error("[fullscreen] fullscreenSearch listener failed", err);
+        });
+      }
+
+      const geocodeRunId = ++fullscreenGeocodeRunRef.current;
+      const accumulatedMarkers = [...initialMarkers];
+
+      await presentFullscreenNativeMap({ lat, lng, zoom: 9, markers: initialMarkers }, { silent: false });
+
+      const missingPlaces = savedPlaces.filter((place) => {
+        if (resolvePlaceCoords(place)) return false;
+        return Boolean(String(place.address ?? "").trim());
+      });
+
+      if (missingPlaces.length === 0) return;
+
+      if (missingPlaces.length > 25) {
+        console.warn(
+          "[fullscreen] geocoding many places without coords:",
+          missingPlaces.length,
+          "— may be slow / rate-limited",
+        );
+      }
+
+      if (!geocoderRef.current || !window.kakao?.maps) {
+        console.warn("[fullscreen] geocoder unavailable — skipping address-only pins");
+        return;
+      }
+
+      for (const place of missingPlaces) {
+        if (geocodeRunId !== fullscreenGeocodeRunRef.current) return;
+
+        await new Promise<void>((resolve) => {
+          const address = String(place.address ?? "").trim();
+          if (!address) {
+            resolve();
+            return;
+          }
+
+          geocoderRef.current.addressSearch(address, (result: any[], status: string) => {
+            if (geocodeRunId !== fullscreenGeocodeRunRef.current) {
+              resolve();
+              return;
+            }
+            if (status !== window.kakao.maps.services.Status.OK || !result[0]) {
+              resolve();
+              return;
+            }
+            const markerLat = parseFloat(result[0].y);
+            const markerLng = parseFloat(result[0].x);
+            if (!Number.isFinite(markerLat) || !Number.isFinite(markerLng)) {
+              resolve();
+              return;
+            }
+
+            savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
+            const marker = placeToMarker(place, { lat: markerLat, lng: markerLng });
+            const existingIdx = accumulatedMarkers.findIndex((m) => m.id === marker.id);
+            if (existingIdx >= 0) {
+              accumulatedMarkers[existingIdx] = marker;
+            } else {
+              accumulatedMarkers.push(marker);
+            }
+
+            void updateFullscreenNativeMarkers(
+              { markers: [...accumulatedMarkers] },
+              { silent: true },
+            ).catch((err) => {
+              console.warn("[fullscreen] updateFullscreenNativeMarkers failed", err);
+            });
+            resolve();
+          });
+        });
+      }
+    } catch (err) {
+      console.error("[fullscreen] presentFullscreenMap failed", err);
+    }
+  }, [savedPlaces, runFullscreenNativeSearch]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+
+    if (mapExpanded) {
+      if (fullscreenAutoOpenedRef.current) return;
+      fullscreenAutoOpenedRef.current = true;
+      void handleOpenFullscreenNativeMap();
+      return;
+    }
+
+    fullscreenAutoOpenedRef.current = false;
+    void dismissFullscreenNativeMap({ silent: true });
+  }, [mapExpanded, handleOpenFullscreenNativeMap]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenDismissListenerRegisteredRef.current) return;
+    fullscreenDismissListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenMapDismissed", () => {
+      fullscreenAutoOpenedRef.current = false;
+      setMapExpanded(false);
+    }).catch((err) => {
+      fullscreenDismissListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenMapDismissed listener failed", err);
+    });
+  }, []);
 
   const resetHiddenPlaces = () => {
     console.log("[PindMap:pin] reset hidden places");
@@ -4407,10 +4661,16 @@ function HomePageContent() {
 
   const addPlacePins = (map: any, arr: any[], posts: FeedPost[], places: Place[], scope: "main" | "expanded" = "main") => {
     if (!geocoderRef.current) return;
+    const useNative = isNativeMapAvailable() && expandedNativeMapEnabled && scope === "expanded";
     const myRunId = ++placePinsRunIdRef.current[scope];
     console.log("[addPlacePins]", scope, "places:", places.length, "runId:", myRunId);
     arr.forEach((m) => m.setMap(null));
     arr.length = 0;
+    if (useNative) {
+      clearNativeMarkerClickHandlers("place-");
+      placePinByIdRef.current.clear();
+    }
+    const nativePlacePins: { id: string; lat: number; lng: number; category?: string }[] = [];
     if (places.length === 0) {
       console.log(`[PindMap:pin] runId ${myRunId} completed successfully`);
       return;
@@ -4422,8 +4682,63 @@ function HomePageContent() {
       if (completed === places.length) {
         if (myRunId === placePinsRunIdRef.current[scope]) {
           console.log(`[PindMap:pin] runId ${myRunId} completed successfully`);
+          if (useNative) {
+            void (async () => {
+              if (myRunId !== placePinsRunIdRef.current[scope]) return;
+              await clearNativeMarkers("place-");
+              if (myRunId !== placePinsRunIdRef.current[scope]) return;
+              await addNativeMarkers(nativePlacePins);
+            })();
+          }
         }
       }
+    };
+    const runSavedPlaceMarkerClick = (place: Place, markerLat: number, markerLng: number) => {
+      const clickToken = Date.now();
+      console.log("[place click]", place.name, "token:", clickToken);
+      selectedPlaceTokenRef.current = clickToken;
+      const relatedPosts = getRelatedPostsForPlaceSheet(
+        posts,
+        placeRefFromPlace(place, markerLat, markerLng),
+      );
+      // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
+      console.log("[place click:setSelected1]", place.name);
+      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
+      new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
+        console.log("[place click:keywordSearch]", place.name, "status:", st, "data.length:", data?.length ?? 0);
+        if (selectedPlaceTokenRef.current !== clickToken) {
+          console.log("[place click:tokenMismatch]", "expected:", clickToken, "current:", selectedPlaceTokenRef.current);
+          return;
+        }
+        if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
+        const nearest = data
+          .map((it) => {
+            const y = parseFloat(it.y);
+            const x = parseFloat(it.x);
+            if (!Number.isFinite(y) || !Number.isFinite(x)) return null;
+            return { place: it, meters: distanceMeters(markerLat, markerLng, y, x) };
+          })
+          .filter((v): v is { place: any; meters: number } => Boolean(v))
+          .sort((a, b) => a.meters - b.meters)[0];
+        if (!nearest || nearest.meters > 100) {
+          console.log("[PindMap:pin] keywordSearch fallback keep saved data", place.name, nearest?.meters);
+          return;
+        }
+        const baseSelected = toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng);
+        const safeNearest =
+          nearest.place && typeof nearest.place === "object" ? nearest.place as Record<string, unknown> : {};
+        const mergedSafely: Record<string, unknown> = { ...baseSelected };
+        for (const key of Object.keys(safeNearest)) {
+          const v = safeNearest[key];
+          if (v !== undefined && v !== null && v !== "") {
+            mergedSafely[key] = v;
+          }
+        }
+        mergedSafely._feedPosts = relatedPosts;
+        mergedSafely._savedPlaceId = place.id;
+        console.log("[place click:setSelected2]", place.name, "merged keys:", Object.keys(mergedSafely));
+        setSelectedPlace(mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string });
+      });
     };
     const attachSavedPlaceMarkerAtLatLng = (
       place: Place,
@@ -4442,10 +4757,12 @@ function HomePageContent() {
       }
       const liveMap = pinScope === "main" ? mapRef.current : expandedMapRef.current;
       const liveArr = pinScope === "main" ? markersRef.current : expandedMarkersRef.current;
-      if (!liveMap) {
-        console.log("[addPlacePins:noLiveMap]", place.name, "scope:", pinScope);
-        done();
-        return;
+      if (!useNative) {
+        if (!liveMap) {
+          console.log("[addPlacePins:noLiveMap]", place.name, "scope:", pinScope);
+          done();
+          return;
+        }
       }
       if (myRunId !== placePinsRunIdRef.current[scope]) {
         console.log("[addPlacePins:cancelled]", place.name, "myRun:", myRunId, "current:", placePinsRunIdRef.current[scope]);
@@ -4453,6 +4770,30 @@ function HomePageContent() {
           cancellationLogged = true;
           console.log(`[PindMap:pin] runId ${myRunId} cancelled (newer run started)`);
         }
+        return;
+      }
+      if (useNative) {
+        const markerId = `place-${place.id}`;
+        if (source === "cache") {
+          console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng, "(cached coords)");
+        } else if (source === "db") {
+          console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng, "(stored coords)");
+        } else {
+          console.log("[addPlacePins:marker]", place.name, "lat:", markerLat, "lng:", markerLng);
+        }
+        savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
+        placePinByIdRef.current.set(markerId, place);
+        nativePlacePins.push({
+          id: markerId,
+          lat: markerLat,
+          lng: markerLng,
+          category: place.category,
+        });
+        setNativeMarkerClickHandler(markerId, () => {
+          const savedPlace = placePinByIdRef.current.get(markerId);
+          if (savedPlace) runSavedPlaceMarkerClick(savedPlace, markerLat, markerLng);
+        });
+        done();
         return;
       }
       let marker: any;
@@ -4471,51 +4812,7 @@ function HomePageContent() {
         }
         savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
         window.kakao.maps.event.addListener(marker, "click", () => {
-          const clickToken = Date.now();
-          console.log("[place click]", place.name, "token:", clickToken);
-          selectedPlaceTokenRef.current = clickToken;
-          const relatedPosts = getRelatedPostsForPlaceSheet(
-            posts,
-            placeRefFromPlace(place, markerLat, markerLng),
-          );
-          // 저장된 핀은 저장 데이터로 즉시 카드 오픈 (동명이 이슈 방지)
-          console.log("[place click:setSelected1]", place.name);
-          setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
-          new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
-            console.log("[place click:keywordSearch]", place.name, "status:", st, "data.length:", data?.length ?? 0);
-            if (selectedPlaceTokenRef.current !== clickToken) {
-              console.log("[place click:tokenMismatch]", "expected:", clickToken, "current:", selectedPlaceTokenRef.current);
-              return;
-            }
-            if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
-            const nearest = data
-              .map((it) => {
-                const y = parseFloat(it.y);
-                const x = parseFloat(it.x);
-                if (!Number.isFinite(y) || !Number.isFinite(x)) return null;
-                return { place: it, meters: distanceMeters(markerLat, markerLng, y, x) };
-              })
-              .filter((v): v is { place: any; meters: number } => Boolean(v))
-              .sort((a, b) => a.meters - b.meters)[0];
-            if (!nearest || nearest.meters > 100) {
-              console.log("[PindMap:pin] keywordSearch fallback keep saved data", place.name, nearest?.meters);
-              return;
-            }
-            const baseSelected = toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng);
-            const safeNearest =
-              nearest.place && typeof nearest.place === "object" ? nearest.place as Record<string, unknown> : {};
-            const mergedSafely: Record<string, unknown> = { ...baseSelected };
-            for (const key of Object.keys(safeNearest)) {
-              const v = safeNearest[key];
-              if (v !== undefined && v !== null && v !== "") {
-                mergedSafely[key] = v;
-              }
-            }
-            mergedSafely._feedPosts = relatedPosts;
-            mergedSafely._savedPlaceId = place.id;
-            console.log("[place click:setSelected2]", place.name, "merged keys:", Object.keys(mergedSafely));
-            setSelectedPlace(mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string });
-          });
+          runSavedPlaceMarkerClick(place, markerLat, markerLng);
         });
         liveArr.push(marker);
         done();
@@ -7948,6 +8245,7 @@ function HomePageContent() {
                 />
               </div>
               {mapExpanded &&
+                !isNativeMapAvailable() &&
                 typeof document !== "undefined" &&
                 createPortal(
                   <div
