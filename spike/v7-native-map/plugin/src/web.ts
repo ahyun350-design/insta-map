@@ -15,6 +15,7 @@ import type {
   SetFullscreenCameraOptions,
   SetFullscreenRouteOptions,
   SetFullscreenMyLocationOptions,
+  SetFullscreenSearchResultsOptions,
   UpdateFullscreenMarkersOptions,
 } from './definitions';
 
@@ -85,6 +86,14 @@ export class PindmapNativeMapWeb extends WebPlugin implements PindmapNativeMapPl
 
   async clearFullscreenMyLocation(): Promise<void> {
     console.warn('[PindmapNativeMap] web stub — clearFullscreenMyLocation noop (iOS only)');
+  }
+
+  async setFullscreenSearchResults(_options: SetFullscreenSearchResultsOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — setFullscreenSearchResults noop (iOS only)');
+  }
+
+  async clearFullscreenSearchResults(): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — clearFullscreenSearchResults noop (iOS only)');
   }
 
   addListener(

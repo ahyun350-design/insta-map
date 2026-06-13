@@ -95,6 +95,19 @@ export interface SetFullscreenMyLocationOptions {
   lng: number;
 }
 
+export interface FullscreenSearchResultInput {
+  id: string;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  category?: string;
+}
+
+export interface SetFullscreenSearchResultsOptions {
+  results: FullscreenSearchResultInput[];
+}
+
 export interface PindmapNativeMapPlugin {
   createMap(options: CreateMapOptions): Promise<{ mapId: string }>;
   destroyMap(): Promise<void>;
@@ -131,4 +144,6 @@ export interface PindmapNativeMapPlugin {
   clearFullscreenRoute(): Promise<void>;
   setFullscreenMyLocation(options: SetFullscreenMyLocationOptions): Promise<void>;
   clearFullscreenMyLocation(): Promise<void>;
+  setFullscreenSearchResults(options: SetFullscreenSearchResultsOptions): Promise<void>;
+  clearFullscreenSearchResults(): Promise<void>;
 }

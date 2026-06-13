@@ -10,6 +10,7 @@ import type {
   SetFullscreenCameraOptions,
   SetFullscreenRouteOptions,
   SetFullscreenMyLocationOptions,
+  SetFullscreenSearchResultsOptions,
   UpdateFullscreenMarkersOptions,
 } from "@pindmap/native-map";
 
@@ -23,6 +24,7 @@ export type {
   SetFullscreenCameraOptions,
   SetFullscreenRouteOptions,
   SetFullscreenMyLocationOptions,
+  SetFullscreenSearchResultsOptions,
 };
 
 export type CreateNativeMapOptions = {
@@ -606,6 +608,51 @@ export async function clearFullscreenNativeMyLocation(
     await getPlugin().clearFullscreenMyLocation();
   } catch (err) {
     nativeMapWarn("clearFullscreenNativeMyLocation failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Show search results list sheet on the full-screen native map VC. */
+export async function setFullscreenNativeSearchResults(
+  options: SetFullscreenSearchResultsOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "setFullscreenNativeSearchResults skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("setFullscreenNativeSearchResults", { count: options.results.length });
+    await getPlugin().setFullscreenSearchResults(options);
+  } catch (err) {
+    nativeMapWarn("setFullscreenNativeSearchResults failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Hide search results list sheet on the full-screen native map VC. */
+export async function clearFullscreenNativeSearchResults(
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "clearFullscreenNativeSearchResults skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("clearFullscreenNativeSearchResults");
+    await getPlugin().clearFullscreenSearchResults();
+  } catch (err) {
+    nativeMapWarn("clearFullscreenNativeSearchResults failed", err);
     if (!silent) {
       return Promise.reject(err);
     }

@@ -519,6 +519,18 @@ private final class KakaoMapTestViewController: UIViewController {
         let address: String?
     }
 
+    struct SearchResultInput {
+        let id: String
+        let name: String
+        let address: String
+        let lat: Double
+        let lng: Double
+        let category: String?
+    }
+
+    private static let searchResultCellID = "SearchResultCell"
+    private static let markerLayerID = "pindmap-fullscreen-markers"
+
     private struct MarkerMetadata {
         let title: String?
         let address: String?
@@ -557,7 +569,13 @@ private final class KakaoMapTestViewController: UIViewController {
     private var placeSheetDirectionsTopToAddress: NSLayoutConstraint?
     private var placeSheetDirectionsTopToTitle: NSLayoutConstraint?
     private var placeSheetMarkerId: String?
-    private static let markerLayerID = "pindmap-fullscreen-markers"
+    private weak var searchResultsCard: UIView?
+    private weak var searchResultsTitleLabel: UILabel?
+    private weak var searchResultsTableView: UITableView?
+    private var searchResultsBottomConstraint: NSLayoutConstraint?
+    private var searchResults: [SearchResultInput] = []
+    private var pendingSearchResults: [SearchResultInput]?
+    private static let searchResultsSheetHeight: CGFloat = 260
     private static let routeLayerID = "pindmap-fullscreen-route"
     private static let routeID = "pindmap-route-main"
     private static let carRouteStyleSetID = "pindmap-route-car"
@@ -646,6 +664,18 @@ private final class KakaoMapTestViewController: UIViewController {
         // No-op while my-location overlay is disabled.
     }
 
+    func setSearchResults(_ results: [SearchResultInput]) {
+        pendingSearchResults = results
+        guard mapViewReady else { return }
+        applySearchResults(results)
+    }
+
+    func clearSearchResults() {
+        pendingSearchResults = nil
+        searchResults = []
+        hideSearchResultsSheet(animated: true)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
@@ -727,6 +757,7 @@ private final class KakaoMapTestViewController: UIViewController {
         searchField.returnKeyType = .search
         searchField.clearButtonMode = .whileEditing
         searchField.delegate = self
+        searchField.addTarget(self, action: #selector(searchFieldEditingChanged), for: .editingChanged)
         searchContainer.addSubview(searchField)
         productionSearchField = searchField
 
@@ -771,6 +802,13 @@ private final class KakaoMapTestViewController: UIViewController {
 
     @objc private func searchButtonTapped() {
         submitFullscreenSearch()
+    }
+
+    @objc private func searchFieldEditingChanged() {
+        let text = productionSearchField?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard text.isEmpty else { return }
+        clearSearchResults()
+        onSearch?("")
     }
 
     private func submitFullscreenSearch() {
@@ -1169,6 +1207,12 @@ private final class KakaoMapTestViewController: UIViewController {
 
         let alreadyVisible = backdrop.alpha > 0 && !backdrop.isHidden
         if alreadyVisible {
+            view.bringSubviewToFront(backdrop)
+            view.bringSubviewToFront(card)
+            bringProductionChromeToFront()
+            if let searchCard = searchResultsCard, !searchCard.isHidden {
+                view.insertSubview(searchCard, belowSubview: backdrop)
+            }
             return
         }
 
@@ -1258,6 +1302,142 @@ private final class KakaoMapTestViewController: UIViewController {
         }
     }
 
+    private func ensureSearchResultsSheetChrome() {
+        guard mode == .production, searchResultsCard == nil else { return }
+
+        let card = UIView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.backgroundColor = .systemBackground
+        card.layer.cornerRadius = 16
+        card.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        card.layer.shadowColor = UIColor.black.cgColor
+        card.layer.shadowOpacity = 0.12
+        card.layer.shadowOffset = CGSize(width: 0, height: -2)
+        card.layer.shadowRadius = 8
+        card.isHidden = true
+        view.addSubview(card)
+        searchResultsCard = card
+
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = .label
+        card.addSubview(titleLabel)
+        searchResultsTitleLabel = titleLabel
+
+        let closeButton = UIButton(type: .system)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.setTitle("✕", for: .normal)
+        closeButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        closeButton.setTitleColor(.secondaryLabel, for: .normal)
+        closeButton.addTarget(self, action: #selector(searchResultsCloseTapped), for: .touchUpInside)
+        card.addSubview(closeButton)
+
+        let tableView = UITableView(frame: .zero, style: .plain)
+        tableView.translatesAutoresizingMaskIntoConstraints = false
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: Self.searchResultCellID)
+        tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
+        tableView.rowHeight = 64
+        card.addSubview(tableView)
+        searchResultsTableView = tableView
+
+        let bottom = card.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: Self.searchResultsSheetHeight)
+        searchResultsBottomConstraint = bottom
+
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottom,
+            card.heightAnchor.constraint(equalToConstant: Self.searchResultsSheetHeight),
+            titleLabel.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
+            titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
+            closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            closeButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            closeButton.widthAnchor.constraint(equalToConstant: 32),
+            closeButton.heightAnchor.constraint(equalToConstant: 32),
+            tableView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            tableView.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            tableView.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            tableView.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor),
+        ])
+    }
+
+    private func applySearchResults(_ results: [SearchResultInput]) {
+        guard mode == .production else { return }
+        searchResults = results
+        if results.isEmpty {
+            hideSearchResultsSheet(animated: true)
+            return
+        }
+
+        for item in results {
+            markerMetadata[item.id] = MarkerMetadata(
+                title: item.name,
+                address: item.address,
+                category: item.category,
+                lat: item.lat,
+                lng: item.lng
+            )
+        }
+
+        ensureSearchResultsSheetChrome()
+        searchResultsTitleLabel?.text = "검색 결과 \(results.count)건"
+        searchResultsTableView?.reloadData()
+        showSearchResultsSheet(animated: true)
+    }
+
+    private func showSearchResultsSheet(animated: Bool) {
+        guard let card = searchResultsCard else { return }
+        card.isHidden = false
+        view.bringSubviewToFront(card)
+        if let backdrop = placeSheetBackdrop, !backdrop.isHidden {
+            view.bringSubviewToFront(backdrop)
+            if let placeCard = placeSheetCard {
+                view.bringSubviewToFront(placeCard)
+            }
+        }
+        bringProductionChromeToFront()
+
+        searchResultsBottomConstraint?.constant = Self.searchResultsSheetHeight
+        view.layoutIfNeeded()
+        searchResultsBottomConstraint?.constant = 0
+
+        if animated {
+            UIView.animate(withDuration: 0.28, delay: 0, options: [.curveEaseOut]) {
+                self.view.layoutIfNeeded()
+            }
+        } else {
+            view.layoutIfNeeded()
+        }
+    }
+
+    private func hideSearchResultsSheet(animated: Bool) {
+        guard let card = searchResultsCard, !card.isHidden else { return }
+        searchResultsBottomConstraint?.constant = Self.searchResultsSheetHeight
+        let animations = { self.view.layoutIfNeeded() }
+        let completion: (Bool) -> Void = { _ in
+            card.isHidden = true
+        }
+        if animated {
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseIn], animations: animations, completion: completion)
+        } else {
+            animations()
+            completion(true)
+        }
+    }
+
+    private func selectSearchResult(_ item: SearchResultInput) {
+        setCamera(lat: item.lat, lng: item.lng, zoom: 5, animated: true)
+        showPlaceBottomSheet(for: item.id)
+    }
+
+    @objc private func searchResultsCloseTapped() {
+        hideSearchResultsSheet(animated: true)
+    }
+
     private func applyInitialContent() {
         applyPendingCamera(animated: false)
         if mode == .prototype {
@@ -1270,6 +1450,9 @@ private final class KakaoMapTestViewController: UIViewController {
         }
         if let pendingRoute {
             applyRoute(path: pendingRoute.path, mode: pendingRoute.mode)
+        }
+        if let pendingSearchResults {
+            applySearchResults(pendingSearchResults)
         }
     }
 
@@ -1389,6 +1572,39 @@ extension KakaoMapTestViewController: KakaoMapEventDelegate {
     }
 }
 
+extension KakaoMapTestViewController: UITableViewDataSource, UITableViewDelegate {
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        searchResults.count
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let item = searchResults[indexPath.row]
+        let cell = tableView.dequeueReusableCell(withIdentifier: Self.searchResultCellID, for: indexPath)
+        cell.textLabel?.text = item.name
+        cell.textLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        cell.textLabel?.numberOfLines = 1
+        cell.detailTextLabel?.text = item.address
+        cell.detailTextLabel?.textColor = .secondaryLabel
+        cell.detailTextLabel?.numberOfLines = 2
+        if let category = item.category, !category.isEmpty {
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10))
+            cell.imageView?.image = renderer.image { ctx in
+                NativeMapMarkerStyleHelper.markerColor(for: category).setFill()
+                ctx.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: 10, height: 10))
+            }
+        } else {
+            cell.imageView?.image = nil
+        }
+        cell.selectionStyle = .default
+        return cell
+    }
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        selectSearchResult(searchResults[indexPath.row])
+    }
+}
+
 extension KakaoMapTestViewController: UITextFieldDelegate {
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         if textField === productionSearchField {
@@ -1452,6 +1668,8 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "clearFullscreenRoute", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setFullscreenMyLocation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearFullscreenMyLocation", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setFullscreenSearchResults", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearFullscreenSearchResults", returnType: CAPPluginReturnPromise),
     ]
 
     private var mapHost: UIView?
@@ -1837,6 +2055,25 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    @objc func setFullscreenSearchResults(_ call: CAPPluginCall) {
+        let results = Self.parseSearchResults(from: call)
+        DispatchQueue.main.async { [weak self] in
+            guard let vc = self?.fullscreenMapVC else {
+                call.resolve()
+                return
+            }
+            vc.setSearchResults(results)
+            call.resolve()
+        }
+    }
+
+    @objc func clearFullscreenSearchResults(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.clearSearchResults()
+            call.resolve()
+        }
+    }
+
     private func wireFullscreenMapCallbacks(_ vc: KakaoMapTestViewController, trackAsProduction: Bool) {
         vc.onMarkerClick = { [weak self] id in
             CAPLog.print("[PindmapNativeMap] markerClick id=\(id)")
@@ -1886,6 +2123,27 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         for dict in raw {
             guard let lat = doubleValue(dict["lat"]), let lng = doubleValue(dict["lng"]) else { continue }
             out.append((lat: lat, lng: lng))
+        }
+        return out
+    }
+
+    private static func parseSearchResults(from call: CAPPluginCall) -> [KakaoMapTestViewController.SearchResultInput] {
+        guard let raw = call.options["results"] as? [[String: Any]] else { return [] }
+        var out: [KakaoMapTestViewController.SearchResultInput] = []
+        for dict in raw {
+            guard let id = dict["id"] as? String else { continue }
+            guard let lat = doubleValue(dict["lat"]), let lng = doubleValue(dict["lng"]) else { continue }
+            let name = dict["name"] as? String ?? ""
+            let address = dict["address"] as? String ?? ""
+            let category = dict["category"] as? String
+            out.append(KakaoMapTestViewController.SearchResultInput(
+                id: id,
+                name: name,
+                address: address,
+                lat: lat,
+                lng: lng,
+                category: category
+            ))
         }
         return out
     }

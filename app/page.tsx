@@ -31,6 +31,8 @@ import {
   updateFullscreenNativeMarkers,
   setFullscreenNativeCamera,
   setFullscreenNativeRoute,
+  setFullscreenNativeSearchResults,
+  clearFullscreenNativeSearchResults,
   setNativeCamera,
   setNativeMarkerClickHandler,
 } from "@/lib/nativeMap";
@@ -1266,7 +1268,14 @@ function HomePageContent() {
   const runFullscreenNativeSearch = useCallback(async (query: string) => {
     try {
       const trimmed = query.trim();
-      if (!trimmed) return;
+      if (!trimmed) {
+        await updateFullscreenNativeMarkers(
+          { markers: [], clearPrefix: "search-" },
+          { silent: false },
+        );
+        await clearFullscreenNativeSearchResults({ silent: false });
+        return;
+      }
       if (!window.kakao?.maps) return;
 
       let biasLat = 37.5665;
@@ -1298,6 +1307,11 @@ function HomePageContent() {
           void (async () => {
             try {
               if (st !== window.kakao.maps.services.Status.OK || !data?.length) {
+                await updateFullscreenNativeMarkers(
+                  { markers: [], clearPrefix: "search-" },
+                  { silent: false },
+                );
+                await clearFullscreenNativeSearchResults({ silent: false });
                 resolve();
                 return;
               }
@@ -1315,13 +1329,32 @@ function HomePageContent() {
                 }];
               });
 
+              const searchResults = markers.map((marker) => ({
+                id: marker.id,
+                name: marker.title ?? "",
+                address: marker.address ?? "",
+                lat: marker.lat,
+                lng: marker.lng,
+                category: undefined as string | undefined,
+              }));
+
               if (markers.length === 0) {
+                await updateFullscreenNativeMarkers(
+                  { markers: [], clearPrefix: "search-" },
+                  { silent: false },
+                );
+                await clearFullscreenNativeSearchResults({ silent: false });
                 resolve();
                 return;
               }
 
               await updateFullscreenNativeMarkers(
                 { markers, clearPrefix: "search-" },
+                { silent: false },
+              );
+
+              await setFullscreenNativeSearchResults(
+                { results: searchResults },
                 { silent: false },
               );
 
