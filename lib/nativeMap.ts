@@ -69,6 +69,8 @@ export type NativeMarkerInput = {
   title?: string;
   address?: string;
   category?: string;
+  photos?: string[];
+  postCount?: number;
 };
 
 const DEFAULT_PROVIDER: NativeMapProvider = "kakao";

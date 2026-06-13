@@ -97,6 +97,7 @@ import {
 import { parseFeedPostFromRow, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
 import {
   getDisplayPlaceForPhoto,
+  getRelatedPostImagesForPlace,
   getRepresentativePhotoPlaceTag,
   hasPhotoPlaceTags,
   buildUniqueCourseItemsFromPhotoPlaceTags,
@@ -400,6 +401,29 @@ function getRelatedPostsForPlaceSheet(
   placeRef: PlaceRefForPhotoTagMatch,
 ): FeedPost[] {
   return mergeRelatedFeedPostsForPlaceSheet(posts, placeRef, filterRelatedFeedPosts);
+}
+
+const MAX_NATIVE_MARKER_PHOTOS = 5;
+
+function getMarkerPhotoMetaForPlace(
+  posts: FeedPost[],
+  place: Place,
+  coords?: LatLng,
+): { photos: string[]; postCount: number } {
+  const placeRef = placeRefFromPlace(place, coords?.lat, coords?.lng);
+  const relatedPosts = getRelatedPostsForPlaceSheet(posts, placeRef);
+  const photos: string[] = [];
+  const seen = new Set<string>();
+  for (const post of relatedPosts) {
+    for (const url of getRelatedPostImagesForPlace(post, placeRef)) {
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      photos.push(url);
+      if (photos.length >= MAX_NATIVE_MARKER_PHOTOS) break;
+    }
+    if (photos.length >= MAX_NATIVE_MARKER_PHOTOS) break;
+  }
+  return { photos, postCount: relatedPosts.length };
 }
 
 function placeRefFromPlace(place: Place, lat?: number, lng?: number): PlaceRefForPhotoTagMatch {
@@ -1477,14 +1501,19 @@ function HomePageContent() {
         return null;
       };
 
-      const placeToMarker = (place: Place, coords: LatLng) => ({
-        id: `place-${place.id}`,
-        lat: coords.lat,
-        lng: coords.lng,
-        category: place.category,
-        title: place.name,
-        address: place.address,
-      });
+      const placeToMarker = (place: Place, coords: LatLng) => {
+        const { photos, postCount } = getMarkerPhotoMetaForPlace(feedPostsRef.current, place, coords);
+        return {
+          id: `place-${place.id}`,
+          lat: coords.lat,
+          lng: coords.lng,
+          category: place.category,
+          title: place.name,
+          address: place.address,
+          ...(photos.length > 0 ? { photos } : {}),
+          ...(postCount > 0 ? { postCount } : {}),
+        };
+      };
 
       const initialMarkers = savedPlaces.flatMap((place) => {
         const coords = resolvePlaceCoords(place);

@@ -26,6 +26,8 @@ export interface MarkerInput {
   title?: string;
   address?: string;
   category?: string;
+  photos?: string[];
+  postCount?: number;
 }
 
 export interface AddMarkersOptions {
