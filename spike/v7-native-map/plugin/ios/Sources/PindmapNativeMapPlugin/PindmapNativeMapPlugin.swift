@@ -183,6 +183,7 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var mapHost: UIView?
     private var touchRouter: MapTouchRouterView?
+    private weak var mappedWebView: WKWebView?
     private var providerName = "none"
 
     override public func load() {
@@ -212,6 +213,16 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         webView.scrollView.backgroundColor = .clear
         if #available(iOS 15.0, *) {
             webView.underPageBackgroundColor = .clear
+        }
+    }
+
+    private func restoreWebViewAppearance(_ webView: WKWebView) {
+        webView.isOpaque = true
+        webView.backgroundColor = nil
+        webView.scrollView.isOpaque = true
+        webView.scrollView.backgroundColor = nil
+        if #available(iOS 15.0, *) {
+            webView.underPageBackgroundColor = nil
         }
     }
 
@@ -286,7 +297,6 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func createMap(_ call: CAPPluginCall) {
         guard let bridge = bridge,
               let webView = bridge.webView,
-              let containerView = mapContainerView(for: webView),
               let elementId = call.getString("elementId") else {
             call.reject("elementId required (or WebView not in view hierarchy)")
             return
@@ -299,6 +309,10 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            guard let containerView = self.mapContainerView(for: webView) else {
+                call.reject("elementId required (or WebView not in view hierarchy)")
+                return
+            }
 
             self.destroyMapHost()
 
@@ -327,8 +341,9 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
                     host.clipsToBounds = true
                     host.layer.cornerRadius = 8
                     self.enableWebViewTransparency(webView)
+                    self.mappedWebView = webView
                     self.punchMapSlotTransparency(elementId: elementId, in: webView)
-                    containerView.insertSubview(host, belowSubview: webView)
+                    containerView.insertSubview(host, aboveSubview: webView)
                     self.mapHost = host
                     self.installTouchRouter(on: containerView, above: webView, mapHost: host)
                     if let mk = host as? MapKitMapHost {
@@ -383,9 +398,14 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         router.mapHost = mapHost
         containerView.insertSubview(router, aboveSubview: webView)
         touchRouter = router
+        containerView.bringSubviewToFront(router)
     }
 
     private func destroyMapHost() {
+        if let webView = mappedWebView ?? bridge?.webView {
+            restoreWebViewAppearance(webView)
+        }
+        mappedWebView = nil
         touchRouter?.removeFromSuperview()
         touchRouter = nil
         if let kakao = mapHost as? KakaoMapHost {

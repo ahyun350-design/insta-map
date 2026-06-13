@@ -22,10 +22,8 @@ import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 import {
   createNativeMap,
   destroyNativeMap,
-  getNativeMapDiagnostics,
   isNativeMapAvailable,
   setNativeCamera,
-  setNativeMapDebug,
 } from "@/lib/nativeMap";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
@@ -872,7 +870,6 @@ function HomePageContent() {
   /** V-7-1: 확장 지도 상단 50% Kakao Native 오버레이 (iOS만, JS API와 병행) */
   const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
   const [expandedNativeMapId, setExpandedNativeMapId] = useState<string | null>(null);
-  const [expandedNativeMapDiag, setExpandedNativeMapDiag] = useState(() => getNativeMapDiagnostics());
   /** 확장 지도 인스턴스가 생길 때마다 증가 — 핀만 별도 effect에서 단일 경로로 그리기 */
   const [expandedMapPinsTick, setExpandedMapPinsTick] = useState(0);
   const [showJobsModal, setShowJobsModal] = useState(false);
@@ -5733,15 +5730,6 @@ function HomePageContent() {
     }
   }, [mapExpanded]);
 
-  /** V-7-1 debug: 확장 지도 진입 시 Capacitor 환경 로그 (Safari Web Inspector) */
-  useEffect(() => {
-    if (!mapExpanded) return;
-    setNativeMapDebug(true);
-    const diag = getNativeMapDiagnostics();
-    setExpandedNativeMapDiag(diag);
-    console.log("[V7-1 nativeMap] expanded map open", diag);
-  }, [mapExpanded]);
-
   /** V-7-1: 확장 지도 Native 슬롯 mount / unmount */
   useEffect(() => {
     const EXTENDED_NATIVE_MAP_SLOT_ID = "extended-map-slot";
@@ -7918,12 +7906,6 @@ function HomePageContent() {
                     <p style={{ margin: 0, fontSize: "11px", color: "#7a849e", textAlign: "center", paddingInline: "12px" }}>
                       {kakaoStatus !== "ready" ? "카카오맵 SDK를 불러오고 있어요" : "지도를 그리고 있어요"}
                     </p>
-                    {kakaoStatus !== "ready" && (
-                      <p style={{ margin: 0, fontSize: "10px", color: "#b45309", textAlign: "center", paddingInline: "8px" }}>
-                        V7-1 debug · kakao={kakaoStatus} · jsKey={mapKey ? "set" : "MISSING"} · latLng=
-                        {isKakaoMapsApiReady() ? "ready" : "wait"}
-                      </p>
-                    )}
                   </div>
                 )}
                 <div
@@ -8004,21 +7986,6 @@ function HomePageContent() {
                       </button>
                       <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
                     </div>
-                    <div className="expandedNativeMapDebugStrip" aria-live="polite">
-                      V7-1 · JS번들 확인 · native=
-                      {expandedNativeMapDiag.available ? "true" : "false"} · platform=
-                      {expandedNativeMapDiag.platform} · capNative=
-                      {expandedNativeMapDiag.isNativePlatform ? "true" : "false"} · kakao=
-                      {kakaoStatus} · latLng={isKakaoMapsApiReady() ? "ready" : "wait"} · jsKey=
-                      {mapKey ? "set" : "MISSING"} · nativeToggle=
-                      {expandedNativeMapEnabled ? "ON" : "OFF"}
-                      {!expandedNativeMapDiag.available && (
-                        <span className="expandedNativeMapDebugHint">
-                          {" "}
-                          (Railway 배포 또는 server.url 끄고 재빌드 필요할 수 있음)
-                        </span>
-                      )}
-                    </div>
                     <div
                       style={{
                         padding: "12px 20px",
@@ -8070,28 +8037,22 @@ function HomePageContent() {
                           <line x1="9.5" y1="9.5" x2="13" y2="13" stroke="white" strokeWidth="1.3" strokeLinecap="round" />
                         </svg>
                       </button>
-                      <button
-                        type="button"
-                        className={
-                          expandedNativeMapEnabled
-                            ? "expandedNativeMapToggle expandedNativeMapToggleOn expandedNativeMapToggleDebug"
-                            : "expandedNativeMapToggle expandedNativeMapToggleDebug"
-                        }
-                        aria-pressed={expandedNativeMapEnabled}
-                        disabled={!expandedNativeMapDiag.available}
-                        title={
-                          expandedNativeMapDiag.available
-                            ? "Kakao Native 지도 (상단 50%)"
-                            : `Native unavailable (platform=${expandedNativeMapDiag.platform})`
-                        }
-                        onClick={() => {
-                          if (!expandedNativeMapDiag.available) return;
-                          setExpandedNativeMapEnabled((on) => !on);
-                        }}
-                        style={{ flexShrink: 0 }}
-                      >
-                        {expandedNativeMapEnabled ? "Native ON" : "Native"}
-                      </button>
+                      {isNativeMapAvailable() && (
+                        <button
+                          type="button"
+                          className={
+                            expandedNativeMapEnabled
+                              ? "expandedNativeMapToggle expandedNativeMapToggleOn"
+                              : "expandedNativeMapToggle"
+                          }
+                          aria-pressed={expandedNativeMapEnabled}
+                          title="Kakao Native 지도 (상단 50%)"
+                          onClick={() => setExpandedNativeMapEnabled((on) => !on)}
+                          style={{ flexShrink: 0 }}
+                        >
+                          {expandedNativeMapEnabled ? "Native ON" : "Native"}
+                        </button>
+                      )}
                     </div>
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />

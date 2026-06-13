@@ -2927,39 +2927,6 @@ body {
   color: #fff;
 }
 
-/* V-7-1 debug: 토글·번들 확인용 (검증 후 제거 가능) */
-.expandedNativeMapDebugStrip {
-  flex-shrink: 0;
-  padding: 6px 12px;
-  font-size: 10px;
-  line-height: 1.35;
-  color: #7c2d12;
-  background: #fff7ed;
-  border-bottom: 1px solid #fdba74;
-  text-align: center;
-}
-
-.expandedNativeMapDebugHint {
-  color: #b45309;
-  font-weight: 600;
-}
-
-.expandedNativeMapToggleDebug {
-  border-width: 2px;
-  border-color: #e11d48;
-  min-width: 76px;
-  min-height: 44px;
-  font-size: 13px;
-}
-
-.expandedNativeMapToggleDebug:disabled {
-  opacity: 0.55;
-  border-color: #9ca3af;
-  color: #6b7280;
-  background: #f3f4f6;
-  cursor: not-allowed;
-}
-
 .tabItem {
   flex: 1 1 0;
   min-width: 0;
