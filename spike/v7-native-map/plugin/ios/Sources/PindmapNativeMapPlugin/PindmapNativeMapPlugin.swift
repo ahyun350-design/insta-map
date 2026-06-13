@@ -487,6 +487,19 @@ private enum NativeMapMarkerStyleHelper {
             ctx.cgContext.strokeEllipse(in: CGRect(x: 1, y: 1, width: size.width - 2, height: size.height - 2))
         }
     }
+
+    static let myLocationStyleID = "pindmap-my-location-style"
+
+    static func makeMyLocationIcon() -> UIImage {
+        let size = CGSize(width: 20, height: 20)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
+            UIColor.systemBlue.setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(x: 3, y: 3, width: size.width - 6, height: size.height - 6))
+        }
+    }
 }
 
 // MARK: - V-7-2 fullscreen native map VC (prototype + production modes)
@@ -552,6 +565,12 @@ private final class KakaoMapTestViewController: UIViewController {
     private var routeLayer: RouteLayer?
     private var registeredRouteStyleSetIDs = Set<String>()
     private var pendingRoute: (path: [(lat: Double, lng: Double)], mode: String)?
+    private var myLocationLayer: LabelLayer?
+    private var myLocationPoi: Poi?
+    private var myLocationStyleRegistered = false
+    private var pendingMyLocation: (lat: Double, lng: Double)?
+    private static let myLocationLayerID = "pindmap-fullscreen-mylocation"
+    private static let myLocationPoiID = "my-location"
 
     private struct TestMarker {
         let id: String
@@ -614,6 +633,17 @@ private final class KakaoMapTestViewController: UIViewController {
     func clearRoute() {
         pendingRoute = nil
         routeLayer?.clearAllRoutes()
+    }
+
+    func setMyLocation(lat: Double, lng: Double) {
+        _ = lat
+        _ = lng
+        // My-location overlay disabled — LabelLayer Poi blocked saved-pin taps; re-enable via non-Poi path later.
+    }
+
+    func clearMyLocation() {
+        pendingMyLocation = nil
+        // No-op while my-location overlay is disabled.
     }
 
     override func viewDidLoad() {
@@ -1243,6 +1273,12 @@ private final class KakaoMapTestViewController: UIViewController {
         }
     }
 
+    private func applyMyLocation(lat: Double, lng: Double) {
+        _ = lat
+        _ = lng
+        // Disabled — see setMyLocation.
+    }
+
     private func applyRoute(path: [(lat: Double, lng: Double)], mode: String) {
         guard path.count >= 2, let map = kakaoMapView() else { return }
 
@@ -1414,6 +1450,8 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "setFullscreenCamera", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setFullscreenRoute", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearFullscreenRoute", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setFullscreenMyLocation", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearFullscreenMyLocation", returnType: CAPPluginReturnPromise),
     ]
 
     private var mapHost: UIView?
@@ -1783,6 +1821,18 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func clearFullscreenRoute(_ call: CAPPluginCall) {
         DispatchQueue.main.async { [weak self] in
             self?.fullscreenMapVC?.clearRoute()
+            call.resolve()
+        }
+    }
+
+    @objc func setFullscreenMyLocation(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            call.resolve()
+        }
+    }
+
+    @objc func clearFullscreenMyLocation(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
             call.resolve()
         }
     }

@@ -90,6 +90,11 @@ export interface SetFullscreenRouteOptions {
   mode?: FullscreenRouteMode;
 }
 
+export interface SetFullscreenMyLocationOptions {
+  lat: number;
+  lng: number;
+}
+
 export interface PindmapNativeMapPlugin {
   createMap(options: CreateMapOptions): Promise<{ mapId: string }>;
   destroyMap(): Promise<void>;
@@ -124,4 +129,6 @@ export interface PindmapNativeMapPlugin {
   setFullscreenCamera(options: SetFullscreenCameraOptions): Promise<void>;
   setFullscreenRoute(options: SetFullscreenRouteOptions): Promise<void>;
   clearFullscreenRoute(): Promise<void>;
+  setFullscreenMyLocation(options: SetFullscreenMyLocationOptions): Promise<void>;
+  clearFullscreenMyLocation(): Promise<void>;
 }

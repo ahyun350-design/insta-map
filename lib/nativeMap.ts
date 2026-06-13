@@ -9,6 +9,7 @@ import type {
   SetCameraOptions,
   SetFullscreenCameraOptions,
   SetFullscreenRouteOptions,
+  SetFullscreenMyLocationOptions,
   UpdateFullscreenMarkersOptions,
 } from "@pindmap/native-map";
 
@@ -21,6 +22,7 @@ export type {
   UpdateFullscreenMarkersOptions,
   SetFullscreenCameraOptions,
   SetFullscreenRouteOptions,
+  SetFullscreenMyLocationOptions,
 };
 
 export type CreateNativeMapOptions = {
@@ -559,6 +561,51 @@ export async function clearFullscreenNativeRoute(
     await getPlugin().clearFullscreenRoute();
   } catch (err) {
     nativeMapWarn("clearFullscreenNativeRoute failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Show my-location dot on the full-screen native map VC. */
+export async function setFullscreenNativeMyLocation(
+  options: SetFullscreenMyLocationOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "setFullscreenNativeMyLocation skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("setFullscreenNativeMyLocation", options);
+    await getPlugin().setFullscreenMyLocation(options);
+  } catch (err) {
+    nativeMapWarn("setFullscreenNativeMyLocation failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Remove my-location dot from the full-screen native map VC. */
+export async function clearFullscreenNativeMyLocation(
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "clearFullscreenNativeMyLocation skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("clearFullscreenNativeMyLocation");
+    await getPlugin().clearFullscreenMyLocation();
+  } catch (err) {
+    nativeMapWarn("clearFullscreenNativeMyLocation failed", err);
     if (!silent) {
       return Promise.reject(err);
     }
