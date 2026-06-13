@@ -30,6 +30,7 @@ import {
   dismissFullscreenNativeMap,
   updateFullscreenNativeMarkers,
   setFullscreenNativeCamera,
+  setFullscreenNativeRoute,
   setNativeCamera,
   setNativeMarkerClickHandler,
 } from "@/lib/nativeMap";
@@ -879,6 +880,7 @@ function HomePageContent() {
   /** V-7-1: 확장 지도 상단 50% Kakao Native 오버레이 (iOS만, JS API와 병행) */
   const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
   const fullscreenSearchListenerRegisteredRef = useRef(false);
+  const fullscreenDirectionsListenerRegisteredRef = useRef(false);
   const fullscreenDismissListenerRegisteredRef = useRef(false);
   const fullscreenAutoOpenedRef = useRef(false);
   const fullscreenGeocodeRunRef = useRef(0);
@@ -1341,6 +1343,89 @@ function HomePageContent() {
     }
   }, []);
 
+  const runFullscreenNativeDirections = useCallback(async (destination: { id: string; lat: number; lng: number }) => {
+    try {
+      const destLat = Number(destination.lat);
+      const destLng = Number(destination.lng);
+      if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) return;
+
+      const fetchAndDrawRoute = async (origin: { lat: number; lng: number }) => {
+        const res = await fetch("/api/directions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            origin,
+            destination: { lat: destLat, lng: destLng },
+            mode: "car",
+          }),
+        });
+        const data = await res.json();
+        if (!data.routes?.[0]) {
+          showToast("경로를 찾을 수 없어요", "error");
+          return;
+        }
+        const route = data.routes[0];
+        const path: { lat: number; lng: number }[] = [];
+        route.sections.forEach((section: { roads?: { vertexes?: number[] }[] }) => {
+          section.roads?.forEach((road) => {
+            const vertexes = road.vertexes ?? [];
+            for (let i = 0; i < vertexes.length; i += 2) {
+              const lng = Number(vertexes[i]);
+              const lat = Number(vertexes[i + 1]);
+              if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                path.push({ lat, lng });
+              }
+            }
+          });
+        });
+        if (path.length < 2) {
+          showToast("경로를 찾을 수 없어요", "error");
+          return;
+        }
+        await setFullscreenNativeRoute({ path, mode: "car" }, { silent: false });
+      };
+
+      const stored = myLocationLatLngRef.current;
+      if (
+        stored &&
+        Number.isFinite(stored.lat) &&
+        Number.isFinite(stored.lng)
+      ) {
+        try {
+          await fetchAndDrawRoute({ lat: stored.lat, lng: stored.lng });
+        } catch (err) {
+          console.error("[fullscreen] directions failed", err);
+          showToast("길찾기에 실패했어요", "error");
+        }
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              await fetchAndDrawRoute({
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude,
+              });
+            } catch (err) {
+              console.error("[fullscreen] directions failed", err);
+              showToast("길찾기에 실패했어요", "error");
+            }
+            resolve();
+          },
+          (err) => {
+            console.error("[fullscreen] geolocation failed", err);
+            showToast("현재 위치를 가져올 수 없어요", "error");
+            resolve();
+          },
+        );
+      });
+    } catch (err) {
+      console.error("[fullscreen] directions failed", err);
+    }
+  }, [showToast]);
+
   const handleOpenFullscreenNativeMap = useCallback(async () => {
     try {
       const resolvePlaceCoords = (place: Place): LatLng | null => {
@@ -1399,6 +1484,16 @@ function HomePageContent() {
         }).catch((err) => {
           fullscreenSearchListenerRegisteredRef.current = false;
           console.error("[fullscreen] fullscreenSearch listener failed", err);
+        });
+      }
+
+      if (!fullscreenDirectionsListenerRegisteredRef.current) {
+        fullscreenDirectionsListenerRegisteredRef.current = true;
+        void PindmapNativeMap.addListener("fullscreenDirections", (e) => {
+          void runFullscreenNativeDirections({ id: e.id, lat: e.lat, lng: e.lng });
+        }).catch((err) => {
+          fullscreenDirectionsListenerRegisteredRef.current = false;
+          console.error("[fullscreen] fullscreenDirections listener failed", err);
         });
       }
 
@@ -1475,7 +1570,7 @@ function HomePageContent() {
     } catch (err) {
       console.error("[fullscreen] presentFullscreenMap failed", err);
     }
-  }, [savedPlaces, runFullscreenNativeSearch]);
+  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;

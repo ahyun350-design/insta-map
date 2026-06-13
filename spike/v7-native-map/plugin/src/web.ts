@@ -7,11 +7,13 @@ import type {
   MarkerClickEvent,
   FullscreenSearchEvent,
   FullscreenMapDismissedEvent,
+  FullscreenDirectionsEvent,
   PindmapNativeMapPlugin,
   PresentFullscreenMapOptions,
   RemoveMarkersOptions,
   SetCameraOptions,
   SetFullscreenCameraOptions,
+  SetFullscreenRouteOptions,
   UpdateFullscreenMarkersOptions,
 } from './definitions';
 
@@ -68,12 +70,21 @@ export class PindmapNativeMapWeb extends WebPlugin implements PindmapNativeMapPl
     console.warn('[PindmapNativeMap] web stub — setFullscreenCamera noop (iOS only)');
   }
 
+  async setFullscreenRoute(_options: SetFullscreenRouteOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — setFullscreenRoute noop (iOS only)');
+  }
+
+  async clearFullscreenRoute(): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — clearFullscreenRoute noop (iOS only)');
+  }
+
   addListener(
-    eventName: 'markerClick' | 'fullscreenSearch' | 'fullscreenMapDismissed',
+    eventName: 'markerClick' | 'fullscreenSearch' | 'fullscreenMapDismissed' | 'fullscreenDirections',
     listenerFunc:
       | ((event: MarkerClickEvent) => void)
       | ((event: FullscreenSearchEvent) => void)
-      | ((event: FullscreenMapDismissedEvent) => void),
+      | ((event: FullscreenMapDismissedEvent) => void)
+      | ((event: FullscreenDirectionsEvent) => void),
   ): Promise<PluginListenerHandle> & PluginListenerHandle {
     return super.addListener(eventName, listenerFunc) as Promise<PluginListenerHandle> & PluginListenerHandle;
   }

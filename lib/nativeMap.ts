@@ -8,6 +8,7 @@ import type {
   PresentFullscreenMapOptions,
   SetCameraOptions,
   SetFullscreenCameraOptions,
+  SetFullscreenRouteOptions,
   UpdateFullscreenMarkersOptions,
 } from "@pindmap/native-map";
 
@@ -19,6 +20,7 @@ export type {
   PresentFullscreenMapOptions,
   UpdateFullscreenMarkersOptions,
   SetFullscreenCameraOptions,
+  SetFullscreenRouteOptions,
 };
 
 export type CreateNativeMapOptions = {
@@ -512,6 +514,51 @@ export async function setFullscreenNativeCamera(
     await getPlugin().setFullscreenCamera(options);
   } catch (err) {
     nativeMapWarn("setFullscreenNativeCamera failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Draw a route polyline on the full-screen native map VC. */
+export async function setFullscreenNativeRoute(
+  options: SetFullscreenRouteOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "setFullscreenNativeRoute skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("setFullscreenNativeRoute", { pointCount: options.path.length, mode: options.mode ?? "car" });
+    await getPlugin().setFullscreenRoute(options);
+  } catch (err) {
+    nativeMapWarn("setFullscreenNativeRoute failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Remove the route polyline from the full-screen native map VC. */
+export async function clearFullscreenNativeRoute(
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "clearFullscreenNativeRoute skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("clearFullscreenNativeRoute");
+    await getPlugin().clearFullscreenRoute();
+  } catch (err) {
+    nativeMapWarn("clearFullscreenNativeRoute failed", err);
     if (!silent) {
       return Promise.reject(err);
     }

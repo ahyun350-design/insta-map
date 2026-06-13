@@ -53,6 +53,12 @@ export interface FullscreenMapDismissedEvent {
   reason?: string;
 }
 
+export interface FullscreenDirectionsEvent {
+  id: string;
+  lat: number;
+  lng: number;
+}
+
 export interface PresentFullscreenMapOptions {
   lat: number;
   lng: number;
@@ -70,6 +76,18 @@ export interface SetFullscreenCameraOptions {
   lng: number;
   zoom?: number;
   animated?: boolean;
+}
+
+export interface LatLngInput {
+  lat: number;
+  lng: number;
+}
+
+export type FullscreenRouteMode = 'car' | 'walk';
+
+export interface SetFullscreenRouteOptions {
+  path: LatLngInput[];
+  mode?: FullscreenRouteMode;
 }
 
 export interface PindmapNativeMapPlugin {
@@ -93,6 +111,10 @@ export interface PindmapNativeMapPlugin {
     eventName: 'fullscreenMapDismissed',
     listenerFunc: (event: FullscreenMapDismissedEvent) => void,
   ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'fullscreenDirections',
+    listenerFunc: (event: FullscreenDirectionsEvent) => void,
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
   /** V-7-2 prototype: modal full-screen map with normal VC lifecycle (overlay-independent) */
   presentNativeMapTest(): Promise<void>;
   /** V-7-2 production: full-screen native map VC (verified lifecycle path) */
@@ -100,4 +122,6 @@ export interface PindmapNativeMapPlugin {
   dismissFullscreenMap(): Promise<void>;
   updateFullscreenMarkers(options: UpdateFullscreenMarkersOptions): Promise<void>;
   setFullscreenCamera(options: SetFullscreenCameraOptions): Promise<void>;
+  setFullscreenRoute(options: SetFullscreenRouteOptions): Promise<void>;
+  clearFullscreenRoute(): Promise<void>;
 }

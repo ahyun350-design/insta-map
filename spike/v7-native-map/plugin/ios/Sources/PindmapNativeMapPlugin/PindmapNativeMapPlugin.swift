@@ -510,6 +510,8 @@ private final class KakaoMapTestViewController: UIViewController {
         let title: String?
         let address: String?
         let category: String?
+        let lat: Double?
+        let lng: Double?
     }
 
     private let mode: Mode
@@ -526,6 +528,7 @@ private final class KakaoMapTestViewController: UIViewController {
     private let overlayCardWebView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
     var onMarkerClick: ((String) -> Void)?
     var onSearch: ((String) -> Void)?
+    var onDirections: ((String, Double, Double) -> Void)?
     var onDismiss: (() -> Void)?
     private weak var productionCloseButton: UIButton?
     private weak var productionSearchBarContainer: UIView?
@@ -537,7 +540,18 @@ private final class KakaoMapTestViewController: UIViewController {
     private weak var placeSheetCategoryLabel: UILabel?
     private weak var placeSheetTitleLabel: UILabel?
     private weak var placeSheetAddressLabel: UILabel?
+    private weak var placeSheetDirectionsButton: UIButton?
+    private var placeSheetDirectionsTopToAddress: NSLayoutConstraint?
+    private var placeSheetDirectionsTopToTitle: NSLayoutConstraint?
+    private var placeSheetMarkerId: String?
     private static let markerLayerID = "pindmap-fullscreen-markers"
+    private static let routeLayerID = "pindmap-fullscreen-route"
+    private static let routeID = "pindmap-route-main"
+    private static let carRouteStyleSetID = "pindmap-route-car"
+    private static let walkRouteStyleSetID = "pindmap-route-walk"
+    private var routeLayer: RouteLayer?
+    private var registeredRouteStyleSetIDs = Set<String>()
+    private var pendingRoute: (path: [(lat: Double, lng: Double)], mode: String)?
 
     private struct TestMarker {
         let id: String
@@ -589,6 +603,17 @@ private final class KakaoMapTestViewController: UIViewController {
             clearAllMarkers()
         }
         _ = addMarkers(markers)
+    }
+
+    func setRoute(path: [(lat: Double, lng: Double)], mode: String) {
+        pendingRoute = (path, mode)
+        guard mapViewReady else { return }
+        applyRoute(path: path, mode: mode)
+    }
+
+    func clearRoute() {
+        pendingRoute = nil
+        routeLayer?.clearAllRoutes()
     }
 
     override func viewDidLoad() {
@@ -910,7 +935,9 @@ private final class KakaoMapTestViewController: UIViewController {
             markerMetadata[marker.id] = MarkerMetadata(
                 title: marker.title,
                 address: marker.address,
-                category: marker.category
+                category: marker.category,
+                lat: marker.lat,
+                lng: marker.lng
             )
             let styleID = ensureStyle(for: marker.category)
             let option = PoiOptions(styleID: styleID, poiID: marker.id)
@@ -1018,8 +1045,25 @@ private final class KakaoMapTestViewController: UIViewController {
         card.addSubview(addressLabel)
         placeSheetAddressLabel = addressLabel
 
-        let bottom = card.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 220)
+        let directionsButton = UIButton(type: .system)
+        directionsButton.translatesAutoresizingMaskIntoConstraints = false
+        directionsButton.setTitle("길찾기", for: .normal)
+        directionsButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        directionsButton.setTitleColor(.white, for: .normal)
+        directionsButton.backgroundColor = UIColor(hex: 0x1a2a7a)
+        directionsButton.layer.cornerRadius = 10
+        directionsButton.addTarget(self, action: #selector(placeSheetDirectionsTapped), for: .touchUpInside)
+        card.addSubview(directionsButton)
+        placeSheetDirectionsButton = directionsButton
+
+        let bottom = card.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 280)
         placeSheetBottomConstraint = bottom
+
+        let directionsTopToAddress = directionsButton.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 12)
+        let directionsTopToTitle = directionsButton.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12)
+        directionsTopToTitle.isActive = false
+        placeSheetDirectionsTopToAddress = directionsTopToAddress
+        placeSheetDirectionsTopToTitle = directionsTopToTitle
 
         NSLayoutConstraint.activate([
             card.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -1042,7 +1086,11 @@ private final class KakaoMapTestViewController: UIViewController {
             addressLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             addressLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
             addressLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
-            addressLabel.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            directionsTopToAddress,
+            directionsButton.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            directionsButton.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            directionsButton.heightAnchor.constraint(equalToConstant: 44),
+            directionsButton.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16),
         ])
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(placeSheetPanned(_:)))
@@ -1054,6 +1102,7 @@ private final class KakaoMapTestViewController: UIViewController {
         ensurePlaceBottomSheetChrome()
         guard let backdrop = placeSheetBackdrop, let card = placeSheetCard else { return }
 
+        placeSheetMarkerId = markerId
         let meta = markerMetadata[markerId]
         let category = meta?.category
         let title = meta?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1079,9 +1128,13 @@ private final class KakaoMapTestViewController: UIViewController {
         if let address, !address.isEmpty {
             placeSheetAddressLabel?.text = address
             placeSheetAddressLabel?.isHidden = false
+            placeSheetDirectionsTopToTitle?.isActive = false
+            placeSheetDirectionsTopToAddress?.isActive = true
         } else {
             placeSheetAddressLabel?.text = nil
             placeSheetAddressLabel?.isHidden = true
+            placeSheetDirectionsTopToAddress?.isActive = false
+            placeSheetDirectionsTopToTitle?.isActive = true
         }
 
         let alreadyVisible = backdrop.alpha > 0 && !backdrop.isHidden
@@ -1133,6 +1186,25 @@ private final class KakaoMapTestViewController: UIViewController {
         hidePlaceBottomSheet(animated: true)
     }
 
+    @objc private func placeSheetDirectionsTapped() {
+        guard let markerId = placeSheetMarkerId else { return }
+        let lat: Double
+        let lng: Double
+        if let meta = markerMetadata[markerId],
+           let metaLat = meta.lat,
+           let metaLng = meta.lng {
+            lat = metaLat
+            lng = metaLng
+        } else if let poi = markerPois[markerId] {
+            let coord = poi.position.wgsCoord
+            lat = coord.latitude
+            lng = coord.longitude
+        } else {
+            return
+        }
+        onDirections?(markerId, lat, lng)
+    }
+
     @objc private func placeSheetPanned(_ gesture: UIPanGestureRecognizer) {
         guard let card = placeSheetCard else { return }
         let translation = gesture.translation(in: view)
@@ -1166,6 +1238,69 @@ private final class KakaoMapTestViewController: UIViewController {
         } else if !pendingInitialMarkers.isEmpty {
             updateMarkers(pendingInitialMarkers, clearPrefix: nil)
         }
+        if let pendingRoute {
+            applyRoute(path: pendingRoute.path, mode: pendingRoute.mode)
+        }
+    }
+
+    private func applyRoute(path: [(lat: Double, lng: Double)], mode: String) {
+        guard path.count >= 2, let map = kakaoMapView() else { return }
+
+        let routeMode = mode == "walk" ? "walk" : "car"
+        let manager = map.getRouteManager()
+        ensureRouteStyleSet(mode: routeMode, manager: manager)
+        guard let layer = ensureRouteLayer(manager: manager) else { return }
+
+        layer.removeRoute(routeID: Self.routeID)
+
+        let points = path.map { MapPoint(longitude: $0.lng, latitude: $0.lat) }
+        let styleSetID = routeMode == "walk" ? Self.walkRouteStyleSetID : Self.carRouteStyleSetID
+        var option = RouteOptions(routeID: Self.routeID, styleID: styleSetID, zOrder: 0)
+        option.segments = [RouteSegment(points: points, styleIndex: 0)]
+
+        guard let route = layer.addRoute(option: option) else { return }
+        route.show()
+        layer.visible = true
+        map.refresh()
+
+        fitCameraToRoute(points: points, map: map)
+    }
+
+    private func ensureRouteLayer(manager: RouteManager) -> RouteLayer? {
+        if routeLayer == nil {
+            routeLayer = manager.addRouteLayer(layerID: Self.routeLayerID, zOrder: 50)
+        }
+        routeLayer?.visible = true
+        return routeLayer
+    }
+
+    private func ensureRouteStyleSet(mode: String, manager: RouteManager) {
+        let styleSetID = mode == "walk" ? Self.walkRouteStyleSetID : Self.carRouteStyleSetID
+        guard !registeredRouteStyleSetIDs.contains(styleSetID) else { return }
+
+        let color = mode == "walk" ? UIColor(hex: 0x16a34a) : UIColor(hex: 0x1a2a7a)
+        let perLevelStyle = PerLevelRouteStyle(
+            width: 6,
+            color: color,
+            strokeWidth: 0,
+            strokeColor: .clear,
+            level: 0,
+            patternIndex: -1
+        )
+        let routeStyle = RouteStyle(styles: [perLevelStyle])
+        let styleSet = RouteStyleSet(styleID: styleSetID, styles: [routeStyle])
+        manager.addRouteStyleSet(styleSet)
+        registeredRouteStyleSetIDs.insert(styleSetID)
+    }
+
+    private func fitCameraToRoute(points: [MapPoint], map: KakaoMap) {
+        guard points.count >= 2 else { return }
+        let area = AreaRect(points: points)
+        let update = CameraUpdate.make(area: area)
+        map.animateCamera(
+            cameraUpdate: update,
+            options: CameraAnimationOptions(autoElevation: true, consecutive: false, durationInMillis: 500)
+        )
     }
 }
 
@@ -1277,6 +1412,8 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "dismissFullscreenMap", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "updateFullscreenMarkers", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setFullscreenCamera", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setFullscreenRoute", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearFullscreenRoute", returnType: CAPPluginReturnPromise),
     ]
 
     private var mapHost: UIView?
@@ -1630,6 +1767,26 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    @objc func setFullscreenRoute(_ call: CAPPluginCall) {
+        let path = Self.parseRoutePath(from: call)
+        let mode = call.getString("mode") ?? "car"
+        DispatchQueue.main.async { [weak self] in
+            guard let vc = self?.fullscreenMapVC else {
+                call.resolve()
+                return
+            }
+            vc.setRoute(path: path, mode: mode)
+            call.resolve()
+        }
+    }
+
+    @objc func clearFullscreenRoute(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.clearRoute()
+            call.resolve()
+        }
+    }
+
     private func wireFullscreenMapCallbacks(_ vc: KakaoMapTestViewController, trackAsProduction: Bool) {
         vc.onMarkerClick = { [weak self] id in
             CAPLog.print("[PindmapNativeMap] markerClick id=\(id)")
@@ -1638,6 +1795,9 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         vc.onSearch = { [weak self] query in
             CAPLog.print("[PindmapNativeMap] fullscreenSearch query=\(query)")
             self?.notifyListeners("fullscreenSearch", data: ["query": query])
+        }
+        vc.onDirections = { [weak self] id, lat, lng in
+            self?.notifyListeners("fullscreenDirections", data: ["id": id, "lat": lat, "lng": lng])
         }
         if trackAsProduction {
             vc.onDismiss = { [weak self] in
@@ -1668,6 +1828,16 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
                 address: $0.address
             )
         }
+    }
+
+    private static func parseRoutePath(from call: CAPPluginCall) -> [(lat: Double, lng: Double)] {
+        guard let raw = call.options["path"] as? [[String: Any]] else { return [] }
+        var out: [(lat: Double, lng: Double)] = []
+        for dict in raw {
+            guard let lat = doubleValue(dict["lat"]), let lng = doubleValue(dict["lng"]) else { continue }
+            out.append((lat: lat, lng: lng))
+        }
+        return out
     }
 
     private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?)] {
