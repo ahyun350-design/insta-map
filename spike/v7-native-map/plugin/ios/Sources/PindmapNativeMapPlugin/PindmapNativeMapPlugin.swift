@@ -560,6 +560,7 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private static func doubleValue(_ value: Any?) -> Double? {
+        if let s = value as? String { return Double(s) }
         if let n = value as? NSNumber { return n.doubleValue }
         if let d = value as? Double { return d }
         return nil

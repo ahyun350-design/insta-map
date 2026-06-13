@@ -20,10 +20,14 @@ import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 import {
+  addNativeMarkers,
+  clearNativeMarkerClickHandlers,
+  clearNativeMarkers,
   createNativeMap,
   destroyNativeMap,
   isNativeMapAvailable,
   setNativeCamera,
+  setNativeMarkerClickHandler,
 } from "@/lib/nativeMap";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
@@ -1044,6 +1048,10 @@ function HomePageContent() {
   const searchMarkersRef = useRef<any[]>([]);
   /** 확장 지도 키워드 검색 결과 핀 전용 — 코스 마커(searchMarkersRef)와 분리 */
   const mapSearchResultPinsRef = useRef<any[]>([]);
+  /** Native 검색 핀 id → place (markerClick 복원용) */
+  const searchPinPlaceByIdRef = useRef<Map<string, any>>(new Map());
+  /** Native 검색 핀 id 목록 — clear 시 추적용 */
+  const searchResultNativePinIdsRef = useRef<string[]>([]);
   const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
   const placePinsRunIdRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
   const locationRenderTokenRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
@@ -1136,10 +1144,35 @@ function HomePageContent() {
     });
     mapSearchResultPinsRef.current = [];
     lastExpandedSearchPlacesRef.current = [];
+    searchPinPlaceByIdRef.current.clear();
+    searchResultNativePinIdsRef.current = [];
+    void clearNativeMarkers();
+    clearNativeMarkerClickHandlers();
   }, []);
 
   const addSearchResultPins = useCallback(
     (places: any[], onMarkerClick: (place: any) => void) => {
+      if (isNativeMapAvailable() && expandedNativeMapEnabled) {
+        const nativeMarkers = places.map((place, index) => ({
+          id: `search-${index}`,
+          lat: Number(place.y),
+          lng: Number(place.x),
+        }));
+        searchPinPlaceByIdRef.current.clear();
+        clearNativeMarkerClickHandlers();
+        nativeMarkers.forEach(({ id }, index) => {
+          searchPinPlaceByIdRef.current.set(id, places[index]);
+          setNativeMarkerClickHandler(id, () => {
+            const place = searchPinPlaceByIdRef.current.get(id);
+            if (place) onMarkerClick(place);
+          });
+        });
+        searchResultNativePinIdsRef.current = nativeMarkers.map((m) => m.id);
+        lastExpandedSearchPlacesRef.current = places.slice();
+        void addNativeMarkers(nativeMarkers);
+        return;
+      }
+
       if (!expandedMapRef.current || !window.kakao?.maps) return;
       places.forEach((place) => {
         const marker = new window.kakao.maps.Marker({
@@ -1153,7 +1186,7 @@ function HomePageContent() {
       });
       lastExpandedSearchPlacesRef.current = places.slice();
     },
-    [],
+    [expandedNativeMapEnabled],
   );
 
   const handleClearMapSearch = useCallback(() => {
