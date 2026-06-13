@@ -24,6 +24,7 @@ export interface MarkerInput {
   lat: number;
   lng: number;
   title?: string;
+  category?: string;
 }
 
 export interface AddMarkersOptions {

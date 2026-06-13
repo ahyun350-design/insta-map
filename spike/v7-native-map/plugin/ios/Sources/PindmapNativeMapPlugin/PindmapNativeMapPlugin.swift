@@ -48,7 +48,7 @@ private final class KakaoMapHost: UIView {
     private var pendingCamera: (lat: Double, lng: Double, zoom: Double)?
     private var markerLayer: LabelLayer?
     private var markerPois: [String: Poi] = [:]
-    private var markerStyleRegistered = false
+    private var registeredStyleIDs = Set<String>()
     private static let markerLayerID = "pindmap-markers"
     private static let markerStyleID = "pindmap-marker-style"
     var onMarkerClick: ((String) -> Void)?
@@ -96,7 +96,7 @@ private final class KakaoMapHost: UIView {
         onMarkerClick = nil
         clearNativeMarkers()
         markerLayer = nil
-        markerStyleRegistered = false
+        registeredStyleIDs.removeAll()
         mapController?.pauseEngine()
         mapController?.resetEngine()
         mapController?.delegate = nil
@@ -104,7 +104,7 @@ private final class KakaoMapHost: UIView {
         pendingCamera = nil
     }
 
-    func addNativeMarkers(_ inputs: [(id: String, lat: Double, lng: Double)]) -> Int {
+    func addNativeMarkers(_ inputs: [(id: String, lat: Double, lng: Double, category: String?)]) -> Int {
         guard let layer = ensureMarkerInfrastructure() else { return 0 }
         var added = 0
         for input in inputs {
@@ -112,7 +112,8 @@ private final class KakaoMapHost: UIView {
                 layer.removePoi(poiID: input.id)
                 markerPois.removeValue(forKey: input.id)
             }
-            let option = PoiOptions(styleID: Self.markerStyleID, poiID: input.id)
+            let styleID = ensureStyle(for: input.category)
+            let option = PoiOptions(styleID: styleID, poiID: input.id)
             option.rank = 0
             option.clickable = true
             let point = MapPoint(longitude: input.lng, latitude: input.lat)
@@ -137,16 +138,75 @@ private final class KakaoMapHost: UIView {
         markerPois.removeAll()
     }
 
-    private static func makeDefaultMarkerIcon() -> UIImage {
+    private static func makeMarkerIcon(color: UIColor) -> UIImage {
         let size = CGSize(width: 28, height: 28)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
-            UIColor.systemRed.setFill()
+            color.setFill()
             ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
             UIColor.white.setStroke()
             ctx.cgContext.setLineWidth(2)
             ctx.cgContext.strokeEllipse(in: CGRect(x: 1, y: 1, width: size.width - 2, height: size.height - 2))
         }
+    }
+
+    private static func makeDefaultMarkerIcon() -> UIImage {
+        makeMarkerIcon(color: .systemRed)
+    }
+
+    private static func markerColor(for category: String?) -> UIColor {
+        guard let category = category?.lowercased(), !category.isEmpty else {
+            return .systemRed
+        }
+        if category.contains("음식") || category.contains("식당") || category.contains("restaurant") {
+            return .systemOrange
+        }
+        if category.contains("카페") || category.contains("coffee") || category.contains("cafe") {
+            return .brown
+        }
+        if category.contains("관광") || category.contains("명소") || category.contains("tourist") {
+            return .systemBlue
+        }
+        return .systemRed
+    }
+
+    private static func categoryStyleKey(for category: String?) -> String {
+        guard let category = category?.lowercased(), !category.isEmpty else {
+            return "default"
+        }
+        if category.contains("음식") || category.contains("식당") || category.contains("restaurant") {
+            return "restaurant"
+        }
+        if category.contains("카페") || category.contains("coffee") || category.contains("cafe") {
+            return "cafe"
+        }
+        if category.contains("관광") || category.contains("명소") || category.contains("tourist") {
+            return "tourist"
+        }
+        return "default"
+    }
+
+    private static func styleID(for category: String?) -> String {
+        let key = categoryStyleKey(for: category)
+        if key == "default" {
+            return markerStyleID
+        }
+        return "pindmap-marker-\(key)"
+    }
+
+    private func ensureStyle(for category: String?) -> String {
+        guard let map = kakaoMapView() else { return Self.markerStyleID }
+        let styleID = Self.styleID(for: category)
+        if registeredStyleIDs.contains(styleID) {
+            return styleID
+        }
+        let manager = map.getLabelManager()
+        let color = Self.markerColor(for: category)
+        let iconStyle = PoiIconStyle(symbol: Self.makeMarkerIcon(color: color), anchorPoint: CGPoint(x: 0.5, y: 1.0))
+        let perLevel = PerLevelPoiStyle(iconStyle: iconStyle, level: 0)
+        manager.addPoiStyle(PoiStyle(styleID: styleID, styles: [perLevel]))
+        registeredStyleIDs.insert(styleID)
+        return styleID
     }
 
     private func kakaoMapView() -> KakaoMap? {
@@ -155,14 +215,9 @@ private final class KakaoMapHost: UIView {
 
     private func ensureMarkerInfrastructure() -> LabelLayer? {
         guard let map = kakaoMapView() else { return nil }
-        let manager = map.getLabelManager()
-        if !markerStyleRegistered {
-            let iconStyle = PoiIconStyle(symbol: Self.makeDefaultMarkerIcon(), anchorPoint: CGPoint(x: 0.5, y: 1.0))
-            let perLevel = PerLevelPoiStyle(iconStyle: iconStyle, level: 0)
-            manager.addPoiStyle(PoiStyle(styleID: Self.markerStyleID, styles: [perLevel]))
-            markerStyleRegistered = true
-        }
+        _ = ensureStyle(for: nil)
         if markerLayer == nil {
+            let manager = map.getLabelManager()
             if let existing = manager.getLabelLayer(layerID: Self.markerLayerID) {
                 markerLayer = existing
             } else {
@@ -541,13 +596,14 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double)] {
+    private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double, category: String?)] {
         guard let raw = call.options["markers"] as? [[String: Any]] else { return [] }
-        var out: [(id: String, lat: Double, lng: Double)] = []
+        var out: [(id: String, lat: Double, lng: Double, category: String?)] = []
         for dict in raw {
             guard let id = dict["id"] as? String else { continue }
             guard let lat = doubleValue(dict["lat"]), let lng = doubleValue(dict["lng"]) else { continue }
-            out.append((id: id, lat: lat, lng: lng))
+            let category = dict["category"] as? String
+            out.append((id: id, lat: lat, lng: lng, category: category))
         }
         return out
     }
