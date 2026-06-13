@@ -51,6 +51,7 @@ private final class KakaoMapHost: UIView {
     private var markerStyleRegistered = false
     private static let markerLayerID = "pindmap-markers"
     private static let markerStyleID = "pindmap-marker-style"
+    var onMarkerClick: ((String) -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -89,6 +90,10 @@ private final class KakaoMapHost: UIView {
     }
 
     func teardown() {
+        if let map = kakaoMapView(), (map.eventDelegate as AnyObject?) === self {
+            map.eventDelegate = nil
+        }
+        onMarkerClick = nil
         clearNativeMarkers()
         markerLayer = nil
         markerStyleRegistered = false
@@ -109,6 +114,7 @@ private final class KakaoMapHost: UIView {
             }
             let option = PoiOptions(styleID: Self.markerStyleID, poiID: input.id)
             option.rank = 0
+            option.clickable = true
             let point = MapPoint(longitude: input.lng, latitude: input.lat)
             guard let poi = layer.addPoi(option: option, at: point) else { continue }
             poi.show()
@@ -173,6 +179,13 @@ private final class KakaoMapHost: UIView {
         return markerLayer
     }
 
+    func attachKakaoEventDelegateIfNeeded() {
+        guard let map = kakaoMapView() else { return }
+        if map.eventDelegate == nil {
+            map.eventDelegate = self
+        }
+    }
+
     private func kakaoZoomLevel() -> Int {
         guard let zoom = pendingCamera?.zoom else { return 9 }
         return max(1, min(20, Int(zoom.rounded())))
@@ -218,6 +231,17 @@ extension KakaoMapHost: MapControllerDelegate {
 
     func addViewSucceeded(_ viewName: String, viewInfoName: String) {
         applyCameraIfReady(animated: false)
+        attachKakaoEventDelegateIfNeeded()
+    }
+}
+
+extension KakaoMapHost: KakaoMapEventDelegate {
+    func poiDidTapped(kakaoMap: KakaoMap, layerID: String, poiID: String, position: MapPoint) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            guard layerID == Self.markerLayerID, self.markerPois[poiID] != nil else { return }
+            self.onMarkerClick?(poiID)
+        }
     }
 }
 
@@ -417,6 +441,10 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
                     case "kakao":
                         self.providerName = "kakao"
                         let kakao = KakaoMapHost(frame: rect)
+                        kakao.onMarkerClick = { [weak self] id in
+                            CAPLog.print("[PindmapNativeMap] markerClick id=\(id)")
+                            self?.notifyListeners("markerClick", data: ["id": id])
+                        }
                         host = kakao
                         kakao.setCamera(lat: lat, lng: lng, zoom: zoom, animated: false)
                     default:

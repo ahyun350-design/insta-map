@@ -1,3 +1,5 @@
+import type { PluginListenerHandle } from '@capacitor/core';
+
 export type NativeMapProvider = 'mapkit' | 'kakao';
 
 export interface CreateMapOptions {
@@ -32,6 +34,10 @@ export interface RemoveMarkersOptions {
   ids: string[];
 }
 
+export interface MarkerClickEvent {
+  id: string;
+}
+
 export interface PindmapNativeMapPlugin {
   createMap(options: CreateMapOptions): Promise<{ mapId: string }>;
   destroyMap(): Promise<void>;
@@ -41,4 +47,8 @@ export interface PindmapNativeMapPlugin {
   addMarkers(options: AddMarkersOptions): Promise<{ added: number }>;
   removeMarkers(options: RemoveMarkersOptions): Promise<void>;
   clearMarkers(): Promise<void>;
+  addListener(
+    eventName: 'markerClick',
+    listenerFunc: (event: MarkerClickEvent) => void,
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
 }
