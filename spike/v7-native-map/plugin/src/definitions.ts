@@ -17,10 +17,28 @@ export interface SetCameraOptions {
   animated?: boolean;
 }
 
+export interface MarkerInput {
+  id: string;
+  lat: number;
+  lng: number;
+  title?: string;
+}
+
+export interface AddMarkersOptions {
+  markers: MarkerInput[];
+}
+
+export interface RemoveMarkersOptions {
+  ids: string[];
+}
+
 export interface PindmapNativeMapPlugin {
   createMap(options: CreateMapOptions): Promise<{ mapId: string }>;
   destroyMap(): Promise<void>;
   setCamera(options: SetCameraOptions): Promise<void>;
   /** Debug: returns native frame applied to map view */
   getDebugInfo(): Promise<{ provider: string; frame: string }>;
+  addMarkers(options: AddMarkersOptions): Promise<{ added: number }>;
+  removeMarkers(options: RemoveMarkersOptions): Promise<void>;
+  clearMarkers(): Promise<void>;
 }

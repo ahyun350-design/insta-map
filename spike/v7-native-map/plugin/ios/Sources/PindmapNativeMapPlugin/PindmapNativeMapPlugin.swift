@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Capacitor
 import MapKit
 import KakaoMapsSDK
@@ -45,6 +46,11 @@ private final class KakaoMapHost: UIView {
     private let kmContainer = KMViewContainer()
     private var mapController: KMController?
     private var pendingCamera: (lat: Double, lng: Double, zoom: Double)?
+    private var markerLayer: LabelLayer?
+    private var markerPois: [String: Poi] = [:]
+    private var markerStyleRegistered = false
+    private static let markerLayerID = "pindmap-markers"
+    private static let markerStyleID = "pindmap-marker-style"
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -83,11 +89,88 @@ private final class KakaoMapHost: UIView {
     }
 
     func teardown() {
+        clearNativeMarkers()
+        markerLayer = nil
+        markerStyleRegistered = false
         mapController?.pauseEngine()
         mapController?.resetEngine()
         mapController?.delegate = nil
         mapController = nil
         pendingCamera = nil
+    }
+
+    func addNativeMarkers(_ inputs: [(id: String, lat: Double, lng: Double)]) -> Int {
+        guard let layer = ensureMarkerInfrastructure() else { return 0 }
+        var added = 0
+        for input in inputs {
+            if markerPois[input.id] != nil {
+                layer.removePoi(poiID: input.id)
+                markerPois.removeValue(forKey: input.id)
+            }
+            let option = PoiOptions(styleID: Self.markerStyleID, poiID: input.id)
+            option.rank = 0
+            let point = MapPoint(longitude: input.lng, latitude: input.lat)
+            guard let poi = layer.addPoi(option: option, at: point) else { continue }
+            poi.show()
+            markerPois[input.id] = poi
+            added += 1
+        }
+        return added
+    }
+
+    func removeNativeMarkers(ids: [String]) {
+        guard let layer = markerLayer ?? ensureMarkerInfrastructure() else { return }
+        for id in ids {
+            layer.removePoi(poiID: id)
+            markerPois.removeValue(forKey: id)
+        }
+    }
+
+    func clearNativeMarkers() {
+        markerLayer?.clearAllItems()
+        markerPois.removeAll()
+    }
+
+    private static func makeDefaultMarkerIcon() -> UIImage {
+        let size = CGSize(width: 28, height: 28)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor.systemRed.setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
+            UIColor.white.setStroke()
+            ctx.cgContext.setLineWidth(2)
+            ctx.cgContext.strokeEllipse(in: CGRect(x: 1, y: 1, width: size.width - 2, height: size.height - 2))
+        }
+    }
+
+    private func kakaoMapView() -> KakaoMap? {
+        mapController?.getView("mapview") as? KakaoMap
+    }
+
+    private func ensureMarkerInfrastructure() -> LabelLayer? {
+        guard let map = kakaoMapView() else { return nil }
+        let manager = map.getLabelManager()
+        if !markerStyleRegistered {
+            let iconStyle = PoiIconStyle(symbol: Self.makeDefaultMarkerIcon(), anchorPoint: CGPoint(x: 0.5, y: 1.0))
+            let perLevel = PerLevelPoiStyle(iconStyle: iconStyle, level: 0)
+            manager.addPoiStyle(PoiStyle(styleID: Self.markerStyleID, styles: [perLevel]))
+            markerStyleRegistered = true
+        }
+        if markerLayer == nil {
+            if let existing = manager.getLabelLayer(layerID: Self.markerLayerID) {
+                markerLayer = existing
+            } else {
+                let opts = LabelLayerOptions(
+                    layerID: Self.markerLayerID,
+                    competitionType: .none,
+                    competitionUnit: .poi,
+                    orderType: .rank,
+                    zOrder: 100
+                )
+                markerLayer = manager.addLabelLayer(option: opts)
+            }
+        }
+        return markerLayer
     }
 
     private func kakaoZoomLevel() -> Int {
@@ -179,6 +262,9 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "destroyMap", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setCamera", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getDebugInfo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "addMarkers", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "removeMarkers", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearMarkers", returnType: CAPPluginReturnPromise),
     ]
 
     private var mapHost: UIView?
@@ -389,6 +475,66 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
             let frame = self?.mapHost?.frame.debugDescription ?? "none"
             call.resolve(["provider": self?.providerName ?? "none", "frame": frame])
         }
+    }
+
+    @objc func addMarkers(_ call: CAPPluginCall) {
+        let inputs = Self.parseMarkerInputs(from: call)
+        DispatchQueue.main.async { [weak self] in
+            guard let kakao = self?.mapHost as? KakaoMapHost else {
+                call.resolve(["added": 0])
+                return
+            }
+            let added = kakao.addNativeMarkers(inputs)
+            CAPLog.print("[PindmapNativeMap] addMarkers count=\(added)")
+            call.resolve(["added": added])
+        }
+    }
+
+    @objc func removeMarkers(_ call: CAPPluginCall) {
+        let ids = Self.parseMarkerIds(from: call)
+        DispatchQueue.main.async { [weak self] in
+            guard let kakao = self?.mapHost as? KakaoMapHost else {
+                call.resolve()
+                return
+            }
+            kakao.removeNativeMarkers(ids: ids)
+            call.resolve()
+        }
+    }
+
+    @objc func clearMarkers(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { [weak self] in
+            guard let kakao = self?.mapHost as? KakaoMapHost else {
+                call.resolve()
+                return
+            }
+            kakao.clearNativeMarkers()
+            call.resolve()
+        }
+    }
+
+    private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double)] {
+        guard let raw = call.options["markers"] as? [[String: Any]] else { return [] }
+        var out: [(id: String, lat: Double, lng: Double)] = []
+        for dict in raw {
+            guard let id = dict["id"] as? String else { continue }
+            guard let lat = doubleValue(dict["lat"]), let lng = doubleValue(dict["lng"]) else { continue }
+            out.append((id: id, lat: lat, lng: lng))
+        }
+        return out
+    }
+
+    private static func parseMarkerIds(from call: CAPPluginCall) -> [String] {
+        if let ids = call.getArray("ids", String.self) {
+            return ids
+        }
+        return call.options["ids"] as? [String] ?? []
+    }
+
+    private static func doubleValue(_ value: Any?) -> Double? {
+        if let n = value as? NSNumber { return n.doubleValue }
+        if let d = value as? Double { return d }
+        return nil
     }
 
     private func installTouchRouter(on containerView: UIView, above webView: WKWebView, mapHost: UIView) {
