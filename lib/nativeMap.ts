@@ -2,6 +2,7 @@ import { Capacitor } from "@capacitor/core";
 import { PindmapNativeMap } from "@pindmap/native-map";
 import type {
   CreateMapOptions,
+  MarkerInput,
   NativeMapProvider,
   PindmapNativeMapPlugin,
   SetCameraOptions,
@@ -45,11 +46,21 @@ export type NativeMapDebugInfo = {
   frame: string;
 };
 
+export type NativeMarkerInput = {
+  id: string;
+  lat: number;
+  lng: number;
+  title?: string;
+};
+
 const DEFAULT_PROVIDER: NativeMapProvider = "kakao";
 const UNAVAILABLE_MAP_ID = "unavailable";
 
 let debugLogging = false;
 let activeMapId: string | null = null;
+let markerClickListenerRegistered = false;
+
+const markerClickHandlers = new Map<string, (id: string) => void>();
 
 type PluginResolver = () => PindmapNativeMapPlugin;
 let pluginResolver: PluginResolver = () => PindmapNativeMap;
@@ -280,5 +291,112 @@ export async function getNativeMapDebugInfo(
     nativeMapWarn("getNativeMapDebugInfo failed", err);
     if (silent) return null;
     return Promise.reject(err);
+  }
+}
+
+function ensureMarkerClickListener(): void {
+  if (markerClickListenerRegistered) return;
+  if (!isNativeMapAvailable()) return;
+
+  markerClickListenerRegistered = true;
+  void getPlugin()
+    .addListener("markerClick", ({ id }) => {
+      const handler = markerClickHandlers.get(id);
+      if (handler) handler(id);
+    })
+    .catch((err) => {
+      markerClickListenerRegistered = false;
+      nativeMapWarn("markerClick listener registration failed", err);
+    });
+}
+
+/**
+ * Register a click handler for a native marker id.
+ * Uses a single plugin listener — one handler per id in an internal Map.
+ */
+export function setNativeMarkerClickHandler(id: string, cb: (id: string) => void): void {
+  markerClickHandlers.set(id, cb);
+  ensureMarkerClickListener();
+}
+
+/** Clear all native marker click handlers (does not remove the plugin listener). */
+export function clearNativeMarkerClickHandlers(): void {
+  markerClickHandlers.clear();
+}
+
+/**
+ * Add markers to the native map overlay.
+ * No-op on web / SSR when `silent` is true (default) — returns 0.
+ */
+export async function addNativeMarkers(
+  markers: NativeMarkerInput[],
+  callOptions: NativeMapCallOptions = {},
+): Promise<number> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, 0, "addNativeMarkers skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve(result);
+  }
+
+  const payload: MarkerInput[] = markers;
+
+  try {
+    nativeMapLog("addNativeMarkers", { count: markers.length });
+    const result = await getPlugin().addMarkers({ markers: payload });
+    return result.added;
+  } catch (err) {
+    nativeMapWarn("addNativeMarkers failed", err);
+    if (silent) return 0;
+    return Promise.reject(err);
+  }
+}
+
+/**
+ * Remove native markers by id.
+ * No-op on web / SSR when `silent` is true (default).
+ */
+export async function removeNativeMarkers(
+  ids: string[],
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "removeNativeMarkers skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("removeNativeMarkers", { count: ids.length });
+    await getPlugin().removeMarkers({ ids });
+  } catch (err) {
+    nativeMapWarn("removeNativeMarkers failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/**
+ * Remove all native markers from the overlay.
+ * No-op on web / SSR when `silent` is true (default).
+ */
+export async function clearNativeMarkers(callOptions: NativeMapCallOptions = {}): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "clearNativeMarkers skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("clearNativeMarkers");
+    await getPlugin().clearMarkers();
+  } catch (err) {
+    nativeMapWarn("clearNativeMarkers failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
   }
 }
