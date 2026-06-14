@@ -709,13 +709,22 @@ private final class KakaoMapTestViewController: UIViewController {
     }
 
     func setRoute(path: [(lat: Double, lng: Double)], mode: String) {
+        // TEMP course-route-debug
+        let routeLayerExists = routeLayer != nil
+        CAPLog.print("[Route] setRoute entry pathCount=\(path.count) mode=\(mode) mapViewReady=\(mapViewReady) routeLayerExists=\(routeLayerExists)")
         pendingRoute = (path, mode)
         guard mapViewReady else {
+            // TEMP course-route-debug
+            CAPLog.print("[Route] setRoute deferred — mapViewReady=false, stored pendingRoute pathCount=\(path.count)")
             return
         }
         guard kakaoMapView() != nil else {
+            // TEMP course-route-debug
+            CAPLog.print("[Route] setRoute deferred — kakaoMapView=nil, pendingRoute stored pathCount=\(path.count)")
             return
         }
+        // TEMP course-route-debug
+        CAPLog.print("[Route] setRoute applying immediately pathCount=\(path.count)")
         applyRoute(path: path, mode: mode)
     }
 
@@ -1894,7 +1903,12 @@ private final class KakaoMapTestViewController: UIViewController {
             updateMarkers(pendingInitialMarkers, clearPrefix: nil)
         }
         if let pendingRoute {
+            // TEMP course-route-debug
+            CAPLog.print("[Route] applyInitialContent applying pendingRoute pathCount=\(pendingRoute.path.count) mode=\(pendingRoute.mode) mapViewReady=\(mapViewReady)")
             applyRoute(path: pendingRoute.path, mode: pendingRoute.mode)
+        } else {
+            // TEMP course-route-debug
+            CAPLog.print("[Route] applyInitialContent no pendingRoute mapViewReady=\(mapViewReady)")
         }
         if let pendingSearchResults {
             applySearchResults(pendingSearchResults)
@@ -1944,20 +1958,32 @@ private final class KakaoMapTestViewController: UIViewController {
     }
 
     private func applyRoute(path: [(lat: Double, lng: Double)], mode: String) {
+        // TEMP course-route-debug
+        CAPLog.print("[Route] applyRoute entry pathCount=\(path.count) mode=\(mode) mapViewReady=\(mapViewReady) routeLayerExists=\(routeLayer != nil)")
         guard path.count >= 2 else {
+            // TEMP course-route-debug
+            CAPLog.print("[Route] applyRoute abort — pathCount < 2 (\(path.count))")
             return
         }
         guard let map = kakaoMapView() else {
+            // TEMP course-route-debug
+            CAPLog.print("[Route] applyRoute abort — kakaoMapView=nil")
             return
         }
 
         let routeMode = mode == "walk" ? "walk" : "car"
         let manager = map.getRouteManager()
         ensureRouteStyleSet(mode: routeMode, manager: manager)
+        // TEMP course-route-debug
+        CAPLog.print("[Route] applyRoute styleSet ok mode=\(routeMode) registeredStyleSets=\(registeredRouteStyleSetIDs.count)")
 
         guard let layer = ensureRouteLayer(manager: manager) else {
+            // TEMP course-route-debug
+            CAPLog.print("[Route] applyRoute abort — ensureRouteLayer returned nil")
             return
         }
+        // TEMP course-route-debug
+        CAPLog.print("[Route] applyRoute routeLayer ok layerID=\(Self.routeLayerID) visible=\(layer.visible)")
 
         layer.removeRoute(routeID: Self.routeID)
 
@@ -1967,12 +1993,17 @@ private final class KakaoMapTestViewController: UIViewController {
         option.segments = [RouteSegment(points: points, styleIndex: 0)]
 
         guard let route = layer.addRoute(option: option) else {
-            CAPLog.print("[PindmapNativeMap][Fullscreen] addRoute FAIL pathCount=\(path.count) mode=\(mode)")
+            // TEMP course-route-debug
+            CAPLog.print("[Route] applyRoute addRoute FAIL pathCount=\(path.count) mode=\(mode) styleSetID=\(styleSetID)")
             return
         }
+        // TEMP course-route-debug
+        CAPLog.print("[Route] applyRoute addRoute ok routeID=\(Self.routeID) pointCount=\(points.count)")
         route.show()
         layer.visible = true
         map.refresh()
+        // TEMP course-route-debug
+        CAPLog.print("[Route] applyRoute done — route shown, layer visible, map refreshed")
 
         fitCameraToRoute(points: points, map: map)
     }
@@ -2038,6 +2069,9 @@ extension KakaoMapTestViewController: MapControllerDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.mapViewReady = true
+            // TEMP course-route-debug
+            let pendingRouteCount = self.pendingRoute?.path.count ?? 0
+            CAPLog.print("[Route] addViewSucceeded mapViewReady=true pendingRouteCount=\(pendingRouteCount)")
             self.syncContainerSize()
             self.attachKakaoEventDelegateIfNeeded()
             self.applyInitialContent()
@@ -2520,8 +2554,12 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func setFullscreenRoute(_ call: CAPPluginCall) {
         let path = Self.parseRoutePath(from: call)
         let mode = call.getString("mode") ?? "car"
+        // TEMP course-route-debug
+        CAPLog.print("[Route] setFullscreenRoute plugin entry pathCount=\(path.count) mode=\(mode) vcExists=\(fullscreenMapVC != nil)")
         DispatchQueue.main.async { [weak self] in
             guard let vc = self?.fullscreenMapVC else {
+                // TEMP course-route-debug
+                CAPLog.print("[Route] setFullscreenRoute no fullscreenMapVC — resolve without drawing")
                 call.resolve()
                 return
             }

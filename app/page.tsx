@@ -967,7 +967,13 @@ function defaultFullscreenNativeCamera(): FullscreenNativeCamera {
 
 /** Allow native map view to finish applyInitialContent before markers/route updates. */
 function waitForFullscreenNativeMapReady(): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, 400));
+  // TEMP course-route-debug
+  console.log("[course] waitForFullscreenNativeMapReady start 400ms");
+  return new Promise((resolve) => window.setTimeout(() => {
+    // TEMP course-route-debug
+    console.log("[course] waitForFullscreenNativeMapReady done");
+    resolve();
+  }, 400));
 }
 
 function buildCourseFullscreenMarkers(coursePlaces: CoursePlace[]): FullscreenSearchMarkerSnapshot[] {
@@ -2090,12 +2096,30 @@ function HomePageContent() {
       const walkPath = await buildCourseWalkPathFromTmap(courseRoutePath);
       console.log("[course] tmap walk path len", walkPath.length);
       const routePath = walkPath.length >= 2 ? walkPath : courseRoutePath;
-      await setFullscreenNativeRoute({ path: routePath, mode: "walk" }, { silent: false });
-      console.log("[course] setFullscreenNativeRoute done", routePath.length);
+      // TEMP course-route-debug
+      console.log("[course] calling setRoute path", routePath.length, "mode walk");
+      try {
+        await setFullscreenNativeRoute({ path: routePath, mode: "walk" }, { silent: false });
+        // TEMP course-route-debug
+        console.log("[course] setRoute resolved");
+      } catch (setRouteErr) {
+        // TEMP course-route-debug
+        console.error("[course] setRoute failed", setRouteErr);
+        throw setRouteErr;
+      }
     } catch (err) {
       console.error("[course] failed", err);
-      await setFullscreenNativeRoute({ path: courseRoutePath, mode: "walk" }, { silent: false });
-      console.log("[course] setFullscreenNativeRoute fallback straight", courseRoutePath.length);
+      const fallbackPath = courseRoutePath;
+      // TEMP course-route-debug
+      console.log("[course] calling setRoute path", fallbackPath.length, "mode walk");
+      try {
+        await setFullscreenNativeRoute({ path: fallbackPath, mode: "walk" }, { silent: false });
+        // TEMP course-route-debug
+        console.log("[course] setRoute resolved");
+      } catch (setRouteErr) {
+        // TEMP course-route-debug
+        console.error("[course] setRoute failed", setRouteErr);
+      }
     } finally {
       setDirectionsLoading(false);
     }
