@@ -911,6 +911,8 @@ function HomePageContent() {
   const fullscreenDismissListenerRegisteredRef = useRef(false);
   const fullscreenAutoOpenedRef = useRef(false);
   const fullscreenGeocodeRunRef = useRef(0);
+  /** iOS 전체화면 Native 코스 모드 — showCourseOnMap에서 설정, 닫을 때 null */
+  const fullscreenCourseRef = useRef<CoursePlace[] | null>(null);
   const [expandedNativeMapId, setExpandedNativeMapId] = useState<string | null>(null);
   /** 확장 지도 인스턴스가 생길 때마다 증가 — 핀만 별도 effect에서 단일 경로로 그리기 */
   const [expandedMapPinsTick, setExpandedMapPinsTick] = useState(0);
@@ -1518,10 +1520,56 @@ function HomePageContent() {
         };
       };
 
-      const initialMarkers = savedPlaces.flatMap((place) => {
-        const coords = resolvePlaceCoords(place);
-        return coords ? [placeToMarker(place, coords)] : [];
+      const coursePlaces = fullscreenCourseRef.current;
+      const isFullscreenCourseMode = Boolean(coursePlaces?.length);
+
+      const courseToMarker = (place: CoursePlace, index: number, coords: LatLng) => ({
+        id: `course-${index}`,
+        lat: coords.lat,
+        lng: coords.lng,
+        category: place.category,
+        title: place.name,
+        address: place.address,
       });
+
+      let courseRoutePath: { lat: number; lng: number }[] = [];
+      let initialMarkers: Array<{
+        id: string;
+        lat: number;
+        lng: number;
+        category?: string;
+        title?: string;
+        address?: string;
+        photos?: string[];
+        postCount?: number;
+      }>;
+
+      if (isFullscreenCourseMode && coursePlaces) {
+        const courseEntries = coursePlaces.flatMap((place, index) => {
+          let coords: LatLng | null = null;
+          if (Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+            coords = { lat: place.lat, lng: place.lng };
+          } else {
+            const cached = savedPlaceCoordsRef.current[place.id];
+            if (
+              cached &&
+              Number.isFinite(cached.lat) &&
+              Number.isFinite(cached.lng)
+            ) {
+              coords = cached;
+            }
+          }
+          if (!coords) return [];
+          return [{ marker: courseToMarker(place, index, coords), coords }];
+        });
+        initialMarkers = courseEntries.map((entry) => entry.marker);
+        courseRoutePath = courseEntries.map((entry) => entry.coords);
+      } else {
+        initialMarkers = savedPlaces.flatMap((place) => {
+          const coords = resolvePlaceCoords(place);
+          return coords ? [placeToMarker(place, coords)] : [];
+        });
+      }
 
       let lat = 37.5665;
       let lng = 126.978;
@@ -1567,6 +1615,13 @@ function HomePageContent() {
 
       await presentFullscreenNativeMap({ lat, lng, zoom: 9, markers: initialMarkers }, { silent: false });
 
+      if (isFullscreenCourseMode && courseRoutePath.length >= 2) {
+        await setFullscreenNativeRoute(
+          { path: courseRoutePath, mode: "car" },
+          { silent: false },
+        );
+      }
+
       void (async () => {
         const stored = myLocationLatLngRef.current;
         if (
@@ -1592,6 +1647,8 @@ function HomePageContent() {
           /* location unavailable — skip silently */
         }
       })();
+
+      if (isFullscreenCourseMode) return;
 
       const missingPlaces = savedPlaces.filter((place) => {
         if (resolvePlaceCoords(place)) return false;
@@ -1674,6 +1731,7 @@ function HomePageContent() {
     }
 
     fullscreenAutoOpenedRef.current = false;
+    fullscreenCourseRef.current = null;
     void dismissFullscreenNativeMap({ silent: true });
   }, [mapExpanded, handleOpenFullscreenNativeMap]);
 
@@ -1683,6 +1741,15 @@ function HomePageContent() {
     fullscreenDismissListenerRegisteredRef.current = true;
     void PindmapNativeMap.addListener("fullscreenMapDismissed", () => {
       fullscreenAutoOpenedRef.current = false;
+      fullscreenCourseRef.current = null;
+      if (returnToCourseSheetRef.current) {
+        returnToCourseSheetRef.current = false;
+        setMapExpanded(false);
+        clearRoute();
+        setShowCourseRoute(false);
+        setShowCourseModal(true);
+        return;
+      }
       setMapExpanded(false);
     }).catch((err) => {
       fullscreenDismissListenerRegisteredRef.current = false;
@@ -4356,8 +4423,13 @@ function HomePageContent() {
     returnToCourseSheetRef.current = true;
     setShowCourseModal(false);
     setShowCourseRoute(true);
-    setMapExpanded(true);
     setActiveTab("map");
+    if (isNativeMapAvailable()) {
+      fullscreenCourseRef.current = [...courseResult];
+      setMapExpanded(true);
+      return;
+    }
+    setMapExpanded(true);
     // 지도가 그려진 후에 마커와 폴리라인 그리기 (살짝 딜레이)
     setTimeout(() => drawCourseRoute(), 800);
   };
