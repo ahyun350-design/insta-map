@@ -35,6 +35,7 @@ import {
   clearFullscreenNativeSearchResults,
   setFullscreenNativePlaceSaved,
   setFullscreenNativeDirectionsInfo,
+  showFullscreenNativePlaceSheet,
   setFullscreenNativeMyLocation,
   setNativeCamera,
   setNativeMarkerClickHandler,
@@ -934,8 +935,14 @@ type FullscreenSearchMarkerSnapshot = {
 };
 
 type FullscreenReturnSnapshot =
-  | { mode: "saved"; camera: FullscreenNativeCamera | null }
-  | { mode: "course"; coursePlaces: CoursePlace[]; camera: FullscreenNativeCamera | null }
+  | { mode: "saved"; camera: FullscreenNativeCamera | null; selectedMarkerId?: string }
+  | {
+      mode: "course";
+      coursePlaces: CoursePlace[];
+      courseMarkers: FullscreenSearchMarkerSnapshot[];
+      camera: FullscreenNativeCamera | null;
+      selectedMarkerId?: string;
+    }
   | {
       mode: "search";
       query: string;
@@ -956,6 +963,20 @@ type FullscreenReturnSnapshot =
 
 function defaultFullscreenNativeCamera(): FullscreenNativeCamera {
   return { lat: 37.5665, lng: 126.978, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+}
+
+function buildCourseFullscreenMarkers(coursePlaces: CoursePlace[]): FullscreenSearchMarkerSnapshot[] {
+  return coursePlaces.flatMap((place, index) => {
+    if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) return [];
+    return [{
+      id: `course-${index}`,
+      lat: place.lat,
+      lng: place.lng,
+      category: place.category,
+      title: place.name,
+      address: place.address,
+    }];
+  });
 }
 
 function coursePlaceToSavedItem(p: CoursePlace): SavedCourseItem {
@@ -1971,10 +1992,27 @@ function HomePageContent() {
 
     const coursePlaces = fullscreenCourseRef.current;
     if (coursePlaces?.length) {
+      const courseMarkers = buildCourseFullscreenMarkers(coursePlaces);
+      let camera: FullscreenNativeCamera = lastFullscreenNativeCameraRef.current ?? fallbackCamera;
+      if (selectedMarkerId?.startsWith("course-")) {
+        const index = Number.parseInt(selectedMarkerId.slice("course-".length), 10);
+        const place = Number.isFinite(index) ? coursePlaces[index] : undefined;
+        if (place && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+          camera = { lat: place.lat, lng: place.lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+        }
+      } else if (selectedMarkerId?.startsWith("place-")) {
+        const place = placePinByIdRef.current.get(selectedMarkerId);
+        const stored = place ? savedPlaceCoordsRef.current[place.id] ?? latLngFromRow(place) : null;
+        if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
+          camera = { lat: stored.lat, lng: stored.lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+        }
+      }
       return {
         mode: "course",
         coursePlaces: coursePlaces.map((place) => ({ ...place })),
-        camera: lastFullscreenNativeCameraRef.current,
+        courseMarkers: courseMarkers.map((marker) => ({ ...marker })),
+        camera,
+        selectedMarkerId,
       };
     }
 
@@ -2002,7 +2040,24 @@ function HomePageContent() {
       };
     }
 
-    return { mode: "saved", camera: lastFullscreenNativeCameraRef.current };
+    let camera = lastFullscreenNativeCameraRef.current;
+    if (selectedMarkerId?.startsWith("place-")) {
+      const place = placePinByIdRef.current.get(selectedMarkerId);
+      const stored = place ? savedPlaceCoordsRef.current[place.id] ?? latLngFromRow(place) : null;
+      if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
+        camera = { lat: stored.lat, lng: stored.lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+      }
+    }
+
+    return { mode: "saved", camera: camera ?? null, selectedMarkerId };
+  }, []);
+
+  const scheduleRestoreFullscreenPlaceSheet = useCallback((markerId?: string) => {
+    const id = String(markerId ?? "").trim();
+    if (!id) return;
+    window.setTimeout(() => {
+      void showFullscreenNativePlaceSheet({ id }, { silent: false });
+    }, 400);
   }, []);
 
   const restoreFullscreenNativeMyLocation = useCallback(async () => {
@@ -2035,6 +2090,10 @@ function HomePageContent() {
     const restoreSnapshot = fullscreenRestorePendingRef.current
       ? fullscreenReturnStateRef.current
       : null;
+    const selectedMarkerIdForRestore =
+      restoreSnapshot && "selectedMarkerId" in restoreSnapshot
+        ? restoreSnapshot.selectedMarkerId
+        : undefined;
     if (fullscreenRestorePendingRef.current) {
       fullscreenRestorePendingRef.current = false;
       fullscreenReturnStateRef.current = null;
@@ -2120,7 +2179,10 @@ function HomePageContent() {
           if (!coords) return [];
           return [{ marker: courseToMarker(place, index, coords), coords }];
         });
-        initialMarkers = courseEntries.map((entry) => entry.marker);
+        initialMarkers =
+          restoreSnapshot?.mode === "course" && restoreSnapshot.courseMarkers.length > 0
+            ? restoreSnapshot.courseMarkers.map((marker) => ({ ...marker }))
+            : courseEntries.map((entry) => entry.marker);
         courseRoutePath = courseEntries.map((entry) => entry.coords);
       } else {
         initialMarkers = savedPlaces.flatMap((place) => {
@@ -2178,6 +2240,58 @@ function HomePageContent() {
           animated: false,
         });
         void restoreFullscreenNativeMyLocation();
+        scheduleRestoreFullscreenPlaceSheet(restoreSnapshot.selectedMarkerId);
+        return;
+      }
+
+      if (restoreSnapshot?.mode === "course") {
+        registerFullscreenNativeListeners();
+
+        const camera =
+          restoreSnapshot.camera ??
+          computeFullscreenNativeEntryCamera(
+            initialMarkers,
+            { lat: initialMarkers[0]?.lat ?? 37.5665, lng: initialMarkers[0]?.lng ?? 126.978 },
+            { useMyLocation: false, myLocation: null },
+          );
+        lastFullscreenNativeCameraRef.current = camera;
+
+        await presentFullscreenNativeMap(
+          { lat: camera.lat, lng: camera.lng, zoom: camera.zoom, markers: initialMarkers },
+          { silent: false },
+        );
+
+        if (courseRoutePath.length >= 2) {
+          setDirectionsLoading(true);
+          try {
+            const walkPath = await buildCourseWalkPathFromTmap(courseRoutePath);
+            await setFullscreenNativeRoute(
+              { path: walkPath.length >= 2 ? walkPath : courseRoutePath, mode: "walk" },
+              { silent: false },
+            );
+          } catch (err) {
+            console.error("[course] restore failed", err);
+            await setFullscreenNativeRoute(
+              { path: courseRoutePath, mode: "walk" },
+              { silent: false },
+            );
+          } finally {
+            setDirectionsLoading(false);
+          }
+        }
+
+        await updateFullscreenNativeMarkers(
+          { markers: initialMarkers },
+          { silent: false },
+        );
+        await setFullscreenNativeCamera({
+          lat: camera.lat,
+          lng: camera.lng,
+          zoom: camera.zoom,
+          animated: false,
+        });
+        void restoreFullscreenNativeMyLocation();
+        scheduleRestoreFullscreenPlaceSheet(selectedMarkerIdForRestore);
         return;
       }
 
@@ -2199,9 +2313,7 @@ function HomePageContent() {
         },
       );
       const entryCamera =
-        restoreSnapshot &&
-        (restoreSnapshot.mode === "course" || restoreSnapshot.mode === "saved") &&
-        restoreSnapshot.camera
+        restoreSnapshot?.mode === "saved" && restoreSnapshot.camera
           ? restoreSnapshot.camera
           : computedEntryCamera;
       lastFullscreenNativeCameraRef.current = entryCamera;
@@ -2241,7 +2353,14 @@ function HomePageContent() {
 
       void restoreFullscreenNativeMyLocation();
 
-      if (isFullscreenCourseMode) return;
+      if (isFullscreenCourseMode) {
+        scheduleRestoreFullscreenPlaceSheet(selectedMarkerIdForRestore);
+        return;
+      }
+
+      if (restoreSnapshot?.mode === "saved") {
+        scheduleRestoreFullscreenPlaceSheet(selectedMarkerIdForRestore);
+      }
 
       const missingPlaces = savedPlaces.filter((place) => {
         if (resolvePlaceCoords(place)) return false;
@@ -2314,7 +2433,7 @@ function HomePageContent() {
       }
       console.error("[fullscreen] presentFullscreenMap failed", err);
     }
-  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast, registerFullscreenNativeListeners, restoreFullscreenNativeMyLocation]);
+  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast, registerFullscreenNativeListeners, restoreFullscreenNativeMyLocation, scheduleRestoreFullscreenPlaceSheet]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;

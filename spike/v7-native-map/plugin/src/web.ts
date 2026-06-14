@@ -106,6 +106,10 @@ export class PindmapNativeMapWeb extends WebPlugin implements PindmapNativeMapPl
     console.warn('[PindmapNativeMap] web stub — setFullscreenDirectionsInfo noop (iOS only)');
   }
 
+  async showFullscreenPlaceSheet(_options: import('./definitions').ShowFullscreenPlaceSheetOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — showFullscreenPlaceSheet noop (iOS only)');
+  }
+
   addListener(
     eventName:
       | 'markerClick'

@@ -93,6 +93,10 @@ export interface SetFullscreenDirectionsInfoOptions {
   distance: number;
 }
 
+export interface ShowFullscreenPlaceSheetOptions {
+  id: string;
+}
+
 export interface FullscreenResearchAreaEvent {
   lat: number;
   lng: number;
@@ -215,4 +219,5 @@ export interface PindmapNativeMapPlugin {
   clearFullscreenSearchResults(): Promise<void>;
   setFullscreenPlaceSaved(options: SetFullscreenPlaceSavedOptions): Promise<void>;
   setFullscreenDirectionsInfo(options: SetFullscreenDirectionsInfoOptions): Promise<void>;
+  showFullscreenPlaceSheet(options: ShowFullscreenPlaceSheetOptions): Promise<void>;
 }

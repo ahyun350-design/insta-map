@@ -20,6 +20,7 @@ import type {
   FullscreenImageLightboxEvent,
   SetFullscreenPlaceSavedOptions,
   SetFullscreenDirectionsInfoOptions,
+  ShowFullscreenPlaceSheetOptions,
   FullscreenRouteMode,
 } from "@pindmap/native-map";
 
@@ -42,6 +43,7 @@ export type {
   FullscreenImageLightboxEvent,
   SetFullscreenPlaceSavedOptions,
   SetFullscreenDirectionsInfoOptions,
+  ShowFullscreenPlaceSheetOptions,
   FullscreenRouteMode,
 };
 
@@ -721,6 +723,29 @@ export async function setFullscreenNativeDirectionsInfo(
     await getPlugin().setFullscreenDirectionsInfo(options);
   } catch (err) {
     nativeMapWarn("setFullscreenNativeDirectionsInfo failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Re-open the native place bottom sheet for a marker id on the fullscreen map. */
+export async function showFullscreenNativePlaceSheet(
+  options: ShowFullscreenPlaceSheetOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "showFullscreenNativePlaceSheet skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("showFullscreenNativePlaceSheet", options);
+    await getPlugin().showFullscreenPlaceSheet(options);
+  } catch (err) {
+    nativeMapWarn("showFullscreenNativePlaceSheet failed", err);
     if (!silent) {
       return Promise.reject(err);
     }

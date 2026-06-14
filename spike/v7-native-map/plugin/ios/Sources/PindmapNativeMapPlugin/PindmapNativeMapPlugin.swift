@@ -755,6 +755,10 @@ private final class KakaoMapTestViewController: UIViewController {
         hideSearchResultsSheet(animated: true)
     }
 
+    func showPlaceSheet(for markerId: String) {
+        showPlaceBottomSheet(for: markerId)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
@@ -2154,6 +2158,7 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "clearFullscreenSearchResults", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setFullscreenPlaceSaved", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setFullscreenDirectionsInfo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "showFullscreenPlaceSheet", returnType: CAPPluginReturnPromise),
     ]
 
     private var mapHost: UIView?
@@ -2634,6 +2639,17 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         DispatchQueue.main.async { [weak self] in
             self?.fullscreenMapVC?.setDirectionsInfo(markerId: id, durationSec: duration, distanceM: distance)
+            call.resolve()
+        }
+    }
+
+    @objc func showFullscreenPlaceSheet(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else {
+            call.reject("id required")
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.showPlaceSheet(for: id)
             call.resolve()
         }
     }
