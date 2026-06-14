@@ -918,6 +918,46 @@ async function buildCourseWalkPathFromTmap(stops: LatLng[]): Promise<LatLng[]> {
 // 좌표가 있는 장소들에서 가까운 순으로 코스 짜기 (Nearest Neighbor 알고리즘)
 type CoursePlace = Place & { lat: number; lng: number };
 
+type FullscreenNativeCamera = { lat: number; lng: number; zoom: number };
+
+type FullscreenSearchMarkerSnapshot = {
+  id: string;
+  lat: number;
+  lng: number;
+  title?: string;
+  address?: string;
+  category?: string;
+  isSaved?: boolean;
+  photos?: string[];
+  postCount?: number;
+  photoPostIds?: string[];
+};
+
+type FullscreenReturnSnapshot =
+  | { mode: "saved"; camera: FullscreenNativeCamera | null }
+  | { mode: "course"; coursePlaces: CoursePlace[]; camera: FullscreenNativeCamera | null }
+  | {
+      mode: "search";
+      query: string;
+      camera: FullscreenNativeCamera;
+      searchBiasCenter: { lat: number; lng: number };
+      selectedMarkerId?: string;
+      markers: FullscreenSearchMarkerSnapshot[];
+      searchResults: Array<{
+        id: string;
+        name: string;
+        address: string;
+        lat: number;
+        lng: number;
+        category?: string;
+      }>;
+      searchPinPlaces: [string, unknown][];
+    };
+
+function defaultFullscreenNativeCamera(): FullscreenNativeCamera {
+  return { lat: 37.5665, lng: 126.978, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+}
+
 function coursePlaceToSavedItem(p: CoursePlace): SavedCourseItem {
   return { id: p.id, name: p.name, address: p.address, category: p.category, lat: p.lat, lng: p.lng };
 }
@@ -1333,6 +1373,14 @@ function HomePageContent() {
   const returnToCourseSheetRef = useRef(false);
   /** Native 전체화면 지도 → 큐레이션 포스트 상세 진입 시, 닫으면 지도로 복귀 */
   const returnToFullscreenMapAfterDetailRef = useRef(false);
+  /** 큐레이션 진입 직전 지도 스냅샷 — 포스트 상세 닫을 때 복원 */
+  const fullscreenReturnStateRef = useRef<FullscreenReturnSnapshot | null>(null);
+  const fullscreenRestorePendingRef = useRef(false);
+  const lastFullscreenNativeCameraRef = useRef<FullscreenNativeCamera | null>(null);
+  const lastFullscreenSearchMarkersRef = useRef<FullscreenSearchMarkerSnapshot[]>([]);
+  const lastFullscreenSearchResultsRef = useRef<
+    Array<{ id: string; name: string; address: string; lat: number; lng: number; category?: string }>
+  >([]);
   const drawCourseRouteRetryRef = useRef(0);
   const courseTitleOriginalRef = useRef("");
   const courseTitleInlineInputRef = useRef<HTMLInputElement>(null);
@@ -1581,6 +1629,8 @@ function HomePageContent() {
       const trimmed = query.trim();
       if (!trimmed) {
         lastFullscreenQueryRef.current = "";
+        lastFullscreenSearchMarkersRef.current = [];
+        lastFullscreenSearchResultsRef.current = [];
         searchPinPlaceByIdRef.current.clear();
         await updateFullscreenNativeMarkers(
           { markers: [], clearPrefix: "search-" },
@@ -1637,6 +1687,8 @@ function HomePageContent() {
             try {
               if (st !== window.kakao.maps.services.Status.OK || !data?.length) {
                 searchPinPlaceByIdRef.current.clear();
+                lastFullscreenSearchMarkersRef.current = [];
+                lastFullscreenSearchResultsRef.current = [];
                 await updateFullscreenNativeMarkers(
                   { markers: [], clearPrefix: "search-" },
                   { silent: false },
@@ -1693,6 +1745,8 @@ function HomePageContent() {
 
               if (markers.length === 0) {
                 searchPinPlaceByIdRef.current.clear();
+                lastFullscreenSearchMarkersRef.current = [];
+                lastFullscreenSearchResultsRef.current = [];
                 await updateFullscreenNativeMarkers(
                   { markers: [], clearPrefix: "search-" },
                   { silent: false },
@@ -1712,11 +1766,15 @@ function HomePageContent() {
                 { silent: false },
               );
 
+              lastFullscreenSearchMarkersRef.current = markers;
+              lastFullscreenSearchResultsRef.current = searchResults;
+
               const searchCamera = computeFullscreenNativeSearchCamera(
                 markers.map((marker) => ({ lat: marker.lat, lng: marker.lng })),
                 { preserveView: isResearchSearch },
               );
               if (searchCamera) {
+                lastFullscreenNativeCameraRef.current = searchCamera;
                 await setFullscreenNativeCamera({
                   lat: searchCamera.lat,
                   lng: searchCamera.lng,
@@ -1870,7 +1928,121 @@ function HomePageContent() {
     }
   }, [showToast]);
 
+  const registerFullscreenNativeListeners = useCallback(() => {
+    if (!fullscreenSearchListenerRegisteredRef.current) {
+      fullscreenSearchListenerRegisteredRef.current = true;
+      void PindmapNativeMap.addListener("fullscreenSearch", (e) => {
+        void runFullscreenNativeSearch(e.query);
+      }).catch((err) => {
+        fullscreenSearchListenerRegisteredRef.current = false;
+        console.error("[fullscreen] fullscreenSearch listener failed", err);
+      });
+    }
+
+    if (!fullscreenResearchListenerRegisteredRef.current) {
+      fullscreenResearchListenerRegisteredRef.current = true;
+      void PindmapNativeMap.addListener("fullscreenResearchArea", (e) => {
+        const keyword = lastFullscreenQueryRef.current.trim();
+        if (!keyword) return;
+        const lat = Number(e.lat);
+        const lng = Number(e.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        void runFullscreenNativeSearch(keyword, { lat, lng });
+      }).catch((err) => {
+        fullscreenResearchListenerRegisteredRef.current = false;
+        console.error("[fullscreen] fullscreenResearchArea listener failed", err);
+      });
+    }
+
+    if (!fullscreenDirectionsListenerRegisteredRef.current) {
+      fullscreenDirectionsListenerRegisteredRef.current = true;
+      void PindmapNativeMap.addListener("fullscreenDirections", (e) => {
+        const mode = e.mode === "walk" ? "walk" : "car";
+        void runFullscreenNativeDirections({ id: e.id, lat: e.lat, lng: e.lng, mode });
+      }).catch((err) => {
+        fullscreenDirectionsListenerRegisteredRef.current = false;
+        console.error("[fullscreen] fullscreenDirections listener failed", err);
+      });
+    }
+  }, [runFullscreenNativeSearch, runFullscreenNativeDirections]);
+
+  const captureFullscreenReturnSnapshot = useCallback((selectedMarkerId?: string): FullscreenReturnSnapshot => {
+    const fallbackCamera = lastFullscreenNativeCameraRef.current ?? defaultFullscreenNativeCamera();
+
+    const coursePlaces = fullscreenCourseRef.current;
+    if (coursePlaces?.length) {
+      return {
+        mode: "course",
+        coursePlaces: coursePlaces.map((place) => ({ ...place })),
+        camera: lastFullscreenNativeCameraRef.current,
+      };
+    }
+
+    const query = lastFullscreenQueryRef.current.trim();
+    const searchMarkers = lastFullscreenSearchMarkersRef.current;
+    if (query && searchMarkers.length > 0) {
+      let camera: FullscreenNativeCamera = { ...fallbackCamera };
+      if (selectedMarkerId?.startsWith("search-")) {
+        const place = searchPinPlaceByIdRef.current.get(selectedMarkerId);
+        const lat = Number(place?.y);
+        const lng = Number(place?.x);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          camera = { lat, lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+        }
+      }
+      return {
+        mode: "search",
+        query,
+        camera,
+        searchBiasCenter: { lat: camera.lat, lng: camera.lng },
+        selectedMarkerId,
+        markers: searchMarkers.map((marker) => ({ ...marker })),
+        searchResults: lastFullscreenSearchResultsRef.current.map((result) => ({ ...result })),
+        searchPinPlaces: Array.from(searchPinPlaceByIdRef.current.entries()),
+      };
+    }
+
+    return { mode: "saved", camera: lastFullscreenNativeCameraRef.current };
+  }, []);
+
+  const restoreFullscreenNativeMyLocation = useCallback(async () => {
+    const stored = myLocationLatLngRef.current;
+    if (
+      stored &&
+      Number.isFinite(stored.lat) &&
+      Number.isFinite(stored.lng)
+    ) {
+      await setFullscreenNativeMyLocation(
+        { lat: stored.lat, lng: stored.lng },
+        { silent: false },
+      );
+      return;
+    }
+
+    try {
+      const pos = await getCurrentPositionForMapStage1();
+      const myLat = Number(pos.latitude);
+      const myLng = Number(pos.longitude);
+      if (!Number.isFinite(myLat) || !Number.isFinite(myLng)) return;
+      myLocationLatLngRef.current = { lat: myLat, lng: myLng };
+      await setFullscreenNativeMyLocation({ lat: myLat, lng: myLng }, { silent: false });
+    } catch {
+      /* location unavailable — skip silently */
+    }
+  }, []);
+
   const handleOpenFullscreenNativeMap = useCallback(async () => {
+    const restoreSnapshot = fullscreenRestorePendingRef.current
+      ? fullscreenReturnStateRef.current
+      : null;
+    if (fullscreenRestorePendingRef.current) {
+      fullscreenRestorePendingRef.current = false;
+      fullscreenReturnStateRef.current = null;
+    }
+    if (restoreSnapshot?.mode === "course") {
+      fullscreenCourseRef.current = restoreSnapshot.coursePlaces.map((place) => ({ ...place }));
+    }
+
     try {
       const resolvePlaceCoords = (place: Place): LatLng | null => {
         const stored = latLngFromRow(place);
@@ -1979,47 +2151,41 @@ function HomePageContent() {
         }
       }
 
-      if (!fullscreenSearchListenerRegisteredRef.current) {
-        fullscreenSearchListenerRegisteredRef.current = true;
-        void PindmapNativeMap.addListener("fullscreenSearch", (e) => {
-          void runFullscreenNativeSearch(e.query);
-        }).catch((err) => {
-          fullscreenSearchListenerRegisteredRef.current = false;
-          console.error("[fullscreen] fullscreenSearch listener failed", err);
-        });
-      }
+      registerFullscreenNativeListeners();
 
-      if (!fullscreenResearchListenerRegisteredRef.current) {
-        fullscreenResearchListenerRegisteredRef.current = true;
-        void PindmapNativeMap.addListener("fullscreenResearchArea", (e) => {
-          const keyword = lastFullscreenQueryRef.current.trim();
-          if (!keyword) return;
-          const lat = Number(e.lat);
-          const lng = Number(e.lng);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-          void runFullscreenNativeSearch(keyword, { lat, lng });
-        }).catch((err) => {
-          fullscreenResearchListenerRegisteredRef.current = false;
-          console.error("[fullscreen] fullscreenResearchArea listener failed", err);
+      if (restoreSnapshot?.mode === "search") {
+        searchPinPlaceByIdRef.current = new Map(
+          restoreSnapshot.searchPinPlaces as [string, unknown][],
+        );
+        const camera = restoreSnapshot.camera;
+        lastFullscreenNativeCameraRef.current = camera;
+        await presentFullscreenNativeMap(
+          { lat: camera.lat, lng: camera.lng, zoom: camera.zoom, markers: initialMarkers },
+          { silent: false },
+        );
+        await setFullscreenNativeSearchResults(
+          { results: restoreSnapshot.searchResults },
+          { silent: false },
+        );
+        await updateFullscreenNativeMarkers(
+          { markers: restoreSnapshot.markers, clearPrefix: "search-" },
+          { silent: false },
+        );
+        await setFullscreenNativeCamera({
+          lat: camera.lat,
+          lng: camera.lng,
+          zoom: camera.zoom,
+          animated: false,
         });
-      }
-
-      if (!fullscreenDirectionsListenerRegisteredRef.current) {
-        fullscreenDirectionsListenerRegisteredRef.current = true;
-        void PindmapNativeMap.addListener("fullscreenDirections", (e) => {
-          const mode = e.mode === "walk" ? "walk" : "car";
-          void runFullscreenNativeDirections({ id: e.id, lat: e.lat, lng: e.lng, mode });
-        }).catch((err) => {
-          fullscreenDirectionsListenerRegisteredRef.current = false;
-          console.error("[fullscreen] fullscreenDirections listener failed", err);
-        });
+        void restoreFullscreenNativeMyLocation();
+        return;
       }
 
       const geocodeRunId = ++fullscreenGeocodeRunRef.current;
       const accumulatedMarkers = [...initialMarkers];
 
       const storedMyLocation = myLocationLatLngRef.current;
-      const entryCamera = computeFullscreenNativeEntryCamera(
+      const computedEntryCamera = computeFullscreenNativeEntryCamera(
         initialMarkers,
         { lat, lng },
         {
@@ -2032,6 +2198,13 @@ function HomePageContent() {
               : null,
         },
       );
+      const entryCamera =
+        restoreSnapshot &&
+        (restoreSnapshot.mode === "course" || restoreSnapshot.mode === "saved") &&
+        restoreSnapshot.camera
+          ? restoreSnapshot.camera
+          : computedEntryCamera;
+      lastFullscreenNativeCameraRef.current = entryCamera;
       await presentFullscreenNativeMap(
         { lat: entryCamera.lat, lng: entryCamera.lng, zoom: entryCamera.zoom, markers: initialMarkers },
         { silent: false },
@@ -2066,31 +2239,7 @@ function HomePageContent() {
         }
       }
 
-      void (async () => {
-        const stored = myLocationLatLngRef.current;
-        if (
-          stored &&
-          Number.isFinite(stored.lat) &&
-          Number.isFinite(stored.lng)
-        ) {
-          await setFullscreenNativeMyLocation(
-            { lat: stored.lat, lng: stored.lng },
-            { silent: false },
-          );
-          return;
-        }
-
-        try {
-          const pos = await getCurrentPositionForMapStage1();
-          const myLat = Number(pos.latitude);
-          const myLng = Number(pos.longitude);
-          if (!Number.isFinite(myLat) || !Number.isFinite(myLng)) return;
-          myLocationLatLngRef.current = { lat: myLat, lng: myLng };
-          await setFullscreenNativeMyLocation({ lat: myLat, lng: myLng }, { silent: false });
-        } catch {
-          /* location unavailable — skip silently */
-        }
-      })();
+      void restoreFullscreenNativeMyLocation();
 
       if (isFullscreenCourseMode) return;
 
@@ -2165,7 +2314,7 @@ function HomePageContent() {
       }
       console.error("[fullscreen] presentFullscreenMap failed", err);
     }
-  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast]);
+  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast, registerFullscreenNativeListeners, restoreFullscreenNativeMyLocation]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
@@ -2285,6 +2434,7 @@ function HomePageContent() {
   const closeDetailPost = useCallback(() => {
     if (returnToFullscreenMapAfterDetailRef.current) {
       returnToFullscreenMapAfterDetailRef.current = false;
+      fullscreenRestorePendingRef.current = true;
       setDetailPostId(null);
       setScrollToComment(false);
       setDetailReturnTo(null);
@@ -7111,23 +7261,24 @@ function HomePageContent() {
     });
   }, [handleFullscreenNativeToggleSave]);
 
-  const handleFullscreenNativeCuration = useCallback(async (postId: string) => {
+  const handleFullscreenNativeCuration = useCallback(async (postId: string, markerId?: string) => {
     const id = String(postId ?? "").trim();
     if (!id) return;
+    fullscreenReturnStateRef.current = captureFullscreenReturnSnapshot(markerId);
     returnToFullscreenMapAfterDetailRef.current = true;
     await dismissFullscreenNativeMap({ silent: false });
     setMapExpanded(false);
     setSelectedPlace(null);
     setSelectedMapPlace(null);
     setDetailPostId(id);
-  }, []);
+  }, [captureFullscreenReturnSnapshot]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
     if (fullscreenCurationListenerRegisteredRef.current) return;
     fullscreenCurationListenerRegisteredRef.current = true;
     void PindmapNativeMap.addListener("fullscreenCuration", (e) => {
-      void handleFullscreenNativeCuration(e.postId);
+      void handleFullscreenNativeCuration(e.postId, e.id);
     }).catch((err) => {
       fullscreenCurationListenerRegisteredRef.current = false;
       console.error("[fullscreen] fullscreenCuration listener failed", err);
