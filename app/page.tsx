@@ -965,6 +965,11 @@ function defaultFullscreenNativeCamera(): FullscreenNativeCamera {
   return { lat: 37.5665, lng: 126.978, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
 }
 
+/** Allow native map view to finish applyInitialContent before markers/route updates. */
+function waitForFullscreenNativeMapReady(): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, 400));
+}
+
 function buildCourseFullscreenMarkers(coursePlaces: CoursePlace[]): FullscreenSearchMarkerSnapshot[] {
   return coursePlaces.flatMap((place, index) => {
     if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) return [];
@@ -2060,6 +2065,42 @@ function HomePageContent() {
     }, 400);
   }, []);
 
+  const drawFullscreenNativeCourseRoute = useCallback(async (
+    courseRoutePath: LatLng[],
+    markerCount: number,
+  ) => {
+    // TEMP restore-debug
+    console.log("[course] entry path len", courseRoutePath.length, "markers", markerCount);
+    if (courseRoutePath.length < 2) {
+      console.log("[course] skip route — path too short");
+      return;
+    }
+    setDirectionsLoading(true);
+    try {
+      if (courseRoutePath.length > FULLSCREEN_COURSE_DIRECTIONS_WARN_STOPS) {
+        console.warn(
+          "[fullscreen] course has many stops; directions requests may be slow",
+          courseRoutePath.length,
+        );
+        showToast(
+          `코스 장소가 ${courseRoutePath.length}곳입니다. 경로 계산에 시간이 걸릴 수 있어요.`,
+          "info",
+        );
+      }
+      const walkPath = await buildCourseWalkPathFromTmap(courseRoutePath);
+      console.log("[course] tmap walk path len", walkPath.length);
+      const routePath = walkPath.length >= 2 ? walkPath : courseRoutePath;
+      await setFullscreenNativeRoute({ path: routePath, mode: "walk" }, { silent: false });
+      console.log("[course] setFullscreenNativeRoute done", routePath.length);
+    } catch (err) {
+      console.error("[course] failed", err);
+      await setFullscreenNativeRoute({ path: courseRoutePath, mode: "walk" }, { silent: false });
+      console.log("[course] setFullscreenNativeRoute fallback straight", courseRoutePath.length);
+    } finally {
+      setDirectionsLoading(false);
+    }
+  }, [showToast]);
+
   const restoreFullscreenNativeMyLocation = useCallback(async () => {
     const stored = myLocationLatLngRef.current;
     if (
@@ -2219,18 +2260,28 @@ function HomePageContent() {
         searchPinPlaceByIdRef.current = new Map(
           restoreSnapshot.searchPinPlaces as [string, unknown][],
         );
+        const searchMarkers = restoreSnapshot.markers;
+        const searchResults = restoreSnapshot.searchResults;
+        // TEMP restore-debug
+        console.log("[restore] search markers", searchMarkers.length, "results", searchResults.length);
         const camera = restoreSnapshot.camera;
         lastFullscreenNativeCameraRef.current = camera;
         await presentFullscreenNativeMap(
-          { lat: camera.lat, lng: camera.lng, zoom: camera.zoom, markers: initialMarkers },
+          {
+            lat: camera.lat,
+            lng: camera.lng,
+            zoom: camera.zoom,
+            markers: [...initialMarkers, ...searchMarkers],
+          },
           { silent: false },
         );
+        await waitForFullscreenNativeMapReady();
         await setFullscreenNativeSearchResults(
-          { results: restoreSnapshot.searchResults },
+          { results: searchResults },
           { silent: false },
         );
         await updateFullscreenNativeMarkers(
-          { markers: restoreSnapshot.markers, clearPrefix: "search-" },
+          { markers: searchMarkers, clearPrefix: "search-" },
           { silent: false },
         );
         await setFullscreenNativeCamera({
@@ -2241,57 +2292,6 @@ function HomePageContent() {
         });
         void restoreFullscreenNativeMyLocation();
         scheduleRestoreFullscreenPlaceSheet(restoreSnapshot.selectedMarkerId);
-        return;
-      }
-
-      if (restoreSnapshot?.mode === "course") {
-        registerFullscreenNativeListeners();
-
-        const camera =
-          restoreSnapshot.camera ??
-          computeFullscreenNativeEntryCamera(
-            initialMarkers,
-            { lat: initialMarkers[0]?.lat ?? 37.5665, lng: initialMarkers[0]?.lng ?? 126.978 },
-            { useMyLocation: false, myLocation: null },
-          );
-        lastFullscreenNativeCameraRef.current = camera;
-
-        await presentFullscreenNativeMap(
-          { lat: camera.lat, lng: camera.lng, zoom: camera.zoom, markers: initialMarkers },
-          { silent: false },
-        );
-
-        if (courseRoutePath.length >= 2) {
-          setDirectionsLoading(true);
-          try {
-            const walkPath = await buildCourseWalkPathFromTmap(courseRoutePath);
-            await setFullscreenNativeRoute(
-              { path: walkPath.length >= 2 ? walkPath : courseRoutePath, mode: "walk" },
-              { silent: false },
-            );
-          } catch (err) {
-            console.error("[course] restore failed", err);
-            await setFullscreenNativeRoute(
-              { path: courseRoutePath, mode: "walk" },
-              { silent: false },
-            );
-          } finally {
-            setDirectionsLoading(false);
-          }
-        }
-
-        await updateFullscreenNativeMarkers(
-          { markers: initialMarkers },
-          { silent: false },
-        );
-        await setFullscreenNativeCamera({
-          lat: camera.lat,
-          lng: camera.lng,
-          zoom: camera.zoom,
-          animated: false,
-        });
-        void restoreFullscreenNativeMyLocation();
-        scheduleRestoreFullscreenPlaceSheet(selectedMarkerIdForRestore);
         return;
       }
 
@@ -2313,42 +2313,21 @@ function HomePageContent() {
         },
       );
       const entryCamera =
-        restoreSnapshot?.mode === "saved" && restoreSnapshot.camera
+        restoreSnapshot?.mode === "course" && restoreSnapshot.camera
           ? restoreSnapshot.camera
-          : computedEntryCamera;
+          : restoreSnapshot?.mode === "saved" && restoreSnapshot.camera
+            ? restoreSnapshot.camera
+            : computedEntryCamera;
       lastFullscreenNativeCameraRef.current = entryCamera;
       await presentFullscreenNativeMap(
         { lat: entryCamera.lat, lng: entryCamera.lng, zoom: entryCamera.zoom, markers: initialMarkers },
         { silent: false },
       );
 
+      await waitForFullscreenNativeMapReady();
+
       if (isFullscreenCourseMode && courseRoutePath.length >= 2) {
-        setDirectionsLoading(true);
-        try {
-          if (courseRoutePath.length > FULLSCREEN_COURSE_DIRECTIONS_WARN_STOPS) {
-            console.warn(
-              "[fullscreen] course has many stops; directions requests may be slow",
-              courseRoutePath.length,
-            );
-            showToast(
-              `코스 장소가 ${courseRoutePath.length}곳입니다. 경로 계산에 시간이 걸릴 수 있어요.`,
-              "info",
-            );
-          }
-          const walkPath = await buildCourseWalkPathFromTmap(courseRoutePath);
-          await setFullscreenNativeRoute(
-            { path: walkPath.length >= 2 ? walkPath : courseRoutePath, mode: "walk" },
-            { silent: false },
-          );
-        } catch (err) {
-          console.error("[course] failed", err);
-          await setFullscreenNativeRoute(
-            { path: courseRoutePath, mode: "walk" },
-            { silent: false },
-          );
-        } finally {
-          setDirectionsLoading(false);
-        }
+        await drawFullscreenNativeCourseRoute(courseRoutePath, initialMarkers.length);
       }
 
       void restoreFullscreenNativeMyLocation();
@@ -2433,7 +2412,7 @@ function HomePageContent() {
       }
       console.error("[fullscreen] presentFullscreenMap failed", err);
     }
-  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast, registerFullscreenNativeListeners, restoreFullscreenNativeMyLocation, scheduleRestoreFullscreenPlaceSheet]);
+  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast, registerFullscreenNativeListeners, restoreFullscreenNativeMyLocation, scheduleRestoreFullscreenPlaceSheet, drawFullscreenNativeCourseRoute]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;

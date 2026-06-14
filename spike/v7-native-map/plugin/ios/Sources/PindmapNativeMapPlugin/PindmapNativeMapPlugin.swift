@@ -713,6 +713,9 @@ private final class KakaoMapTestViewController: UIViewController {
         guard mapViewReady else {
             return
         }
+        guard kakaoMapView() != nil else {
+            return
+        }
         applyRoute(path: path, mode: mode)
     }
 
@@ -1886,7 +1889,8 @@ private final class KakaoMapTestViewController: UIViewController {
                 MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0, isSaved: false, photoPostIds: [])
             }
             _ = addMarkers(protoMarkers)
-        } else if !pendingInitialMarkers.isEmpty {
+        } else if !pendingInitialMarkers.isEmpty && markerPois.isEmpty {
+            // TEMP restore-debug — skip re-applying initial markers if JS already added markers (search restore race)
             updateMarkers(pendingInitialMarkers, clearPrefix: nil)
         }
         if let pendingRoute {
@@ -1963,6 +1967,7 @@ private final class KakaoMapTestViewController: UIViewController {
         option.segments = [RouteSegment(points: points, styleIndex: 0)]
 
         guard let route = layer.addRoute(option: option) else {
+            CAPLog.print("[PindmapNativeMap][Fullscreen] addRoute FAIL pathCount=\(path.count) mode=\(mode)")
             return
         }
         route.show()
