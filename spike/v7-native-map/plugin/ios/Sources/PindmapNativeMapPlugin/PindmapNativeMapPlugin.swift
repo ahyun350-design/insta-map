@@ -1170,7 +1170,7 @@ private final class KakaoMapTestViewController: UIViewController {
     private func onMarkerPoiTapped(poiID: String) {
         guard markerPois[poiID] != nil else { return }
         if mode == .production {
-            showPlaceBottomSheet(for: poiID)
+            onPlaceDetail?(poiID)
         }
         onMarkerClick?(poiID)
     }
