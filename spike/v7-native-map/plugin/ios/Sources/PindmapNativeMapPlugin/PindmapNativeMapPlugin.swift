@@ -1156,6 +1156,8 @@ private final class KakaoMapTestViewController: UIViewController {
                 isSaved: marker.isSaved,
                 photoPostIds: marker.photoPostIds
             )
+            // TEMP photo2 — trace photos received from JS into native marker metadata
+            CAPLog.print("[photo2] marker id=\(marker.id) title=\(marker.title ?? "") photos=\(marker.photos.count) postIds=\(marker.photoPostIds.count) postCount=\(marker.postCount)")
             let styleID = ensureStyle(for: marker.category)
             let option = PoiOptions(styleID: styleID, poiID: marker.id)
             option.rank = 0
@@ -1559,6 +1561,8 @@ private final class KakaoMapTestViewController: UIViewController {
 
         placeSheetMarkerId = markerId
         let meta = markerMetadata[markerId]
+        // TEMP photo2 — trace photos read when opening place bottom sheet
+        CAPLog.print("[photo2] showPlaceBottomSheet id=\(markerId) title=\(meta?.title ?? "") photos=\(meta?.photos.count ?? 0) postIds=\(meta?.photoPostIds.count ?? 0) postCount=\(meta?.postCount ?? 0)")
         let category = meta?.category
         let title = meta?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
         let address = meta?.address?.trimmingCharacters(in: .whitespacesAndNewlines)

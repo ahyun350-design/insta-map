@@ -551,6 +551,16 @@ function getMarkerPhotoMetaForPlace(
     }
     if (photos.length >= MAX_NATIVE_MARKER_PHOTOS) break;
   }
+  // TEMP photo2 — trace curation photo matching for saved-pin bottom sheet
+  if (place.name.includes("이요이")) {
+    console.log("[photo2] getMarkerPhotoMetaForPlace", place.name, {
+      relatedPosts: relatedPosts.length,
+      photos: photos.length,
+      postCount: relatedPosts.length,
+      photoPostIds,
+      placeRef,
+    });
+  }
   return { photos, postCount: relatedPosts.length, photoPostIds };
 }
 
@@ -1847,6 +1857,8 @@ function HomePageContent() {
 
       const placeToMarker = (place: Place, coords: LatLng) => {
         const { photos, postCount, photoPostIds } = getMarkerPhotoMetaForPlace(feedPostsRef.current, place, coords);
+        // TEMP photo2 — trace photos sent to native fullscreen markers
+        console.log("[photo2] place", place.name, "photos", photos?.length, "postCount", postCount, "postIds", photoPostIds);
         return {
           id: `place-${place.id}`,
           lat: coords.lat,
