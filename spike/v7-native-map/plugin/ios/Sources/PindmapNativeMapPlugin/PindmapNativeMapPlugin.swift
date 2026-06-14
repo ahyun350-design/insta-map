@@ -599,6 +599,7 @@ private final class KakaoMapTestViewController: UIViewController {
     var onMarkerClick: ((String) -> Void)?
     var onSearch: ((String) -> Void)?
     var onDirections: ((String, Double, Double) -> Void)?
+    var onPlaceDetail: ((String) -> Void)?
     var onResearchArea: ((Double, Double) -> Void)?
     var onDismiss: (() -> Void)?
     private weak var productionCloseButton: UIButton?
@@ -613,10 +614,15 @@ private final class KakaoMapTestViewController: UIViewController {
     private weak var placeSheetTitleLabel: UILabel?
     private weak var placeSheetAddressLabel: UILabel?
     private weak var placeSheetDirectionsButton: UIButton?
+    private weak var placeSheetDetailButton: UIButton?
     private var placeSheetDirectionsTopToAddress: NSLayoutConstraint?
     private var placeSheetDirectionsTopToTitle: NSLayoutConstraint?
     private var placeSheetDirectionsTopToMedia: NSLayoutConstraint?
     private var placeSheetDirectionsTopToPostCount: NSLayoutConstraint?
+    private var placeSheetDetailTopToAddress: NSLayoutConstraint?
+    private var placeSheetDetailTopToTitle: NSLayoutConstraint?
+    private var placeSheetDetailTopToMedia: NSLayoutConstraint?
+    private var placeSheetDetailTopToPostCount: NSLayoutConstraint?
     private var placeSheetMarkerId: String?
     private weak var placeSheetPostCountLabel: UILabel?
     private weak var placeSheetPhotosScrollView: UIScrollView?
@@ -1297,6 +1303,19 @@ private final class KakaoMapTestViewController: UIViewController {
         card.addSubview(directionsButton)
         placeSheetDirectionsButton = directionsButton
 
+        let detailButton = UIButton(type: .system)
+        detailButton.translatesAutoresizingMaskIntoConstraints = false
+        detailButton.setTitle("상세 보기", for: .normal)
+        detailButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        detailButton.setTitleColor(UIColor(hex: 0x1a2a7a), for: .normal)
+        detailButton.backgroundColor = .systemBackground
+        detailButton.layer.cornerRadius = 10
+        detailButton.layer.borderWidth = 1
+        detailButton.layer.borderColor = UIColor(hex: 0x1a2a7a).cgColor
+        detailButton.addTarget(self, action: #selector(placeSheetDetailTapped), for: .touchUpInside)
+        card.addSubview(detailButton)
+        placeSheetDetailButton = detailButton
+
         let bottom = card.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: Self.placeSheetCompactDismissOffset)
         placeSheetBottomConstraint = bottom
 
@@ -1304,13 +1323,24 @@ private final class KakaoMapTestViewController: UIViewController {
         let directionsTopToTitle = directionsButton.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12)
         let directionsTopToMedia = directionsButton.topAnchor.constraint(equalTo: photosScrollView.bottomAnchor, constant: 12)
         let directionsTopToPostCount = directionsButton.topAnchor.constraint(equalTo: postCountLabel.bottomAnchor, constant: 12)
+        let detailTopToAddress = detailButton.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 12)
+        let detailTopToTitle = detailButton.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12)
+        let detailTopToMedia = detailButton.topAnchor.constraint(equalTo: photosScrollView.bottomAnchor, constant: 12)
+        let detailTopToPostCount = detailButton.topAnchor.constraint(equalTo: postCountLabel.bottomAnchor, constant: 12)
         directionsTopToTitle.isActive = false
         directionsTopToMedia.isActive = false
         directionsTopToPostCount.isActive = false
+        detailTopToTitle.isActive = false
+        detailTopToMedia.isActive = false
+        detailTopToPostCount.isActive = false
         placeSheetDirectionsTopToAddress = directionsTopToAddress
         placeSheetDirectionsTopToTitle = directionsTopToTitle
         placeSheetDirectionsTopToMedia = directionsTopToMedia
         placeSheetDirectionsTopToPostCount = directionsTopToPostCount
+        placeSheetDetailTopToAddress = detailTopToAddress
+        placeSheetDetailTopToTitle = detailTopToTitle
+        placeSheetDetailTopToMedia = detailTopToMedia
+        placeSheetDetailTopToPostCount = detailTopToPostCount
 
         let photosHeight = photosScrollView.heightAnchor.constraint(equalToConstant: Self.photoThumbnailSize)
         placeSheetPhotosHeightConstraint = photosHeight
@@ -1349,7 +1379,12 @@ private final class KakaoMapTestViewController: UIViewController {
             photosStackView.bottomAnchor.constraint(equalTo: photosScrollView.contentLayoutGuide.bottomAnchor),
             photosStackView.heightAnchor.constraint(equalTo: photosScrollView.frameLayoutGuide.heightAnchor),
             directionsTopToAddress,
-            directionsButton.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            detailTopToAddress,
+            detailButton.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            detailButton.trailingAnchor.constraint(equalTo: card.centerXAnchor, constant: -4),
+            detailButton.heightAnchor.constraint(equalToConstant: 44),
+            detailButton.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            directionsButton.leadingAnchor.constraint(equalTo: card.centerXAnchor, constant: 4),
             directionsButton.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
             directionsButton.heightAnchor.constraint(equalToConstant: 44),
             directionsButton.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16),
@@ -1413,15 +1448,23 @@ private final class KakaoMapTestViewController: UIViewController {
         placeSheetDirectionsTopToTitle?.isActive = false
         placeSheetDirectionsTopToMedia?.isActive = false
         placeSheetDirectionsTopToPostCount?.isActive = false
+        placeSheetDetailTopToAddress?.isActive = false
+        placeSheetDetailTopToTitle?.isActive = false
+        placeSheetDetailTopToMedia?.isActive = false
+        placeSheetDetailTopToPostCount?.isActive = false
 
         if hasPhotos {
             placeSheetDirectionsTopToMedia?.isActive = true
+            placeSheetDetailTopToMedia?.isActive = true
         } else if hasPostCount {
             placeSheetDirectionsTopToPostCount?.isActive = true
+            placeSheetDetailTopToPostCount?.isActive = true
         } else if meta?.address?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
             placeSheetDirectionsTopToAddress?.isActive = true
+            placeSheetDetailTopToAddress?.isActive = true
         } else {
             placeSheetDirectionsTopToTitle?.isActive = true
+            placeSheetDetailTopToTitle?.isActive = true
         }
     }
 
@@ -1540,6 +1583,11 @@ private final class KakaoMapTestViewController: UIViewController {
             return
         }
         onDirections?(markerId, lat, lng)
+    }
+
+    @objc private func placeSheetDetailTapped() {
+        guard let markerId = placeSheetMarkerId else { return }
+        onPlaceDetail?(markerId)
     }
 
     @objc private func placeSheetPanned(_ gesture: UIPanGestureRecognizer) {
@@ -2405,6 +2453,9 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         vc.onResearchArea = { [weak self] lat, lng in
             self?.notifyListeners("fullscreenResearchArea", data: ["lat": lat, "lng": lng])
+        }
+        vc.onPlaceDetail = { [weak self] id in
+            self?.notifyListeners("fullscreenPlaceDetail", data: ["id": id])
         }
         if trackAsProduction {
             vc.onDismiss = { [weak self] in

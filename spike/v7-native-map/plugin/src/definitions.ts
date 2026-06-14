@@ -66,6 +66,10 @@ export interface FullscreenResearchAreaEvent {
   lng: number;
 }
 
+export interface FullscreenPlaceDetailEvent {
+  id: string;
+}
+
 export interface PresentFullscreenMapOptions {
   lat: number;
   lng: number;
@@ -143,6 +147,10 @@ export interface PindmapNativeMapPlugin {
   addListener(
     eventName: 'fullscreenResearchArea',
     listenerFunc: (event: FullscreenResearchAreaEvent) => void,
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'fullscreenPlaceDetail',
+    listenerFunc: (event: FullscreenPlaceDetailEvent) => void,
   ): Promise<PluginListenerHandle> & PluginListenerHandle;
   /** V-7-2 prototype: modal full-screen map with normal VC lifecycle (overlay-independent) */
   presentNativeMapTest(): Promise<void>;

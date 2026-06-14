@@ -1143,6 +1143,7 @@ function HomePageContent() {
   const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
   const fullscreenSearchListenerRegisteredRef = useRef(false);
   const fullscreenResearchListenerRegisteredRef = useRef(false);
+  const fullscreenPlaceDetailListenerRegisteredRef = useRef(false);
   const fullscreenDirectionsListenerRegisteredRef = useRef(false);
   const fullscreenDismissListenerRegisteredRef = useRef(false);
   const fullscreenAutoOpenedRef = useRef(false);
@@ -1537,6 +1538,7 @@ function HomePageContent() {
       const trimmed = query.trim();
       if (!trimmed) {
         lastFullscreenQueryRef.current = "";
+        searchPinPlaceByIdRef.current.clear();
         await updateFullscreenNativeMarkers(
           { markers: [], clearPrefix: "search-" },
           { silent: false },
@@ -1591,6 +1593,7 @@ function HomePageContent() {
           void (async () => {
             try {
               if (st !== window.kakao.maps.services.Status.OK || !data?.length) {
+                searchPinPlaceByIdRef.current.clear();
                 await updateFullscreenNativeMarkers(
                   { markers: [], clearPrefix: "search-" },
                   { silent: false },
@@ -1600,10 +1603,12 @@ function HomePageContent() {
                 return;
               }
 
+              searchPinPlaceByIdRef.current.clear();
               const markers = data.slice(0, 15).flatMap((place, index) => {
                 const lat = Number(place.y);
                 const lng = Number(place.x);
                 if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+                searchPinPlaceByIdRef.current.set(`search-${index}`, place);
                 return [{
                   id: `search-${index}`,
                   lat,
@@ -1623,6 +1628,7 @@ function HomePageContent() {
               }));
 
               if (markers.length === 0) {
+                searchPinPlaceByIdRef.current.clear();
                 await updateFullscreenNativeMarkers(
                   { markers: [], clearPrefix: "search-" },
                   { silent: false },
@@ -1830,7 +1836,10 @@ function HomePageContent() {
       } else {
         initialMarkers = savedPlaces.flatMap((place) => {
           const coords = resolvePlaceCoords(place);
-          return coords ? [placeToMarker(place, coords)] : [];
+          if (!coords) return [];
+          placePinByIdRef.current.set(`place-${place.id}`, place);
+          savedPlaceCoordsRef.current[place.id] = coords;
+          return [placeToMarker(place, coords)];
         });
       }
 
@@ -5631,6 +5640,55 @@ function HomePageContent() {
       _placeRef: expandedRef,
     });
   }, []);
+
+  const handleFullscreenNativePlaceDetail = useCallback(async (markerId: string) => {
+    const id = String(markerId ?? "").trim();
+    if (!id) return;
+
+    fullscreenAutoOpenedRef.current = false;
+
+    if (id.startsWith("place-")) {
+      const place = placePinByIdRef.current.get(id);
+      if (!place) {
+        showToast("장소 정보를 찾을 수 없어요", "error");
+        return;
+      }
+      const stored = savedPlaceCoordsRef.current[place.id] ?? latLngFromRow(place);
+      const lat = stored?.lat;
+      const lng = stored?.lng;
+      const relatedPosts = getRelatedPostsForPlaceSheet(
+        feedPostsRef.current,
+        placeRefFromPlace(place, lat, lng),
+      );
+      await dismissFullscreenNativeMap({ silent: false });
+      setMapExpanded(false);
+      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, lat, lng));
+      return;
+    }
+
+    if (id.startsWith("search-")) {
+      const place = searchPinPlaceByIdRef.current.get(id);
+      if (!place) {
+        showToast("장소 정보를 찾을 수 없어요", "error");
+        return;
+      }
+      await dismissFullscreenNativeMap({ silent: false });
+      setMapExpanded(false);
+      openExpandedSearchPlaceCard(place, "fullscreen-native-detail");
+    }
+  }, [toSelectedFromSavedPlace, openExpandedSearchPlaceCard, showToast]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenPlaceDetailListenerRegisteredRef.current) return;
+    fullscreenPlaceDetailListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenPlaceDetail", (e) => {
+      void handleFullscreenNativePlaceDetail(e.id);
+    }).catch((err) => {
+      fullscreenPlaceDetailListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenPlaceDetail listener failed", err);
+    });
+  }, [handleFullscreenNativePlaceDetail]);
 
   /** 확장 지도 검색 — 지도 center 기준 (GPS 아님) */
   const getExpandedMapSearchCenter = useCallback(() => {

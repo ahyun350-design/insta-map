@@ -13,6 +13,7 @@ import type {
   SetFullscreenSearchResultsOptions,
   UpdateFullscreenMarkersOptions,
   FullscreenResearchAreaEvent,
+  FullscreenPlaceDetailEvent,
 } from "@pindmap/native-map";
 
 /** Re-export plugin types for Step 3 consumers */
@@ -27,6 +28,7 @@ export type {
   SetFullscreenMyLocationOptions,
   SetFullscreenSearchResultsOptions,
   FullscreenResearchAreaEvent,
+  FullscreenPlaceDetailEvent,
 };
 
 export type CreateNativeMapOptions = {
