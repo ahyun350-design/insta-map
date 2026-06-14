@@ -7100,17 +7100,27 @@ function HomePageContent() {
     });
   }, [handleFullscreenNativeToggleSave]);
 
+  const handleFullscreenNativeCuration = useCallback(async (postId: string) => {
+    const id = String(postId ?? "").trim();
+    if (!id) return;
+    await dismissFullscreenNativeMap({ silent: false });
+    setMapExpanded(false);
+    setSelectedPlace(null);
+    setSelectedMapPlace(null);
+    setDetailPostId(id);
+  }, []);
+
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
     if (fullscreenCurationListenerRegisteredRef.current) return;
     fullscreenCurationListenerRegisteredRef.current = true;
     void PindmapNativeMap.addListener("fullscreenCuration", (e) => {
-      if (e.postId) setDetailPostId(e.postId);
+      void handleFullscreenNativeCuration(e.postId);
     }).catch((err) => {
       fullscreenCurationListenerRegisteredRef.current = false;
       console.error("[fullscreen] fullscreenCuration listener failed", err);
     });
-  }, []);
+  }, [handleFullscreenNativeCuration]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
