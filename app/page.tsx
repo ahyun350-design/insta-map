@@ -643,6 +643,118 @@ function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * c;
 }
 
+const FULLSCREEN_COURSE_DIRECTIONS_WARN_STOPS = 10;
+
+function parseDirectionsRouteToPath(route: {
+  sections?: { roads?: { vertexes?: number[] }[] }[];
+}): LatLng[] {
+  const path: LatLng[] = [];
+  route.sections?.forEach((section) => {
+    section.roads?.forEach((road) => {
+      const vertexes = road.vertexes ?? [];
+      for (let i = 0; i < vertexes.length; i += 2) {
+        const lng = Number(vertexes[i]);
+        const lat = Number(vertexes[i + 1]);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          path.push({ lat, lng });
+        }
+      }
+    });
+  });
+  return path;
+}
+
+function straightLineSegmentPath(origin: LatLng, destination: LatLng): LatLng[] {
+  return [origin, destination];
+}
+
+async function fetchDirectionsSegmentPath(
+  origin: LatLng,
+  destination: LatLng,
+): Promise<LatLng[]> {
+  try {
+    const res = await fetch("/api/directions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origin, destination, mode: "car" }),
+    });
+    const data = (await res.json()) as {
+      routes?: { sections?: { roads?: { vertexes?: number[] }[] }[] }[];
+    };
+    const route = data.routes?.[0];
+    if (!route) return straightLineSegmentPath(origin, destination);
+    const path = parseDirectionsRouteToPath(route);
+    return path.length >= 2 ? path : straightLineSegmentPath(origin, destination);
+  } catch {
+    return straightLineSegmentPath(origin, destination);
+  }
+}
+
+/** 코스 장소 순서대로 인접 구간마다 도로 경로를 요청해 하나의 path로 이어붙임. */
+async function buildCourseRoadPathFromDirections(stops: LatLng[]): Promise<LatLng[]> {
+  if (stops.length < 2) return stops;
+  const merged: LatLng[] = [];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const segment = await fetchDirectionsSegmentPath(stops[i]!, stops[i + 1]!);
+    if (merged.length === 0) merged.push(...segment);
+    else merged.push(...segment.slice(1));
+  }
+  return merged.length >= 2 ? merged : stops;
+}
+
+function parseTmapWalkGeoJsonToPath(data: {
+  features?: {
+    geometry?: { type?: string; coordinates?: number[][] };
+  }[];
+}): LatLng[] {
+  const path: LatLng[] = [];
+  data.features?.forEach((feature) => {
+    if (feature.geometry?.type !== "LineString") return;
+    const coordinates = feature.geometry.coordinates ?? [];
+    coordinates.forEach((coord) => {
+      const lng = Number(coord[0]);
+      const lat = Number(coord[1]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        path.push({ lat, lng });
+      }
+    });
+  });
+  return path;
+}
+
+async function fetchWalkDirectionsSegmentPath(
+  origin: LatLng,
+  destination: LatLng,
+): Promise<LatLng[]> {
+  try {
+    const res = await fetch("/api/walk-directions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origin, destination }),
+    });
+    if (!res.ok) return straightLineSegmentPath(origin, destination);
+    const data = (await res.json()) as {
+      features?: { geometry?: { type?: string; coordinates?: number[][] } }[];
+    };
+    const path = parseTmapWalkGeoJsonToPath(data);
+    return path.length >= 2 ? path : straightLineSegmentPath(origin, destination);
+  } catch {
+    return straightLineSegmentPath(origin, destination);
+  }
+}
+
+/** 코스 장소 순서대로 인접 구간마다 Tmap 보행자 경로를 요청해 하나의 path로 이어붙임. */
+async function buildCourseWalkPathFromTmap(stops: LatLng[]): Promise<LatLng[]> {
+  if (stops.length < 2) return stops;
+  const merged: LatLng[] = [];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const segment = await fetchWalkDirectionsSegmentPath(stops[i]!, stops[i + 1]!);
+    if (merged.length === 0) merged.push(...segment);
+    else merged.push(...segment.slice(1));
+  }
+  return merged.length >= 2 ? merged : stops;
+}
+
 // 좌표가 있는 장소들에서 가까운 순으로 코스 짜기 (Nearest Neighbor 알고리즘)
 type CoursePlace = Place & { lat: number; lng: number };
 
@@ -1616,10 +1728,32 @@ function HomePageContent() {
       await presentFullscreenNativeMap({ lat, lng, zoom: 9, markers: initialMarkers }, { silent: false });
 
       if (isFullscreenCourseMode && courseRoutePath.length >= 2) {
-        await setFullscreenNativeRoute(
-          { path: courseRoutePath, mode: "car" },
-          { silent: false },
-        );
+        setDirectionsLoading(true);
+        try {
+          if (courseRoutePath.length > FULLSCREEN_COURSE_DIRECTIONS_WARN_STOPS) {
+            console.warn(
+              "[fullscreen] course has many stops; directions requests may be slow",
+              courseRoutePath.length,
+            );
+            showToast(
+              `코스 장소가 ${courseRoutePath.length}곳입니다. 경로 계산에 시간이 걸릴 수 있어요.`,
+              "info",
+            );
+          }
+          const walkPath = await buildCourseWalkPathFromTmap(courseRoutePath);
+          await setFullscreenNativeRoute(
+            { path: walkPath.length >= 2 ? walkPath : courseRoutePath, mode: "walk" },
+            { silent: false },
+          );
+        } catch (err) {
+          console.error("[course] failed", err);
+          await setFullscreenNativeRoute(
+            { path: courseRoutePath, mode: "walk" },
+            { silent: false },
+          );
+        } finally {
+          setDirectionsLoading(false);
+        }
       }
 
       void (async () => {
@@ -1716,9 +1850,12 @@ function HomePageContent() {
         });
       }
     } catch (err) {
+      if (fullscreenCourseRef.current?.length) {
+        console.error("[course] failed", err);
+      }
       console.error("[fullscreen] presentFullscreenMap failed", err);
     }
-  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections]);
+  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
