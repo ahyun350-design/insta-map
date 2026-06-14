@@ -599,10 +599,12 @@ private final class KakaoMapTestViewController: UIViewController {
     var onMarkerClick: ((String) -> Void)?
     var onSearch: ((String) -> Void)?
     var onDirections: ((String, Double, Double) -> Void)?
+    var onResearchArea: ((Double, Double) -> Void)?
     var onDismiss: (() -> Void)?
     private weak var productionCloseButton: UIButton?
     private weak var productionSearchBarContainer: UIView?
     private weak var productionSearchField: UITextField?
+    private weak var researchAreaButton: UIButton?
     private weak var placeSheetBackdrop: UIView?
     private weak var placeSheetCard: UIView?
     private var placeSheetBottomConstraint: NSLayoutConstraint?
@@ -735,6 +737,7 @@ private final class KakaoMapTestViewController: UIViewController {
     func clearSearchResults() {
         pendingSearchResults = nil
         searchResults = []
+        hideResearchAreaButton()
         hideSearchResultsSheet(animated: true)
     }
 
@@ -854,12 +857,78 @@ private final class KakaoMapTestViewController: UIViewController {
     }
 
     private func bringProductionChromeToFront() {
+        if let research = researchAreaButton, !research.isHidden {
+            view.bringSubviewToFront(research)
+        }
         if let search = productionSearchBarContainer {
             view.bringSubviewToFront(search)
         }
         if let button = productionCloseButton {
             view.bringSubviewToFront(button)
         }
+    }
+
+    private func ensureResearchAreaButton() {
+        guard mode == .production else { return }
+        if researchAreaButton != nil { return }
+
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setTitle("이 지역에서 재검색", for: .normal)
+        button.setTitleColor(UIColor(red: 0.10, green: 0.16, blue: 0.48, alpha: 1.0), for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        button.backgroundColor = .white
+        button.layer.cornerRadius = 18
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.12
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowRadius = 6
+        button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        button.isHidden = true
+        button.accessibilityLabel = "이 지역에서 재검색"
+        if #available(iOS 13.0, *) {
+            let config = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+            let image = UIImage(systemName: "arrow.triangle.2.circlepath", withConfiguration: config)
+            button.setImage(image, for: .normal)
+            button.tintColor = UIColor(red: 0.10, green: 0.16, blue: 0.48, alpha: 1.0)
+            button.semanticContentAttribute = .forceLeftToRight
+            button.imageEdgeInsets = UIEdgeInsets(top: 0, left: -4, bottom: 0, right: 4)
+        }
+        button.addTarget(self, action: #selector(researchAreaButtonTapped), for: .touchUpInside)
+        view.addSubview(button)
+        researchAreaButton = button
+
+        let topAnchor = productionSearchBarContainer?.bottomAnchor ?? view.safeAreaLayoutGuide.topAnchor
+        NSLayoutConstraint.activate([
+            button.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            button.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+        ])
+    }
+
+    private func mapCenterCoordinate() -> (lat: Double, lng: Double)? {
+        guard let map = kakaoMapView() else { return nil }
+        let rect = map.viewRect
+        let centerPoint = CGPoint(x: rect.midX, y: rect.midY)
+        let mapPoint = map.getPosition(centerPoint)
+        let coord = mapPoint.wgsCoord
+        return (coord.latitude, coord.longitude)
+    }
+
+    private func showResearchAreaButtonIfNeeded() {
+        guard mode == .production, !searchResults.isEmpty else { return }
+        ensureResearchAreaButton()
+        researchAreaButton?.isHidden = false
+        bringProductionChromeToFront()
+    }
+
+    private func hideResearchAreaButton() {
+        researchAreaButton?.isHidden = true
+    }
+
+    @objc private func researchAreaButtonTapped() {
+        guard let center = mapCenterCoordinate() else { return }
+        hideResearchAreaButton()
+        onResearchArea?(center.lat, center.lng)
     }
 
     @objc private func searchButtonTapped() {
@@ -1562,6 +1631,7 @@ private final class KakaoMapTestViewController: UIViewController {
     private func applySearchResults(_ results: [SearchResultInput]) {
         guard mode == .production else { return }
         searchResults = results
+        hideResearchAreaButton()
         if results.isEmpty {
             hideSearchResultsSheet(animated: true)
             return
@@ -1626,7 +1696,7 @@ private final class KakaoMapTestViewController: UIViewController {
     }
 
     private func selectSearchResult(_ item: SearchResultInput) {
-        setCamera(lat: item.lat, lng: item.lng, zoom: 5, animated: true)
+        setCamera(lat: item.lat, lng: item.lng, zoom: 16, animated: true)
         showPlaceBottomSheet(for: item.id)
     }
 
@@ -1801,7 +1871,17 @@ extension KakaoMapTestViewController: MapControllerDelegate {
     }
 }
 
-extension KakaoMapTestViewController: KakaoMapEventDelegate {}
+extension KakaoMapTestViewController: KakaoMapEventDelegate {
+    func cameraDidStopped(kakaoMap: KakaoMap, by: MoveBy) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            guard self.mode == .production else { return }
+            guard !self.searchResults.isEmpty else { return }
+            guard by != .notUserAction else { return }
+            self.showResearchAreaButtonIfNeeded()
+        }
+    }
+}
 
 extension KakaoMapTestViewController: UITableViewDataSource, UITableViewDelegate {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -2322,6 +2402,9 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         vc.onDirections = { [weak self] id, lat, lng in
             self?.notifyListeners("fullscreenDirections", data: ["id": id, "lat": lat, "lng": lng])
+        }
+        vc.onResearchArea = { [weak self] lat, lng in
+            self?.notifyListeners("fullscreenResearchArea", data: ["lat": lat, "lng": lng])
         }
         if trackAsProduction {
             vc.onDismiss = { [weak self] in

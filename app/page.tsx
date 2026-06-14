@@ -339,6 +339,129 @@ function getMapResearchDistanceThresholdM(map: { getBounds?: () => { getNorthEas
   return MAP_RESEARCH_MIN_DISTANCE_M;
 }
 
+/** Kakao Native SDK zoomLevel: 숫자 클수록 가까움 (동네 ~16, 도시 ~12, 전국 ~7) */
+const FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM = 16;
+const FULLSCREEN_NATIVE_DEFAULT_ENTRY_ZOOM = 16;
+
+function estimateKakaoNativeZoomLevelForLatLngSpan(
+  latSpan: number,
+  lngSpan: number,
+  minLevel = 12,
+  maxLevel = 16,
+): number {
+  const span = Math.max(latSpan, lngSpan);
+  if (span <= 0) return FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM;
+  let level: number;
+  if (span < 0.002) level = 17;
+  else if (span < 0.006) level = 16;
+  else if (span < 0.015) level = 15;
+  else if (span < 0.04) level = 14;
+  else if (span < 0.12) level = 13;
+  else if (span < 0.35) level = 12;
+  else if (span < 1.0) level = 10;
+  else if (span < 2.5) level = 8;
+  else level = 7;
+  return Math.max(minLevel, Math.min(maxLevel, level));
+}
+
+/** JS Kakao Map level(작을수록 가까움) → Native SDK zoomLevel(클수록 가까움) */
+function kakaoJsLevelToNativeZoomLevel(jsLevel: number): number {
+  const level = Math.round(jsLevel);
+  return Math.max(1, Math.min(20, 21 - level));
+}
+
+function computeFullscreenNativeSearchCamera(
+  markers: LatLng[],
+  options?: { preserveView?: boolean },
+): { lat: number; lng: number; zoom: number } | null {
+  if (options?.preserveView) return null;
+  const valid = markers.filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng));
+  if (valid.length === 0) return null;
+  if (valid.length === 1) {
+    return { lat: valid[0]!.lat, lng: valid[0]!.lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+  }
+  const fitMarkers = valid.slice(0, 3);
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  for (const m of fitMarkers) {
+    minLat = Math.min(minLat, m.lat);
+    maxLat = Math.max(maxLat, m.lat);
+    minLng = Math.min(minLng, m.lng);
+    maxLng = Math.max(maxLng, m.lng);
+  }
+  const latSpan = maxLat - minLat;
+  const lngSpan = maxLng - minLng;
+  const padding = Math.max(latSpan, lngSpan) * 0.1 + 0.001;
+  return {
+    lat: (minLat + maxLat) / 2,
+    lng: (minLng + maxLng) / 2,
+    zoom: estimateKakaoNativeZoomLevelForLatLngSpan(
+      latSpan + padding,
+      lngSpan + padding,
+      14,
+      16,
+    ),
+  };
+}
+
+function computeFullscreenNativeEntryCamera(
+  markers: Array<{ lat: number; lng: number }>,
+  fallback: { lat: number; lng: number },
+  options?: { myLocation?: LatLng | null; useMyLocation?: boolean },
+): { lat: number; lng: number; zoom: number } {
+  const useMyLocation = options?.useMyLocation !== false;
+  const myLocation = options?.myLocation;
+  if (
+    useMyLocation &&
+    myLocation &&
+    Number.isFinite(myLocation.lat) &&
+    Number.isFinite(myLocation.lng)
+  ) {
+    return {
+      lat: myLocation.lat,
+      lng: myLocation.lng,
+      zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM,
+    };
+  }
+
+  const valid = markers.filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng));
+  const markerZoomBounds = useMyLocation
+    ? { min: 12, max: 16 }
+    : { min: 10, max: 16 };
+
+  if (valid.length === 0) {
+    return { lat: fallback.lat, lng: fallback.lng, zoom: FULLSCREEN_NATIVE_DEFAULT_ENTRY_ZOOM };
+  }
+  if (valid.length === 1) {
+    return { lat: valid[0]!.lat, lng: valid[0]!.lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+  }
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  for (const m of valid) {
+    minLat = Math.min(minLat, m.lat);
+    maxLat = Math.max(maxLat, m.lat);
+    minLng = Math.min(minLng, m.lng);
+    maxLng = Math.max(maxLng, m.lng);
+  }
+  const latSpan = maxLat - minLat;
+  const lngSpan = maxLng - minLng;
+  const padding = Math.max(latSpan, lngSpan) * 0.2 + 0.005;
+  return {
+    lat: (minLat + maxLat) / 2,
+    lng: (minLng + maxLng) / 2,
+    zoom: estimateKakaoNativeZoomLevelForLatLngSpan(
+      latSpan + padding,
+      lngSpan + padding,
+      markerZoomBounds.min,
+      markerZoomBounds.max,
+    ),
+  };
+}
+
 /** 동명이 장소 큐레이션 매칭 — 같은 블록(약 100m) 또는 좌표 없을 때 주소 텍스트 fallback */
 const RELATED_POST_MAX_DISTANCE_M = 100;
 
@@ -1019,6 +1142,7 @@ function HomePageContent() {
   /** V-7-1: 확장 지도 상단 50% Kakao Native 오버레이 (iOS만, JS API와 병행) */
   const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
   const fullscreenSearchListenerRegisteredRef = useRef(false);
+  const fullscreenResearchListenerRegisteredRef = useRef(false);
   const fullscreenDirectionsListenerRegisteredRef = useRef(false);
   const fullscreenDismissListenerRegisteredRef = useRef(false);
   const fullscreenAutoOpenedRef = useRef(false);
@@ -1042,6 +1166,7 @@ function HomePageContent() {
   const [showMapResearchButton, setShowMapResearchButton] = useState(false);
   const lastSearchCenterRef = useRef<{ lat: number; lng: number } | null>(null);
   const mapSearchKeywordRef = useRef("");
+  const lastFullscreenQueryRef = useRef("");
   const pendingSearchCenterSyncRef = useRef(false);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
@@ -1404,10 +1529,14 @@ function HomePageContent() {
     }
   };
 
-  const runFullscreenNativeSearch = useCallback(async (query: string) => {
+  const runFullscreenNativeSearch = useCallback(async (
+    query: string,
+    biasCenter?: { lat: number; lng: number },
+  ) => {
     try {
       const trimmed = query.trim();
       if (!trimmed) {
+        lastFullscreenQueryRef.current = "";
         await updateFullscreenNativeMarkers(
           { markers: [], clearPrefix: "search-" },
           { silent: false },
@@ -1415,22 +1544,38 @@ function HomePageContent() {
         await clearFullscreenNativeSearchResults({ silent: false });
         return;
       }
+      lastFullscreenQueryRef.current = trimmed;
       if (!window.kakao?.maps) return;
+
+      const isResearchSearch = Boolean(
+        biasCenter &&
+        Number.isFinite(biasCenter.lat) &&
+        Number.isFinite(biasCenter.lng),
+      );
 
       let biasLat = 37.5665;
       let biasLng = 126.978;
-      try {
-        const map = expandedMapRef.current;
-        if (map?.getCenter) {
-          const center = map.getCenter();
-          biasLat = center.getLat();
-          biasLng = center.getLng();
-        } else if (myLocationLatLngRef.current) {
-          biasLat = myLocationLatLngRef.current.lat;
-          biasLng = myLocationLatLngRef.current.lng;
+      if (
+        biasCenter &&
+        Number.isFinite(biasCenter.lat) &&
+        Number.isFinite(biasCenter.lng)
+      ) {
+        biasLat = biasCenter.lat;
+        biasLng = biasCenter.lng;
+      } else {
+        try {
+          const map = expandedMapRef.current;
+          if (map?.getCenter) {
+            const center = map.getCenter();
+            biasLat = center.getLat();
+            biasLng = center.getLng();
+          } else if (myLocationLatLngRef.current) {
+            biasLat = myLocationLatLngRef.current.lat;
+            biasLng = myLocationLatLngRef.current.lng;
+          }
+        } catch {
+          /* noop */
         }
-      } catch {
-        /* noop */
       }
 
       const ps = new window.kakao.maps.services.Places();
@@ -1497,12 +1642,18 @@ function HomePageContent() {
                 { silent: false },
               );
 
-              await setFullscreenNativeCamera({
-                lat: markers[0].lat,
-                lng: markers[0].lng,
-                zoom: 5,
-                animated: true,
-              });
+              const searchCamera = computeFullscreenNativeSearchCamera(
+                markers.map((marker) => ({ lat: marker.lat, lng: marker.lng })),
+                { preserveView: isResearchSearch },
+              );
+              if (searchCamera) {
+                await setFullscreenNativeCamera({
+                  lat: searchCamera.lat,
+                  lng: searchCamera.lng,
+                  zoom: searchCamera.zoom,
+                  animated: true,
+                });
+              }
             } catch (err) {
               console.error("[fullscreen] search post-process failed", err);
             }
@@ -1712,6 +1863,21 @@ function HomePageContent() {
         });
       }
 
+      if (!fullscreenResearchListenerRegisteredRef.current) {
+        fullscreenResearchListenerRegisteredRef.current = true;
+        void PindmapNativeMap.addListener("fullscreenResearchArea", (e) => {
+          const keyword = lastFullscreenQueryRef.current.trim();
+          if (!keyword) return;
+          const lat = Number(e.lat);
+          const lng = Number(e.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          void runFullscreenNativeSearch(keyword, { lat, lng });
+        }).catch((err) => {
+          fullscreenResearchListenerRegisteredRef.current = false;
+          console.error("[fullscreen] fullscreenResearchArea listener failed", err);
+        });
+      }
+
       if (!fullscreenDirectionsListenerRegisteredRef.current) {
         fullscreenDirectionsListenerRegisteredRef.current = true;
         void PindmapNativeMap.addListener("fullscreenDirections", (e) => {
@@ -1725,7 +1891,24 @@ function HomePageContent() {
       const geocodeRunId = ++fullscreenGeocodeRunRef.current;
       const accumulatedMarkers = [...initialMarkers];
 
-      await presentFullscreenNativeMap({ lat, lng, zoom: 9, markers: initialMarkers }, { silent: false });
+      const storedMyLocation = myLocationLatLngRef.current;
+      const entryCamera = computeFullscreenNativeEntryCamera(
+        initialMarkers,
+        { lat, lng },
+        {
+          useMyLocation: !isFullscreenCourseMode,
+          myLocation:
+            storedMyLocation &&
+            Number.isFinite(storedMyLocation.lat) &&
+            Number.isFinite(storedMyLocation.lng)
+              ? storedMyLocation
+              : null,
+        },
+      );
+      await presentFullscreenNativeMap(
+        { lat: entryCamera.lat, lng: entryCamera.lng, zoom: entryCamera.zoom, markers: initialMarkers },
+        { silent: false },
+      );
 
       if (isFullscreenCourseMode && courseRoutePath.length >= 2) {
         setDirectionsLoading(true);
@@ -6481,7 +6664,9 @@ function HomePageContent() {
           const center = map.getCenter();
           lat = center.getLat();
           lng = center.getLng();
-          zoom = typeof map.getLevel === "function" ? map.getLevel() : 9;
+          zoom = typeof map.getLevel === "function"
+            ? kakaoJsLevelToNativeZoomLevel(map.getLevel())
+            : FULLSCREEN_NATIVE_DEFAULT_ENTRY_ZOOM;
         }
       } catch {
         /* noop */
@@ -6538,7 +6723,7 @@ function HomePageContent() {
           {
             lat: center.getLat(),
             lng: center.getLng(),
-            zoom: map.getLevel(),
+            zoom: kakaoJsLevelToNativeZoomLevel(map.getLevel()),
             animated: false,
           },
           { silent: true },

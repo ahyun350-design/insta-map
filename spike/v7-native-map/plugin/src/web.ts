@@ -8,6 +8,7 @@ import type {
   FullscreenSearchEvent,
   FullscreenMapDismissedEvent,
   FullscreenDirectionsEvent,
+  FullscreenResearchAreaEvent,
   PindmapNativeMapPlugin,
   PresentFullscreenMapOptions,
   RemoveMarkersOptions,
@@ -97,12 +98,13 @@ export class PindmapNativeMapWeb extends WebPlugin implements PindmapNativeMapPl
   }
 
   addListener(
-    eventName: 'markerClick' | 'fullscreenSearch' | 'fullscreenMapDismissed' | 'fullscreenDirections',
+    eventName: 'markerClick' | 'fullscreenSearch' | 'fullscreenMapDismissed' | 'fullscreenDirections' | 'fullscreenResearchArea',
     listenerFunc:
       | ((event: MarkerClickEvent) => void)
       | ((event: FullscreenSearchEvent) => void)
       | ((event: FullscreenMapDismissedEvent) => void)
-      | ((event: FullscreenDirectionsEvent) => void),
+      | ((event: FullscreenDirectionsEvent) => void)
+      | ((event: FullscreenResearchAreaEvent) => void),
   ): Promise<PluginListenerHandle> & PluginListenerHandle {
     return super.addListener(eventName, listenerFunc) as Promise<PluginListenerHandle> & PluginListenerHandle;
   }
