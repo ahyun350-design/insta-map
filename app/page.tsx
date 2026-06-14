@@ -531,12 +531,11 @@ function getRelatedPostsForPlaceSheet(
 
 const MAX_NATIVE_MARKER_PHOTOS = 5;
 
-function getMarkerPhotoMetaForPlace(
+function getMarkerPhotoMetaForPlaceRef(
   posts: FeedPost[],
-  place: Place,
-  coords?: LatLng,
+  placeRef: PlaceRefForPhotoTagMatch,
+  debugName?: string,
 ): { photos: string[]; postCount: number; photoPostIds: string[] } {
-  const placeRef = placeRefFromPlace(place, coords?.lat, coords?.lng);
   const relatedPosts = getRelatedPostsForPlaceSheet(posts, placeRef);
   const photos: string[] = [];
   const photoPostIds: string[] = [];
@@ -552,8 +551,8 @@ function getMarkerPhotoMetaForPlace(
     if (photos.length >= MAX_NATIVE_MARKER_PHOTOS) break;
   }
   // TEMP photo2 — trace curation photo matching for saved-pin bottom sheet
-  if (place.name.includes("이요이")) {
-    console.log("[photo2] getMarkerPhotoMetaForPlace", place.name, {
+  if (debugName?.includes("이요이")) {
+    console.log("[photo2] getMarkerPhotoMetaForPlaceRef", debugName, {
       relatedPosts: relatedPosts.length,
       photos: photos.length,
       postCount: relatedPosts.length,
@@ -562,6 +561,30 @@ function getMarkerPhotoMetaForPlace(
     });
   }
   return { photos, postCount: relatedPosts.length, photoPostIds };
+}
+
+function getMarkerPhotoMetaForPlace(
+  posts: FeedPost[],
+  place: Place,
+  coords?: LatLng,
+): { photos: string[]; postCount: number; photoPostIds: string[] } {
+  const placeRef = placeRefFromPlace(place, coords?.lat, coords?.lng);
+  return getMarkerPhotoMetaForPlaceRef(posts, placeRef, place.name);
+}
+
+function getMarkerPhotoMetaForKakaoPlace(
+  posts: FeedPost[],
+  place: {
+    id?: string;
+    place_name?: string;
+    y?: string | number;
+    x?: string | number;
+    road_address_name?: string;
+    address_name?: string;
+  },
+): { photos: string[]; postCount: number; photoPostIds: string[] } {
+  const placeRef = placeRefFromKakaoPlace(place);
+  return getMarkerPhotoMetaForPlaceRef(posts, placeRef, place.place_name);
 }
 
 function placeRefFromPlace(place: Place, lat?: number, lng?: number): PlaceRefForPhotoTagMatch {
@@ -1639,13 +1662,21 @@ function HomePageContent() {
                     p.name.trim() === sheetCandidate.place_name.trim() &&
                     p.address.trim() === sheetCandidate.road_address_name.trim(),
                 );
+                const { photos, postCount, photoPostIds } = getMarkerPhotoMetaForKakaoPlace(
+                  feedPostsRef.current,
+                  place,
+                );
                 return [{
                   id: `search-${index}`,
                   lat,
                   lng,
                   title: String(place.place_name ?? ""),
                   address: String(place.road_address_name || place.address_name || ""),
+                  category: typeof place.category_name === "string" ? place.category_name : undefined,
                   isSaved,
+                  ...(photos.length > 0 ? { photos } : {}),
+                  ...(postCount > 0 ? { postCount } : {}),
+                  ...(photoPostIds.length > 0 ? { photoPostIds } : {}),
                 }];
               });
 
@@ -1669,13 +1700,13 @@ function HomePageContent() {
                 return;
               }
 
-              await updateFullscreenNativeMarkers(
-                { markers, clearPrefix: "search-" },
+              await setFullscreenNativeSearchResults(
+                { results: searchResults },
                 { silent: false },
               );
 
-              await setFullscreenNativeSearchResults(
-                { results: searchResults },
+              await updateFullscreenNativeMarkers(
+                { markers, clearPrefix: "search-" },
                 { silent: false },
               );
 
