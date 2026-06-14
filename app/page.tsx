@@ -33,6 +33,7 @@ import {
   setFullscreenNativeRoute,
   setFullscreenNativeSearchResults,
   clearFullscreenNativeSearchResults,
+  setFullscreenNativeMyLocation,
   setNativeCamera,
   setNativeMarkerClickHandler,
 } from "@/lib/nativeMap";
@@ -1565,6 +1566,32 @@ function HomePageContent() {
       const accumulatedMarkers = [...initialMarkers];
 
       await presentFullscreenNativeMap({ lat, lng, zoom: 9, markers: initialMarkers }, { silent: false });
+
+      void (async () => {
+        const stored = myLocationLatLngRef.current;
+        if (
+          stored &&
+          Number.isFinite(stored.lat) &&
+          Number.isFinite(stored.lng)
+        ) {
+          await setFullscreenNativeMyLocation(
+            { lat: stored.lat, lng: stored.lng },
+            { silent: false },
+          );
+          return;
+        }
+
+        try {
+          const pos = await getCurrentPositionForMapStage1();
+          const myLat = Number(pos.latitude);
+          const myLng = Number(pos.longitude);
+          if (!Number.isFinite(myLat) || !Number.isFinite(myLng)) return;
+          myLocationLatLngRef.current = { lat: myLat, lng: myLng };
+          await setFullscreenNativeMyLocation({ lat: myLat, lng: myLng }, { silent: false });
+        } catch {
+          /* location unavailable — skip silently */
+        }
+      })();
 
       const missingPlaces = savedPlaces.filter((place) => {
         if (resolvePlaceCoords(place)) return false;

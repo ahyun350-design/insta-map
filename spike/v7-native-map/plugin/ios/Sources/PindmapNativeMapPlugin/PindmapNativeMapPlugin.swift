@@ -487,6 +487,19 @@ private enum NativeMapMarkerStyleHelper {
             ctx.cgContext.strokeEllipse(in: CGRect(x: 1, y: 1, width: size.width - 2, height: size.height - 2))
         }
     }
+
+    static let myLocationStyleID = "pindmap-my-location-style"
+
+    static func makeMyLocationIcon() -> UIImage {
+        let size = CGSize(width: 20, height: 20)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
+            UIColor.systemBlue.setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(x: 3, y: 3, width: size.width - 6, height: size.height - 6))
+        }
+    }
 }
 
 // MARK: - Place sheet remote image loading
@@ -558,6 +571,11 @@ private final class KakaoMapTestViewController: UIViewController {
 
     private static let searchResultCellID = "SearchResultCell"
     private static let markerLayerID = "pindmap-fullscreen-markers"
+    private static let myLocationShapeLayerID = "pindmap-fullscreen-mylocation"
+    private static let myLocationShapeID = "my-location"
+    private static let myLocationPolygonStyleSetID = "pindmap-my-location-shape"
+    private static let myLocationOuterRadiusMeters: Double = 10
+    private static let myLocationInnerRadiusMeters: Double = 7
 
     private struct MarkerMetadata {
         let title: String?
@@ -622,6 +640,10 @@ private final class KakaoMapTestViewController: UIViewController {
     private var routeLayer: RouteLayer?
     private var registeredRouteStyleSetIDs = Set<String>()
     private var pendingRoute: (path: [(lat: Double, lng: Double)], mode: String)?
+    private var pendingMyLocation: (lat: Double, lng: Double)?
+    private var myLocationShapeLayer: ShapeLayer?
+    private var myLocationShape: MapPolygonShape?
+    private var registeredPolygonStyleSetIDs = Set<String>()
 
     private struct TestMarker {
         let id: String
@@ -688,9 +710,18 @@ private final class KakaoMapTestViewController: UIViewController {
         routeLayer?.clearAllRoutes()
     }
 
-    func setMyLocation(lat: Double, lng: Double) {}
+    func setMyLocation(lat: Double, lng: Double) {
+        pendingMyLocation = (lat, lng)
+        guard mapViewReady else { return }
+        applyMyLocation(lat: lat, lng: lng)
+    }
 
-    func clearMyLocation() {}
+    func clearMyLocation() {
+        pendingMyLocation = nil
+        myLocationShapeLayer?.removeMapPolygonShape(shapeID: Self.myLocationShapeID)
+        myLocationShape = nil
+        kakaoMapView()?.refresh()
+    }
 
     func setSearchResults(_ results: [SearchResultInput]) {
         pendingSearchResults = results
@@ -1047,6 +1078,7 @@ private final class KakaoMapTestViewController: UIViewController {
                 continue
             }
             poi.show()
+            attachMarkerPoiTapHandler(to: poi, poiID: marker.id)
             markerPois[marker.id] = poi
             added += 1
         }
@@ -1055,6 +1087,22 @@ private final class KakaoMapTestViewController: UIViewController {
         map.refresh()
         CAPLog.print("[PindmapNativeMap][Fullscreen] markers added count=\(added)")
         return added
+    }
+
+    private func onMarkerPoiTapped(poiID: String) {
+        guard markerPois[poiID] != nil else { return }
+        if mode == .production {
+            showPlaceBottomSheet(for: poiID)
+        }
+        onMarkerClick?(poiID)
+    }
+
+    private func attachMarkerPoiTapHandler(to poi: Poi, poiID: String) {
+        _ = poi.addPoiTappedEventHandler(target: self) { owner in
+            { _ in
+                owner.onMarkerPoiTapped(poiID: poiID)
+            }
+        }
     }
 
     private func syncContainerSize() {
@@ -1599,6 +1647,95 @@ private final class KakaoMapTestViewController: UIViewController {
         if let pendingSearchResults {
             applySearchResults(pendingSearchResults)
         }
+        if let pendingMyLocation {
+            applyMyLocation(lat: pendingMyLocation.lat, lng: pendingMyLocation.lng)
+        }
+    }
+
+    private func ensureMyLocationPolygonStyleSet(manager: ShapeManager) {
+        let styleSetID = Self.myLocationPolygonStyleSetID
+        guard !registeredPolygonStyleSetIDs.contains(styleSetID) else { return }
+
+        let outerStyle = PerLevelPolygonStyle(
+            color: UIColor.white,
+            strokeWidth: 0,
+            strokeColor: .clear,
+            level: 0
+        )
+        let innerStyle = PerLevelPolygonStyle(
+            color: UIColor.systemBlue,
+            strokeWidth: 0,
+            strokeColor: .clear,
+            level: 0
+        )
+        let styleSet = PolygonStyleSet(
+            styleSetID: styleSetID,
+            styles: [
+                PolygonStyle(styles: [outerStyle]),
+                PolygonStyle(styles: [innerStyle]),
+            ]
+        )
+        manager.addPolygonStyleSet(styleSet)
+        registeredPolygonStyleSetIDs.insert(styleSetID)
+    }
+
+    private func ensureMyLocationShapeLayer(on map: KakaoMap) -> ShapeLayer? {
+        if myLocationShapeLayer == nil {
+            let manager = map.getShapeManager()
+            ensureMyLocationPolygonStyleSet(manager: manager)
+            myLocationShapeLayer = manager.addShapeLayer(
+                layerID: Self.myLocationShapeLayerID,
+                zOrder: 110
+            )
+        }
+        myLocationShapeLayer?.visible = true
+        return myLocationShapeLayer
+    }
+
+    private func makeMyLocationMapPolygons(lat: Double, lng: Double) -> [MapPolygon] {
+        let center = MapPoint(longitude: lng, latitude: lat)
+        let outerPoints = Primitives.getCirclePoints(
+            radius: Self.myLocationOuterRadiusMeters,
+            numPoints: 32,
+            cw: true,
+            center: center
+        )
+        let innerPoints = Primitives.getCirclePoints(
+            radius: Self.myLocationInnerRadiusMeters,
+            numPoints: 32,
+            cw: true,
+            center: center
+        )
+        return [
+            MapPolygon(exteriorRing: outerPoints, hole: nil, styleIndex: 0),
+            MapPolygon(exteriorRing: innerPoints, hole: nil, styleIndex: 1),
+        ]
+    }
+
+    private func applyMyLocation(lat: Double, lng: Double) {
+        pendingMyLocation = (lat, lng)
+        guard mode == .production else { return }
+        guard let map = kakaoMapView(), let layer = ensureMyLocationShapeLayer(on: map) else { return }
+
+        let polygons = makeMyLocationMapPolygons(lat: lat, lng: lng)
+        if let existing = myLocationShape ?? layer.getMapPolygonShape(shapeID: Self.myLocationShapeID) {
+            existing.changeStyleAndData(styleID: Self.myLocationPolygonStyleSetID, polygons: polygons)
+            existing.show()
+            myLocationShape = existing
+        } else {
+            let options = MapPolygonShapeOptions(
+                shapeID: Self.myLocationShapeID,
+                styleID: Self.myLocationPolygonStyleSetID,
+                zOrder: 0
+            )
+            options.polygons = polygons
+            guard let shape = layer.addMapPolygonShape(options) else {
+                return
+            }
+            shape.show()
+            myLocationShape = shape
+        }
+        map.refresh()
     }
 
     private func applyRoute(path: [(lat: Double, lng: Double)], mode: String) {
@@ -1708,18 +1845,7 @@ extension KakaoMapTestViewController: MapControllerDelegate {
     }
 }
 
-extension KakaoMapTestViewController: KakaoMapEventDelegate {
-    func poiDidTapped(kakaoMap: KakaoMap, layerID: String, poiID: String, position: MapPoint) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            guard layerID == Self.markerLayerID, self.markerPois[poiID] != nil else { return }
-            if self.mode == .production {
-                self.showPlaceBottomSheet(for: poiID)
-            }
-            self.onMarkerClick?(poiID)
-        }
-    }
-}
+extension KakaoMapTestViewController: KakaoMapEventDelegate {}
 
 extension KakaoMapTestViewController: UITableViewDataSource, UITableViewDelegate {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -2193,11 +2319,21 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func setFullscreenMyLocation(_ call: CAPPluginCall) {
-        call.resolve()
+        guard let lat = call.getDouble("lat"), let lng = call.getDouble("lng") else {
+            call.resolve()
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.setMyLocation(lat: lat, lng: lng)
+            call.resolve()
+        }
     }
 
     @objc func clearFullscreenMyLocation(_ call: CAPPluginCall) {
-        call.resolve()
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.clearMyLocation()
+            call.resolve()
+        }
     }
 
     @objc func setFullscreenSearchResults(_ call: CAPPluginCall) {
