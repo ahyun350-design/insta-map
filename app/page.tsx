@@ -1331,6 +1331,8 @@ function HomePageContent() {
   /** DB에 저장된 코스를 모달로 볼 때 id — courseResult 변경으로 savedCourseId가 지워지지 않게 */
   const viewingSavedCourseIdRef = useRef<string | null>(null);
   const returnToCourseSheetRef = useRef(false);
+  /** Native 전체화면 지도 → 큐레이션 포스트 상세 진입 시, 닫으면 지도로 복귀 */
+  const returnToFullscreenMapAfterDetailRef = useRef(false);
   const drawCourseRouteRetryRef = useRef(0);
   const courseTitleOriginalRef = useRef("");
   const courseTitleInlineInputRef = useRef<HTMLInputElement>(null);
@@ -2281,6 +2283,15 @@ function HomePageContent() {
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
 
   const closeDetailPost = useCallback(() => {
+    if (returnToFullscreenMapAfterDetailRef.current) {
+      returnToFullscreenMapAfterDetailRef.current = false;
+      setDetailPostId(null);
+      setScrollToComment(false);
+      setDetailReturnTo(null);
+      setActiveTab("map");
+      setMapExpanded(true);
+      return;
+    }
     const ret = detailReturnTo;
     setDetailPostId(null);
     setScrollToComment(false);
@@ -7103,6 +7114,7 @@ function HomePageContent() {
   const handleFullscreenNativeCuration = useCallback(async (postId: string) => {
     const id = String(postId ?? "").trim();
     if (!id) return;
+    returnToFullscreenMapAfterDetailRef.current = true;
     await dismissFullscreenNativeMap({ silent: false });
     setMapExpanded(false);
     setSelectedPlace(null);
