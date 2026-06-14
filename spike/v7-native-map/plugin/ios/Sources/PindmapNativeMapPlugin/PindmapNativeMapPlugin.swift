@@ -1056,7 +1056,7 @@ private final class KakaoMapTestViewController: UIViewController {
 
     @objc private func replaceMarkersTapped() {
         let busanInputs = busanMarkers.map {
-            MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0)
+            MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0, isSaved: false, photoPostIds: [])
         }
         updateMarkers(busanInputs, clearPrefix: nil)
     }
@@ -1875,7 +1875,7 @@ private final class KakaoMapTestViewController: UIViewController {
         applyPendingCamera(animated: false)
         if mode == .prototype {
             let protoMarkers = seoulMarkers.map {
-                MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0)
+                MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0, isSaved: false, photoPostIds: [])
             }
             _ = addMarkers(protoMarkers)
         } else if !pendingInitialMarkers.isEmpty {
