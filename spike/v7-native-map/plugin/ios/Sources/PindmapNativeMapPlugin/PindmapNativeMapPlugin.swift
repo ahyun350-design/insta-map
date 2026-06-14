@@ -571,11 +571,8 @@ private final class KakaoMapTestViewController: UIViewController {
 
     private static let searchResultCellID = "SearchResultCell"
     private static let markerLayerID = "pindmap-fullscreen-markers"
-    private static let myLocationShapeLayerID = "pindmap-fullscreen-mylocation"
-    private static let myLocationShapeID = "my-location"
-    private static let myLocationPolygonStyleSetID = "pindmap-my-location-shape"
-    private static let myLocationOuterRadiusMeters: Double = 10
-    private static let myLocationInnerRadiusMeters: Double = 7
+    private static let myLocationGuiID = "my-location"
+    private static let myLocationIconSize: UInt = 24
 
     private struct MarkerMetadata {
         let title: String?
@@ -641,9 +638,7 @@ private final class KakaoMapTestViewController: UIViewController {
     private var registeredRouteStyleSetIDs = Set<String>()
     private var pendingRoute: (path: [(lat: Double, lng: Double)], mode: String)?
     private var pendingMyLocation: (lat: Double, lng: Double)?
-    private var myLocationShapeLayer: ShapeLayer?
-    private var myLocationShape: MapPolygonShape?
-    private var registeredPolygonStyleSetIDs = Set<String>()
+    private var myLocationInfoWindow: InfoWindow?
 
     private struct TestMarker {
         let id: String
@@ -718,9 +713,17 @@ private final class KakaoMapTestViewController: UIViewController {
 
     func clearMyLocation() {
         pendingMyLocation = nil
-        myLocationShapeLayer?.removeMapPolygonShape(shapeID: Self.myLocationShapeID)
-        myLocationShape = nil
-        kakaoMapView()?.refresh()
+        guard let map = kakaoMapView() else {
+            myLocationInfoWindow = nil
+            return
+        }
+        let layer = map.getGuiManager().infoWindowLayer
+        if let window = myLocationInfoWindow ?? layer.getInfoWindow(guiName: Self.myLocationGuiID) {
+            window.hide()
+            layer.removeInfoWindow(guiName: Self.myLocationGuiID)
+        }
+        myLocationInfoWindow = nil
+        map.refresh()
     }
 
     func setSearchResults(_ results: [SearchResultInput]) {
@@ -1652,88 +1655,41 @@ private final class KakaoMapTestViewController: UIViewController {
         }
     }
 
-    private func ensureMyLocationPolygonStyleSet(manager: ShapeManager) {
-        let styleSetID = Self.myLocationPolygonStyleSetID
-        guard !registeredPolygonStyleSetIDs.contains(styleSetID) else { return }
-
-        let outerStyle = PerLevelPolygonStyle(
-            color: UIColor.white,
-            strokeWidth: 0,
-            strokeColor: .clear,
-            level: 0
-        )
-        let innerStyle = PerLevelPolygonStyle(
-            color: UIColor.systemBlue,
-            strokeWidth: 0,
-            strokeColor: .clear,
-            level: 0
-        )
-        let styleSet = PolygonStyleSet(
-            styleSetID: styleSetID,
-            styles: [
-                PolygonStyle(styles: [outerStyle]),
-                PolygonStyle(styles: [innerStyle]),
-            ]
-        )
-        manager.addPolygonStyleSet(styleSet)
-        registeredPolygonStyleSetIDs.insert(styleSetID)
-    }
-
-    private func ensureMyLocationShapeLayer(on map: KakaoMap) -> ShapeLayer? {
-        if myLocationShapeLayer == nil {
-            let manager = map.getShapeManager()
-            ensureMyLocationPolygonStyleSet(manager: manager)
-            myLocationShapeLayer = manager.addShapeLayer(
-                layerID: Self.myLocationShapeLayerID,
-                zOrder: 110
-            )
-        }
-        myLocationShapeLayer?.visible = true
-        return myLocationShapeLayer
-    }
-
-    private func makeMyLocationMapPolygons(lat: Double, lng: Double) -> [MapPolygon] {
-        let center = MapPoint(longitude: lng, latitude: lat)
-        let outerPoints = Primitives.getCirclePoints(
-            radius: Self.myLocationOuterRadiusMeters,
-            numPoints: 32,
-            cw: true,
-            center: center
-        )
-        let innerPoints = Primitives.getCirclePoints(
-            radius: Self.myLocationInnerRadiusMeters,
-            numPoints: 32,
-            cw: true,
-            center: center
-        )
-        return [
-            MapPolygon(exteriorRing: outerPoints, hole: nil, styleIndex: 0),
-            MapPolygon(exteriorRing: innerPoints, hole: nil, styleIndex: 1),
-        ]
+    private func makeMyLocationInfoWindow() -> InfoWindow {
+        let infoWindow = InfoWindow(Self.myLocationGuiID)
+        let bodyImage = GuiImage("myLocationDot")
+        bodyImage.image = NativeMapMarkerStyleHelper.makeMyLocationIcon()
+        var iconSize = GuiSize()
+        iconSize.width = Self.myLocationIconSize
+        iconSize.height = Self.myLocationIconSize
+        bodyImage.imageSize = iconSize
+        infoWindow.body = bodyImage
+        infoWindow.tail = nil
+        let half = CGFloat(Self.myLocationIconSize) / 2
+        infoWindow.bodyOffset = CGPoint(x: -half, y: -half)
+        infoWindow.zOrder = 1000
+        return infoWindow
     }
 
     private func applyMyLocation(lat: Double, lng: Double) {
         pendingMyLocation = (lat, lng)
         guard mode == .production else { return }
-        guard let map = kakaoMapView(), let layer = ensureMyLocationShapeLayer(on: map) else { return }
+        guard let map = kakaoMapView() else { return }
 
-        let polygons = makeMyLocationMapPolygons(lat: lat, lng: lng)
-        if let existing = myLocationShape ?? layer.getMapPolygonShape(shapeID: Self.myLocationShapeID) {
-            existing.changeStyleAndData(styleID: Self.myLocationPolygonStyleSetID, polygons: polygons)
+        let guiManager = map.getGuiManager()
+        let layer = guiManager.infoWindowLayer
+        let point = MapPoint(longitude: lng, latitude: lat)
+
+        if let existing = myLocationInfoWindow ?? layer.getInfoWindow(guiName: Self.myLocationGuiID) {
+            existing.position = point
             existing.show()
-            myLocationShape = existing
+            myLocationInfoWindow = existing
         } else {
-            let options = MapPolygonShapeOptions(
-                shapeID: Self.myLocationShapeID,
-                styleID: Self.myLocationPolygonStyleSetID,
-                zOrder: 0
-            )
-            options.polygons = polygons
-            guard let shape = layer.addMapPolygonShape(options) else {
-                return
-            }
-            shape.show()
-            myLocationShape = shape
+            let infoWindow = makeMyLocationInfoWindow()
+            infoWindow.position = point
+            layer.addInfoWindow(infoWindow)
+            infoWindow.show()
+            myLocationInfoWindow = infoWindow
         }
         map.refresh()
     }
