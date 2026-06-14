@@ -33,6 +33,8 @@ import {
   setFullscreenNativeRoute,
   setFullscreenNativeSearchResults,
   clearFullscreenNativeSearchResults,
+  setFullscreenNativePlaceSaved,
+  setFullscreenNativeDirectionsInfo,
   setFullscreenNativeMyLocation,
   setNativeCamera,
   setNativeMarkerClickHandler,
@@ -533,21 +535,23 @@ function getMarkerPhotoMetaForPlace(
   posts: FeedPost[],
   place: Place,
   coords?: LatLng,
-): { photos: string[]; postCount: number } {
+): { photos: string[]; postCount: number; photoPostIds: string[] } {
   const placeRef = placeRefFromPlace(place, coords?.lat, coords?.lng);
   const relatedPosts = getRelatedPostsForPlaceSheet(posts, placeRef);
   const photos: string[] = [];
+  const photoPostIds: string[] = [];
   const seen = new Set<string>();
   for (const post of relatedPosts) {
     for (const url of getRelatedPostImagesForPlace(post, placeRef)) {
       if (!url || seen.has(url)) continue;
       seen.add(url);
       photos.push(url);
+      photoPostIds.push(post.id);
       if (photos.length >= MAX_NATIVE_MARKER_PHOTOS) break;
     }
     if (photos.length >= MAX_NATIVE_MARKER_PHOTOS) break;
   }
-  return { photos, postCount: relatedPosts.length };
+  return { photos, postCount: relatedPosts.length, photoPostIds };
 }
 
 function placeRefFromPlace(place: Place, lat?: number, lng?: number): PlaceRefForPhotoTagMatch {
@@ -1145,6 +1149,10 @@ function HomePageContent() {
   const fullscreenResearchListenerRegisteredRef = useRef(false);
   const fullscreenPlaceDetailListenerRegisteredRef = useRef(false);
   const fullscreenDirectionsListenerRegisteredRef = useRef(false);
+  const fullscreenToggleSaveListenerRegisteredRef = useRef(false);
+  const fullscreenCurationListenerRegisteredRef = useRef(false);
+  const fullscreenOpenExternalListenerRegisteredRef = useRef(false);
+  const fullscreenImageLightboxListenerRegisteredRef = useRef(false);
   const fullscreenDismissListenerRegisteredRef = useRef(false);
   const fullscreenAutoOpenedRef = useRef(false);
   const fullscreenGeocodeRunRef = useRef(0);
@@ -1609,12 +1617,25 @@ function HomePageContent() {
                 const lng = Number(place.x);
                 if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
                 searchPinPlaceByIdRef.current.set(`search-${index}`, place);
+                const sheetCandidate = {
+                  place_name: String(place.place_name ?? ""),
+                  road_address_name: String(place.road_address_name || place.address_name || ""),
+                  address_name: String(place.address_name || ""),
+                  y: place.y,
+                  x: place.x,
+                };
+                const isSaved = savedPlacesRef.current.some(
+                  (p) =>
+                    p.name.trim() === sheetCandidate.place_name.trim() &&
+                    p.address.trim() === sheetCandidate.road_address_name.trim(),
+                );
                 return [{
                   id: `search-${index}`,
                   lat,
                   lng,
                   title: String(place.place_name ?? ""),
                   address: String(place.road_address_name || place.address_name || ""),
+                  isSaved,
                 }];
               });
 
@@ -1672,15 +1693,21 @@ function HomePageContent() {
     }
   }, []);
 
-  const runFullscreenNativeDirections = useCallback(async (destination: { id: string; lat: number; lng: number }) => {
+  const runFullscreenNativeDirections = useCallback(async (destination: {
+    id: string;
+    lat: number;
+    lng: number;
+    mode?: "car" | "walk";
+  }) => {
     try {
       const destLat = Number(destination.lat);
       const destLng = Number(destination.lng);
+      const mode = destination.mode === "walk" ? "walk" : "car";
       if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) {
         return;
       }
 
-      const fetchAndDrawRoute = async (origin: { lat: number; lng: number }) => {
+      const fetchAndDrawCarRoute = async (origin: { lat: number; lng: number }) => {
         const res = await fetch("/api/directions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1714,7 +1741,50 @@ function HomePageContent() {
           return;
         }
         await setFullscreenNativeRoute({ path, mode: "car" }, { silent: false });
+        const summary = route.summary;
+        if (summary?.duration != null && summary?.distance != null) {
+          await setFullscreenNativeDirectionsInfo(
+            {
+              id: destination.id,
+              duration: Math.round(Number(summary.duration)),
+              distance: Math.round(Number(summary.distance)),
+            },
+            { silent: false },
+          );
+        }
       };
+
+      const fetchAndDrawWalkRoute = async (origin: { lat: number; lng: number }) => {
+        const res = await fetch("/api/walk-directions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ origin, destination: { lat: destLat, lng: destLng } }),
+        });
+        if (!res.ok) {
+          showToast("경로를 찾을 수 없어요", "error");
+          return;
+        }
+        const data = (await res.json()) as {
+          features?: { geometry?: { type?: string; coordinates?: number[][] } }[];
+          properties?: { totalTime?: number; totalDistance?: number };
+        };
+        const path = parseTmapWalkGeoJsonToPath(data);
+        if (path.length < 2) {
+          showToast("경로를 찾을 수 없어요", "error");
+          return;
+        }
+        await setFullscreenNativeRoute({ path, mode: "walk" }, { silent: false });
+        const duration = Number(data.properties?.totalTime);
+        const distance = Number(data.properties?.totalDistance);
+        if (Number.isFinite(duration) && Number.isFinite(distance) && duration > 0 && distance > 0) {
+          await setFullscreenNativeDirectionsInfo(
+            { id: destination.id, duration: Math.round(duration), distance: Math.round(distance) },
+            { silent: false },
+          );
+        }
+      };
+
+      const fetchAndDrawRoute = mode === "walk" ? fetchAndDrawWalkRoute : fetchAndDrawCarRoute;
 
       const stored = myLocationLatLngRef.current;
       if (
@@ -1776,7 +1846,7 @@ function HomePageContent() {
       };
 
       const placeToMarker = (place: Place, coords: LatLng) => {
-        const { photos, postCount } = getMarkerPhotoMetaForPlace(feedPostsRef.current, place, coords);
+        const { photos, postCount, photoPostIds } = getMarkerPhotoMetaForPlace(feedPostsRef.current, place, coords);
         return {
           id: `place-${place.id}`,
           lat: coords.lat,
@@ -1784,8 +1854,10 @@ function HomePageContent() {
           category: place.category,
           title: place.name,
           address: place.address,
+          isSaved: true,
           ...(photos.length > 0 ? { photos } : {}),
           ...(postCount > 0 ? { postCount } : {}),
+          ...(photoPostIds.length > 0 ? { photoPostIds } : {}),
         };
       };
 
@@ -1890,7 +1962,8 @@ function HomePageContent() {
       if (!fullscreenDirectionsListenerRegisteredRef.current) {
         fullscreenDirectionsListenerRegisteredRef.current = true;
         void PindmapNativeMap.addListener("fullscreenDirections", (e) => {
-          void runFullscreenNativeDirections({ id: e.id, lat: e.lat, lng: e.lng });
+          const mode = e.mode === "walk" ? "walk" : "car";
+          void runFullscreenNativeDirections({ id: e.id, lat: e.lat, lng: e.lng, mode });
         }).catch((err) => {
           fullscreenDirectionsListenerRegisteredRef.current = false;
           console.error("[fullscreen] fullscreenDirections listener failed", err);
@@ -5642,41 +5715,10 @@ function HomePageContent() {
   }, []);
 
   const handleFullscreenNativePlaceDetail = useCallback(async (markerId: string) => {
-    const id = String(markerId ?? "").trim();
-    if (!id) return;
-
-    fullscreenAutoOpenedRef.current = false;
-
-    if (id.startsWith("place-")) {
-      const place = placePinByIdRef.current.get(id);
-      if (!place) {
-        showToast("장소 정보를 찾을 수 없어요", "error");
-        return;
-      }
-      const stored = savedPlaceCoordsRef.current[place.id] ?? latLngFromRow(place);
-      const lat = stored?.lat;
-      const lng = stored?.lng;
-      const relatedPosts = getRelatedPostsForPlaceSheet(
-        feedPostsRef.current,
-        placeRefFromPlace(place, lat, lng),
-      );
-      await dismissFullscreenNativeMap({ silent: false });
-      setMapExpanded(false);
-      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, lat, lng));
-      return;
-    }
-
-    if (id.startsWith("search-")) {
-      const place = searchPinPlaceByIdRef.current.get(id);
-      if (!place) {
-        showToast("장소 정보를 찾을 수 없어요", "error");
-        return;
-      }
-      await dismissFullscreenNativeMap({ silent: false });
-      setMapExpanded(false);
-      openExpandedSearchPlaceCard(place, "fullscreen-native-detail");
-    }
-  }, [toSelectedFromSavedPlace, openExpandedSearchPlaceCard, showToast]);
+    // Pin tap no longer opens React PlaceDetailSheet — native bottom sheet handles place UI.
+    // Kept for potential future "상세 보기" entry points.
+    void markerId;
+  }, []);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
@@ -6939,6 +6981,118 @@ function HomePageContent() {
     showToast("저장됐어요", "success");
     onAfterSave?.();
   }, [user?.id, resolveSavedMatch, deletePlace, addPlace, showToast]);
+
+  const resolveFullscreenMarkerPlaceSheet = useCallback((markerId: string): PlaceSheetData | null => {
+    const id = String(markerId ?? "").trim();
+    if (!id) return null;
+    if (id.startsWith("place-")) {
+      const place = placePinByIdRef.current.get(id);
+      if (!place) return null;
+      const stored = savedPlaceCoordsRef.current[place.id] ?? latLngFromRow(place);
+      const lat = stored?.lat;
+      const lng = stored?.lng;
+      const relatedPosts = getRelatedPostsForPlaceSheet(
+        feedPostsRef.current,
+        placeRefFromPlace(place, lat, lng),
+      );
+      return toSelectedFromSavedPlace(place, relatedPosts, lat, lng) as PlaceSheetData;
+    }
+    if (id.startsWith("search-")) {
+      const place = searchPinPlaceByIdRef.current.get(id);
+      if (!place) return null;
+      const expandedRef = placeRefFromKakaoPlace(place);
+      return {
+        ...place,
+        _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, expandedRef),
+        _placeRef: expandedRef,
+      } as PlaceSheetData;
+    }
+    return null;
+  }, [toSelectedFromSavedPlace]);
+
+  const handleFullscreenNativeToggleSave = useCallback(async (markerId: string) => {
+    const placeData = resolveFullscreenMarkerPlaceSheet(markerId);
+    if (!placeData) {
+      showToast("장소 정보를 찾을 수 없어요", "error");
+      return;
+    }
+    await togglePlaceSheetSave(placeData);
+    const isSaved = !!resolveSavedMatch(placeData);
+    await setFullscreenNativePlaceSaved({ id: markerId, saved: isSaved }, { silent: false });
+  }, [resolveFullscreenMarkerPlaceSheet, togglePlaceSheetSave, resolveSavedMatch, showToast]);
+
+  const handleFullscreenNativeOpenExternal = useCallback((markerId: string, type: "apple" | "transit") => {
+    const placeData = resolveFullscreenMarkerPlaceSheet(markerId);
+    if (!placeData) {
+      showToast("장소 정보를 찾을 수 없어요", "error");
+      return;
+    }
+    const lat = Number(placeData.y);
+    const lng = Number(placeData.x);
+    if (type === "apple") {
+      openAppleMapsPlace(
+        placeData.place_name,
+        placeData.road_address_name || placeData.address_name,
+        placeData.y,
+        placeData.x,
+      );
+      return;
+    }
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      showToast("위치 정보가 없어요", "error");
+      return;
+    }
+    openTransitInKakaoMap(placeData.place_name ?? "장소", lat, lng);
+  }, [resolveFullscreenMarkerPlaceSheet, openAppleMapsPlace, showToast]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenToggleSaveListenerRegisteredRef.current) return;
+    fullscreenToggleSaveListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenToggleSave", (e) => {
+      void handleFullscreenNativeToggleSave(e.id);
+    }).catch((err) => {
+      fullscreenToggleSaveListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenToggleSave listener failed", err);
+    });
+  }, [handleFullscreenNativeToggleSave]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenCurationListenerRegisteredRef.current) return;
+    fullscreenCurationListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenCuration", (e) => {
+      if (e.postId) setDetailPostId(e.postId);
+    }).catch((err) => {
+      fullscreenCurationListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenCuration listener failed", err);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenOpenExternalListenerRegisteredRef.current) return;
+    fullscreenOpenExternalListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenOpenExternal", (e) => {
+      const type = e.type === "transit" ? "transit" : "apple";
+      handleFullscreenNativeOpenExternal(e.id, type);
+    }).catch((err) => {
+      fullscreenOpenExternalListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenOpenExternal listener failed", err);
+    });
+  }, [handleFullscreenNativeOpenExternal]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenImageLightboxListenerRegisteredRef.current) return;
+    fullscreenImageLightboxListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenImageLightbox", (e) => {
+      if (e.url) setLightboxImg(e.url);
+    }).catch((err) => {
+      fullscreenImageLightboxListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenImageLightbox listener failed", err);
+    });
+  }, []);
 
   const openHomePlaceSheetFromPost = useCallback(
     (post: FeedPost, placeRef?: PlaceRefForPhotoTagMatch) => {

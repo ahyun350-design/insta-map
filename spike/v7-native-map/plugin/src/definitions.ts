@@ -28,6 +28,8 @@ export interface MarkerInput {
   category?: string;
   photos?: string[];
   postCount?: number;
+  isSaved?: boolean;
+  photoPostIds?: string[];
 }
 
 export interface AddMarkersOptions {
@@ -59,6 +61,36 @@ export interface FullscreenDirectionsEvent {
   id: string;
   lat: number;
   lng: number;
+  mode?: FullscreenRouteMode;
+}
+
+export interface FullscreenToggleSaveEvent {
+  id: string;
+}
+
+export interface FullscreenCurationEvent {
+  id: string;
+  postId: string;
+}
+
+export interface FullscreenOpenExternalEvent {
+  id: string;
+  type: 'apple' | 'transit';
+}
+
+export interface FullscreenImageLightboxEvent {
+  url: string;
+}
+
+export interface SetFullscreenPlaceSavedOptions {
+  id: string;
+  saved: boolean;
+}
+
+export interface SetFullscreenDirectionsInfoOptions {
+  id: string;
+  duration: number;
+  distance: number;
 }
 
 export interface FullscreenResearchAreaEvent {
@@ -152,6 +184,22 @@ export interface PindmapNativeMapPlugin {
     eventName: 'fullscreenPlaceDetail',
     listenerFunc: (event: FullscreenPlaceDetailEvent) => void,
   ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'fullscreenToggleSave',
+    listenerFunc: (event: FullscreenToggleSaveEvent) => void,
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'fullscreenCuration',
+    listenerFunc: (event: FullscreenCurationEvent) => void,
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'fullscreenOpenExternal',
+    listenerFunc: (event: FullscreenOpenExternalEvent) => void,
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
+  addListener(
+    eventName: 'fullscreenImageLightbox',
+    listenerFunc: (event: FullscreenImageLightboxEvent) => void,
+  ): Promise<PluginListenerHandle> & PluginListenerHandle;
   /** V-7-2 prototype: modal full-screen map with normal VC lifecycle (overlay-independent) */
   presentNativeMapTest(): Promise<void>;
   /** V-7-2 production: full-screen native map VC (verified lifecycle path) */
@@ -165,4 +213,6 @@ export interface PindmapNativeMapPlugin {
   clearFullscreenMyLocation(): Promise<void>;
   setFullscreenSearchResults(options: SetFullscreenSearchResultsOptions): Promise<void>;
   clearFullscreenSearchResults(): Promise<void>;
+  setFullscreenPlaceSaved(options: SetFullscreenPlaceSavedOptions): Promise<void>;
+  setFullscreenDirectionsInfo(options: SetFullscreenDirectionsInfoOptions): Promise<void>;
 }

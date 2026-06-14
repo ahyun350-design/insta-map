@@ -14,6 +14,13 @@ import type {
   UpdateFullscreenMarkersOptions,
   FullscreenResearchAreaEvent,
   FullscreenPlaceDetailEvent,
+  FullscreenToggleSaveEvent,
+  FullscreenCurationEvent,
+  FullscreenOpenExternalEvent,
+  FullscreenImageLightboxEvent,
+  SetFullscreenPlaceSavedOptions,
+  SetFullscreenDirectionsInfoOptions,
+  FullscreenRouteMode,
 } from "@pindmap/native-map";
 
 /** Re-export plugin types for Step 3 consumers */
@@ -29,6 +36,13 @@ export type {
   SetFullscreenSearchResultsOptions,
   FullscreenResearchAreaEvent,
   FullscreenPlaceDetailEvent,
+  FullscreenToggleSaveEvent,
+  FullscreenCurationEvent,
+  FullscreenOpenExternalEvent,
+  FullscreenImageLightboxEvent,
+  SetFullscreenPlaceSavedOptions,
+  SetFullscreenDirectionsInfoOptions,
+  FullscreenRouteMode,
 };
 
 export type CreateNativeMapOptions = {
@@ -75,6 +89,8 @@ export type NativeMarkerInput = {
   category?: string;
   photos?: string[];
   postCount?: number;
+  isSaved?: boolean;
+  photoPostIds?: string[];
 };
 
 const DEFAULT_PROVIDER: NativeMapProvider = "kakao";
@@ -659,6 +675,52 @@ export async function clearFullscreenNativeSearchResults(
     await getPlugin().clearFullscreenSearchResults();
   } catch (err) {
     nativeMapWarn("clearFullscreenNativeSearchResults failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Update saved-state heart on the native place bottom sheet. */
+export async function setFullscreenNativePlaceSaved(
+  options: SetFullscreenPlaceSavedOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "setFullscreenNativePlaceSaved skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("setFullscreenNativePlaceSaved", options);
+    await getPlugin().setFullscreenPlaceSaved(options);
+  } catch (err) {
+    nativeMapWarn("setFullscreenNativePlaceSaved failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Show route duration/distance on the native place bottom sheet. */
+export async function setFullscreenNativeDirectionsInfo(
+  options: SetFullscreenDirectionsInfoOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "setFullscreenNativeDirectionsInfo skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("setFullscreenNativeDirectionsInfo", options);
+    await getPlugin().setFullscreenDirectionsInfo(options);
+  } catch (err) {
+    nativeMapWarn("setFullscreenNativeDirectionsInfo failed", err);
     if (!silent) {
       return Promise.reject(err);
     }

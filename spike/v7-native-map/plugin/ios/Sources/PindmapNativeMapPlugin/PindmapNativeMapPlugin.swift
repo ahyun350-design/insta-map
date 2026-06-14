@@ -558,6 +558,8 @@ private final class KakaoMapTestViewController: UIViewController {
         let address: String?
         let photos: [String]
         let postCount: Int
+        let isSaved: Bool
+        let photoPostIds: [String]
     }
 
     struct SearchResultInput {
@@ -575,13 +577,15 @@ private final class KakaoMapTestViewController: UIViewController {
     private static let myLocationIconSize: UInt = 24
 
     private struct MarkerMetadata {
-        let title: String?
-        let address: String?
-        let category: String?
-        let lat: Double?
-        let lng: Double?
-        let photos: [String]
-        let postCount: Int
+        var title: String?
+        var address: String?
+        var category: String?
+        var lat: Double?
+        var lng: Double?
+        var photos: [String]
+        var postCount: Int
+        var isSaved: Bool
+        var photoPostIds: [String]
     }
 
     private let mode: Mode
@@ -598,7 +602,11 @@ private final class KakaoMapTestViewController: UIViewController {
     private let overlayCardWebView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
     var onMarkerClick: ((String) -> Void)?
     var onSearch: ((String) -> Void)?
-    var onDirections: ((String, Double, Double) -> Void)?
+    var onDirections: ((String, Double, Double, String) -> Void)?
+    var onToggleSave: ((String) -> Void)?
+    var onCuration: ((String, String) -> Void)?
+    var onOpenExternal: ((String, String) -> Void)?
+    var onImageLightbox: ((String) -> Void)?
     var onPlaceDetail: ((String) -> Void)?
     var onResearchArea: ((Double, Double) -> Void)?
     var onDismiss: (() -> Void)?
@@ -614,23 +622,23 @@ private final class KakaoMapTestViewController: UIViewController {
     private weak var placeSheetTitleLabel: UILabel?
     private weak var placeSheetAddressLabel: UILabel?
     private weak var placeSheetDirectionsButton: UIButton?
-    private weak var placeSheetDetailButton: UIButton?
-    private var placeSheetDirectionsTopToAddress: NSLayoutConstraint?
-    private var placeSheetDirectionsTopToTitle: NSLayoutConstraint?
-    private var placeSheetDirectionsTopToMedia: NSLayoutConstraint?
-    private var placeSheetDirectionsTopToPostCount: NSLayoutConstraint?
-    private var placeSheetDetailTopToAddress: NSLayoutConstraint?
-    private var placeSheetDetailTopToTitle: NSLayoutConstraint?
-    private var placeSheetDetailTopToMedia: NSLayoutConstraint?
-    private var placeSheetDetailTopToPostCount: NSLayoutConstraint?
+    private weak var placeSheetSaveButton: UIButton?
+    private weak var placeSheetDirectionsInfoLabel: UILabel?
+    private weak var placeSheetModeControl: UISegmentedControl?
+    private weak var placeSheetAppleMapsButton: UIButton?
+    private weak var placeSheetTransitButton: UIButton?
+    private var placeSheetActionsTopToAddress: NSLayoutConstraint?
+    private var placeSheetActionsTopToTitle: NSLayoutConstraint?
+    private var placeSheetActionsTopToMedia: NSLayoutConstraint?
+    private var placeSheetActionsTopToPostCount: NSLayoutConstraint?
     private var placeSheetMarkerId: String?
     private weak var placeSheetPostCountLabel: UILabel?
     private weak var placeSheetPhotosScrollView: UIScrollView?
     private weak var placeSheetPhotosStackView: UIStackView?
     private var placeSheetPhotosHeightConstraint: NSLayoutConstraint?
     private static let photoThumbnailSize: CGFloat = 88
-    private static let placeSheetCompactDismissOffset: CGFloat = 220
-    private static let placeSheetExpandedDismissOffset: CGFloat = 360
+    private static let placeSheetCompactDismissOffset: CGFloat = 300
+    private static let placeSheetExpandedDismissOffset: CGFloat = 440
     private weak var searchResultsCard: UIView?
     private weak var searchResultsTitleLabel: UILabel?
     private weak var searchResultsTableView: UITableView?
@@ -1144,7 +1152,9 @@ private final class KakaoMapTestViewController: UIViewController {
                 lat: marker.lat,
                 lng: marker.lng,
                 photos: marker.photos,
-                postCount: marker.postCount
+                postCount: marker.postCount,
+                isSaved: marker.isSaved,
+                photoPostIds: marker.photoPostIds
             )
             let styleID = ensureStyle(for: marker.category)
             let option = PoiOptions(styleID: styleID, poiID: marker.id)
@@ -1170,7 +1180,7 @@ private final class KakaoMapTestViewController: UIViewController {
     private func onMarkerPoiTapped(poiID: String) {
         guard markerPois[poiID] != nil else { return }
         if mode == .production {
-            onPlaceDetail?(poiID)
+            showPlaceBottomSheet(for: poiID)
         }
         onMarkerClick?(poiID)
     }
@@ -1292,6 +1302,29 @@ private final class KakaoMapTestViewController: UIViewController {
         photosScrollView.addSubview(photosStackView)
         placeSheetPhotosStackView = photosStackView
 
+        let saveButton = UIButton(type: .system)
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
+        saveButton.setImage(UIImage(systemName: "heart"), for: .normal)
+        saveButton.tintColor = .secondaryLabel
+        saveButton.addTarget(self, action: #selector(placeSheetSaveTapped), for: .touchUpInside)
+        card.addSubview(saveButton)
+        placeSheetSaveButton = saveButton
+
+        let directionsInfoLabel = UILabel()
+        directionsInfoLabel.translatesAutoresizingMaskIntoConstraints = false
+        directionsInfoLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        directionsInfoLabel.textColor = .secondaryLabel
+        directionsInfoLabel.isHidden = true
+        card.addSubview(directionsInfoLabel)
+        placeSheetDirectionsInfoLabel = directionsInfoLabel
+
+        let modeControl = UISegmentedControl(items: ["🚗 차", "🚶 도보"])
+        modeControl.translatesAutoresizingMaskIntoConstraints = false
+        modeControl.selectedSegmentIndex = 0
+        modeControl.addTarget(self, action: #selector(placeSheetModeChanged), for: .valueChanged)
+        card.addSubview(modeControl)
+        placeSheetModeControl = modeControl
+
         let directionsButton = UIButton(type: .system)
         directionsButton.translatesAutoresizingMaskIntoConstraints = false
         directionsButton.setTitle("길찾기", for: .normal)
@@ -1303,44 +1336,51 @@ private final class KakaoMapTestViewController: UIViewController {
         card.addSubview(directionsButton)
         placeSheetDirectionsButton = directionsButton
 
-        let detailButton = UIButton(type: .system)
-        detailButton.translatesAutoresizingMaskIntoConstraints = false
-        detailButton.setTitle("상세 보기", for: .normal)
-        detailButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
-        detailButton.setTitleColor(UIColor(hex: 0x1a2a7a), for: .normal)
-        detailButton.backgroundColor = .systemBackground
-        detailButton.layer.cornerRadius = 10
-        detailButton.layer.borderWidth = 1
-        detailButton.layer.borderColor = UIColor(hex: 0x1a2a7a).cgColor
-        detailButton.addTarget(self, action: #selector(placeSheetDetailTapped), for: .touchUpInside)
-        card.addSubview(detailButton)
-        placeSheetDetailButton = detailButton
+        let appleMapsButton = UIButton(type: .system)
+        appleMapsButton.translatesAutoresizingMaskIntoConstraints = false
+        appleMapsButton.setTitle("Apple 지도", for: .normal)
+        appleMapsButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        appleMapsButton.setTitleColor(UIColor(hex: 0x1a2a7a), for: .normal)
+        appleMapsButton.backgroundColor = .systemBackground
+        appleMapsButton.layer.cornerRadius = 10
+        appleMapsButton.layer.borderWidth = 1
+        appleMapsButton.layer.borderColor = UIColor(hex: 0x1a2a7a).cgColor
+        appleMapsButton.addTarget(self, action: #selector(placeSheetAppleMapsTapped), for: .touchUpInside)
+
+        let transitButton = UIButton(type: .system)
+        transitButton.translatesAutoresizingMaskIntoConstraints = false
+        transitButton.setTitle("대중교통", for: .normal)
+        transitButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        transitButton.setTitleColor(UIColor(hex: 0x1a2a7a), for: .normal)
+        transitButton.backgroundColor = .systemBackground
+        transitButton.layer.cornerRadius = 10
+        transitButton.layer.borderWidth = 1
+        transitButton.layer.borderColor = UIColor(hex: 0x1a2a7a).cgColor
+        transitButton.addTarget(self, action: #selector(placeSheetTransitTapped), for: .touchUpInside)
+
+        let externalStack = UIStackView(arrangedSubviews: [appleMapsButton, transitButton])
+        externalStack.translatesAutoresizingMaskIntoConstraints = false
+        externalStack.axis = .horizontal
+        externalStack.spacing = 8
+        externalStack.distribution = .fillEqually
+        card.addSubview(externalStack)
+        placeSheetAppleMapsButton = appleMapsButton
+        placeSheetTransitButton = transitButton
 
         let bottom = card.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: Self.placeSheetCompactDismissOffset)
         placeSheetBottomConstraint = bottom
 
-        let directionsTopToAddress = directionsButton.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 12)
-        let directionsTopToTitle = directionsButton.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12)
-        let directionsTopToMedia = directionsButton.topAnchor.constraint(equalTo: photosScrollView.bottomAnchor, constant: 12)
-        let directionsTopToPostCount = directionsButton.topAnchor.constraint(equalTo: postCountLabel.bottomAnchor, constant: 12)
-        let detailTopToAddress = detailButton.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 12)
-        let detailTopToTitle = detailButton.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12)
-        let detailTopToMedia = detailButton.topAnchor.constraint(equalTo: photosScrollView.bottomAnchor, constant: 12)
-        let detailTopToPostCount = detailButton.topAnchor.constraint(equalTo: postCountLabel.bottomAnchor, constant: 12)
-        directionsTopToTitle.isActive = false
-        directionsTopToMedia.isActive = false
-        directionsTopToPostCount.isActive = false
-        detailTopToTitle.isActive = false
-        detailTopToMedia.isActive = false
-        detailTopToPostCount.isActive = false
-        placeSheetDirectionsTopToAddress = directionsTopToAddress
-        placeSheetDirectionsTopToTitle = directionsTopToTitle
-        placeSheetDirectionsTopToMedia = directionsTopToMedia
-        placeSheetDirectionsTopToPostCount = directionsTopToPostCount
-        placeSheetDetailTopToAddress = detailTopToAddress
-        placeSheetDetailTopToTitle = detailTopToTitle
-        placeSheetDetailTopToMedia = detailTopToMedia
-        placeSheetDetailTopToPostCount = detailTopToPostCount
+        let actionsTopToAddress = directionsInfoLabel.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 12)
+        let actionsTopToTitle = directionsInfoLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12)
+        let actionsTopToMedia = directionsInfoLabel.topAnchor.constraint(equalTo: photosScrollView.bottomAnchor, constant: 12)
+        let actionsTopToPostCount = directionsInfoLabel.topAnchor.constraint(equalTo: postCountLabel.bottomAnchor, constant: 12)
+        actionsTopToTitle.isActive = false
+        actionsTopToMedia.isActive = false
+        actionsTopToPostCount.isActive = false
+        placeSheetActionsTopToAddress = actionsTopToAddress
+        placeSheetActionsTopToTitle = actionsTopToTitle
+        placeSheetActionsTopToMedia = actionsTopToMedia
+        placeSheetActionsTopToPostCount = actionsTopToPostCount
 
         let photosHeight = photosScrollView.heightAnchor.constraint(equalToConstant: Self.photoThumbnailSize)
         placeSheetPhotosHeightConstraint = photosHeight
@@ -1349,6 +1389,10 @@ private final class KakaoMapTestViewController: UIViewController {
             card.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             card.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottom,
+            saveButton.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            saveButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
+            saveButton.widthAnchor.constraint(equalToConstant: 32),
+            saveButton.heightAnchor.constraint(equalToConstant: 32),
             closeButton.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
             closeButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
             closeButton.widthAnchor.constraint(equalToConstant: 32),
@@ -1359,7 +1403,7 @@ private final class KakaoMapTestViewController: UIViewController {
             categoryDot.heightAnchor.constraint(equalToConstant: 10),
             categoryLabel.leadingAnchor.constraint(equalTo: categoryDot.trailingAnchor, constant: 8),
             categoryLabel.centerYAnchor.constraint(equalTo: categoryDot.centerYAnchor),
-            categoryLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
+            categoryLabel.trailingAnchor.constraint(lessThanOrEqualTo: saveButton.leadingAnchor, constant: -8),
             titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 20),
             titleLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -20),
             titleLabel.topAnchor.constraint(equalTo: categoryDot.bottomAnchor, constant: 12),
@@ -1378,16 +1422,21 @@ private final class KakaoMapTestViewController: UIViewController {
             photosStackView.trailingAnchor.constraint(equalTo: photosScrollView.contentLayoutGuide.trailingAnchor),
             photosStackView.bottomAnchor.constraint(equalTo: photosScrollView.contentLayoutGuide.bottomAnchor),
             photosStackView.heightAnchor.constraint(equalTo: photosScrollView.frameLayoutGuide.heightAnchor),
-            directionsTopToAddress,
-            detailTopToAddress,
-            detailButton.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            detailButton.trailingAnchor.constraint(equalTo: card.centerXAnchor, constant: -4),
-            detailButton.heightAnchor.constraint(equalToConstant: 44),
-            detailButton.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16),
-            directionsButton.leadingAnchor.constraint(equalTo: card.centerXAnchor, constant: 4),
+            actionsTopToAddress,
+            directionsInfoLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            directionsInfoLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            modeControl.topAnchor.constraint(equalTo: directionsInfoLabel.bottomAnchor, constant: 8),
+            modeControl.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            modeControl.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            directionsButton.topAnchor.constraint(equalTo: modeControl.bottomAnchor, constant: 10),
+            directionsButton.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             directionsButton.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
             directionsButton.heightAnchor.constraint(equalToConstant: 44),
-            directionsButton.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            externalStack.topAnchor.constraint(equalTo: directionsButton.bottomAnchor, constant: 10),
+            externalStack.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            externalStack.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            externalStack.heightAnchor.constraint(equalToConstant: 40),
+            externalStack.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16),
         ])
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(placeSheetPanned(_:)))
@@ -1427,6 +1476,7 @@ private final class KakaoMapTestViewController: UIViewController {
                 view.removeFromSuperview()
             }
             if hasPhotos {
+                var index = 0
                 for urlString in photos {
                     let imageView = UIImageView()
                     imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -1434,6 +1484,11 @@ private final class KakaoMapTestViewController: UIViewController {
                     imageView.clipsToBounds = true
                     imageView.layer.cornerRadius = 10
                     imageView.backgroundColor = UIColor.secondarySystemFill
+                    imageView.isUserInteractionEnabled = true
+                    imageView.tag = index
+                    index += 1
+                    let tap = UITapGestureRecognizer(target: self, action: #selector(placeSheetPhotoTapped(_:)))
+                    imageView.addGestureRecognizer(tap)
                     NSLayoutConstraint.activate([
                         imageView.widthAnchor.constraint(equalToConstant: Self.photoThumbnailSize),
                         imageView.heightAnchor.constraint(equalToConstant: Self.photoThumbnailSize),
@@ -1444,28 +1499,57 @@ private final class KakaoMapTestViewController: UIViewController {
             }
         }
 
-        placeSheetDirectionsTopToAddress?.isActive = false
-        placeSheetDirectionsTopToTitle?.isActive = false
-        placeSheetDirectionsTopToMedia?.isActive = false
-        placeSheetDirectionsTopToPostCount?.isActive = false
-        placeSheetDetailTopToAddress?.isActive = false
-        placeSheetDetailTopToTitle?.isActive = false
-        placeSheetDetailTopToMedia?.isActive = false
-        placeSheetDetailTopToPostCount?.isActive = false
+        placeSheetActionsTopToAddress?.isActive = false
+        placeSheetActionsTopToTitle?.isActive = false
+        placeSheetActionsTopToMedia?.isActive = false
+        placeSheetActionsTopToPostCount?.isActive = false
 
         if hasPhotos {
-            placeSheetDirectionsTopToMedia?.isActive = true
-            placeSheetDetailTopToMedia?.isActive = true
+            placeSheetActionsTopToMedia?.isActive = true
         } else if hasPostCount {
-            placeSheetDirectionsTopToPostCount?.isActive = true
-            placeSheetDetailTopToPostCount?.isActive = true
+            placeSheetActionsTopToPostCount?.isActive = true
         } else if meta?.address?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
-            placeSheetDirectionsTopToAddress?.isActive = true
-            placeSheetDetailTopToAddress?.isActive = true
+            placeSheetActionsTopToAddress?.isActive = true
         } else {
-            placeSheetDirectionsTopToTitle?.isActive = true
-            placeSheetDetailTopToTitle?.isActive = true
+            placeSheetActionsTopToTitle?.isActive = true
         }
+    }
+
+    private func updatePlaceSheetSaveButton(isSaved: Bool) {
+        let symbol = isSaved ? "heart.fill" : "heart"
+        placeSheetSaveButton?.setImage(UIImage(systemName: symbol), for: .normal)
+        placeSheetSaveButton?.tintColor = isSaved ? UIColor(hex: 0xe07070) : .secondaryLabel
+    }
+
+    private func formatDirectionsInfo(durationSec: Int, distanceM: Int) -> String {
+        let minutes = max(1, Int(round(Double(durationSec) / 60.0)))
+        let km = Double(distanceM) / 1000.0
+        let distanceText: String
+        if km >= 10 {
+            distanceText = String(format: "%.0f km", km)
+        } else if km >= 1 {
+            distanceText = String(format: "%.1f km", km)
+        } else {
+            distanceText = "\(distanceM) m"
+        }
+        return "약 \(minutes)분 · \(distanceText)"
+    }
+
+    func setPlaceSaved(markerId: String, saved: Bool) {
+        if var meta = markerMetadata[markerId] {
+            meta.isSaved = saved
+            markerMetadata[markerId] = meta
+        }
+        if placeSheetMarkerId == markerId {
+            updatePlaceSheetSaveButton(isSaved: saved)
+        }
+    }
+
+    func setDirectionsInfo(markerId: String, durationSec: Int, distanceM: Int) {
+        guard placeSheetMarkerId == markerId else { return }
+        let text = formatDirectionsInfo(durationSec: durationSec, distanceM: distanceM)
+        placeSheetDirectionsInfoLabel?.text = text
+        placeSheetDirectionsInfoLabel?.isHidden = false
     }
 
     private func showPlaceBottomSheet(for markerId: String) {
@@ -1505,6 +1589,10 @@ private final class KakaoMapTestViewController: UIViewController {
         }
 
         updatePlaceSheetMedia(for: meta)
+        updatePlaceSheetSaveButton(isSaved: meta?.isSaved ?? false)
+        placeSheetDirectionsInfoLabel?.text = nil
+        placeSheetDirectionsInfoLabel?.isHidden = true
+        placeSheetModeControl?.selectedSegmentIndex = 0
 
         let dismissOffset = placeSheetDismissOffset(for: markerId)
         let alreadyVisible = backdrop.alpha > 0 && !backdrop.isHidden
@@ -1582,12 +1670,41 @@ private final class KakaoMapTestViewController: UIViewController {
         } else {
             return
         }
-        onDirections?(markerId, lat, lng)
+        let mode = (placeSheetModeControl?.selectedSegmentIndex == 1) ? "walk" : "car"
+        onDirections?(markerId, lat, lng, mode)
     }
 
-    @objc private func placeSheetDetailTapped() {
+    @objc private func placeSheetSaveTapped() {
         guard let markerId = placeSheetMarkerId else { return }
-        onPlaceDetail?(markerId)
+        onToggleSave?(markerId)
+    }
+
+    @objc private func placeSheetModeChanged() {
+        placeSheetDirectionsTapped()
+    }
+
+    @objc private func placeSheetAppleMapsTapped() {
+        guard let markerId = placeSheetMarkerId else { return }
+        onOpenExternal?(markerId, "apple")
+    }
+
+    @objc private func placeSheetTransitTapped() {
+        guard let markerId = placeSheetMarkerId else { return }
+        onOpenExternal?(markerId, "transit")
+    }
+
+    @objc private func placeSheetPhotoTapped(_ gesture: UITapGestureRecognizer) {
+        guard let imageView = gesture.view as? UIImageView,
+              let markerId = placeSheetMarkerId,
+              let meta = markerMetadata[markerId] else { return }
+        let index = imageView.tag
+        guard index >= 0, index < meta.photos.count else { return }
+        let url = meta.photos[index]
+        if index < meta.photoPostIds.count, !meta.photoPostIds[index].isEmpty {
+            onCuration?(markerId, meta.photoPostIds[index])
+        } else {
+            onImageLightbox?(url)
+        }
     }
 
     @objc private func placeSheetPanned(_ gesture: UIPanGestureRecognizer) {
@@ -1693,7 +1810,9 @@ private final class KakaoMapTestViewController: UIViewController {
                 lat: item.lat,
                 lng: item.lng,
                 photos: [],
-                postCount: 0
+                postCount: 0,
+                isSaved: false,
+                photoPostIds: []
             )
         }
 
@@ -2029,6 +2148,8 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "clearFullscreenMyLocation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setFullscreenSearchResults", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearFullscreenSearchResults", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setFullscreenPlaceSaved", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setFullscreenDirectionsInfo", returnType: CAPPluginReturnPromise),
     ]
 
     private var mapHost: UIView?
@@ -2448,8 +2569,20 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
             CAPLog.print("[PindmapNativeMap] fullscreenSearch query=\(query)")
             self?.notifyListeners("fullscreenSearch", data: ["query": query])
         }
-        vc.onDirections = { [weak self] id, lat, lng in
-            self?.notifyListeners("fullscreenDirections", data: ["id": id, "lat": lat, "lng": lng])
+        vc.onDirections = { [weak self] id, lat, lng, mode in
+            self?.notifyListeners("fullscreenDirections", data: ["id": id, "lat": lat, "lng": lng, "mode": mode])
+        }
+        vc.onToggleSave = { [weak self] id in
+            self?.notifyListeners("fullscreenToggleSave", data: ["id": id])
+        }
+        vc.onCuration = { [weak self] id, postId in
+            self?.notifyListeners("fullscreenCuration", data: ["id": id, "postId": postId])
+        }
+        vc.onOpenExternal = { [weak self] id, type in
+            self?.notifyListeners("fullscreenOpenExternal", data: ["id": id, "type": type])
+        }
+        vc.onImageLightbox = { [weak self] url in
+            self?.notifyListeners("fullscreenImageLightbox", data: ["url": url])
         }
         vc.onResearchArea = { [weak self] lat, lng in
             self?.notifyListeners("fullscreenResearchArea", data: ["lat": lat, "lng": lng])
@@ -2473,8 +2606,36 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         return top
     }
 
+    @objc func setFullscreenPlaceSaved(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else {
+            call.reject("id required")
+            return
+        }
+        let saved = call.getBool("saved") ?? false
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.setPlaceSaved(markerId: id, saved: saved)
+            call.resolve()
+        }
+    }
+
+    @objc func setFullscreenDirectionsInfo(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else {
+            call.reject("id required")
+            return
+        }
+        guard let duration = Self.intValue(call.options["duration"]),
+              let distance = Self.intValue(call.options["distance"]) else {
+            call.reject("duration and distance required")
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.setDirectionsInfo(markerId: id, durationSec: duration, distanceM: distance)
+            call.resolve()
+        }
+    }
+
     private static func toMapMarkerInputs(
-        _ tuples: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int)]
+        _ tuples: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String])]
     ) -> [KakaoMapTestViewController.MapMarkerInput] {
         tuples.map {
             KakaoMapTestViewController.MapMarkerInput(
@@ -2485,7 +2646,9 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
                 title: $0.title,
                 address: $0.address,
                 photos: $0.photos,
-                postCount: $0.postCount
+                postCount: $0.postCount,
+                isSaved: $0.isSaved,
+                photoPostIds: $0.photoPostIds
             )
         }
     }
@@ -2521,9 +2684,9 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         return out
     }
 
-    private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int)] {
+    private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String])] {
         guard let raw = call.options["markers"] as? [[String: Any]] else { return [] }
-        var out: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int)] = []
+        var out: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String])] = []
         for dict in raw {
             guard let id = dict["id"] as? String else { continue }
             guard let lat = doubleValue(dict["lat"]), let lng = doubleValue(dict["lng"]) else { continue }
@@ -2532,7 +2695,9 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
             let address = dict["address"] as? String
             let photos = (dict["photos"] as? [String])?.filter { !$0.isEmpty } ?? []
             let postCount = intValue(dict["postCount"]) ?? 0
-            out.append((id: id, lat: lat, lng: lng, category: category, title: title, address: address, photos: photos, postCount: postCount))
+            let isSaved = dict["isSaved"] as? Bool ?? false
+            let photoPostIds = (dict["photoPostIds"] as? [String]) ?? []
+            out.append((id: id, lat: lat, lng: lng, category: category, title: title, address: address, photos: photos, postCount: postCount, isSaved: isSaved, photoPostIds: photoPostIds))
         }
         return out
     }
