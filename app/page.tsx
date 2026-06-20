@@ -1212,6 +1212,7 @@ function HomePageContent() {
     return "map";
   });
   const [instagramUrl, setInstagramUrl] = useState("");
+  const instagramUrlInputRef = useRef<HTMLInputElement | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
   const [status, setStatus] = useState(""); const [error, setError] = useState("");
@@ -9389,7 +9390,7 @@ function HomePageContent() {
                 </div>
               )}
               <div className="mapInputWrap">
-                <input className="mapInput" placeholder="Instagram 릴스/게시물 URL 붙여넣기" value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} />
+                <input ref={instagramUrlInputRef} className="mapInput" placeholder="Instagram 릴스/게시물 URL 붙여넣기" value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} />
                 <button className="primaryButton" onClick={handleAddFromInstagram} type="button" disabled={!canSubmit}>{isSubmitting ? "분석 중..." : "핀 추가"}</button>
               </div>
               {isAnalyzing && (
@@ -9651,7 +9652,20 @@ function HomePageContent() {
                   </article>
                 ))}
                 {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={resetHiddenPlaces} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
-                {savedPlaces.length === 0 && <p className="emptyText">아직 핀이 없습니다. URL을 입력해 시작해보세요.</p>}
+                {savedPlaces.length === 0 && (
+                  <EmptyState
+                    icon="📍"
+                    title="아직 핀이 없어요"
+                    description="인스타그램 릴스나 게시물 URL을 붙여넣으면 지도에 자동으로 핀이 찍혀요"
+                    action={{
+                      label: "릴스 붙여넣기",
+                      onClick: () => {
+                        instagramUrlInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        instagramUrlInputRef.current?.focus();
+                      },
+                    }}
+                  />
+                )}
               </div>
           </div>
 
