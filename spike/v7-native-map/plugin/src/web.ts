@@ -9,6 +9,7 @@ import type {
   FullscreenMapDismissedEvent,
   FullscreenDirectionsEvent,
   FullscreenResearchAreaEvent,
+  FullscreenPlaceDetailEvent,
   PindmapNativeMapPlugin,
   PresentFullscreenMapOptions,
   RemoveMarkersOptions,
@@ -81,6 +82,14 @@ export class PindmapNativeMapWeb extends WebPlugin implements PindmapNativeMapPl
     console.warn('[PindmapNativeMap] web stub — clearFullscreenRoute noop (iOS only)');
   }
 
+  async setFullscreenCourseNavigation(_options: import('./definitions').SetFullscreenCourseNavigationOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — setFullscreenCourseNavigation noop (iOS only)');
+  }
+
+  async clearFullscreenCourseNavigation(): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — clearFullscreenCourseNavigation noop (iOS only)');
+  }
+
   async setFullscreenMyLocation(_options: SetFullscreenMyLocationOptions): Promise<void> {
     console.warn('[PindmapNativeMap] web stub — setFullscreenMyLocation noop (iOS only)');
   }
@@ -97,14 +106,41 @@ export class PindmapNativeMapWeb extends WebPlugin implements PindmapNativeMapPl
     console.warn('[PindmapNativeMap] web stub — clearFullscreenSearchResults noop (iOS only)');
   }
 
+  async setFullscreenPlaceSaved(_options: import('./definitions').SetFullscreenPlaceSavedOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — setFullscreenPlaceSaved noop (iOS only)');
+  }
+
+  async setFullscreenDirectionsInfo(_options: import('./definitions').SetFullscreenDirectionsInfoOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — setFullscreenDirectionsInfo noop (iOS only)');
+  }
+
+  async showFullscreenPlaceSheet(_options: import('./definitions').ShowFullscreenPlaceSheetOptions): Promise<void> {
+    console.warn('[PindmapNativeMap] web stub — showFullscreenPlaceSheet noop (iOS only)');
+  }
+
   addListener(
-    eventName: 'markerClick' | 'fullscreenSearch' | 'fullscreenMapDismissed' | 'fullscreenDirections' | 'fullscreenResearchArea',
+    eventName:
+      | 'markerClick'
+      | 'fullscreenSearch'
+      | 'fullscreenMapDismissed'
+      | 'fullscreenDirections'
+      | 'fullscreenResearchArea'
+      | 'fullscreenPlaceDetail'
+      | 'fullscreenToggleSave'
+      | 'fullscreenCuration'
+      | 'fullscreenOpenExternal'
+      | 'fullscreenImageLightbox',
     listenerFunc:
-      | ((event: MarkerClickEvent) => void)
-      | ((event: FullscreenSearchEvent) => void)
-      | ((event: FullscreenMapDismissedEvent) => void)
-      | ((event: FullscreenDirectionsEvent) => void)
-      | ((event: FullscreenResearchAreaEvent) => void),
+      | ((event: import('./definitions').MarkerClickEvent) => void)
+      | ((event: import('./definitions').FullscreenSearchEvent) => void)
+      | ((event: import('./definitions').FullscreenMapDismissedEvent) => void)
+      | ((event: import('./definitions').FullscreenDirectionsEvent) => void)
+      | ((event: import('./definitions').FullscreenResearchAreaEvent) => void)
+      | ((event: import('./definitions').FullscreenPlaceDetailEvent) => void)
+      | ((event: import('./definitions').FullscreenToggleSaveEvent) => void)
+      | ((event: import('./definitions').FullscreenCurationEvent) => void)
+      | ((event: import('./definitions').FullscreenOpenExternalEvent) => void)
+      | ((event: import('./definitions').FullscreenImageLightboxEvent) => void),
   ): Promise<PluginListenerHandle> & PluginListenerHandle {
     return super.addListener(eventName, listenerFunc) as Promise<PluginListenerHandle> & PluginListenerHandle;
   }

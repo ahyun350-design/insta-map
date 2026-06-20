@@ -31,8 +31,14 @@ import {
   updateFullscreenNativeMarkers,
   setFullscreenNativeCamera,
   setFullscreenNativeRoute,
+  clearFullscreenNativeRoute,
+  setFullscreenNativeCourseNavigation,
+  clearFullscreenNativeCourseNavigation,
   setFullscreenNativeSearchResults,
   clearFullscreenNativeSearchResults,
+  setFullscreenNativePlaceSaved,
+  setFullscreenNativeDirectionsInfo,
+  showFullscreenNativePlaceSheet,
   setFullscreenNativeMyLocation,
   setNativeCamera,
   setNativeMarkerClickHandler,
@@ -64,6 +70,12 @@ import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
 import { MapResearchAreaButton } from "@/components/MapResearchAreaButton";
+import { CourseNavigationOverlay } from "@/components/CourseNavigationOverlay";
+import {
+  buildCourseWalkNavigationFromTmap,
+  parseTmapWalkGeoJsonToPath,
+  type CourseWalkNavigation,
+} from "@/lib/courseWalkNavigation";
 import { feedPostToPlaceSheet, type PlaceSheetData } from "@/lib/placeSheet";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
@@ -529,25 +541,50 @@ function getRelatedPostsForPlaceSheet(
 
 const MAX_NATIVE_MARKER_PHOTOS = 5;
 
-function getMarkerPhotoMetaForPlace(
+function getMarkerPhotoMetaForPlaceRef(
   posts: FeedPost[],
-  place: Place,
-  coords?: LatLng,
-): { photos: string[]; postCount: number } {
-  const placeRef = placeRefFromPlace(place, coords?.lat, coords?.lng);
+  placeRef: PlaceRefForPhotoTagMatch,
+  debugName?: string,
+): { photos: string[]; postCount: number; photoPostIds: string[] } {
   const relatedPosts = getRelatedPostsForPlaceSheet(posts, placeRef);
   const photos: string[] = [];
+  const photoPostIds: string[] = [];
   const seen = new Set<string>();
   for (const post of relatedPosts) {
     for (const url of getRelatedPostImagesForPlace(post, placeRef)) {
       if (!url || seen.has(url)) continue;
       seen.add(url);
       photos.push(url);
+      photoPostIds.push(post.id);
       if (photos.length >= MAX_NATIVE_MARKER_PHOTOS) break;
     }
     if (photos.length >= MAX_NATIVE_MARKER_PHOTOS) break;
   }
-  return { photos, postCount: relatedPosts.length };
+  return { photos, postCount: relatedPosts.length, photoPostIds };
+}
+
+function getMarkerPhotoMetaForPlace(
+  posts: FeedPost[],
+  place: Place,
+  coords?: LatLng,
+): { photos: string[]; postCount: number; photoPostIds: string[] } {
+  const placeRef = placeRefFromPlace(place, coords?.lat, coords?.lng);
+  return getMarkerPhotoMetaForPlaceRef(posts, placeRef, place.name);
+}
+
+function getMarkerPhotoMetaForKakaoPlace(
+  posts: FeedPost[],
+  place: {
+    id?: string;
+    place_name?: string;
+    y?: string | number;
+    x?: string | number;
+    road_address_name?: string;
+    address_name?: string;
+  },
+): { photos: string[]; postCount: number; photoPostIds: string[] } {
+  const placeRef = placeRefFromKakaoPlace(place);
+  return getMarkerPhotoMetaForPlaceRef(posts, placeRef, place.place_name);
 }
 
 function placeRefFromPlace(place: Place, lat?: number, lng?: number): PlaceRefForPhotoTagMatch {
@@ -825,61 +862,104 @@ async function buildCourseRoadPathFromDirections(stops: LatLng[]): Promise<LatLn
   return merged.length >= 2 ? merged : stops;
 }
 
-function parseTmapWalkGeoJsonToPath(data: {
-  features?: {
-    geometry?: { type?: string; coordinates?: number[][] };
-  }[];
-}): LatLng[] {
-  const path: LatLng[] = [];
-  data.features?.forEach((feature) => {
-    if (feature.geometry?.type !== "LineString") return;
-    const coordinates = feature.geometry.coordinates ?? [];
-    coordinates.forEach((coord) => {
-      const lng = Number(coord[0]);
-      const lat = Number(coord[1]);
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        path.push({ lat, lng });
-      }
-    });
-  });
-  return path;
+function courseNavigationToNativePayload(navigation: CourseWalkNavigation) {
+  return {
+    placeCount: navigation.placeCount,
+    totalTimeSec: navigation.totalTimeSec,
+    totalDistanceM: navigation.totalDistanceM,
+    fullPath: navigation.mergedPath,
+    segments: navigation.segments.map((segment) => ({
+      index: segment.index,
+      fromName: segment.fromName,
+      toName: segment.toName,
+      distanceM: segment.distanceM,
+      timeSec: segment.timeSec,
+      path: segment.path,
+      steps: segment.steps.map((step) => ({
+        description: step.description,
+        lat: step.lat,
+        lng: step.lng,
+      })),
+    })),
+  };
 }
 
-async function fetchWalkDirectionsSegmentPath(
-  origin: LatLng,
-  destination: LatLng,
-): Promise<LatLng[]> {
-  try {
-    const res = await fetch("/api/walk-directions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ origin, destination }),
-    });
-    if (!res.ok) return straightLineSegmentPath(origin, destination);
-    const data = (await res.json()) as {
-      features?: { geometry?: { type?: string; coordinates?: number[][] } }[];
-    };
-    const path = parseTmapWalkGeoJsonToPath(data);
-    return path.length >= 2 ? path : straightLineSegmentPath(origin, destination);
-  } catch {
-    return straightLineSegmentPath(origin, destination);
-  }
-}
-
-/** 코스 장소 순서대로 인접 구간마다 Tmap 보행자 경로를 요청해 하나의 path로 이어붙임. */
-async function buildCourseWalkPathFromTmap(stops: LatLng[]): Promise<LatLng[]> {
-  if (stops.length < 2) return stops;
-  const merged: LatLng[] = [];
-  for (let i = 0; i < stops.length - 1; i++) {
-    const segment = await fetchWalkDirectionsSegmentPath(stops[i]!, stops[i + 1]!);
-    if (merged.length === 0) merged.push(...segment);
-    else merged.push(...segment.slice(1));
-  }
-  return merged.length >= 2 ? merged : stops;
+function latLngBoundsFromPath(path: LatLng[]) {
+  if (!path.length || !window.kakao?.maps) return null;
+  const bounds = new window.kakao.maps.LatLngBounds();
+  path.forEach((point) => bounds.extend(new window.kakao.maps.LatLng(point.lat, point.lng)));
+  return bounds;
 }
 
 // 좌표가 있는 장소들에서 가까운 순으로 코스 짜기 (Nearest Neighbor 알고리즘)
 type CoursePlace = Place & { lat: number; lng: number };
+
+type FullscreenNativeCamera = { lat: number; lng: number; zoom: number };
+
+type FullscreenSearchMarkerSnapshot = {
+  id: string;
+  lat: number;
+  lng: number;
+  title?: string;
+  address?: string;
+  category?: string;
+  isSaved?: boolean;
+  photos?: string[];
+  postCount?: number;
+  photoPostIds?: string[];
+  order?: number;
+};
+
+type FullscreenReturnSnapshot =
+  | { mode: "saved"; camera: FullscreenNativeCamera | null; selectedMarkerId?: string }
+  | {
+      mode: "course";
+      coursePlaces: CoursePlace[];
+      courseMarkers: FullscreenSearchMarkerSnapshot[];
+      camera: FullscreenNativeCamera | null;
+      selectedMarkerId?: string;
+    }
+  | {
+      mode: "search";
+      query: string;
+      camera: FullscreenNativeCamera;
+      searchBiasCenter: { lat: number; lng: number };
+      selectedMarkerId?: string;
+      markers: FullscreenSearchMarkerSnapshot[];
+      searchResults: Array<{
+        id: string;
+        name: string;
+        address: string;
+        lat: number;
+        lng: number;
+        category?: string;
+      }>;
+      searchPinPlaces: [string, unknown][];
+    };
+
+function defaultFullscreenNativeCamera(): FullscreenNativeCamera {
+  return { lat: 37.5665, lng: 126.978, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+}
+
+/** Allow native map view to finish applyInitialContent before markers/route updates. */
+function waitForFullscreenNativeMapReady(): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, 400));
+}
+
+function buildCourseFullscreenMarkers(coursePlaces: CoursePlace[]): FullscreenSearchMarkerSnapshot[] {
+  return coursePlaces.flatMap((place, index) => {
+    if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) return [];
+    return [{
+      id: `course-${index}`,
+      lat: place.lat,
+      lng: place.lng,
+      category: place.category,
+      title: place.name,
+      address: place.address,
+      order: index + 1,
+    }];
+  });
+}
 
 function coursePlaceToSavedItem(p: CoursePlace): SavedCourseItem {
   return { id: p.id, name: p.name, address: p.address, category: p.category, lat: p.lat, lng: p.lng };
@@ -1143,12 +1223,21 @@ function HomePageContent() {
   const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
   const fullscreenSearchListenerRegisteredRef = useRef(false);
   const fullscreenResearchListenerRegisteredRef = useRef(false);
+  const fullscreenPlaceDetailListenerRegisteredRef = useRef(false);
   const fullscreenDirectionsListenerRegisteredRef = useRef(false);
+  const fullscreenToggleSaveListenerRegisteredRef = useRef(false);
+  const fullscreenCurationListenerRegisteredRef = useRef(false);
+  const fullscreenOpenExternalListenerRegisteredRef = useRef(false);
+  const fullscreenImageLightboxListenerRegisteredRef = useRef(false);
   const fullscreenDismissListenerRegisteredRef = useRef(false);
   const fullscreenAutoOpenedRef = useRef(false);
   const fullscreenGeocodeRunRef = useRef(0);
   /** iOS 전체화면 Native 코스 모드 — showCourseOnMap에서 설정, 닫을 때 null */
   const fullscreenCourseRef = useRef<CoursePlace[] | null>(null);
+  /** 코스 경로 비동기(Tmap) 취소용 — 닫기/코스 종료 시 증가 */
+  const fullscreenCourseRouteSessionRef = useRef(0);
+  const mapExpandedLiveRef = useRef(false);
+  const fullscreenCourseNavigationRef = useRef<CourseWalkNavigation | null>(null);
   const [expandedNativeMapId, setExpandedNativeMapId] = useState<string | null>(null);
   /** 확장 지도 인스턴스가 생길 때마다 증가 — 핀만 별도 effect에서 단일 경로로 그리기 */
   const [expandedMapPinsTick, setExpandedMapPinsTick] = useState(0);
@@ -1255,6 +1344,9 @@ function HomePageContent() {
   const [courseLoading, setCourseLoading] = useState(false);
   const [courseResult, setCourseResult] = useState<CoursePlace[] | null>(null);
   const [showCourseRoute, setShowCourseRoute] = useState(false);
+  const [courseNavigation, setCourseNavigation] = useState<CourseWalkNavigation | null>(null);
+  const [courseNavSegmentIndex, setCourseNavSegmentIndex] = useState<number | null>(null);
+  const [courseNavFocusMode, setCourseNavFocusMode] = useState(false);
   const [courseCurrentLocation, setCourseCurrentLocation] = useState<LatLng | null>(null);
   const [courseLocationLoading, setCourseLocationLoading] = useState(false);
   const [coursePlaceCoords, setCoursePlaceCoords] = useState<Record<string, LatLng>>({});
@@ -1289,6 +1381,16 @@ function HomePageContent() {
   /** DB에 저장된 코스를 모달로 볼 때 id — courseResult 변경으로 savedCourseId가 지워지지 않게 */
   const viewingSavedCourseIdRef = useRef<string | null>(null);
   const returnToCourseSheetRef = useRef(false);
+  /** Native 전체화면 지도 → 큐레이션 포스트 상세 진입 시, 닫으면 지도로 복귀 */
+  const returnToFullscreenMapAfterDetailRef = useRef(false);
+  /** 큐레이션 진입 직전 지도 스냅샷 — 포스트 상세 닫을 때 복원 */
+  const fullscreenReturnStateRef = useRef<FullscreenReturnSnapshot | null>(null);
+  const fullscreenRestorePendingRef = useRef(false);
+  const lastFullscreenNativeCameraRef = useRef<FullscreenNativeCamera | null>(null);
+  const lastFullscreenSearchMarkersRef = useRef<FullscreenSearchMarkerSnapshot[]>([]);
+  const lastFullscreenSearchResultsRef = useRef<
+    Array<{ id: string; name: string; address: string; lat: number; lng: number; category?: string }>
+  >([]);
   const drawCourseRouteRetryRef = useRef(0);
   const courseTitleOriginalRef = useRef("");
   const courseTitleInlineInputRef = useRef<HTMLInputElement>(null);
@@ -1537,6 +1639,9 @@ function HomePageContent() {
       const trimmed = query.trim();
       if (!trimmed) {
         lastFullscreenQueryRef.current = "";
+        lastFullscreenSearchMarkersRef.current = [];
+        lastFullscreenSearchResultsRef.current = [];
+        searchPinPlaceByIdRef.current.clear();
         await updateFullscreenNativeMarkers(
           { markers: [], clearPrefix: "search-" },
           { silent: false },
@@ -1591,6 +1696,9 @@ function HomePageContent() {
           void (async () => {
             try {
               if (st !== window.kakao.maps.services.Status.OK || !data?.length) {
+                searchPinPlaceByIdRef.current.clear();
+                lastFullscreenSearchMarkersRef.current = [];
+                lastFullscreenSearchResultsRef.current = [];
                 await updateFullscreenNativeMarkers(
                   { markers: [], clearPrefix: "search-" },
                   { silent: false },
@@ -1600,16 +1708,39 @@ function HomePageContent() {
                 return;
               }
 
+              searchPinPlaceByIdRef.current.clear();
               const markers = data.slice(0, 15).flatMap((place, index) => {
                 const lat = Number(place.y);
                 const lng = Number(place.x);
                 if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+                searchPinPlaceByIdRef.current.set(`search-${index}`, place);
+                const sheetCandidate = {
+                  place_name: String(place.place_name ?? ""),
+                  road_address_name: String(place.road_address_name || place.address_name || ""),
+                  address_name: String(place.address_name || ""),
+                  y: place.y,
+                  x: place.x,
+                };
+                const isSaved = savedPlacesRef.current.some(
+                  (p) =>
+                    p.name.trim() === sheetCandidate.place_name.trim() &&
+                    p.address.trim() === sheetCandidate.road_address_name.trim(),
+                );
+                const { photos, postCount, photoPostIds } = getMarkerPhotoMetaForKakaoPlace(
+                  feedPostsRef.current,
+                  place,
+                );
                 return [{
                   id: `search-${index}`,
                   lat,
                   lng,
                   title: String(place.place_name ?? ""),
                   address: String(place.road_address_name || place.address_name || ""),
+                  category: typeof place.category_name === "string" ? place.category_name : undefined,
+                  isSaved,
+                  ...(photos.length > 0 ? { photos } : {}),
+                  ...(postCount > 0 ? { postCount } : {}),
+                  ...(photoPostIds.length > 0 ? { photoPostIds } : {}),
                 }];
               });
 
@@ -1623,6 +1754,9 @@ function HomePageContent() {
               }));
 
               if (markers.length === 0) {
+                searchPinPlaceByIdRef.current.clear();
+                lastFullscreenSearchMarkersRef.current = [];
+                lastFullscreenSearchResultsRef.current = [];
                 await updateFullscreenNativeMarkers(
                   { markers: [], clearPrefix: "search-" },
                   { silent: false },
@@ -1632,21 +1766,25 @@ function HomePageContent() {
                 return;
               }
 
+              await setFullscreenNativeSearchResults(
+                { results: searchResults },
+                { silent: false },
+              );
+
               await updateFullscreenNativeMarkers(
                 { markers, clearPrefix: "search-" },
                 { silent: false },
               );
 
-              await setFullscreenNativeSearchResults(
-                { results: searchResults },
-                { silent: false },
-              );
+              lastFullscreenSearchMarkersRef.current = markers;
+              lastFullscreenSearchResultsRef.current = searchResults;
 
               const searchCamera = computeFullscreenNativeSearchCamera(
                 markers.map((marker) => ({ lat: marker.lat, lng: marker.lng })),
                 { preserveView: isResearchSearch },
               );
               if (searchCamera) {
+                lastFullscreenNativeCameraRef.current = searchCamera;
                 await setFullscreenNativeCamera({
                   lat: searchCamera.lat,
                   lng: searchCamera.lng,
@@ -1666,7 +1804,11 @@ function HomePageContent() {
     }
   }, []);
 
-  const runFullscreenNativeDirections = useCallback(async (destination: { id: string; lat: number; lng: number }) => {
+  const runFullscreenNativeDirections = useCallback(async (destination: {
+    id: string;
+    lat: number;
+    lng: number;
+  }) => {
     try {
       const destLat = Number(destination.lat);
       const destLng = Number(destination.lng);
@@ -1674,40 +1816,39 @@ function HomePageContent() {
         return;
       }
 
-      const fetchAndDrawRoute = async (origin: { lat: number; lng: number }) => {
-        const res = await fetch("/api/directions", {
+      const fetchAndDrawWalkRoute = async (origin: { lat: number; lng: number }) => {
+        const res = await fetch("/api/walk-directions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            origin,
-            destination: { lat: destLat, lng: destLng },
-            mode: "car",
-          }),
+          body: JSON.stringify({ origin, destination: { lat: destLat, lng: destLng } }),
         });
-        const data = await res.json();
-        if (!data.routes?.[0]) {
+        if (!res.ok) {
           showToast("경로를 찾을 수 없어요", "error");
           return;
         }
-        const route = data.routes[0];
-        const path: { lat: number; lng: number }[] = [];
-        route.sections.forEach((section: { roads?: { vertexes?: number[] }[] }) => {
-          section.roads?.forEach((road) => {
-            const vertexes = road.vertexes ?? [];
-            for (let i = 0; i < vertexes.length; i += 2) {
-              const lng = Number(vertexes[i]);
-              const lat = Number(vertexes[i + 1]);
-              if (Number.isFinite(lat) && Number.isFinite(lng)) {
-                path.push({ lat, lng });
-              }
-            }
-          });
-        });
+        const data = (await res.json()) as {
+          features?: { geometry?: { type?: string; coordinates?: number[][] } }[];
+          properties?: { totalTime?: number; totalDistance?: number };
+        };
+        const path = parseTmapWalkGeoJsonToPath(data);
         if (path.length < 2) {
           showToast("경로를 찾을 수 없어요", "error");
           return;
         }
-        await setFullscreenNativeRoute({ path, mode: "car" }, { silent: false });
+        await setFullscreenNativeRoute({ path, mode: "walk" }, { silent: false });
+        const duration = Number(data.properties?.totalTime);
+        const distance = Number(data.properties?.totalDistance);
+        if (Number.isFinite(duration) && Number.isFinite(distance) && duration > 0 && distance > 0) {
+          await setFullscreenNativeDirectionsInfo(
+            { id: destination.id, duration: Math.round(duration), distance: Math.round(distance) },
+            { silent: false },
+          );
+        }
+      };
+
+      const runWithOrigin = async (origin: { lat: number; lng: number }) => {
+        setDirectionsMode("walk");
+        await fetchAndDrawWalkRoute(origin);
       };
 
       const stored = myLocationLatLngRef.current;
@@ -1717,7 +1858,7 @@ function HomePageContent() {
         Number.isFinite(stored.lng)
       ) {
         try {
-          await fetchAndDrawRoute({ lat: stored.lat, lng: stored.lng });
+          await runWithOrigin({ lat: stored.lat, lng: stored.lng });
         } catch (err) {
           console.error("[fullscreen] directions failed", err);
           showToast("길찾기에 실패했어요", "error");
@@ -1729,7 +1870,7 @@ function HomePageContent() {
         navigator.geolocation.getCurrentPosition(
           async (pos) => {
             try {
-              await fetchAndDrawRoute({
+              await runWithOrigin({
                 lat: pos.coords.latitude,
                 lng: pos.coords.longitude,
               });
@@ -1751,7 +1892,253 @@ function HomePageContent() {
     }
   }, [showToast]);
 
+  const registerFullscreenNativeListeners = useCallback(() => {
+    if (!fullscreenSearchListenerRegisteredRef.current) {
+      fullscreenSearchListenerRegisteredRef.current = true;
+      void PindmapNativeMap.addListener("fullscreenSearch", (e) => {
+        void runFullscreenNativeSearch(e.query);
+      }).catch((err) => {
+        fullscreenSearchListenerRegisteredRef.current = false;
+        console.error("[fullscreen] fullscreenSearch listener failed", err);
+      });
+    }
+
+    if (!fullscreenResearchListenerRegisteredRef.current) {
+      fullscreenResearchListenerRegisteredRef.current = true;
+      void PindmapNativeMap.addListener("fullscreenResearchArea", (e) => {
+        const keyword = lastFullscreenQueryRef.current.trim();
+        if (!keyword) return;
+        const lat = Number(e.lat);
+        const lng = Number(e.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        void runFullscreenNativeSearch(keyword, { lat, lng });
+      }).catch((err) => {
+        fullscreenResearchListenerRegisteredRef.current = false;
+        console.error("[fullscreen] fullscreenResearchArea listener failed", err);
+      });
+    }
+
+    if (!fullscreenDirectionsListenerRegisteredRef.current) {
+      fullscreenDirectionsListenerRegisteredRef.current = true;
+      void PindmapNativeMap.addListener("fullscreenDirections", (e) => {
+        void runFullscreenNativeDirections({ id: e.id, lat: e.lat, lng: e.lng });
+      }).catch((err) => {
+        fullscreenDirectionsListenerRegisteredRef.current = false;
+        console.error("[fullscreen] fullscreenDirections listener failed", err);
+      });
+    }
+  }, [runFullscreenNativeSearch, runFullscreenNativeDirections]);
+
+  const captureFullscreenReturnSnapshot = useCallback((selectedMarkerId?: string): FullscreenReturnSnapshot => {
+    const fallbackCamera = lastFullscreenNativeCameraRef.current ?? defaultFullscreenNativeCamera();
+
+    const coursePlaces = fullscreenCourseRef.current;
+    if (coursePlaces?.length) {
+      const courseMarkers = buildCourseFullscreenMarkers(coursePlaces);
+      let camera: FullscreenNativeCamera = lastFullscreenNativeCameraRef.current ?? fallbackCamera;
+      if (selectedMarkerId?.startsWith("course-")) {
+        const index = Number.parseInt(selectedMarkerId.slice("course-".length), 10);
+        const place = Number.isFinite(index) ? coursePlaces[index] : undefined;
+        if (place && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+          camera = { lat: place.lat, lng: place.lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+        }
+      } else if (selectedMarkerId?.startsWith("place-")) {
+        const place = placePinByIdRef.current.get(selectedMarkerId);
+        const stored = place ? savedPlaceCoordsRef.current[place.id] ?? latLngFromRow(place) : null;
+        if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
+          camera = { lat: stored.lat, lng: stored.lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+        }
+      }
+      return {
+        mode: "course",
+        coursePlaces: coursePlaces.map((place) => ({ ...place })),
+        courseMarkers: courseMarkers.map((marker) => ({ ...marker })),
+        camera,
+        selectedMarkerId,
+      };
+    }
+
+    const query = lastFullscreenQueryRef.current.trim();
+    const searchMarkers = lastFullscreenSearchMarkersRef.current;
+    if (query && searchMarkers.length > 0) {
+      let camera: FullscreenNativeCamera = { ...fallbackCamera };
+      if (selectedMarkerId?.startsWith("search-")) {
+        const place = searchPinPlaceByIdRef.current.get(selectedMarkerId);
+        const lat = Number(place?.y);
+        const lng = Number(place?.x);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          camera = { lat, lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+        }
+      }
+      return {
+        mode: "search",
+        query,
+        camera,
+        searchBiasCenter: { lat: camera.lat, lng: camera.lng },
+        selectedMarkerId,
+        markers: searchMarkers.map((marker) => ({ ...marker })),
+        searchResults: lastFullscreenSearchResultsRef.current.map((result) => ({ ...result })),
+        searchPinPlaces: Array.from(searchPinPlaceByIdRef.current.entries()),
+      };
+    }
+
+    let camera = lastFullscreenNativeCameraRef.current;
+    if (selectedMarkerId?.startsWith("place-")) {
+      const place = placePinByIdRef.current.get(selectedMarkerId);
+      const stored = place ? savedPlaceCoordsRef.current[place.id] ?? latLngFromRow(place) : null;
+      if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
+        camera = { lat: stored.lat, lng: stored.lng, zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM };
+      }
+    }
+
+    return { mode: "saved", camera: camera ?? null, selectedMarkerId };
+  }, []);
+
+  const scheduleRestoreFullscreenPlaceSheet = useCallback((markerId?: string) => {
+    const id = String(markerId ?? "").trim();
+    if (!id) return;
+    window.setTimeout(() => {
+      void showFullscreenNativePlaceSheet({ id }, { silent: false });
+    }, 400);
+  }, []);
+
+  const drawFullscreenNativeCourseRoute = useCallback(async (
+    courseRoutePath: LatLng[],
+    courseMarkers: FullscreenSearchMarkerSnapshot[],
+    sessionId: number,
+  ) => {
+    if (courseRoutePath.length < 2) {
+      // TEMP crs-debug
+      console.log("[crs] drawCourseRoute skip path too short", courseRoutePath.length);
+      return;
+    }
+
+    const isSessionStillValid = () =>
+      sessionId === fullscreenCourseRouteSessionRef.current &&
+      mapExpandedLiveRef.current &&
+      Boolean(fullscreenCourseRef.current?.length);
+
+    const applyRouteAndRefreshMarkers = async (path: LatLng[], label: string) => {
+      if (!isSessionStillValid()) {
+        // TEMP crs-debug
+        console.log("[crs] skip route draw — session invalid", label, "session", sessionId);
+        return false;
+      }
+      // TEMP crs-debug
+      console.log("[crs] setRoute call path", path.length, "mode walk", label);
+      await setFullscreenNativeRoute({ path, mode: "walk" }, { silent: false });
+      if (!isSessionStillValid()) {
+        // TEMP crs-debug
+        console.log("[crs] skip marker refresh — session invalid after setRoute", label);
+        return false;
+      }
+      await updateFullscreenNativeMarkers(
+        { markers: courseMarkers.map((marker) => ({ ...marker })) },
+        { silent: false },
+      );
+      // TEMP crs-debug
+      console.log("[crs] setRoute resolved path", path.length, label, "markers", courseMarkers.length);
+      return true;
+    };
+
+    setDirectionsLoading(true);
+    try {
+      if (courseRoutePath.length > FULLSCREEN_COURSE_DIRECTIONS_WARN_STOPS) {
+        console.warn(
+          "[fullscreen] course has many stops; directions requests may be slow",
+          courseRoutePath.length,
+        );
+        showToast(
+          `코스 장소가 ${courseRoutePath.length}곳입니다. 경로 계산에 시간이 걸릴 수 있어요.`,
+          "info",
+        );
+      }
+
+      await applyRouteAndRefreshMarkers(courseRoutePath, "preview-straight");
+
+      const coursePlaces = fullscreenCourseRef.current;
+      const stopNames =
+        coursePlaces?.length === courseRoutePath.length
+          ? coursePlaces.map((place) => place.name)
+          : courseRoutePath.map((_, index) => `장소 ${index + 1}`);
+      const navigation = await buildCourseWalkNavigationFromTmap(courseRoutePath, stopNames);
+      if (!isSessionStillValid()) {
+        // TEMP crs-debug
+        console.log("[crs] skip after tmap — session invalid", sessionId);
+        return;
+      }
+      fullscreenCourseNavigationRef.current = navigation;
+      setCourseNavigation(navigation);
+      setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
+      setCourseNavFocusMode(false);
+      const routePath =
+        navigation.mergedPath.length >= 2 ? navigation.mergedPath : courseRoutePath;
+      await applyRouteAndRefreshMarkers(routePath, "walk-final");
+      await setFullscreenNativeCourseNavigation(
+        courseNavigationToNativePayload(navigation),
+        { silent: false },
+      );
+    } catch (err) {
+      console.error("[course] failed", err);
+      if (!isSessionStillValid()) {
+        // TEMP crs-debug
+        console.log("[crs] skip fallback — session invalid", sessionId);
+        return;
+      }
+      try {
+        // TEMP crs-debug
+        console.log("[crs] setRoute fallback call path", courseRoutePath.length);
+        await applyRouteAndRefreshMarkers(courseRoutePath, "fallback-straight");
+      } catch (setRouteErr) {
+        console.error("[course] setRoute failed", setRouteErr);
+      }
+    } finally {
+      setDirectionsLoading(false);
+    }
+  }, [showToast]);
+
+  const restoreFullscreenNativeMyLocation = useCallback(async () => {
+    const stored = myLocationLatLngRef.current;
+    if (
+      stored &&
+      Number.isFinite(stored.lat) &&
+      Number.isFinite(stored.lng)
+    ) {
+      await setFullscreenNativeMyLocation(
+        { lat: stored.lat, lng: stored.lng },
+        { silent: false },
+      );
+      return;
+    }
+
+    try {
+      const pos = await getCurrentPositionForMapStage1();
+      const myLat = Number(pos.latitude);
+      const myLng = Number(pos.longitude);
+      if (!Number.isFinite(myLat) || !Number.isFinite(myLng)) return;
+      myLocationLatLngRef.current = { lat: myLat, lng: myLng };
+      await setFullscreenNativeMyLocation({ lat: myLat, lng: myLng }, { silent: false });
+    } catch {
+      /* location unavailable — skip silently */
+    }
+  }, []);
+
   const handleOpenFullscreenNativeMap = useCallback(async () => {
+    const restoreSnapshot = fullscreenRestorePendingRef.current
+      ? fullscreenReturnStateRef.current
+      : null;
+    const selectedMarkerIdForRestore =
+      restoreSnapshot && "selectedMarkerId" in restoreSnapshot
+        ? restoreSnapshot.selectedMarkerId
+        : undefined;
+    if (fullscreenRestorePendingRef.current) {
+      fullscreenRestorePendingRef.current = false;
+      fullscreenReturnStateRef.current = null;
+    }
+    if (restoreSnapshot?.mode === "course") {
+      fullscreenCourseRef.current = restoreSnapshot.coursePlaces.map((place) => ({ ...place }));
+    }
+
     try {
       const resolvePlaceCoords = (place: Place): LatLng | null => {
         const stored = latLngFromRow(place);
@@ -1770,7 +2157,7 @@ function HomePageContent() {
       };
 
       const placeToMarker = (place: Place, coords: LatLng) => {
-        const { photos, postCount } = getMarkerPhotoMetaForPlace(feedPostsRef.current, place, coords);
+        const { photos, postCount, photoPostIds } = getMarkerPhotoMetaForPlace(feedPostsRef.current, place, coords);
         return {
           id: `place-${place.id}`,
           lat: coords.lat,
@@ -1778,8 +2165,10 @@ function HomePageContent() {
           category: place.category,
           title: place.name,
           address: place.address,
+          isSaved: true,
           ...(photos.length > 0 ? { photos } : {}),
           ...(postCount > 0 ? { postCount } : {}),
+          ...(photoPostIds.length > 0 ? { photoPostIds } : {}),
         };
       };
 
@@ -1793,6 +2182,7 @@ function HomePageContent() {
         category: place.category,
         title: place.name,
         address: place.address,
+        order: index + 1,
       });
 
       let courseRoutePath: { lat: number; lng: number }[] = [];
@@ -1825,12 +2215,18 @@ function HomePageContent() {
           if (!coords) return [];
           return [{ marker: courseToMarker(place, index, coords), coords }];
         });
-        initialMarkers = courseEntries.map((entry) => entry.marker);
+        initialMarkers =
+          restoreSnapshot?.mode === "course" && restoreSnapshot.courseMarkers.length > 0
+            ? restoreSnapshot.courseMarkers.map((marker) => ({ ...marker }))
+            : courseEntries.map((entry) => entry.marker);
         courseRoutePath = courseEntries.map((entry) => entry.coords);
       } else {
         initialMarkers = savedPlaces.flatMap((place) => {
           const coords = resolvePlaceCoords(place);
-          return coords ? [placeToMarker(place, coords)] : [];
+          if (!coords) return [];
+          placePinByIdRef.current.set(`place-${place.id}`, place);
+          savedPlaceCoordsRef.current[place.id] = coords;
+          return [placeToMarker(place, coords)];
         });
       }
 
@@ -1853,46 +2249,50 @@ function HomePageContent() {
         }
       }
 
-      if (!fullscreenSearchListenerRegisteredRef.current) {
-        fullscreenSearchListenerRegisteredRef.current = true;
-        void PindmapNativeMap.addListener("fullscreenSearch", (e) => {
-          void runFullscreenNativeSearch(e.query);
-        }).catch((err) => {
-          fullscreenSearchListenerRegisteredRef.current = false;
-          console.error("[fullscreen] fullscreenSearch listener failed", err);
-        });
-      }
+      registerFullscreenNativeListeners();
 
-      if (!fullscreenResearchListenerRegisteredRef.current) {
-        fullscreenResearchListenerRegisteredRef.current = true;
-        void PindmapNativeMap.addListener("fullscreenResearchArea", (e) => {
-          const keyword = lastFullscreenQueryRef.current.trim();
-          if (!keyword) return;
-          const lat = Number(e.lat);
-          const lng = Number(e.lng);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-          void runFullscreenNativeSearch(keyword, { lat, lng });
-        }).catch((err) => {
-          fullscreenResearchListenerRegisteredRef.current = false;
-          console.error("[fullscreen] fullscreenResearchArea listener failed", err);
+      if (restoreSnapshot?.mode === "search") {
+        searchPinPlaceByIdRef.current = new Map(
+          restoreSnapshot.searchPinPlaces as [string, unknown][],
+        );
+        const searchMarkers = restoreSnapshot.markers;
+        const searchResults = restoreSnapshot.searchResults;
+        const camera = restoreSnapshot.camera;
+        lastFullscreenNativeCameraRef.current = camera;
+        await presentFullscreenNativeMap(
+          {
+            lat: camera.lat,
+            lng: camera.lng,
+            zoom: camera.zoom,
+            markers: [...initialMarkers, ...searchMarkers],
+          },
+          { silent: false },
+        );
+        await waitForFullscreenNativeMapReady();
+        await setFullscreenNativeSearchResults(
+          { results: searchResults },
+          { silent: false },
+        );
+        await updateFullscreenNativeMarkers(
+          { markers: searchMarkers, clearPrefix: "search-" },
+          { silent: false },
+        );
+        await setFullscreenNativeCamera({
+          lat: camera.lat,
+          lng: camera.lng,
+          zoom: camera.zoom,
+          animated: false,
         });
-      }
-
-      if (!fullscreenDirectionsListenerRegisteredRef.current) {
-        fullscreenDirectionsListenerRegisteredRef.current = true;
-        void PindmapNativeMap.addListener("fullscreenDirections", (e) => {
-          void runFullscreenNativeDirections({ id: e.id, lat: e.lat, lng: e.lng });
-        }).catch((err) => {
-          fullscreenDirectionsListenerRegisteredRef.current = false;
-          console.error("[fullscreen] fullscreenDirections listener failed", err);
-        });
+        void restoreFullscreenNativeMyLocation();
+        scheduleRestoreFullscreenPlaceSheet(restoreSnapshot.selectedMarkerId);
+        return;
       }
 
       const geocodeRunId = ++fullscreenGeocodeRunRef.current;
       const accumulatedMarkers = [...initialMarkers];
 
       const storedMyLocation = myLocationLatLngRef.current;
-      const entryCamera = computeFullscreenNativeEntryCamera(
+      const computedEntryCamera = computeFullscreenNativeEntryCamera(
         initialMarkers,
         { lat, lng },
         {
@@ -1905,67 +2305,36 @@ function HomePageContent() {
               : null,
         },
       );
+      const entryCamera =
+        restoreSnapshot?.mode === "course" && restoreSnapshot.camera
+          ? restoreSnapshot.camera
+          : restoreSnapshot?.mode === "saved" && restoreSnapshot.camera
+            ? restoreSnapshot.camera
+            : computedEntryCamera;
+      lastFullscreenNativeCameraRef.current = entryCamera;
       await presentFullscreenNativeMap(
         { lat: entryCamera.lat, lng: entryCamera.lng, zoom: entryCamera.zoom, markers: initialMarkers },
         { silent: false },
       );
 
+      await waitForFullscreenNativeMapReady();
+
       if (isFullscreenCourseMode && courseRoutePath.length >= 2) {
-        setDirectionsLoading(true);
-        try {
-          if (courseRoutePath.length > FULLSCREEN_COURSE_DIRECTIONS_WARN_STOPS) {
-            console.warn(
-              "[fullscreen] course has many stops; directions requests may be slow",
-              courseRoutePath.length,
-            );
-            showToast(
-              `코스 장소가 ${courseRoutePath.length}곳입니다. 경로 계산에 시간이 걸릴 수 있어요.`,
-              "info",
-            );
-          }
-          const walkPath = await buildCourseWalkPathFromTmap(courseRoutePath);
-          await setFullscreenNativeRoute(
-            { path: walkPath.length >= 2 ? walkPath : courseRoutePath, mode: "walk" },
-            { silent: false },
-          );
-        } catch (err) {
-          console.error("[course] failed", err);
-          await setFullscreenNativeRoute(
-            { path: courseRoutePath, mode: "walk" },
-            { silent: false },
-          );
-        } finally {
-          setDirectionsLoading(false);
-        }
+        const courseSessionId = ++fullscreenCourseRouteSessionRef.current;
+        const courseMarkersForRoute = initialMarkers.map((marker) => ({ ...marker })) as FullscreenSearchMarkerSnapshot[];
+        await drawFullscreenNativeCourseRoute(courseRoutePath, courseMarkersForRoute, courseSessionId);
       }
 
-      void (async () => {
-        const stored = myLocationLatLngRef.current;
-        if (
-          stored &&
-          Number.isFinite(stored.lat) &&
-          Number.isFinite(stored.lng)
-        ) {
-          await setFullscreenNativeMyLocation(
-            { lat: stored.lat, lng: stored.lng },
-            { silent: false },
-          );
-          return;
-        }
+      void restoreFullscreenNativeMyLocation();
 
-        try {
-          const pos = await getCurrentPositionForMapStage1();
-          const myLat = Number(pos.latitude);
-          const myLng = Number(pos.longitude);
-          if (!Number.isFinite(myLat) || !Number.isFinite(myLng)) return;
-          myLocationLatLngRef.current = { lat: myLat, lng: myLng };
-          await setFullscreenNativeMyLocation({ lat: myLat, lng: myLng }, { silent: false });
-        } catch {
-          /* location unavailable — skip silently */
-        }
-      })();
+      if (isFullscreenCourseMode) {
+        scheduleRestoreFullscreenPlaceSheet(selectedMarkerIdForRestore);
+        return;
+      }
 
-      if (isFullscreenCourseMode) return;
+      if (restoreSnapshot?.mode === "saved") {
+        scheduleRestoreFullscreenPlaceSheet(selectedMarkerIdForRestore);
+      }
 
       const missingPlaces = savedPlaces.filter((place) => {
         if (resolvePlaceCoords(place)) return false;
@@ -2038,7 +2407,11 @@ function HomePageContent() {
       }
       console.error("[fullscreen] presentFullscreenMap failed", err);
     }
-  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast]);
+  }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast, registerFullscreenNativeListeners, restoreFullscreenNativeMyLocation, scheduleRestoreFullscreenPlaceSheet, drawFullscreenNativeCourseRoute]);
+
+  useEffect(() => {
+    mapExpandedLiveRef.current = mapExpanded;
+  }, [mapExpanded]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
@@ -2051,7 +2424,14 @@ function HomePageContent() {
     }
 
     fullscreenAutoOpenedRef.current = false;
+    fullscreenCourseRouteSessionRef.current += 1;
     fullscreenCourseRef.current = null;
+    fullscreenCourseNavigationRef.current = null;
+    setCourseNavigation(null);
+    setCourseNavSegmentIndex(null);
+    setCourseNavFocusMode(false);
+    void clearFullscreenNativeRoute({ silent: true });
+    void clearFullscreenNativeCourseNavigation({ silent: true });
     void dismissFullscreenNativeMap({ silent: true });
   }, [mapExpanded, handleOpenFullscreenNativeMap]);
 
@@ -2061,7 +2441,14 @@ function HomePageContent() {
     fullscreenDismissListenerRegisteredRef.current = true;
     void PindmapNativeMap.addListener("fullscreenMapDismissed", () => {
       fullscreenAutoOpenedRef.current = false;
+      fullscreenCourseRouteSessionRef.current += 1;
       fullscreenCourseRef.current = null;
+      fullscreenCourseNavigationRef.current = null;
+      setCourseNavigation(null);
+      setCourseNavSegmentIndex(null);
+      setCourseNavFocusMode(false);
+      void clearFullscreenNativeRoute({ silent: true });
+      void clearFullscreenNativeCourseNavigation({ silent: true });
       if (returnToCourseSheetRef.current) {
         returnToCourseSheetRef.current = false;
         setMapExpanded(false);
@@ -2156,6 +2543,16 @@ function HomePageContent() {
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
 
   const closeDetailPost = useCallback(() => {
+    if (returnToFullscreenMapAfterDetailRef.current) {
+      returnToFullscreenMapAfterDetailRef.current = false;
+      fullscreenRestorePendingRef.current = true;
+      setDetailPostId(null);
+      setScrollToComment(false);
+      setDetailReturnTo(null);
+      setActiveTab("map");
+      setMapExpanded(true);
+      return;
+    }
     const ret = detailReturnTo;
     setDetailPostId(null);
     setScrollToComment(false);
@@ -4743,6 +5140,10 @@ function HomePageContent() {
     returnToCourseSheetRef.current = true;
     setShowCourseModal(false);
     setShowCourseRoute(true);
+    setCourseNavigation(null);
+    setCourseNavSegmentIndex(null);
+    setCourseNavFocusMode(false);
+    fullscreenCourseNavigationRef.current = null;
     setActiveTab("map");
     if (isNativeMapAvailable()) {
       fullscreenCourseRef.current = [...courseResult];
@@ -4751,17 +5152,17 @@ function HomePageContent() {
     }
     setMapExpanded(true);
     // 지도가 그려진 후에 마커와 폴리라인 그리기 (살짝 딜레이)
-    setTimeout(() => drawCourseRoute(), 800);
+    setTimeout(() => void drawCourseRoute(), 800);
   };
 
   // 전체화면 지도에 코스 경로 그리기
-  const drawCourseRoute = () => {
+  const drawCourseRoute = async () => {
     if (!courseResult) return;
     if (!expandedMapRef.current || !window.kakao?.maps) {
       if (drawCourseRouteRetryRef.current < 2) {
         drawCourseRouteRetryRef.current += 1;
         window.setTimeout(
-          () => drawCourseRoute(),
+          () => void drawCourseRoute(),
           !expandedMapRef.current ? 200 : 1000,
         );
       }
@@ -4773,11 +5174,13 @@ function HomePageContent() {
     searchMarkersRef.current.forEach((m) => m.setMap(null));
     searchMarkersRef.current = [];
 
-    const path: any[] = [];
+    const stops: LatLng[] = [];
+    const stopNames: string[] = [];
     const bounds = new window.kakao.maps.LatLngBounds();
     courseResult.forEach((place, idx) => {
       const pos = new window.kakao.maps.LatLng(place.lat, place.lng);
-      path.push(pos);
+      stops.push({ lat: place.lat, lng: place.lng });
+      stopNames.push(place.name);
       bounds.extend(pos);
       // 순번 마커
       const numberSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40"><path d="M16 0C7.16 0 0 7.16 0 16c0 12 16 24 16 24S32 28 32 16C32 7.16 24.84 0 16 0z" fill="#1a2a7a" stroke="#fff" stroke-width="1.5"/><circle cx="16" cy="16" r="11" fill="#fff"/><text x="16" y="20" text-anchor="middle" font-size="13" font-weight="700" fill="#1a2a7a">${idx + 1}</text></svg>`;
@@ -4807,16 +5210,29 @@ function HomePageContent() {
       });
       searchMarkersRef.current.push(marker);
     });
-    // 경로선
-    routePolylineRef.current = new window.kakao.maps.Polyline({
-      path,
-      strokeWeight: 4,
-      strokeColor: "#1a2a7a",
-      strokeOpacity: 0.85,
-      strokeStyle: "solid",
-    });
-    routePolylineRef.current.setMap(expandedMapRef.current);
+
     expandedMapRef.current.setBounds(bounds);
+
+    if (stops.length < 2) return;
+
+    setDirectionsLoading(true);
+    try {
+      applyWebCourseRoutePath(stops, false);
+
+      const navigation = await buildCourseWalkNavigationFromTmap(stops, stopNames);
+      if (!expandedMapRef.current || !courseResult) return;
+
+      fullscreenCourseNavigationRef.current = navigation;
+      setCourseNavigation(navigation);
+      setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
+      setCourseNavFocusMode(false);
+      applyWebCourseRoutePath(navigation.mergedPath);
+    } catch (err) {
+      console.error("[course] web route failed", err);
+      applyWebCourseRoutePath(stops);
+    } finally {
+      setDirectionsLoading(false);
+    }
   };
   const handleAddFromInstagram = async () => {
     if (!canSubmit) return;
@@ -5565,6 +5981,63 @@ function HomePageContent() {
     setDirectionsInfo(null);
   };
 
+  const applyWebCourseRoutePath = useCallback((path: LatLng[], fitBounds = true) => {
+    if (!expandedMapRef.current || !window.kakao?.maps || path.length < 2) return;
+    if (routePolylineRef.current) routePolylineRef.current.setMap(null);
+    const kakaoPath = path.map(
+      (point) => new window.kakao.maps.LatLng(point.lat, point.lng),
+    );
+    routePolylineRef.current = new window.kakao.maps.Polyline({
+      path: kakaoPath,
+      strokeWeight: 4,
+      strokeColor: "#1a2a7a",
+      strokeOpacity: 0.85,
+      strokeStyle: "solid",
+    });
+    routePolylineRef.current.setMap(expandedMapRef.current);
+    if (fitBounds) {
+      const bounds = latLngBoundsFromPath(path);
+      if (bounds) expandedMapRef.current.setBounds(bounds);
+    }
+  }, []);
+
+  const handleCourseNavSelectSegment = useCallback((index: number) => {
+    const nav = courseNavigation ?? fullscreenCourseNavigationRef.current;
+    const segment = nav?.segments[index];
+    if (!segment) return;
+    setCourseNavSegmentIndex(index);
+    applyWebCourseRoutePath(segment.path);
+  }, [applyWebCourseRoutePath, courseNavigation]);
+
+  const handleCourseNavPrevSegment = useCallback(() => {
+    if (courseNavSegmentIndex == null || courseNavSegmentIndex <= 0) return;
+    setCourseNavFocusMode(true);
+    handleCourseNavSelectSegment(courseNavSegmentIndex - 1);
+  }, [courseNavSegmentIndex, handleCourseNavSelectSegment]);
+
+  const handleCourseNavNextSegment = useCallback(() => {
+    const nav = courseNavigation;
+    if (!nav || courseNavSegmentIndex == null) return;
+    if (courseNavSegmentIndex >= nav.segments.length - 1) return;
+    setCourseNavFocusMode(true);
+    handleCourseNavSelectSegment(courseNavSegmentIndex + 1);
+  }, [courseNavigation, courseNavSegmentIndex, handleCourseNavSelectSegment]);
+
+  const handleCourseNavToggleFocusMode = useCallback(() => {
+    const nav = courseNavigation;
+    if (!nav || courseNavSegmentIndex == null) return;
+    setCourseNavFocusMode(true);
+    const segment = nav.segments[courseNavSegmentIndex];
+    if (segment) applyWebCourseRoutePath(segment.path);
+  }, [applyWebCourseRoutePath, courseNavigation, courseNavSegmentIndex]);
+
+  const handleCourseNavShowFullRoute = useCallback(() => {
+    const nav = courseNavigation;
+    if (!nav) return;
+    setCourseNavFocusMode(false);
+    applyWebCourseRoutePath(nav.mergedPath);
+  }, [applyWebCourseRoutePath, courseNavigation]);
+
   const drawRoute = async (destLat: number, destLng: number, mode: "car" | "walk" = "car") => {
     if (!expandedMapRef.current || !window.kakao?.maps) return;
     setDirectionsLoading(true);
@@ -5631,6 +6104,24 @@ function HomePageContent() {
       _placeRef: expandedRef,
     });
   }, []);
+
+  const handleFullscreenNativePlaceDetail = useCallback(async (markerId: string) => {
+    // Pin tap no longer opens React PlaceDetailSheet — native bottom sheet handles place UI.
+    // Kept for potential future "상세 보기" entry points.
+    void markerId;
+  }, []);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenPlaceDetailListenerRegisteredRef.current) return;
+    fullscreenPlaceDetailListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenPlaceDetail", (e) => {
+      void handleFullscreenNativePlaceDetail(e.id);
+    }).catch((err) => {
+      fullscreenPlaceDetailListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenPlaceDetail listener failed", err);
+    });
+  }, [handleFullscreenNativePlaceDetail]);
 
   /** 확장 지도 검색 — 지도 center 기준 (GPS 아님) */
   const getExpandedMapSearchCenter = useCallback(() => {
@@ -6881,6 +7372,130 @@ function HomePageContent() {
     showToast("저장됐어요", "success");
     onAfterSave?.();
   }, [user?.id, resolveSavedMatch, deletePlace, addPlace, showToast]);
+
+  const resolveFullscreenMarkerPlaceSheet = useCallback((markerId: string): PlaceSheetData | null => {
+    const id = String(markerId ?? "").trim();
+    if (!id) return null;
+    if (id.startsWith("place-")) {
+      const place = placePinByIdRef.current.get(id);
+      if (!place) return null;
+      const stored = savedPlaceCoordsRef.current[place.id] ?? latLngFromRow(place);
+      const lat = stored?.lat;
+      const lng = stored?.lng;
+      const relatedPosts = getRelatedPostsForPlaceSheet(
+        feedPostsRef.current,
+        placeRefFromPlace(place, lat, lng),
+      );
+      return toSelectedFromSavedPlace(place, relatedPosts, lat, lng) as PlaceSheetData;
+    }
+    if (id.startsWith("search-")) {
+      const place = searchPinPlaceByIdRef.current.get(id);
+      if (!place) return null;
+      const expandedRef = placeRefFromKakaoPlace(place);
+      return {
+        ...place,
+        _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, expandedRef),
+        _placeRef: expandedRef,
+      } as PlaceSheetData;
+    }
+    return null;
+  }, [toSelectedFromSavedPlace]);
+
+  const handleFullscreenNativeToggleSave = useCallback(async (markerId: string) => {
+    const placeData = resolveFullscreenMarkerPlaceSheet(markerId);
+    if (!placeData) {
+      showToast("장소 정보를 찾을 수 없어요", "error");
+      return;
+    }
+    await togglePlaceSheetSave(placeData);
+    const isSaved = !!resolveSavedMatch(placeData);
+    await setFullscreenNativePlaceSaved({ id: markerId, saved: isSaved }, { silent: false });
+  }, [resolveFullscreenMarkerPlaceSheet, togglePlaceSheetSave, resolveSavedMatch, showToast]);
+
+  const handleFullscreenNativeOpenExternal = useCallback((markerId: string, type: "apple" | "transit") => {
+    const placeData = resolveFullscreenMarkerPlaceSheet(markerId);
+    if (!placeData) {
+      showToast("장소 정보를 찾을 수 없어요", "error");
+      return;
+    }
+    const lat = Number(placeData.y);
+    const lng = Number(placeData.x);
+    if (type === "apple") {
+      openAppleMapsPlace(
+        placeData.place_name,
+        placeData.road_address_name || placeData.address_name,
+        placeData.y,
+        placeData.x,
+      );
+      return;
+    }
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      showToast("위치 정보가 없어요", "error");
+      return;
+    }
+    openTransitInKakaoMap(placeData.place_name ?? "장소", lat, lng);
+  }, [resolveFullscreenMarkerPlaceSheet, openAppleMapsPlace, showToast]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenToggleSaveListenerRegisteredRef.current) return;
+    fullscreenToggleSaveListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenToggleSave", (e) => {
+      void handleFullscreenNativeToggleSave(e.id);
+    }).catch((err) => {
+      fullscreenToggleSaveListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenToggleSave listener failed", err);
+    });
+  }, [handleFullscreenNativeToggleSave]);
+
+  const handleFullscreenNativeCuration = useCallback(async (postId: string, markerId?: string) => {
+    const id = String(postId ?? "").trim();
+    if (!id) return;
+    fullscreenReturnStateRef.current = captureFullscreenReturnSnapshot(markerId);
+    returnToFullscreenMapAfterDetailRef.current = true;
+    await dismissFullscreenNativeMap({ silent: false });
+    setMapExpanded(false);
+    setSelectedPlace(null);
+    setSelectedMapPlace(null);
+    setDetailPostId(id);
+  }, [captureFullscreenReturnSnapshot]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenCurationListenerRegisteredRef.current) return;
+    fullscreenCurationListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenCuration", (e) => {
+      void handleFullscreenNativeCuration(e.postId, e.id);
+    }).catch((err) => {
+      fullscreenCurationListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenCuration listener failed", err);
+    });
+  }, [handleFullscreenNativeCuration]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenOpenExternalListenerRegisteredRef.current) return;
+    fullscreenOpenExternalListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenOpenExternal", (e) => {
+      const type = e.type === "transit" ? "transit" : "apple";
+      handleFullscreenNativeOpenExternal(e.id, type);
+    }).catch((err) => {
+      fullscreenOpenExternalListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenOpenExternal listener failed", err);
+    });
+  }, [handleFullscreenNativeOpenExternal]);
+
+  useEffect(() => {
+    if (!isNativeMapAvailable()) return;
+    if (fullscreenImageLightboxListenerRegisteredRef.current) return;
+    fullscreenImageLightboxListenerRegisteredRef.current = true;
+    void PindmapNativeMap.addListener("fullscreenImageLightbox", (e) => {
+      if (e.url) setLightboxImg(e.url);
+    }).catch((err) => {
+      fullscreenImageLightboxListenerRegisteredRef.current = false;
+      console.error("[fullscreen] fullscreenImageLightbox listener failed", err);
+    });
+  }, []);
 
   const openHomePlaceSheetFromPost = useCallback(
     (post: FeedPost, placeRef?: PlaceRefForPhotoTagMatch) => {
@@ -8868,11 +9483,20 @@ function HomePageContent() {
                             setMapExpanded(false);
                             clearRoute();
                             setShowCourseRoute(false);
+                            setCourseNavigation(null);
+                            setCourseNavSegmentIndex(null);
+                            setCourseNavFocusMode(false);
+                            fullscreenCourseNavigationRef.current = null;
                             setShowCourseModal(true);
                             return;
                           }
                           setMapExpanded(false);
                           setSelectedPlace(null);
+                          setShowCourseRoute(false);
+                          setCourseNavigation(null);
+                          setCourseNavSegmentIndex(null);
+                          setCourseNavFocusMode(false);
+                          fullscreenCourseNavigationRef.current = null;
                         }}
                         style={{
                           position: "absolute",
@@ -8975,6 +9599,18 @@ function HomePageContent() {
                         </>
                       )}
                       <MapResearchAreaButton visible={showMapResearchButton} onResearch={handleResearchThisArea} />
+                      {showCourseRoute && courseNavigation && (
+                        <CourseNavigationOverlay
+                          navigation={courseNavigation}
+                          selectedSegmentIndex={courseNavSegmentIndex}
+                          segmentFocusMode={courseNavFocusMode}
+                          onSelectSegment={handleCourseNavSelectSegment}
+                          onPrevSegment={handleCourseNavPrevSegment}
+                          onNextSegment={handleCourseNavNextSegment}
+                          onToggleFocusMode={handleCourseNavToggleFocusMode}
+                          onShowFullRoute={handleCourseNavShowFullRoute}
+                        />
+                      )}
                       {selectedPlace && renderPlaceCard()}
                       {isMapSearchSheetOpen && mapSearchResults.length > 0 && (
                         <MapSearchResultsSheet

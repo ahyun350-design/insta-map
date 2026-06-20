@@ -142,6 +142,7 @@ private final class KakaoMapHost: UIView {
             let option = PoiOptions(styleID: styleID, poiID: input.id)
             option.rank = 0
             option.clickable = true
+            option.transformType = .default
             let point = MapPoint(longitude: input.lng, latitude: input.lat)
             guard let poi = layer.addPoi(option: option, at: point) else {
                 CAPLog.print("[PindmapNativeMap] addPoi FAIL id=\(input.id) styleID=\(option.styleID)")
@@ -209,73 +210,20 @@ private final class KakaoMapHost: UIView {
         }
     }
 
-    private static func makeMarkerIcon(color: UIColor) -> UIImage {
-        let size = CGSize(width: 28, height: 28)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { ctx in
-            color.setFill()
-            ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
-            UIColor.white.setStroke()
-            ctx.cgContext.setLineWidth(2)
-            ctx.cgContext.strokeEllipse(in: CGRect(x: 1, y: 1, width: size.width - 2, height: size.height - 2))
-        }
-    }
-
-    private static func makeDefaultMarkerIcon() -> UIImage {
-        makeMarkerIcon(color: .systemRed)
-    }
-
-    private static func markerColor(for category: String?) -> UIColor {
-        guard let category = category, !category.isEmpty else {
-            return .systemRed
-        }
-        switch category {
-        case "맛집": return UIColor(hex: 0x513229)
-        case "카페": return UIColor(hex: 0xb08d57)
-        case "쇼핑": return UIColor(hex: 0x4a7fa5)
-        case "숙소": return UIColor(hex: 0x7a7a50)
-        case "놀거리": return UIColor(hex: 0x6d4bd6)
-        case "여행지": return UIColor(hex: 0x1b9aad)
-        default: return .systemRed
-        }
-    }
-
-    private static func categoryStyleKey(for category: String?) -> String {
-        guard let category = category, !category.isEmpty else {
-            return "default"
-        }
-        switch category {
-        case "맛집": return "food"
-        case "카페": return "cafe"
-        case "쇼핑": return "shopping"
-        case "숙소": return "stay"
-        case "놀거리": return "play"
-        case "여행지": return "travel"
-        default: return "default"
-        }
-    }
-
-    private static func styleID(for category: String?) -> String {
-        let key = categoryStyleKey(for: category)
-        if key == "default" {
-            return markerStyleID
-        }
-        return "pindmap-marker-\(key)"
-    }
-
     private func ensureStyle(for category: String?) -> String {
         guard let map = kakaoMapView() else {
             return Self.markerStyleID
         }
-        let styleID = Self.styleID(for: category)
+        let styleID = NativeMapMarkerStyleHelper.styleID(for: category)
         if registeredStyleIDs.contains(styleID) {
             return styleID
         }
         let manager = map.getLabelManager()
-        let color = Self.markerColor(for: category)
-        let iconStyle = PoiIconStyle(symbol: Self.makeMarkerIcon(color: color), anchorPoint: CGPoint(x: 0.5, y: 1.0))
-        let perLevel = PerLevelPoiStyle(iconStyle: iconStyle, level: 0)
-        manager.addPoiStyle(PoiStyle(styleID: styleID, styles: [perLevel]))
+        let iconStyle = NativeMapMarkerStyleHelper.makeFixedZoomPoiIconStyle(
+            symbol: NativeMapMarkerStyleHelper.makeMarkerIcon(category: category),
+            anchorPoint: NativeMapMarkerStyleHelper.savedPinAnchor
+        )
+        NativeMapMarkerStyleHelper.registerFixedZoomPoiStyle(on: manager, styleID: styleID, iconStyle: iconStyle)
         registeredStyleIDs.insert(styleID)
         return styleID
     }
@@ -408,6 +356,9 @@ extension KakaoMapHost: MapControllerDelegate {
             guard let self = self else { return }
             self.syncMapViewContainerSize()
             self.mapViewReady = true
+            if let map = self.kakaoMapView() {
+                NativeMapMarkerStyleHelper.applyFixedScreenMapSettings(on: map)
+            }
             self.applyCameraIfReady(animated: false)
             self.attachKakaoEventDelegateIfNeeded()
             self.flushPendingMarkersIfNeeded()
@@ -436,30 +387,94 @@ extension KakaoMapHost: KakaoMapEventDelegate {
     }
 }
 
-// MARK: - Shared marker styling (fullscreen VC only — KakaoMapHost unchanged)
+// MARK: - Shared marker styling (compact + fullscreen native maps)
 
 private enum NativeMapMarkerStyleHelper {
     static let defaultStyleID = "pindmap-marker-style"
+    /// KakaoMapsSDK zoom range — PerLevelPoiStyle at every level keeps symbol scale 1.0 (Kakao Marker parity).
+    static let minMapZoomLevel = 0
+    static let maxMapZoomLevel = 21
+    /// React makeMarkerImage — Size(36, 44)
+    static let pinSize = CGSize(width: 36, height: 44)
+    /// React course marker — Size(32, 40)
+    static let coursePinSize = CGSize(width: 32, height: 40)
+    /// React makeMyLocationImage — Size(24, 24)
+    static let myLocationSize = CGSize(width: 24, height: 24)
+    /// Saved/search pin anchor — Kakao MarkerImage default (bottom center).
+    static let savedPinAnchor = CGPoint(x: 0.5, y: 1.0)
+    /// Course pin anchor — bottom center.
+    static let coursePinAnchor = CGPoint(x: 0.5, y: 1.0)
+    /// My location anchor — Kakao offset(12,12) on 24×24 → center (0.5, 0.5).
+    static let myLocationAnchor = CGPoint(x: 0.5, y: 0.5)
 
-    static func markerColor(for category: String?) -> UIColor {
-        guard let category = category, !category.isEmpty else {
-            return .systemRed
-        }
-        switch category {
-        case "맛집": return UIColor(hex: 0x513229)
-        case "카페": return UIColor(hex: 0xb08d57)
-        case "쇼핑": return UIColor(hex: 0x4a7fa5)
-        case "숙소": return UIColor(hex: 0x7a7a50)
-        case "놀거리": return UIColor(hex: 0x6d4bd6)
-        case "여행지": return UIColor(hex: 0x1b9aad)
-        default: return .systemRed
+    /// KakaoMapsSDK known-issue render scale: UIScreen.main.scale / 2.0 (logical px → sharp bitmap).
+    static var kakaoRenderScale: CGFloat {
+        max(UIScreen.main.scale / 2.0, 1.0)
+    }
+
+    private static func imageRenderer(for size: CGSize) -> UIGraphicsImageRenderer {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = kakaoRenderScale
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: format)
+    }
+
+    /// One iconStyle duplicated at zoom levels 0…21 — no per-level scale interpolation (fixed screen px like Kakao Marker).
+    static func allZoomLevelPoiStyles(iconStyle: PoiIconStyle) -> [PerLevelPoiStyle] {
+        (minMapZoomLevel...maxMapZoomLevel).map { level in
+            PerLevelPoiStyle(iconStyle: iconStyle, padding: 0, level: level)
         }
     }
 
-    static func styleID(for category: String?) -> String {
-        guard let category = category, !category.isEmpty else {
-            return defaultStyleID
+    static func makeFixedZoomPoiIconStyle(symbol: UIImage, anchorPoint: CGPoint) -> PoiIconStyle {
+        PoiIconStyle(
+            symbol: symbol,
+            anchorPoint: anchorPoint,
+            transition: PoiTransition(entrance: .none, exit: .none),
+            enableEntranceTransition: false,
+            enableExitTransition: false,
+            badges: nil
+        )
+    }
+
+    static func registerFixedZoomPoiStyle(on manager: LabelManager, styleID: String, iconStyle: PoiIconStyle) {
+        manager.addPoiStyle(PoiStyle(styleID: styleID, styles: allZoomLevelPoiStyles(iconStyle: iconStyle)))
+    }
+
+    static func applyFixedScreenMapSettings(on map: KakaoMap) {
+        map.poiScale = .regular
+    }
+
+    struct CategoryPinStyle {
+        let fillColor: UIColor
+        let strokeColor: UIColor
+        let emoji: String
+    }
+
+    static func categoryPinStyle(for category: String?) -> CategoryPinStyle {
+        switch category {
+        case "맛집":
+            return CategoryPinStyle(fillColor: UIColor(hex: 0x513229), strokeColor: .white, emoji: "🍽️")
+        case "카페":
+            return CategoryPinStyle(fillColor: UIColor(hex: 0xFCE6B7), strokeColor: UIColor(hex: 0x999999), emoji: "☕")
+        case "쇼핑":
+            return CategoryPinStyle(fillColor: UIColor(hex: 0xD8EBF9), strokeColor: UIColor(hex: 0x999999), emoji: "🛍️")
+        case "숙소":
+            return CategoryPinStyle(fillColor: UIColor(hex: 0xD7D4B1), strokeColor: UIColor(hex: 0x999999), emoji: "🏠")
+        case "놀거리":
+            return CategoryPinStyle(fillColor: UIColor(hex: 0xc4b5fd), strokeColor: UIColor(hex: 0x999999), emoji: "🎮")
+        case "여행지":
+            return CategoryPinStyle(fillColor: UIColor(hex: 0x99e9f2), strokeColor: UIColor(hex: 0x999999), emoji: "🗺️")
+        default:
+            return CategoryPinStyle(fillColor: .systemRed, strokeColor: UIColor(hex: 0x999999), emoji: "📍")
         }
+    }
+
+    static func markerColor(for category: String?) -> UIColor {
+        categoryPinStyle(for: category).fillColor
+    }
+
+    static func styleID(for category: String?, order: Int? = nil) -> String {
         let key: String
         switch category {
         case "맛집": key = "food"
@@ -471,34 +486,147 @@ private enum NativeMapMarkerStyleHelper {
         default: key = "default"
         }
         if key == "default" {
+            if let order, order > 0 { return "\(defaultStyleID)-order-\(order)" }
             return defaultStyleID
         }
+        if let order, order > 0 { return "pindmap-marker-\(key)-order-\(order)" }
         return "pindmap-marker-\(key)"
     }
 
-    static func makeMarkerIcon(color: UIColor) -> UIImage {
-        let size = CGSize(width: 28, height: 28)
-        let renderer = UIGraphicsImageRenderer(size: size)
+    static func makeMarkerIcon(category: String?, order: Int? = nil) -> UIImage {
+        let style = categoryPinStyle(for: category)
+        let isCoursePin = (order ?? 0) > 0
+        let canvasSize = isCoursePin ? coursePinSize : pinSize
+        let renderer = imageRenderer(for: canvasSize)
         return renderer.image { ctx in
-            color.setFill()
-            ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
-            UIColor.white.setStroke()
-            ctx.cgContext.setLineWidth(2)
-            ctx.cgContext.strokeEllipse(in: CGRect(x: 1, y: 1, width: size.width - 2, height: size.height - 2))
+            let cg = ctx.cgContext
+            let bounds = CGRect(origin: .zero, size: canvasSize)
+
+            let droplet = isCoursePin
+                ? courseDropletPath(in: bounds)
+                : savedDropletPath(in: bounds)
+
+            cg.saveGState()
+            style.fillColor.setFill()
+            droplet.fill()
+            style.strokeColor.setStroke()
+            droplet.lineWidth = 1
+            droplet.stroke()
+            cg.restoreGState()
+
+            let cx = canvasSize.width * (isCoursePin ? 16 / 32 : 18 / 36)
+            let cy = canvasSize.height * (isCoursePin ? 16 / 40 : 18 / 44)
+            let radius = canvasSize.width * (isCoursePin ? 11 / 32 : 13 / 36)
+            cg.setFillColor(UIColor.white.withAlphaComponent(0.9).cgColor)
+            cg.fillEllipse(in: CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2))
+
+            if let order, order > 0 {
+                let text = "\(order)"
+                let font = UIFont.systemFont(ofSize: isCoursePin ? 13 : 13, weight: .bold)
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: font,
+                    .foregroundColor: readableCenterTextColor(for: style.fillColor),
+                ]
+                let textSize = (text as NSString).size(withAttributes: attrs)
+                let textRect = CGRect(
+                    x: cx - textSize.width / 2,
+                    y: cy - textSize.height / 2,
+                    width: textSize.width,
+                    height: textSize.height
+                )
+                (text as NSString).draw(in: textRect, withAttributes: attrs)
+            } else {
+                let font = UIFont.systemFont(ofSize: 14)
+                let attrs: [NSAttributedString.Key: Any] = [.font: font]
+                let textSize = (style.emoji as NSString).size(withAttributes: attrs)
+                let textRect = CGRect(
+                    x: cx - textSize.width / 2,
+                    y: cy - textSize.height / 2 + 1,
+                    width: textSize.width,
+                    height: textSize.height
+                )
+                (style.emoji as NSString).draw(in: textRect, withAttributes: attrs)
+            }
         }
+    }
+
+    /// React makeMarkerImage viewBox 0 0 36 44
+    private static func savedDropletPath(in rect: CGRect) -> UIBezierPath {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x / 36 * rect.width, y: rect.minY + y / 44 * rect.height)
+        }
+        let path = UIBezierPath()
+        path.move(to: p(18, 0))
+        path.addCurve(to: p(0, 18), controlPoint1: p(8.06, 0), controlPoint2: p(0, 8.06))
+        path.addCurve(to: p(18, 44), controlPoint1: p(0, 31.5), controlPoint2: p(18, 44))
+        path.addCurve(to: p(36, 18), controlPoint1: p(18, 44), controlPoint2: p(36, 31.5))
+        path.addCurve(to: p(18, 0), controlPoint1: p(36, 8.06), controlPoint2: p(27.94, 0))
+        path.close()
+        return path
+    }
+
+    /// React course marker viewBox 0 0 32 40
+    private static func courseDropletPath(in rect: CGRect) -> UIBezierPath {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x / 32 * rect.width, y: rect.minY + y / 40 * rect.height)
+        }
+        let path = UIBezierPath()
+        path.move(to: p(16, 0))
+        path.addCurve(to: p(0, 16), controlPoint1: p(7.16, 0), controlPoint2: p(0, 7.16))
+        path.addCurve(to: p(16, 40), controlPoint1: p(0, 28), controlPoint2: p(16, 40))
+        path.addCurve(to: p(32, 16), controlPoint1: p(16, 40), controlPoint2: p(32, 28))
+        path.addCurve(to: p(16, 0), controlPoint1: p(32, 7.16), controlPoint2: p(24.84, 0))
+        path.close()
+        return path
+    }
+
+    private static func dropletPath(in rect: CGRect) -> UIBezierPath {
+        savedDropletPath(in: rect)
+    }
+
+    private static func readableCenterTextColor(for fill: UIColor) -> UIColor {
+        var r: CGFloat = 0
+        var g: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        fill.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        return luminance > 0.72 ? UIColor(hex: 0x1a2a7a) : fill
     }
 
     static let myLocationStyleID = "pindmap-my-location-style"
 
     static func makeMyLocationIcon() -> UIImage {
-        let size = CGSize(width: 20, height: 20)
-        let renderer = UIGraphicsImageRenderer(size: size)
+        let size = myLocationSize
+        let renderer = imageRenderer(for: size)
         return renderer.image { ctx in
-            UIColor.white.setFill()
-            ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
-            UIColor.systemBlue.setFill()
-            ctx.cgContext.fillEllipse(in: CGRect(x: 3, y: 3, width: size.width - 6, height: size.height - 6))
+            let cg = ctx.cgContext
+            // React makeMyLocationImage: r=10 #1a2a7a + white stroke 2.5, inner r=4 white
+            let outerRect = CGRect(x: 2, y: 2, width: 20, height: 20)
+            cg.setFillColor(UIColor(hex: 0x1a2a7a).cgColor)
+            cg.fillEllipse(in: outerRect)
+            cg.setStrokeColor(UIColor.white.cgColor)
+            cg.setLineWidth(2.5)
+            cg.strokeEllipse(in: outerRect.insetBy(dx: 1.25, dy: 1.25))
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.fillEllipse(in: CGRect(x: 8, y: 8, width: 8, height: 8))
         }
+    }
+
+    static func makeMyLocationInfoWindow(guiID: String) -> InfoWindow {
+        let infoWindow = InfoWindow(guiID)
+        let bodyImage = GuiImage("myLocationDot")
+        bodyImage.image = makeMyLocationIcon()
+        var iconSize = GuiSize()
+        iconSize.width = UInt(myLocationSize.width)
+        iconSize.height = UInt(myLocationSize.height)
+        bodyImage.imageSize = iconSize
+        infoWindow.body = bodyImage
+        infoWindow.tail = nil
+        let half = myLocationSize.width / 2
+        infoWindow.bodyOffset = CGPoint(x: -half, y: -half)
+        infoWindow.zOrder = 1000
+        return infoWindow
     }
 }
 
@@ -558,6 +686,9 @@ private final class KakaoMapTestViewController: UIViewController {
         let address: String?
         let photos: [String]
         let postCount: Int
+        let isSaved: Bool
+        let photoPostIds: [String]
+        let order: Int?
     }
 
     struct SearchResultInput {
@@ -572,16 +703,20 @@ private final class KakaoMapTestViewController: UIViewController {
     private static let searchResultCellID = "SearchResultCell"
     private static let markerLayerID = "pindmap-fullscreen-markers"
     private static let myLocationGuiID = "my-location"
-    private static let myLocationIconSize: UInt = 24
+
+    /// Plugin-level route debug — exposed for [crs] logs
+    var isMapViewReadyForDebug: Bool { mapViewReady }
 
     private struct MarkerMetadata {
-        let title: String?
-        let address: String?
-        let category: String?
-        let lat: Double?
-        let lng: Double?
-        let photos: [String]
-        let postCount: Int
+        var title: String?
+        var address: String?
+        var category: String?
+        var lat: Double?
+        var lng: Double?
+        var photos: [String]
+        var postCount: Int
+        var isSaved: Bool
+        var photoPostIds: [String]
     }
 
     private let mode: Mode
@@ -598,7 +733,12 @@ private final class KakaoMapTestViewController: UIViewController {
     private let overlayCardWebView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
     var onMarkerClick: ((String) -> Void)?
     var onSearch: ((String) -> Void)?
-    var onDirections: ((String, Double, Double) -> Void)?
+    var onDirections: ((String, Double, Double, String) -> Void)?
+    var onToggleSave: ((String) -> Void)?
+    var onCuration: ((String, String) -> Void)?
+    var onOpenExternal: ((String, String) -> Void)?
+    var onImageLightbox: ((String) -> Void)?
+    var onPlaceDetail: ((String) -> Void)?
     var onResearchArea: ((Double, Double) -> Void)?
     var onDismiss: (() -> Void)?
     private weak var productionCloseButton: UIButton?
@@ -613,18 +753,22 @@ private final class KakaoMapTestViewController: UIViewController {
     private weak var placeSheetTitleLabel: UILabel?
     private weak var placeSheetAddressLabel: UILabel?
     private weak var placeSheetDirectionsButton: UIButton?
-    private var placeSheetDirectionsTopToAddress: NSLayoutConstraint?
-    private var placeSheetDirectionsTopToTitle: NSLayoutConstraint?
-    private var placeSheetDirectionsTopToMedia: NSLayoutConstraint?
-    private var placeSheetDirectionsTopToPostCount: NSLayoutConstraint?
+    private weak var placeSheetSaveButton: UIButton?
+    private weak var placeSheetDirectionsInfoLabel: UILabel?
+    private weak var placeSheetAppleMapsButton: UIButton?
+    private weak var placeSheetTransitButton: UIButton?
+    private var placeSheetActionsTopToAddress: NSLayoutConstraint?
+    private var placeSheetActionsTopToTitle: NSLayoutConstraint?
+    private var placeSheetActionsTopToMedia: NSLayoutConstraint?
+    private var placeSheetActionsTopToPostCount: NSLayoutConstraint?
     private var placeSheetMarkerId: String?
     private weak var placeSheetPostCountLabel: UILabel?
     private weak var placeSheetPhotosScrollView: UIScrollView?
     private weak var placeSheetPhotosStackView: UIStackView?
     private var placeSheetPhotosHeightConstraint: NSLayoutConstraint?
     private static let photoThumbnailSize: CGFloat = 88
-    private static let placeSheetCompactDismissOffset: CGFloat = 220
-    private static let placeSheetExpandedDismissOffset: CGFloat = 360
+    private static let placeSheetCompactDismissOffset: CGFloat = 300
+    private static let placeSheetExpandedDismissOffset: CGFloat = 440
     private weak var searchResultsCard: UIView?
     private weak var searchResultsTitleLabel: UILabel?
     private weak var searchResultsTableView: UITableView?
@@ -641,6 +785,42 @@ private final class KakaoMapTestViewController: UIViewController {
     private var pendingRoute: (path: [(lat: Double, lng: Double)], mode: String)?
     private var pendingMyLocation: (lat: Double, lng: Double)?
     private var myLocationInfoWindow: InfoWindow?
+
+    struct CourseNavStep {
+        let description: String
+        let lat: Double
+        let lng: Double
+    }
+
+    struct CourseNavSegment {
+        let index: Int
+        let fromName: String
+        let toName: String
+        let distanceM: Int
+        let timeSec: Int
+        let path: [(lat: Double, lng: Double)]
+        let steps: [CourseNavStep]
+    }
+
+    private var courseNavSegments: [CourseNavSegment] = []
+    private var courseNavFullPath: [(lat: Double, lng: Double)] = []
+    private var courseNavPlaceCount = 0
+    private var courseNavTotalDistanceM = 0
+    private var courseNavTotalTimeSec = 0
+    private var courseNavSelectedSegmentIndex: Int?
+    private var courseNavSegmentFocusMode = false
+    private weak var courseNavPanel: UIView?
+    private weak var courseNavSummaryLabel: UILabel?
+    private weak var courseNavSegmentScrollView: UIScrollView?
+    private weak var courseNavSegmentStack: UIStackView?
+    private weak var courseNavFocusBar: UIStackView?
+    private weak var courseNavPrevButton: UIButton?
+    private weak var courseNavNextButton: UIButton?
+    private weak var courseNavFocusLabel: UILabel?
+    private var courseNavFocusBarTopConstraint: NSLayoutConstraint?
+    private var courseNavFocusBarHeightConstraint: NSLayoutConstraint?
+    private var courseNavFocusBarBottomConstraint: NSLayoutConstraint?
+    private var courseNavScrollBottomConstraint: NSLayoutConstraint?
 
     private struct TestMarker {
         let id: String
@@ -677,6 +857,9 @@ private final class KakaoMapTestViewController: UIViewController {
         if mapViewReady {
             applyPendingCamera(animated: false)
             updateMarkers(markers, clearPrefix: nil)
+            // TEMP crs-debug
+            CAPLog.print("[crs] configure mapViewReady=true flushPendingRouteIfNeeded pendingRouteCount=\(pendingRoute?.path.count ?? 0)")
+            flushPendingRouteIfNeeded()
         }
     }
 
@@ -694,17 +877,123 @@ private final class KakaoMapTestViewController: UIViewController {
         _ = addMarkers(markers)
     }
 
-    func setRoute(path: [(lat: Double, lng: Double)], mode: String) {
+    func setRoute(path: [(lat: Double, lng: Double)], mode: String, fitCamera: Bool = true) {
+        // TEMP crs-debug
+        CAPLog.print("[crs] setRoute entry pathCount=\(path.count) mode=\(mode) mapViewReady=\(mapViewReady) kakaoMap=\(kakaoMapView() != nil)")
         pendingRoute = (path, mode)
-        guard mapViewReady else {
+        guard mapViewReady, kakaoMapView() != nil else {
+            // TEMP crs-debug
+            CAPLog.print("[crs] setRoute deferred — stored pendingRoute pathCount=\(path.count)")
             return
         }
-        applyRoute(path: path, mode: mode)
+        // TEMP crs-debug
+        CAPLog.print("[crs] setRoute applying immediately pathCount=\(path.count)")
+        applyRoute(path: path, mode: mode, fitCamera: fitCamera)
+    }
+
+    private func flushPendingRouteIfNeeded() {
+        guard let pendingRoute else {
+            // TEMP crs-debug
+            CAPLog.print("[crs] flushPendingRoute skip — no pendingRoute mapViewReady=\(mapViewReady)")
+            return
+        }
+        guard mapViewReady, kakaoMapView() != nil else {
+            // TEMP crs-debug
+            CAPLog.print("[crs] flushPendingRoute skip — not ready pathCount=\(pendingRoute.path.count) mapViewReady=\(mapViewReady) kakaoMap=\(kakaoMapView() != nil)")
+            return
+        }
+        // TEMP crs-debug
+        CAPLog.print("[crs] flushPendingRoute applying pathCount=\(pendingRoute.path.count) mode=\(pendingRoute.mode)")
+        applyRoute(path: pendingRoute.path, mode: pendingRoute.mode, fitCamera: true)
     }
 
     func clearRoute() {
         pendingRoute = nil
         routeLayer?.clearAllRoutes()
+    }
+
+    func setCourseNavigation(
+        placeCount: Int,
+        totalTimeSec: Int,
+        totalDistanceM: Int,
+        segments: [CourseNavSegment],
+        fullPath: [(lat: Double, lng: Double)]
+    ) {
+        courseNavSegments = segments
+        courseNavFullPath = fullPath
+        courseNavPlaceCount = placeCount
+        courseNavTotalDistanceM = totalDistanceM
+        courseNavTotalTimeSec = totalTimeSec
+        courseNavSelectedSegmentIndex = segments.isEmpty ? nil : 0
+        courseNavSegmentFocusMode = false
+        ensureCourseNavChrome()
+        productionSearchBarContainer?.isHidden = true
+        hideResearchAreaButton()
+        updateCourseNavUI()
+        bringCourseNavToFront()
+    }
+
+    func clearCourseNavigation() {
+        courseNavSegments = []
+        courseNavFullPath = []
+        courseNavPlaceCount = 0
+        courseNavTotalDistanceM = 0
+        courseNavTotalTimeSec = 0
+        courseNavSelectedSegmentIndex = nil
+        courseNavSegmentFocusMode = false
+        courseNavPanel?.isHidden = true
+        productionSearchBarContainer?.isHidden = false
+    }
+
+    static func parseCourseNavigationSegments(from call: CAPPluginCall) -> [CourseNavSegment] {
+        guard let raw = call.options["segments"] as? [[String: Any]] else { return [] }
+        var out: [CourseNavSegment] = []
+        for dict in raw {
+            let index = intValue(dict["index"]) ?? out.count
+            let fromName = dict["fromName"] as? String ?? ""
+            let toName = dict["toName"] as? String ?? ""
+            let distanceM = intValue(dict["distanceM"]) ?? 0
+            let timeSec = intValue(dict["timeSec"]) ?? 0
+            var path: [(lat: Double, lng: Double)] = []
+            if let pathRaw = dict["path"] as? [[String: Any]] {
+                for point in pathRaw {
+                    guard let lat = doubleValue(point["lat"]), let lng = doubleValue(point["lng"]) else { continue }
+                    path.append((lat: lat, lng: lng))
+                }
+            }
+            var steps: [CourseNavStep] = []
+            if let stepsRaw = dict["steps"] as? [[String: Any]] {
+                for stepDict in stepsRaw {
+                    guard let lat = doubleValue(stepDict["lat"]), let lng = doubleValue(stepDict["lng"]) else { continue }
+                    let description = stepDict["description"] as? String ?? ""
+                    steps.append(CourseNavStep(description: description, lat: lat, lng: lng))
+                }
+            }
+            out.append(CourseNavSegment(
+                index: index,
+                fromName: fromName,
+                toName: toName,
+                distanceM: distanceM,
+                timeSec: timeSec,
+                path: path,
+                steps: steps
+            ))
+        }
+        return out.sorted { $0.index < $1.index }
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let intVal = value as? Int { return intVal }
+        if let num = value as? NSNumber { return num.intValue }
+        if let str = value as? String, let intVal = Int(str) { return intVal }
+        return nil
+    }
+
+    private static func doubleValue(_ value: Any?) -> Double? {
+        if let doubleVal = value as? Double { return doubleVal }
+        if let num = value as? NSNumber { return num.doubleValue }
+        if let str = value as? String, let doubleVal = Double(str) { return doubleVal }
+        return nil
     }
 
     func setMyLocation(lat: Double, lng: Double) {
@@ -739,6 +1028,10 @@ private final class KakaoMapTestViewController: UIViewController {
         searchResults = []
         hideResearchAreaButton()
         hideSearchResultsSheet(animated: true)
+    }
+
+    func showPlaceSheet(for markerId: String) {
+        showPlaceBottomSheet(for: markerId)
     }
 
     override func viewDidLoad() {
@@ -1042,7 +1335,7 @@ private final class KakaoMapTestViewController: UIViewController {
 
     @objc private func replaceMarkersTapped() {
         let busanInputs = busanMarkers.map {
-            MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0)
+            MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0, isSaved: false, photoPostIds: [], order: nil)
         }
         updateMarkers(busanInputs, clearPrefix: nil)
     }
@@ -1058,22 +1351,22 @@ private final class KakaoMapTestViewController: UIViewController {
         }
     }
 
-    private func ensureStyle(for category: String?) -> String {
+    private func ensureStyle(for category: String?, order: Int? = nil) -> String {
         guard let map = kakaoMapView() else {
-            return NativeMapMarkerStyleHelper.styleID(for: category)
+            return NativeMapMarkerStyleHelper.styleID(for: category, order: order)
         }
-        let styleID = NativeMapMarkerStyleHelper.styleID(for: category)
+        let styleID = NativeMapMarkerStyleHelper.styleID(for: category, order: order)
         if registeredStyleIDs.contains(styleID) {
             return styleID
         }
         let manager = map.getLabelManager()
-        let color = NativeMapMarkerStyleHelper.markerColor(for: category)
-        let iconStyle = PoiIconStyle(
-            symbol: NativeMapMarkerStyleHelper.makeMarkerIcon(color: color),
-            anchorPoint: CGPoint(x: 0.5, y: 1.0)
+        let isCoursePin = (order ?? 0) > 0
+        let anchor = isCoursePin ? NativeMapMarkerStyleHelper.coursePinAnchor : NativeMapMarkerStyleHelper.savedPinAnchor
+        let iconStyle = NativeMapMarkerStyleHelper.makeFixedZoomPoiIconStyle(
+            symbol: NativeMapMarkerStyleHelper.makeMarkerIcon(category: category, order: order),
+            anchorPoint: anchor
         )
-        let perLevel = PerLevelPoiStyle(iconStyle: iconStyle, level: 0)
-        manager.addPoiStyle(PoiStyle(styleID: styleID, styles: [perLevel]))
+        NativeMapMarkerStyleHelper.registerFixedZoomPoiStyle(on: manager, styleID: styleID, iconStyle: iconStyle)
         registeredStyleIDs.insert(styleID)
         return styleID
     }
@@ -1138,12 +1431,15 @@ private final class KakaoMapTestViewController: UIViewController {
                 lat: marker.lat,
                 lng: marker.lng,
                 photos: marker.photos,
-                postCount: marker.postCount
+                postCount: marker.postCount,
+                isSaved: marker.isSaved,
+                photoPostIds: marker.photoPostIds
             )
-            let styleID = ensureStyle(for: marker.category)
+            let styleID = ensureStyle(for: marker.category, order: marker.order)
             let option = PoiOptions(styleID: styleID, poiID: marker.id)
             option.rank = 0
             option.clickable = true
+            option.transformType = .default
             let point = MapPoint(longitude: marker.lng, latitude: marker.lat)
             guard let poi = layer.addPoi(option: option, at: point) else {
                 CAPLog.print("[PindmapNativeMap][Fullscreen] addPoi FAIL id=\(marker.id)")
@@ -1286,6 +1582,22 @@ private final class KakaoMapTestViewController: UIViewController {
         photosScrollView.addSubview(photosStackView)
         placeSheetPhotosStackView = photosStackView
 
+        let saveButton = UIButton(type: .system)
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
+        saveButton.setImage(UIImage(systemName: "heart"), for: .normal)
+        saveButton.tintColor = .secondaryLabel
+        saveButton.addTarget(self, action: #selector(placeSheetSaveTapped), for: .touchUpInside)
+        card.addSubview(saveButton)
+        placeSheetSaveButton = saveButton
+
+        let directionsInfoLabel = UILabel()
+        directionsInfoLabel.translatesAutoresizingMaskIntoConstraints = false
+        directionsInfoLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        directionsInfoLabel.textColor = .secondaryLabel
+        directionsInfoLabel.isHidden = true
+        card.addSubview(directionsInfoLabel)
+        placeSheetDirectionsInfoLabel = directionsInfoLabel
+
         let directionsButton = UIButton(type: .system)
         directionsButton.translatesAutoresizingMaskIntoConstraints = false
         directionsButton.setTitle("길찾기", for: .normal)
@@ -1297,20 +1609,51 @@ private final class KakaoMapTestViewController: UIViewController {
         card.addSubview(directionsButton)
         placeSheetDirectionsButton = directionsButton
 
+        let appleMapsButton = UIButton(type: .system)
+        appleMapsButton.translatesAutoresizingMaskIntoConstraints = false
+        appleMapsButton.setTitle("Apple 지도", for: .normal)
+        appleMapsButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        appleMapsButton.setTitleColor(UIColor(hex: 0x1a2a7a), for: .normal)
+        appleMapsButton.backgroundColor = .systemBackground
+        appleMapsButton.layer.cornerRadius = 10
+        appleMapsButton.layer.borderWidth = 1
+        appleMapsButton.layer.borderColor = UIColor(hex: 0x1a2a7a).cgColor
+        appleMapsButton.addTarget(self, action: #selector(placeSheetAppleMapsTapped), for: .touchUpInside)
+
+        let transitButton = UIButton(type: .system)
+        transitButton.translatesAutoresizingMaskIntoConstraints = false
+        transitButton.setTitle("대중교통", for: .normal)
+        transitButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        transitButton.setTitleColor(UIColor(hex: 0x1a2a7a), for: .normal)
+        transitButton.backgroundColor = .systemBackground
+        transitButton.layer.cornerRadius = 10
+        transitButton.layer.borderWidth = 1
+        transitButton.layer.borderColor = UIColor(hex: 0x1a2a7a).cgColor
+        transitButton.addTarget(self, action: #selector(placeSheetTransitTapped), for: .touchUpInside)
+
+        let externalStack = UIStackView(arrangedSubviews: [appleMapsButton, transitButton])
+        externalStack.translatesAutoresizingMaskIntoConstraints = false
+        externalStack.axis = .horizontal
+        externalStack.spacing = 8
+        externalStack.distribution = .fillEqually
+        card.addSubview(externalStack)
+        placeSheetAppleMapsButton = appleMapsButton
+        placeSheetTransitButton = transitButton
+
         let bottom = card.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: Self.placeSheetCompactDismissOffset)
         placeSheetBottomConstraint = bottom
 
-        let directionsTopToAddress = directionsButton.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 12)
-        let directionsTopToTitle = directionsButton.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12)
-        let directionsTopToMedia = directionsButton.topAnchor.constraint(equalTo: photosScrollView.bottomAnchor, constant: 12)
-        let directionsTopToPostCount = directionsButton.topAnchor.constraint(equalTo: postCountLabel.bottomAnchor, constant: 12)
-        directionsTopToTitle.isActive = false
-        directionsTopToMedia.isActive = false
-        directionsTopToPostCount.isActive = false
-        placeSheetDirectionsTopToAddress = directionsTopToAddress
-        placeSheetDirectionsTopToTitle = directionsTopToTitle
-        placeSheetDirectionsTopToMedia = directionsTopToMedia
-        placeSheetDirectionsTopToPostCount = directionsTopToPostCount
+        let actionsTopToAddress = directionsInfoLabel.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 12)
+        let actionsTopToTitle = directionsInfoLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12)
+        let actionsTopToMedia = directionsInfoLabel.topAnchor.constraint(equalTo: photosScrollView.bottomAnchor, constant: 12)
+        let actionsTopToPostCount = directionsInfoLabel.topAnchor.constraint(equalTo: postCountLabel.bottomAnchor, constant: 12)
+        actionsTopToTitle.isActive = false
+        actionsTopToMedia.isActive = false
+        actionsTopToPostCount.isActive = false
+        placeSheetActionsTopToAddress = actionsTopToAddress
+        placeSheetActionsTopToTitle = actionsTopToTitle
+        placeSheetActionsTopToMedia = actionsTopToMedia
+        placeSheetActionsTopToPostCount = actionsTopToPostCount
 
         let photosHeight = photosScrollView.heightAnchor.constraint(equalToConstant: Self.photoThumbnailSize)
         placeSheetPhotosHeightConstraint = photosHeight
@@ -1319,6 +1662,10 @@ private final class KakaoMapTestViewController: UIViewController {
             card.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             card.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bottom,
+            saveButton.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            saveButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
+            saveButton.widthAnchor.constraint(equalToConstant: 32),
+            saveButton.heightAnchor.constraint(equalToConstant: 32),
             closeButton.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
             closeButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
             closeButton.widthAnchor.constraint(equalToConstant: 32),
@@ -1329,7 +1676,7 @@ private final class KakaoMapTestViewController: UIViewController {
             categoryDot.heightAnchor.constraint(equalToConstant: 10),
             categoryLabel.leadingAnchor.constraint(equalTo: categoryDot.trailingAnchor, constant: 8),
             categoryLabel.centerYAnchor.constraint(equalTo: categoryDot.centerYAnchor),
-            categoryLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
+            categoryLabel.trailingAnchor.constraint(lessThanOrEqualTo: saveButton.leadingAnchor, constant: -8),
             titleLabel.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 20),
             titleLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -20),
             titleLabel.topAnchor.constraint(equalTo: categoryDot.bottomAnchor, constant: 12),
@@ -1348,11 +1695,18 @@ private final class KakaoMapTestViewController: UIViewController {
             photosStackView.trailingAnchor.constraint(equalTo: photosScrollView.contentLayoutGuide.trailingAnchor),
             photosStackView.bottomAnchor.constraint(equalTo: photosScrollView.contentLayoutGuide.bottomAnchor),
             photosStackView.heightAnchor.constraint(equalTo: photosScrollView.frameLayoutGuide.heightAnchor),
-            directionsTopToAddress,
+            actionsTopToAddress,
+            directionsInfoLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            directionsInfoLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            directionsButton.topAnchor.constraint(equalTo: directionsInfoLabel.bottomAnchor, constant: 10),
             directionsButton.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             directionsButton.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
             directionsButton.heightAnchor.constraint(equalToConstant: 44),
-            directionsButton.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            externalStack.topAnchor.constraint(equalTo: directionsButton.bottomAnchor, constant: 10),
+            externalStack.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            externalStack.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            externalStack.heightAnchor.constraint(equalToConstant: 40),
+            externalStack.bottomAnchor.constraint(equalTo: card.safeAreaLayoutGuide.bottomAnchor, constant: -16),
         ])
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(placeSheetPanned(_:)))
@@ -1392,6 +1746,7 @@ private final class KakaoMapTestViewController: UIViewController {
                 view.removeFromSuperview()
             }
             if hasPhotos {
+                var index = 0
                 for urlString in photos {
                     let imageView = UIImageView()
                     imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -1399,6 +1754,11 @@ private final class KakaoMapTestViewController: UIViewController {
                     imageView.clipsToBounds = true
                     imageView.layer.cornerRadius = 10
                     imageView.backgroundColor = UIColor.secondarySystemFill
+                    imageView.isUserInteractionEnabled = true
+                    imageView.tag = index
+                    index += 1
+                    let tap = UITapGestureRecognizer(target: self, action: #selector(placeSheetPhotoTapped(_:)))
+                    imageView.addGestureRecognizer(tap)
                     NSLayoutConstraint.activate([
                         imageView.widthAnchor.constraint(equalToConstant: Self.photoThumbnailSize),
                         imageView.heightAnchor.constraint(equalToConstant: Self.photoThumbnailSize),
@@ -1409,20 +1769,57 @@ private final class KakaoMapTestViewController: UIViewController {
             }
         }
 
-        placeSheetDirectionsTopToAddress?.isActive = false
-        placeSheetDirectionsTopToTitle?.isActive = false
-        placeSheetDirectionsTopToMedia?.isActive = false
-        placeSheetDirectionsTopToPostCount?.isActive = false
+        placeSheetActionsTopToAddress?.isActive = false
+        placeSheetActionsTopToTitle?.isActive = false
+        placeSheetActionsTopToMedia?.isActive = false
+        placeSheetActionsTopToPostCount?.isActive = false
 
         if hasPhotos {
-            placeSheetDirectionsTopToMedia?.isActive = true
+            placeSheetActionsTopToMedia?.isActive = true
         } else if hasPostCount {
-            placeSheetDirectionsTopToPostCount?.isActive = true
+            placeSheetActionsTopToPostCount?.isActive = true
         } else if meta?.address?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
-            placeSheetDirectionsTopToAddress?.isActive = true
+            placeSheetActionsTopToAddress?.isActive = true
         } else {
-            placeSheetDirectionsTopToTitle?.isActive = true
+            placeSheetActionsTopToTitle?.isActive = true
         }
+    }
+
+    private func updatePlaceSheetSaveButton(isSaved: Bool) {
+        let symbol = isSaved ? "heart.fill" : "heart"
+        placeSheetSaveButton?.setImage(UIImage(systemName: symbol), for: .normal)
+        placeSheetSaveButton?.tintColor = isSaved ? UIColor(hex: 0xe07070) : .secondaryLabel
+    }
+
+    private func formatDirectionsInfo(durationSec: Int, distanceM: Int) -> String {
+        let minutes = max(1, Int(round(Double(durationSec) / 60.0)))
+        let km = Double(distanceM) / 1000.0
+        let distanceText: String
+        if km >= 10 {
+            distanceText = String(format: "%.0f km", km)
+        } else if km >= 1 {
+            distanceText = String(format: "%.1f km", km)
+        } else {
+            distanceText = "\(distanceM) m"
+        }
+        return "약 \(minutes)분 · \(distanceText)"
+    }
+
+    func setPlaceSaved(markerId: String, saved: Bool) {
+        if var meta = markerMetadata[markerId] {
+            meta.isSaved = saved
+            markerMetadata[markerId] = meta
+        }
+        if placeSheetMarkerId == markerId {
+            updatePlaceSheetSaveButton(isSaved: saved)
+        }
+    }
+
+    func setDirectionsInfo(markerId: String, durationSec: Int, distanceM: Int) {
+        guard placeSheetMarkerId == markerId else { return }
+        let text = formatDirectionsInfo(durationSec: durationSec, distanceM: distanceM)
+        placeSheetDirectionsInfoLabel?.text = text
+        placeSheetDirectionsInfoLabel?.isHidden = false
     }
 
     private func showPlaceBottomSheet(for markerId: String) {
@@ -1462,6 +1859,9 @@ private final class KakaoMapTestViewController: UIViewController {
         }
 
         updatePlaceSheetMedia(for: meta)
+        updatePlaceSheetSaveButton(isSaved: meta?.isSaved ?? false)
+        placeSheetDirectionsInfoLabel?.text = nil
+        placeSheetDirectionsInfoLabel?.isHidden = true
 
         let dismissOffset = placeSheetDismissOffset(for: markerId)
         let alreadyVisible = backdrop.alpha > 0 && !backdrop.isHidden
@@ -1539,7 +1939,36 @@ private final class KakaoMapTestViewController: UIViewController {
         } else {
             return
         }
-        onDirections?(markerId, lat, lng)
+        onDirections?(markerId, lat, lng, "walk")
+    }
+
+    @objc private func placeSheetSaveTapped() {
+        guard let markerId = placeSheetMarkerId else { return }
+        onToggleSave?(markerId)
+    }
+
+    @objc private func placeSheetAppleMapsTapped() {
+        guard let markerId = placeSheetMarkerId else { return }
+        onOpenExternal?(markerId, "apple")
+    }
+
+    @objc private func placeSheetTransitTapped() {
+        guard let markerId = placeSheetMarkerId else { return }
+        onOpenExternal?(markerId, "transit")
+    }
+
+    @objc private func placeSheetPhotoTapped(_ gesture: UITapGestureRecognizer) {
+        guard let imageView = gesture.view as? UIImageView,
+              let markerId = placeSheetMarkerId,
+              let meta = markerMetadata[markerId] else { return }
+        let index = imageView.tag
+        guard index >= 0, index < meta.photos.count else { return }
+        let url = meta.photos[index]
+        if index < meta.photoPostIds.count, !meta.photoPostIds[index].isEmpty {
+            onCuration?(markerId, meta.photoPostIds[index])
+        } else {
+            onImageLightbox?(url)
+        }
     }
 
     @objc private func placeSheetPanned(_ gesture: UIPanGestureRecognizer) {
@@ -1645,7 +2074,9 @@ private final class KakaoMapTestViewController: UIViewController {
                 lat: item.lat,
                 lng: item.lng,
                 photos: [],
-                postCount: 0
+                postCount: 0,
+                isSaved: false,
+                photoPostIds: []
             )
         }
 
@@ -1708,14 +2139,20 @@ private final class KakaoMapTestViewController: UIViewController {
         applyPendingCamera(animated: false)
         if mode == .prototype {
             let protoMarkers = seoulMarkers.map {
-                MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0)
+                MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0, isSaved: false, photoPostIds: [], order: nil)
             }
             _ = addMarkers(protoMarkers)
-        } else if !pendingInitialMarkers.isEmpty {
+        } else if !pendingInitialMarkers.isEmpty && markerPois.isEmpty {
+            // Skip re-applying initial markers if JS already added markers (search restore race)
             updateMarkers(pendingInitialMarkers, clearPrefix: nil)
         }
         if let pendingRoute {
-            applyRoute(path: pendingRoute.path, mode: pendingRoute.mode)
+            // TEMP crs-debug
+            CAPLog.print("[crs] applyInitialContent applyRoute pathCount=\(pendingRoute.path.count) mode=\(pendingRoute.mode)")
+            applyRoute(path: pendingRoute.path, mode: pendingRoute.mode, fitCamera: true)
+        } else {
+            // TEMP crs-debug
+            CAPLog.print("[crs] applyInitialContent no pendingRoute")
         }
         if let pendingSearchResults {
             applySearchResults(pendingSearchResults)
@@ -1726,19 +2163,7 @@ private final class KakaoMapTestViewController: UIViewController {
     }
 
     private func makeMyLocationInfoWindow() -> InfoWindow {
-        let infoWindow = InfoWindow(Self.myLocationGuiID)
-        let bodyImage = GuiImage("myLocationDot")
-        bodyImage.image = NativeMapMarkerStyleHelper.makeMyLocationIcon()
-        var iconSize = GuiSize()
-        iconSize.width = Self.myLocationIconSize
-        iconSize.height = Self.myLocationIconSize
-        bodyImage.imageSize = iconSize
-        infoWindow.body = bodyImage
-        infoWindow.tail = nil
-        let half = CGFloat(Self.myLocationIconSize) / 2
-        infoWindow.bodyOffset = CGPoint(x: -half, y: -half)
-        infoWindow.zOrder = 1000
-        return infoWindow
+        NativeMapMarkerStyleHelper.makeMyLocationInfoWindow(guiID: Self.myLocationGuiID)
     }
 
     private func applyMyLocation(lat: Double, lng: Double) {
@@ -1764,21 +2189,259 @@ private final class KakaoMapTestViewController: UIViewController {
         map.refresh()
     }
 
-    private func applyRoute(path: [(lat: Double, lng: Double)], mode: String) {
+    private func formatWalkDuration(_ totalSec: Int) -> String {
+        let minutes = max(1, Int(round(Double(totalSec) / 60.0)))
+        if minutes < 60 { return "\(minutes)분" }
+        let hours = minutes / 60
+        let rem = minutes % 60
+        return rem > 0 ? "\(hours)시간 \(rem)분" : "\(hours)시간"
+    }
+
+    private func formatWalkDistance(_ totalM: Int) -> String {
+        if totalM >= 1000 {
+            let km = Double(totalM) / 1000.0
+            return km >= 10 ? String(format: "%.0f km", km) : String(format: "%.1f km", km)
+        }
+        return "\(totalM) m"
+    }
+
+    private func ensureCourseNavChrome() {
+        guard mode == .production else { return }
+        if courseNavPanel != nil {
+            courseNavPanel?.isHidden = false
+            return
+        }
+
+        let panel = UIView()
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.96)
+        panel.layer.cornerRadius = 16
+        panel.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        panel.layer.shadowColor = UIColor.black.cgColor
+        panel.layer.shadowOpacity = 0.12
+        panel.layer.shadowOffset = CGSize(width: 0, height: -2)
+        panel.layer.shadowRadius = 8
+        view.addSubview(panel)
+        courseNavPanel = panel
+
+        let summary = UILabel()
+        summary.translatesAutoresizingMaskIntoConstraints = false
+        summary.font = .systemFont(ofSize: 14, weight: .semibold)
+        summary.textColor = UIColor(hex: 0x1a2a7a)
+        summary.numberOfLines = 2
+        panel.addSubview(summary)
+        courseNavSummaryLabel = summary
+
+        let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.showsHorizontalScrollIndicator = false
+        panel.addSubview(scroll)
+        courseNavSegmentScrollView = scroll
+
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal
+        stack.spacing = 8
+        stack.alignment = .fill
+        scroll.addSubview(stack)
+        courseNavSegmentStack = stack
+
+        let focusBar = UIStackView()
+        focusBar.translatesAutoresizingMaskIntoConstraints = false
+        focusBar.axis = .horizontal
+        focusBar.spacing = 8
+        focusBar.alignment = .center
+        focusBar.distribution = .fillEqually
+        panel.addSubview(focusBar)
+        courseNavFocusBar = focusBar
+
+        let prevButton = UIButton(type: .system)
+        prevButton.setTitle("이전", for: .normal)
+        prevButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        prevButton.addTarget(self, action: #selector(courseNavPrevTapped), for: .touchUpInside)
+        focusBar.addArrangedSubview(prevButton)
+        courseNavPrevButton = prevButton
+
+        let focusLabel = UILabel()
+        focusLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        focusLabel.textAlignment = .center
+        focusLabel.textColor = .secondaryLabel
+        focusBar.addArrangedSubview(focusLabel)
+        courseNavFocusLabel = focusLabel
+
+        let nextButton = UIButton(type: .system)
+        nextButton.setTitle("다음", for: .normal)
+        nextButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        nextButton.addTarget(self, action: #selector(courseNavNextTapped), for: .touchUpInside)
+        focusBar.addArrangedSubview(nextButton)
+        courseNavNextButton = nextButton
+
+        let fullButton = UIButton(type: .system)
+        fullButton.setTitle("전체 보기", for: .normal)
+        fullButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .bold)
+        fullButton.setTitleColor(UIColor(hex: 0x1a2a7a), for: .normal)
+        fullButton.addTarget(self, action: #selector(courseNavShowFullTapped), for: .touchUpInside)
+        focusBar.addArrangedSubview(fullButton)
+
+        let focusTop = focusBar.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 8)
+        let focusHeight = focusBar.heightAnchor.constraint(equalToConstant: 32)
+        let focusBottom = focusBar.bottomAnchor.constraint(equalTo: panel.safeAreaLayoutGuide.bottomAnchor, constant: -12)
+        let scrollBottom = scroll.bottomAnchor.constraint(equalTo: panel.safeAreaLayoutGuide.bottomAnchor, constant: -12)
+        scrollBottom.isActive = false
+        courseNavFocusBarTopConstraint = focusTop
+        courseNavFocusBarHeightConstraint = focusHeight
+        courseNavFocusBarBottomConstraint = focusBottom
+        courseNavScrollBottomConstraint = scrollBottom
+
+        NSLayoutConstraint.activate([
+            panel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            panel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            panel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            summary.topAnchor.constraint(equalTo: panel.topAnchor, constant: 12),
+            summary.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 16),
+            summary.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -16),
+
+            scroll.topAnchor.constraint(equalTo: summary.bottomAnchor, constant: 10),
+            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 12),
+            scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -12),
+            scroll.heightAnchor.constraint(equalToConstant: 36),
+
+            stack.topAnchor.constraint(equalTo: scroll.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
+            stack.heightAnchor.constraint(equalTo: scroll.heightAnchor),
+
+            focusTop,
+            focusBar.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 12),
+            focusBar.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -12),
+            focusHeight,
+            focusBottom,
+        ])
+    }
+
+    private func bringCourseNavToFront() {
+        if let panel = courseNavPanel {
+            view.bringSubviewToFront(panel)
+        }
+        if let button = productionCloseButton {
+            view.bringSubviewToFront(button)
+        }
+    }
+
+    private func updateCourseNavUI() {
+        guard let summary = courseNavSummaryLabel else { return }
+        summary.text = "전체 도보 \(formatWalkDuration(courseNavTotalTimeSec)) · \(formatWalkDistance(courseNavTotalDistanceM)) · 장소 \(courseNavPlaceCount)곳"
+
+        courseNavSegmentStack?.arrangedSubviews.forEach { chip in
+            courseNavSegmentStack?.removeArrangedSubview(chip)
+            chip.removeFromSuperview()
+        }
+
+        for segment in courseNavSegments {
+            let button = UIButton(type: .system)
+            button.setTitle("\(segment.index + 1)→\(segment.index + 2) \(segment.toName)", for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
+            button.titleLabel?.lineBreakMode = .byTruncatingTail
+            button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+            button.layer.cornerRadius = 14
+            button.tag = segment.index
+            button.addTarget(self, action: #selector(courseNavSegmentChipTapped(_:)), for: .touchUpInside)
+            styleCourseNavSegmentChip(button, selected: segment.index == courseNavSelectedSegmentIndex)
+            courseNavSegmentStack?.addArrangedSubview(button)
+        }
+
+        let segmentCount = courseNavSegments.count
+        let selected = courseNavSelectedSegmentIndex ?? 0
+        let showFocusBar = courseNavSegmentFocusMode
+        courseNavFocusBar?.isHidden = !showFocusBar
+        courseNavFocusBarTopConstraint?.constant = showFocusBar ? 8 : 0
+        courseNavFocusBarHeightConstraint?.constant = showFocusBar ? 32 : 0
+        courseNavFocusBarBottomConstraint?.isActive = showFocusBar
+        courseNavScrollBottomConstraint?.isActive = !showFocusBar
+        courseNavFocusLabel?.text = "구간 \(selected + 1)/\(max(segmentCount, 1))"
+        courseNavPrevButton?.isEnabled = selected > 0
+        courseNavNextButton?.isEnabled = selected < segmentCount - 1
+    }
+
+    private func styleCourseNavSegmentChip(_ button: UIButton, selected: Bool) {
+        if selected {
+            button.backgroundColor = UIColor(hex: 0x1a2a7a)
+            button.setTitleColor(.white, for: .normal)
+        } else {
+            button.backgroundColor = UIColor.secondarySystemFill
+            button.setTitleColor(.label, for: .normal)
+        }
+    }
+
+    private func selectCourseNavSegment(_ index: Int, segmentFocus: Bool) {
+        guard index >= 0, index < courseNavSegments.count else { return }
+        courseNavSelectedSegmentIndex = index
+        courseNavSegmentFocusMode = segmentFocus
+        updateCourseNavUI()
+        if segmentFocus {
+            let segment = courseNavSegments[index]
+            setRoute(path: segment.path, mode: "walk", fitCamera: true)
+        }
+    }
+
+    @objc private func courseNavSegmentChipTapped(_ sender: UIButton) {
+        let focus = courseNavSegmentFocusMode || (courseNavSelectedSegmentIndex != sender.tag)
+        selectCourseNavSegment(sender.tag, segmentFocus: focus)
+        if !courseNavSegmentFocusMode {
+            courseNavSegmentFocusMode = true
+            updateCourseNavUI()
+            let segment = courseNavSegments[sender.tag]
+            setRoute(path: segment.path, mode: "walk", fitCamera: true)
+        }
+    }
+
+    @objc private func courseNavPrevTapped() {
+        guard let current = courseNavSelectedSegmentIndex, current > 0 else { return }
+        selectCourseNavSegment(current - 1, segmentFocus: true)
+    }
+
+    @objc private func courseNavNextTapped() {
+        guard let current = courseNavSelectedSegmentIndex, current < courseNavSegments.count - 1 else { return }
+        selectCourseNavSegment(current + 1, segmentFocus: true)
+    }
+
+    @objc private func courseNavShowFullTapped() {
+        courseNavSegmentFocusMode = false
+        updateCourseNavUI()
+        if courseNavFullPath.count >= 2 {
+            setRoute(path: courseNavFullPath, mode: "walk", fitCamera: true)
+        }
+    }
+
+    private func applyRoute(path: [(lat: Double, lng: Double)], mode: String, fitCamera: Bool = true) {
+        // TEMP crs-debug
+        CAPLog.print("[crs] applyRoute entry pathCount=\(path.count) mode=\(mode) mapViewReady=\(mapViewReady) routeLayerExists=\(routeLayer != nil)")
         guard path.count >= 2 else {
+            // TEMP crs-debug
+            CAPLog.print("[crs] applyRoute abort — pathCount < 2 (\(path.count))")
             return
         }
         guard let map = kakaoMapView() else {
+            // TEMP crs-debug
+            CAPLog.print("[crs] applyRoute abort — kakaoMapView=nil")
             return
         }
 
         let routeMode = mode == "walk" ? "walk" : "car"
         let manager = map.getRouteManager()
         ensureRouteStyleSet(mode: routeMode, manager: manager)
+        // TEMP crs-debug
+        CAPLog.print("[crs] applyRoute styleSet ok mode=\(routeMode) registeredStyleSets=\(registeredRouteStyleSetIDs.count)")
 
         guard let layer = ensureRouteLayer(manager: manager) else {
+            // TEMP crs-debug
+            CAPLog.print("[crs] applyRoute abort — ensureRouteLayer returned nil")
             return
         }
+        // TEMP crs-debug
+        CAPLog.print("[crs] applyRoute routeLayer ok layerID=\(Self.routeLayerID) visible=\(layer.visible)")
 
         layer.removeRoute(routeID: Self.routeID)
 
@@ -1786,15 +2449,25 @@ private final class KakaoMapTestViewController: UIViewController {
         let styleSetID = routeMode == "walk" ? Self.walkRouteStyleSetID : Self.carRouteStyleSetID
         var option = RouteOptions(routeID: Self.routeID, styleID: styleSetID, zOrder: 0)
         option.segments = [RouteSegment(points: points, styleIndex: 0)]
+        // TEMP crs-debug
+        CAPLog.print("[crs] applyRoute addRoute attempt segmentPoints=\(points.count) styleSetID=\(styleSetID)")
 
         guard let route = layer.addRoute(option: option) else {
+            // TEMP crs-debug
+            CAPLog.print("[crs] applyRoute addRoute FAIL nil route pathCount=\(path.count)")
             return
         }
+        // TEMP crs-debug
+        CAPLog.print("[crs] applyRoute addRoute ok routeID=\(Self.routeID)")
         route.show()
         layer.visible = true
         map.refresh()
+        // TEMP crs-debug
+        CAPLog.print("[crs] applyRoute done — route shown layerVisible=\(layer.visible)")
 
-        fitCameraToRoute(points: points, map: map)
+        if fitCamera {
+            fitCameraToRoute(points: points, map: map)
+        }
     }
 
     private func ensureRouteLayer(manager: RouteManager) -> RouteLayer? {
@@ -1858,9 +2531,19 @@ extension KakaoMapTestViewController: MapControllerDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.mapViewReady = true
+            // TEMP crs-debug
+            CAPLog.print("[crs] addViewSucceeded mapViewReady=true pendingRouteCount=\(self.pendingRoute?.path.count ?? 0)")
             self.syncContainerSize()
+            if let map = self.kakaoMapView() {
+                NativeMapMarkerStyleHelper.applyFixedScreenMapSettings(on: map)
+            }
             self.attachKakaoEventDelegateIfNeeded()
             self.applyInitialContent()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                // TEMP crs-debug
+                CAPLog.print("[crs] addViewSucceeded delayed flushPendingRouteIfNeeded")
+                self?.flushPendingRouteIfNeeded()
+            }
         }
     }
 
@@ -1977,16 +2660,22 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "setFullscreenCamera", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setFullscreenRoute", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearFullscreenRoute", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setFullscreenCourseNavigation", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearFullscreenCourseNavigation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setFullscreenMyLocation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearFullscreenMyLocation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setFullscreenSearchResults", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearFullscreenSearchResults", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setFullscreenPlaceSaved", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setFullscreenDirectionsInfo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "showFullscreenPlaceSheet", returnType: CAPPluginReturnPromise),
     ]
 
     private var mapHost: UIView?
     private var touchRouter: MapTouchRouterView?
     private weak var mappedWebView: WKWebView?
-    private weak var fullscreenMapVC: KakaoMapTestViewController?
+    private var fullscreenMapVC: KakaoMapTestViewController?
+    private var pluginPendingFullscreenRoute: (path: [(lat: Double, lng: Double)], mode: String)?
     private var providerName = "none"
 
     override public func load() {
@@ -2281,6 +2970,14 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
             let vc = KakaoMapTestViewController(mode: .production)
             vc.modalPresentationStyle = .fullScreen
             vc.configure(lat: lat, lng: lng, zoom: zoom, markers: markers)
+            if let pendingRoute = self.pluginPendingFullscreenRoute {
+                // TEMP crs-debug
+                CAPLog.print("[crs] presentFullscreenMap apply pluginPendingRoute pathCount=\(pendingRoute.path.count) mode=\(pendingRoute.mode)")
+                vc.setRoute(path: pendingRoute.path, mode: pendingRoute.mode)
+            } else {
+                // TEMP crs-debug
+                CAPLog.print("[crs] presentFullscreenMap no pluginPendingRoute at present time")
+            }
             self.wireFullscreenMapCallbacks(vc, trackAsProduction: true)
             guard let presenter = self.topViewController(from: bridge) else {
                 call.reject("no view controller to present from")
@@ -2301,6 +2998,7 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             vc.dismiss(animated: true) {
                 self?.fullscreenMapVC = nil
+                self?.pluginPendingFullscreenRoute = nil
                 call.resolve()
             }
         }
@@ -2337,19 +3035,60 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func setFullscreenRoute(_ call: CAPPluginCall) {
         let path = Self.parseRoutePath(from: call)
         let mode = call.getString("mode") ?? "car"
+        let fitCamera = call.getBool("fitCamera") ?? true
+        pluginPendingFullscreenRoute = (path, mode)
+        let vcExists = fullscreenMapVC != nil
+        let mapViewReady = fullscreenMapVC?.isMapViewReadyForDebug ?? false
+        // TEMP crs-debug
+        CAPLog.print("[crs] setFullscreenRoute plugin entry pathCount=\(path.count) mode=\(mode) vcExists=\(vcExists) mapViewReady=\(mapViewReady) pluginPendingStored=true")
         DispatchQueue.main.async { [weak self] in
-            guard let vc = self?.fullscreenMapVC else {
+            guard let self = self else {
                 call.resolve()
                 return
             }
-            vc.setRoute(path: path, mode: mode)
+            if let vc = self.fullscreenMapVC {
+                // TEMP crs-debug
+                CAPLog.print("[crs] setFullscreenRoute forwarding to vc pathCount=\(path.count) mapViewReady=\(vc.isMapViewReadyForDebug)")
+                vc.setRoute(path: path, mode: mode, fitCamera: fitCamera)
+            } else {
+                // TEMP crs-debug
+                CAPLog.print("[crs] setFullscreenRoute vc nil — only pluginPendingFullscreenRoute stored pathCount=\(path.count)")
+            }
             call.resolve()
         }
     }
 
     @objc func clearFullscreenRoute(_ call: CAPPluginCall) {
         DispatchQueue.main.async { [weak self] in
+            // TEMP crs-debug
+            CAPLog.print("[crs] clearFullscreenRoute pluginPending cleared")
+            self?.pluginPendingFullscreenRoute = nil
             self?.fullscreenMapVC?.clearRoute()
+            call.resolve()
+        }
+    }
+
+    @objc func setFullscreenCourseNavigation(_ call: CAPPluginCall) {
+        let placeCount = call.getInt("placeCount") ?? 0
+        let totalTimeSec = call.getInt("totalTimeSec") ?? 0
+        let totalDistanceM = call.getInt("totalDistanceM") ?? 0
+        let segments = KakaoMapTestViewController.parseCourseNavigationSegments(from: call)
+        let fullPath = Self.parseRoutePath(fromKey: "fullPath", call: call)
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.setCourseNavigation(
+                placeCount: placeCount,
+                totalTimeSec: totalTimeSec,
+                totalDistanceM: totalDistanceM,
+                segments: segments,
+                fullPath: fullPath
+            )
+            call.resolve()
+        }
+    }
+
+    @objc func clearFullscreenCourseNavigation(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.clearCourseNavigation()
             call.resolve()
         }
     }
@@ -2400,15 +3139,31 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
             CAPLog.print("[PindmapNativeMap] fullscreenSearch query=\(query)")
             self?.notifyListeners("fullscreenSearch", data: ["query": query])
         }
-        vc.onDirections = { [weak self] id, lat, lng in
-            self?.notifyListeners("fullscreenDirections", data: ["id": id, "lat": lat, "lng": lng])
+        vc.onDirections = { [weak self] id, lat, lng, mode in
+            self?.notifyListeners("fullscreenDirections", data: ["id": id, "lat": lat, "lng": lng, "mode": mode])
+        }
+        vc.onToggleSave = { [weak self] id in
+            self?.notifyListeners("fullscreenToggleSave", data: ["id": id])
+        }
+        vc.onCuration = { [weak self] id, postId in
+            self?.notifyListeners("fullscreenCuration", data: ["id": id, "postId": postId])
+        }
+        vc.onOpenExternal = { [weak self] id, type in
+            self?.notifyListeners("fullscreenOpenExternal", data: ["id": id, "type": type])
+        }
+        vc.onImageLightbox = { [weak self] url in
+            self?.notifyListeners("fullscreenImageLightbox", data: ["url": url])
         }
         vc.onResearchArea = { [weak self] lat, lng in
             self?.notifyListeners("fullscreenResearchArea", data: ["lat": lat, "lng": lng])
         }
+        vc.onPlaceDetail = { [weak self] id in
+            self?.notifyListeners("fullscreenPlaceDetail", data: ["id": id])
+        }
         if trackAsProduction {
             vc.onDismiss = { [weak self] in
                 self?.fullscreenMapVC = nil
+                self?.pluginPendingFullscreenRoute = nil
                 self?.notifyListeners("fullscreenMapDismissed", data: [:])
             }
         }
@@ -2422,8 +3177,47 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         return top
     }
 
+    @objc func setFullscreenPlaceSaved(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else {
+            call.reject("id required")
+            return
+        }
+        let saved = call.getBool("saved") ?? false
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.setPlaceSaved(markerId: id, saved: saved)
+            call.resolve()
+        }
+    }
+
+    @objc func setFullscreenDirectionsInfo(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else {
+            call.reject("id required")
+            return
+        }
+        guard let duration = Self.intValue(call.options["duration"]),
+              let distance = Self.intValue(call.options["distance"]) else {
+            call.reject("duration and distance required")
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.setDirectionsInfo(markerId: id, durationSec: duration, distanceM: distance)
+            call.resolve()
+        }
+    }
+
+    @objc func showFullscreenPlaceSheet(_ call: CAPPluginCall) {
+        guard let id = call.getString("id") else {
+            call.reject("id required")
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.fullscreenMapVC?.showPlaceSheet(for: id)
+            call.resolve()
+        }
+    }
+
     private static func toMapMarkerInputs(
-        _ tuples: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int)]
+        _ tuples: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String], order: Int?)]
     ) -> [KakaoMapTestViewController.MapMarkerInput] {
         tuples.map {
             KakaoMapTestViewController.MapMarkerInput(
@@ -2434,13 +3228,20 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
                 title: $0.title,
                 address: $0.address,
                 photos: $0.photos,
-                postCount: $0.postCount
+                postCount: $0.postCount,
+                isSaved: $0.isSaved,
+                photoPostIds: $0.photoPostIds,
+                order: $0.order
             )
         }
     }
 
     private static func parseRoutePath(from call: CAPPluginCall) -> [(lat: Double, lng: Double)] {
-        guard let raw = call.options["path"] as? [[String: Any]] else { return [] }
+        parseRoutePath(fromKey: "path", call: call)
+    }
+
+    private static func parseRoutePath(fromKey key: String, call: CAPPluginCall) -> [(lat: Double, lng: Double)] {
+        guard let raw = call.options[key] as? [[String: Any]] else { return [] }
         var out: [(lat: Double, lng: Double)] = []
         for dict in raw {
             guard let lat = doubleValue(dict["lat"]), let lng = doubleValue(dict["lng"]) else { continue }
@@ -2470,9 +3271,9 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         return out
     }
 
-    private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int)] {
+    private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String], order: Int?)] {
         guard let raw = call.options["markers"] as? [[String: Any]] else { return [] }
-        var out: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int)] = []
+        var out: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String], order: Int?)] = []
         for dict in raw {
             guard let id = dict["id"] as? String else { continue }
             guard let lat = doubleValue(dict["lat"]), let lng = doubleValue(dict["lng"]) else { continue }
@@ -2481,7 +3282,10 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
             let address = dict["address"] as? String
             let photos = (dict["photos"] as? [String])?.filter { !$0.isEmpty } ?? []
             let postCount = intValue(dict["postCount"]) ?? 0
-            out.append((id: id, lat: lat, lng: lng, category: category, title: title, address: address, photos: photos, postCount: postCount))
+            let isSaved = dict["isSaved"] as? Bool ?? false
+            let photoPostIds = (dict["photoPostIds"] as? [String]) ?? []
+            let order = intValue(dict["order"])
+            out.append((id: id, lat: lat, lng: lng, category: category, title: title, address: address, photos: photos, postCount: postCount, isSaved: isSaved, photoPostIds: photoPostIds, order: order))
         }
         return out
     }

@@ -9,10 +9,20 @@ import type {
   SetCameraOptions,
   SetFullscreenCameraOptions,
   SetFullscreenRouteOptions,
+  SetFullscreenCourseNavigationOptions,
   SetFullscreenMyLocationOptions,
   SetFullscreenSearchResultsOptions,
   UpdateFullscreenMarkersOptions,
   FullscreenResearchAreaEvent,
+  FullscreenPlaceDetailEvent,
+  FullscreenToggleSaveEvent,
+  FullscreenCurationEvent,
+  FullscreenOpenExternalEvent,
+  FullscreenImageLightboxEvent,
+  SetFullscreenPlaceSavedOptions,
+  SetFullscreenDirectionsInfoOptions,
+  ShowFullscreenPlaceSheetOptions,
+  FullscreenRouteMode,
 } from "@pindmap/native-map";
 
 /** Re-export plugin types for Step 3 consumers */
@@ -24,9 +34,19 @@ export type {
   UpdateFullscreenMarkersOptions,
   SetFullscreenCameraOptions,
   SetFullscreenRouteOptions,
+  SetFullscreenCourseNavigationOptions,
   SetFullscreenMyLocationOptions,
   SetFullscreenSearchResultsOptions,
   FullscreenResearchAreaEvent,
+  FullscreenPlaceDetailEvent,
+  FullscreenToggleSaveEvent,
+  FullscreenCurationEvent,
+  FullscreenOpenExternalEvent,
+  FullscreenImageLightboxEvent,
+  SetFullscreenPlaceSavedOptions,
+  SetFullscreenDirectionsInfoOptions,
+  ShowFullscreenPlaceSheetOptions,
+  FullscreenRouteMode,
 };
 
 export type CreateNativeMapOptions = {
@@ -73,6 +93,9 @@ export type NativeMarkerInput = {
   category?: string;
   photos?: string[];
   postCount?: number;
+  isSaved?: boolean;
+  photoPostIds?: string[];
+  order?: number;
 };
 
 const DEFAULT_PROVIDER: NativeMapProvider = "kakao";
@@ -573,6 +596,54 @@ export async function clearFullscreenNativeRoute(
   }
 }
 
+/** Show course navigation chrome (summary, segments, turn-by-turn) on native fullscreen map. */
+export async function setFullscreenNativeCourseNavigation(
+  options: SetFullscreenCourseNavigationOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "setFullscreenNativeCourseNavigation skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("setFullscreenNativeCourseNavigation", {
+      placeCount: options.placeCount,
+      segmentCount: options.segments.length,
+    });
+    await getPlugin().setFullscreenCourseNavigation(options);
+  } catch (err) {
+    nativeMapWarn("setFullscreenNativeCourseNavigation failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Hide course navigation chrome on native fullscreen map. */
+export async function clearFullscreenNativeCourseNavigation(
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "clearFullscreenNativeCourseNavigation skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("clearFullscreenNativeCourseNavigation");
+    await getPlugin().clearFullscreenCourseNavigation();
+  } catch (err) {
+    nativeMapWarn("clearFullscreenNativeCourseNavigation failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
 /** Show my-location dot on the full-screen native map VC. */
 export async function setFullscreenNativeMyLocation(
   options: SetFullscreenMyLocationOptions,
@@ -657,6 +728,75 @@ export async function clearFullscreenNativeSearchResults(
     await getPlugin().clearFullscreenSearchResults();
   } catch (err) {
     nativeMapWarn("clearFullscreenNativeSearchResults failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Update saved-state heart on the native place bottom sheet. */
+export async function setFullscreenNativePlaceSaved(
+  options: SetFullscreenPlaceSavedOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "setFullscreenNativePlaceSaved skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("setFullscreenNativePlaceSaved", options);
+    await getPlugin().setFullscreenPlaceSaved(options);
+  } catch (err) {
+    nativeMapWarn("setFullscreenNativePlaceSaved failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Show route duration/distance on the native place bottom sheet. */
+export async function setFullscreenNativeDirectionsInfo(
+  options: SetFullscreenDirectionsInfoOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "setFullscreenNativeDirectionsInfo skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("setFullscreenNativeDirectionsInfo", options);
+    await getPlugin().setFullscreenDirectionsInfo(options);
+  } catch (err) {
+    nativeMapWarn("setFullscreenNativeDirectionsInfo failed", err);
+    if (!silent) {
+      return Promise.reject(err);
+    }
+  }
+}
+
+/** Re-open the native place bottom sheet for a marker id on the fullscreen map. */
+export async function showFullscreenNativePlaceSheet(
+  options: ShowFullscreenPlaceSheetOptions,
+  callOptions: NativeMapCallOptions = {},
+): Promise<void> {
+  const silent = callOptions.silent ?? true;
+
+  if (!isNativeMapAvailable()) {
+    const result = unavailableResult(silent, undefined, "showFullscreenNativePlaceSheet skipped — not iOS native");
+    return result instanceof Promise ? result : Promise.resolve();
+  }
+
+  try {
+    nativeMapLog("showFullscreenNativePlaceSheet", options);
+    await getPlugin().showFullscreenPlaceSheet(options);
+  } catch (err) {
+    nativeMapWarn("showFullscreenNativePlaceSheet failed", err);
     if (!silent) {
       return Promise.reject(err);
     }
