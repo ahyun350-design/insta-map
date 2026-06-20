@@ -3392,6 +3392,134 @@ body {
   justify-content: flex-end;
 }
 
+/* ── 온보딩 ── */
+.onboardingRoot {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #fafbff 0%, #fff 45%, #f7f9ff 100%);
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
+  box-sizing: border-box;
+}
+
+.onboardingHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 8px;
+  flex-shrink: 0;
+}
+
+.onboardingBrand {
+  font-family: "Playfair Display", serif;
+  font-size: 20px;
+  color: #1a2a7a;
+  letter-spacing: 0.3px;
+}
+
+.onboardingSkip {
+  border: none;
+  background: transparent;
+  color: #7a849e;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 8px 4px;
+}
+
+.onboardingSlideArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 28px 24px;
+  text-align: center;
+  touch-action: pan-y;
+}
+
+.onboardingIllustrationWrap {
+  width: 100%;
+  max-width: 320px;
+  margin-bottom: 28px;
+}
+
+.onboardingIllustration {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.onboardingTitle {
+  margin: 0 0 10px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a2a7a;
+  line-height: 1.35;
+  letter-spacing: -0.2px;
+}
+
+.onboardingDescription {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #5c6478;
+  max-width: 300px;
+}
+
+.onboardingFooter {
+  flex-shrink: 0;
+  padding: 8px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.onboardingDots {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.onboardingDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  background: #d8deef;
+  cursor: pointer;
+}
+
+.onboardingDotActive {
+  width: 22px;
+  border-radius: 999px;
+  background: #1a2a7a;
+}
+
+.onboardingPrimary {
+  width: 100%;
+  max-width: 320px;
+  border: none;
+  border-radius: 12px;
+  padding: 14px 20px;
+  background: #1a2a7a;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.onboardingPrimaryLarge {
+  padding: 16px 20px;
+  font-size: 16px;
+  box-shadow: 0 8px 24px rgba(26, 42, 122, 0.22);
+}
+
 /* ── 스켈레톤 로딩 ── */
 .skeleton {
   background: linear-gradient(90deg, #f0f0f0 25%, #e5e5e5 50%, #f0f0f0 75%);

@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { hasSeenOnboarding } from "@/lib/onboarding";
 
 function formatLoginError(error: AuthError): string {
   const raw = (error.message || "").trim();
@@ -38,6 +39,27 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const seen = await hasSeenOnboarding();
+      if (cancelled) return;
+      if (!seen) {
+        router.replace("/onboarding");
+        return;
+      }
+      setOnboardingChecked(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  if (!onboardingChecked) {
+    return null;
+  }
 
   // 이메일 로그인
   const handleEmailLogin = async (e: React.FormEvent) => {

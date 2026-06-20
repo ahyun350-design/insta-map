@@ -16,6 +16,7 @@
     "@capacitor/geolocation": "^8.2.0",
     "@capacitor/ios": "^8.3.1",
     "@capacitor/keyboard": "^8.0.3",
+    "@capacitor/preferences": "^8.0.1",
     "@pindmap/native-map": "file:./spike/v7-native-map/plugin",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.104.1",

@@ -15,6 +15,7 @@ import {
   type InAppNotificationItem,
 } from "@/lib/inAppNotification";
 import { useInAppNotifications } from "@/lib/useInAppNotifications";
+import { resolveUnauthenticatedPath } from "@/lib/onboarding";
 import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
@@ -1078,6 +1079,10 @@ function HomePageContent() {
       return false;
     }
   }, [reloadUserFromSession]);
+
+  const redirectUnauthenticated = useCallback(async () => {
+    router.push(await resolveUnauthenticatedPath());
+  }, [router]);
 
   useEffect(() => {
     if (user) authStallRetryRef.current = 0;
@@ -2832,29 +2837,32 @@ function HomePageContent() {
         if (session?.user) {
           const ok = await reloadUserWithTimeout();
           if (cancelled) return;
-          if (!ok) router.push("/login");
+          if (!ok) {
+            await redirectUnauthenticated();
+            return;
+          }
           return;
         }
         const ok = await reloadUserWithTimeout();
         if (cancelled) return;
         if (!ok) {
-          router.push("/login");
+          await redirectUnauthenticated();
           return;
         }
         session = await verifySessionQuick();
         if (cancelled) return;
         if (!session?.user) {
-          router.push("/login");
+          await redirectUnauthenticated();
         }
       } catch (e) {
         console.error("[PindMap:home][auth] login gate failed", e);
-        if (!cancelled) router.push("/login");
+        if (!cancelled) await redirectUnauthenticated();
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [user, userLoading, sessionChecked, router, verifySessionQuick, reloadUserWithTimeout]);
+  }, [user, userLoading, sessionChecked, router, verifySessionQuick, reloadUserWithTimeout, redirectUnauthenticated]);
 
   useEffect(() => {
     if (!sessionChecked || userLoading || !user || loading) return;
@@ -2874,7 +2882,7 @@ function HomePageContent() {
   useEffect(() => {
     if (!sessionChecked || userLoading || user) return;
     if (authStallRetryRef.current >= 1) {
-      router.push("/login");
+      void redirectUnauthenticated();
       return;
     }
     const timer = window.setTimeout(() => {
@@ -2883,14 +2891,14 @@ function HomePageContent() {
       void (async () => {
         try {
           const ok = await reloadUserWithTimeout();
-          if (!ok) router.push("/login");
+          if (!ok) await redirectUnauthenticated();
         } finally {
           setAuthRetryPending(false);
         }
       })();
     }, 3000);
     return () => window.clearTimeout(timer);
-  }, [sessionChecked, userLoading, user, router, reloadUserWithTimeout]);
+  }, [sessionChecked, userLoading, user, reloadUserWithTimeout, redirectUnauthenticated]);
 
   useEffect(() => {
     const onVisible = () => {
@@ -7658,7 +7666,7 @@ function HomePageContent() {
               void (async () => {
                 try {
                   const ok = await reloadUserWithTimeout();
-                  if (!ok) router.push("/login");
+                  if (!ok) await redirectUnauthenticated();
                 } finally {
                   setAuthRetryPending(false);
                 }
