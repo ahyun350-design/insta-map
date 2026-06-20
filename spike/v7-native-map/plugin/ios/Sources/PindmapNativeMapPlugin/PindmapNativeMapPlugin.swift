@@ -390,16 +390,34 @@ extension KakaoMapHost: KakaoMapEventDelegate {
 // MARK: - Shared marker styling (compact + fullscreen native maps)
 
 private enum NativeMapMarkerStyleHelper {
+    // MARK: - Pin tuning (match React Kakao MarkerImage on-screen size + sharpness)
+    /// Canvas / PoiIconStyle symbol size in points. React target is 36×44 on screen; bump if SDK renders smaller.
+    static let PIN_DISPLAY_SIZE = CGSize(width: 40, height: 48)
+    /// UIGraphicsImageRenderer scale. Bitmap px = PIN_DISPLAY_SIZE × PIN_BITMAP_SCALE (≥2.0 for sharp edges).
+    static let PIN_BITMAP_SCALE: CGFloat = 2.0
+
+    private static let reactSavedPinSize = CGSize(width: 36, height: 44)
+    private static let reactCoursePinSize = CGSize(width: 32, height: 40)
+    private static let reactMyLocationPinSize = CGSize(width: 24, height: 24)
+
     static let defaultStyleID = "pindmap-marker-style"
     /// KakaoMapsSDK zoom range — PerLevelPoiStyle at every level keeps symbol scale 1.0 (Kakao Marker parity).
     static let minMapZoomLevel = 0
     static let maxMapZoomLevel = 21
-    /// React makeMarkerImage — Size(36, 44)
-    static let pinSize = CGSize(width: 36, height: 44)
-    /// React course marker — Size(32, 40)
-    static let coursePinSize = CGSize(width: 32, height: 40)
-    /// React makeMyLocationImage — Size(24, 24)
-    static let myLocationSize = CGSize(width: 24, height: 24)
+    /// Saved/search pin canvas — scales with PIN_DISPLAY_SIZE (React 36×44 reference).
+    static var pinSize: CGSize { PIN_DISPLAY_SIZE }
+    /// Course pin canvas — proportional to React 32×40.
+    static var coursePinSize: CGSize {
+        CGSize(
+            width: PIN_DISPLAY_SIZE.width * reactCoursePinSize.width / reactSavedPinSize.width,
+            height: PIN_DISPLAY_SIZE.height * reactCoursePinSize.height / reactSavedPinSize.height
+        )
+    }
+    /// My location canvas — proportional to React 24×24.
+    static var myLocationSize: CGSize {
+        let side = PIN_DISPLAY_SIZE.width * reactMyLocationPinSize.width / reactSavedPinSize.width
+        return CGSize(width: side, height: side)
+    }
     /// Saved/search pin anchor — Kakao MarkerImage default (bottom center).
     static let savedPinAnchor = CGPoint(x: 0.5, y: 1.0)
     /// Course pin anchor — bottom center.
@@ -407,16 +425,18 @@ private enum NativeMapMarkerStyleHelper {
     /// My location anchor — Kakao offset(12,12) on 24×24 → center (0.5, 0.5).
     static let myLocationAnchor = CGPoint(x: 0.5, y: 0.5)
 
-    /// KakaoMapsSDK known-issue render scale: UIScreen.main.scale / 2.0 (logical px → sharp bitmap).
-    static var kakaoRenderScale: CGFloat {
-        max(UIScreen.main.scale / 2.0, 1.0)
-    }
-
+    /// KakaoMapsSDK applies its own POI display scaling — tune PIN_DISPLAY_SIZE / PIN_BITMAP_SCALE only (not UIScreen.main.scale).
     private static func imageRenderer(for size: CGSize) -> UIGraphicsImageRenderer {
         let format = UIGraphicsImageRendererFormat()
-        format.scale = kakaoRenderScale
+        format.scale = PIN_BITMAP_SCALE
         format.opaque = false
         return UIGraphicsImageRenderer(size: size, format: format)
+    }
+
+    private static func configurePinContext(_ cg: CGContext) {
+        cg.setShouldAntialias(true)
+        cg.setAllowsAntialiasing(true)
+        cg.interpolationQuality = .high
     }
 
     /// One iconStyle duplicated at zoom levels 0…21 — no per-level scale interpolation (fixed screen px like Kakao Marker).
@@ -500,6 +520,7 @@ private enum NativeMapMarkerStyleHelper {
         let renderer = imageRenderer(for: canvasSize)
         return renderer.image { ctx in
             let cg = ctx.cgContext
+            configurePinContext(cg)
             let bounds = CGRect(origin: .zero, size: canvasSize)
 
             let droplet = isCoursePin
@@ -511,6 +532,8 @@ private enum NativeMapMarkerStyleHelper {
             droplet.fill()
             style.strokeColor.setStroke()
             droplet.lineWidth = 1
+            droplet.lineJoinStyle = .round
+            droplet.lineCapStyle = .round
             droplet.stroke()
             cg.restoreGState()
 
@@ -522,30 +545,22 @@ private enum NativeMapMarkerStyleHelper {
 
             if let order, order > 0 {
                 let text = "\(order)"
-                let font = UIFont.systemFont(ofSize: isCoursePin ? 13 : 13, weight: .bold)
+                let fontScale = canvasSize.width / reactCoursePinSize.width
+                let font = UIFont.systemFont(ofSize: 13 * fontScale, weight: .bold)
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: font,
                     .foregroundColor: readableCenterTextColor(for: style.fillColor),
                 ]
                 let textSize = (text as NSString).size(withAttributes: attrs)
-                let textRect = CGRect(
-                    x: cx - textSize.width / 2,
-                    y: cy - textSize.height / 2,
-                    width: textSize.width,
-                    height: textSize.height
-                )
-                (text as NSString).draw(in: textRect, withAttributes: attrs)
+                let textOrigin = CGPoint(x: cx - textSize.width / 2, y: cy - textSize.height / 2)
+                (text as NSString).draw(at: textOrigin, withAttributes: attrs)
             } else {
-                let font = UIFont.systemFont(ofSize: 14)
+                let fontScale = canvasSize.width / reactSavedPinSize.width
+                let font = UIFont.systemFont(ofSize: 14 * fontScale)
                 let attrs: [NSAttributedString.Key: Any] = [.font: font]
                 let textSize = (style.emoji as NSString).size(withAttributes: attrs)
-                let textRect = CGRect(
-                    x: cx - textSize.width / 2,
-                    y: cy - textSize.height / 2 + 1,
-                    width: textSize.width,
-                    height: textSize.height
-                )
-                (style.emoji as NSString).draw(in: textRect, withAttributes: attrs)
+                let textOrigin = CGPoint(x: cx - textSize.width / 2, y: cy - textSize.height / 2 + 0.5 * fontScale)
+                (style.emoji as NSString).draw(at: textOrigin, withAttributes: attrs)
             }
         }
     }
@@ -598,18 +613,21 @@ private enum NativeMapMarkerStyleHelper {
 
     static func makeMyLocationIcon() -> UIImage {
         let size = myLocationSize
+        let unit = size.width / reactMyLocationPinSize.width
         let renderer = imageRenderer(for: size)
         return renderer.image { ctx in
             let cg = ctx.cgContext
-            // React makeMyLocationImage: r=10 #1a2a7a + white stroke 2.5, inner r=4 white
-            let outerRect = CGRect(x: 2, y: 2, width: 20, height: 20)
+            configurePinContext(cg)
+            // React makeMyLocationImage: r=10 #1a2a7a + white stroke 2.5, inner r=4 white (24×24 viewBox)
+            let outerRect = CGRect(x: 2 * unit, y: 2 * unit, width: 20 * unit, height: 20 * unit)
             cg.setFillColor(UIColor(hex: 0x1a2a7a).cgColor)
             cg.fillEllipse(in: outerRect)
             cg.setStrokeColor(UIColor.white.cgColor)
-            cg.setLineWidth(2.5)
-            cg.strokeEllipse(in: outerRect.insetBy(dx: 1.25, dy: 1.25))
+            cg.setLineWidth(2.5 * unit)
+            cg.setLineJoin(.round)
+            cg.strokeEllipse(in: outerRect.insetBy(dx: 1.25 * unit, dy: 1.25 * unit))
             cg.setFillColor(UIColor.white.cgColor)
-            cg.fillEllipse(in: CGRect(x: 8, y: 8, width: 8, height: 8))
+            cg.fillEllipse(in: CGRect(x: 8 * unit, y: 8 * unit, width: 8 * unit, height: 8 * unit))
         }
     }
 
