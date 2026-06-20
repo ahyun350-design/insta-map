@@ -2248,7 +2248,230 @@ body {
   border: 1px solid #c5c9d6;
 }
 
-/* ── 지도 입력 ── */
+/* ── 지도 릴스 입력 (핵심 CTA) ── */
+.mapReelInputSection {
+  margin: 0 0 16px;
+  padding: 16px 16px 18px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f8faff 0%, #eef2fb 100%);
+  border: 1.5px solid rgba(26, 42, 122, 0.18);
+  box-shadow: 0 8px 24px rgba(26, 42, 122, 0.08);
+  box-sizing: border-box;
+}
+
+.mapReelInputTitle {
+  margin: 0 0 6px;
+  font-family: 'Playfair Display', serif;
+  font-size: 18px;
+  font-weight: 500;
+  color: #1a2a7a;
+  letter-spacing: 0.2px;
+}
+
+.mapReelInputHint {
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #4a5568;
+  letter-spacing: -0.1px;
+  font-weight: 500;
+}
+
+.mapReelInputWrap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.mapReelInputField {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 56px;
+  border: 2px solid rgba(26, 42, 122, 0.55);
+  background: #fff;
+  border-radius: 12px;
+  padding: 0 14px;
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.mapReelInputField:focus-within {
+  border-color: #1a2a7a;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(26, 42, 122, 0.14);
+}
+
+.mapReelInputIcon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(26, 42, 122, 0.1);
+  color: #1a2a7a;
+}
+
+.mapInputReel {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 15px 0;
+  margin: 0;
+  font-size: 15px;
+  font-family: 'Inter', sans-serif;
+  color: #1a1a1a;
+  outline: none;
+  border-radius: 0;
+  line-height: 1.4;
+}
+
+.mapInputReel::placeholder {
+  color: #6b7280;
+  font-size: 15px;
+}
+
+.mapInputReel:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.mapReelSubmitBtn {
+  min-height: 56px;
+  min-width: 92px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 12px;
+  background: #1a2a7a;
+  color: #fff;
+  font-family: 'Playfair Display', serif;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(26, 42, 122, 0.28);
+  transition: opacity 0.2s, background 0.2s, transform 0.15s;
+}
+
+.mapReelSubmitBtn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.mapReelSubmitBtn:hover:not(:disabled) {
+  opacity: 0.94;
+}
+
+.mapReelSubmitBtn:disabled {
+  background: #b8bfd4;
+  color: rgba(255, 255, 255, 0.95);
+  cursor: not-allowed;
+  opacity: 1;
+  box-shadow: none;
+}
+
+/* ── 지도 탭 미니맵 ── */
+.mapCompactWrap {
+  position: relative;
+  width: 100%;
+  min-height: 240px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1.5px solid rgba(26, 42, 122, 0.2);
+  box-shadow: 0 4px 16px rgba(26, 42, 122, 0.08);
+  background: #f5f7fd;
+}
+
+.mapCompactLoading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: linear-gradient(180deg, #f7f9ff 0%, #eef1fb 100%);
+  min-height: 240px;
+}
+
+.mapCompactMap {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-height: 240px;
+}
+
+.mapExpandFab {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 999px;
+  background: #1a2a7a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(26, 42, 122, 0.35);
+}
+
+.mapExpandFab:active {
+  transform: scale(0.98);
+}
+
+.mapExpandHint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  border: none;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.92) 35%, rgba(255, 255, 255, 0.98) 100%);
+  color: #1a2a7a;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  text-align: center;
+  cursor: pointer;
+}
+
+.mapSecondaryActions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px 0 4px;
+}
+
+.mapHideAllBtn {
+  border: none;
+  background: transparent;
+  color: #8b93aa;
+  font-size: 12px;
+  font-family: 'Inter', sans-serif;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.mapHideAllBtn:active {
+  color: #1a2a7a;
+}
+
+/* ── 지도 입력 (일반) ── */
 .mapInputWrap {
   display: grid;
   grid-template-columns: 1fr auto;

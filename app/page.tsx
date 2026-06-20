@@ -9389,9 +9389,42 @@ function HomePageContent() {
                   </div>
                 </div>
               )}
-              <div className="mapInputWrap">
-                <input ref={instagramUrlInputRef} className="mapInput" placeholder="Instagram 릴스/게시물 URL 붙여넣기" value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} />
-                <button className="primaryButton" onClick={handleAddFromInstagram} type="button" disabled={!canSubmit}>{isSubmitting ? "분석 중..." : "핀 추가"}</button>
+              <div className="mapReelInputSection">
+                <p className="mapReelInputTitle">릴스로 장소 추가</p>
+                <p className="mapReelInputHint">
+                  📱 인스타그램 릴스·게시물 링크를 붙여넣으면 지도에 자동으로 핀이 찍혀요
+                </p>
+                <div className="mapReelInputWrap">
+                  <div className="mapReelInputField">
+                    <span className="mapReelInputIcon" aria-hidden>
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <rect x="3" y="3" width="14" height="14" rx="3.5" stroke="currentColor" strokeWidth="1.5" />
+                        <path
+                          d="M8.5 11.5L6.5 9.5l1.2-1.2M11.5 8.5l2 2-1.2 1.2M7.5 12.5h5"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <input
+                      ref={instagramUrlInputRef}
+                      className="mapInputReel"
+                      placeholder="여기에 인스타 릴스 링크를 붙여넣으세요"
+                      value={instagramUrl}
+                      onChange={(e) => setInstagramUrl(e.target.value)}
+                    />
+                  </div>
+                  <button
+                    className="mapReelSubmitBtn"
+                    onClick={handleAddFromInstagram}
+                    type="button"
+                    disabled={!canSubmit}
+                  >
+                    {isSubmitting ? "분석 중..." : "핀 추가"}
+                  </button>
+                </div>
               </div>
               {isAnalyzing && (
                 <div style={{ marginTop: "6px" }}>
@@ -9403,37 +9436,11 @@ function HomePageContent() {
               {error && <p className="emptyText">{error}</p>}
               {kakaoStatus === "loading" && <p className="hintText">카카오맵 SDK를 불러오는 중입니다</p>}
               {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", marginBottom: "6px" }}>
-                <button onClick={() => setMapExpanded(true)} style={{ background: "transparent", border: "0.5px solid #ddd", borderRadius: "4px", padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "0.5px", fontFamily: "'Inter', sans-serif" }}>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 5V1H5M7 1H11V5M11 7V11H7M5 11H1V7" stroke="#1a2a7a" strokeWidth="1.2" strokeLinecap="round"/></svg>전체화면
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHiddenIds(new Set(savedPlaces.map((p) => p.id)))}
-                  disabled={savedPlaces.length === 0}
-                  style={{ background: "transparent", border: "0.5px solid #ddd", borderRadius: "4px", padding: "6px 12px", cursor: savedPlaces.length === 0 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "5px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "0.5px", fontFamily: "'Inter', sans-serif", opacity: savedPlaces.length === 0 ? 0.5 : 1 }}
-                >
-                  🗑️ 검색기록 삭제
-                </button>
-              </div>
-              <div style={{ position: "relative", width: "100%", minHeight: 220 }}>
+              <div className="mapCompactWrap">
                 {(kakaoStatus === "idle" || kakaoStatus === "loading" || (kakaoStatus === "ready" && !compactMapReady)) && (
                   <div
+                    className="mapCompactLoading"
                     aria-hidden={compactMapReady}
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      zIndex: 4,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "10px",
-                      background: "linear-gradient(180deg, #f7f9ff 0%, #eef1fb 100%)",
-                      border: "0.5px solid #e4e9f7",
-                      borderRadius: "8px",
-                      minHeight: 220,
-                    }}
                   >
                     <span style={{ fontSize: "28px", lineHeight: 1 }}>🗺️</span>
                     <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 600, letterSpacing: "0.3px" }}>지도를 불러오는 중...</p>
@@ -9444,10 +9451,40 @@ function HomePageContent() {
                 )}
                 <div
                   ref={mapContainerRef}
-                  className="kakaoMap"
-                  style={{ position: "relative", zIndex: 1 }}
+                  className="kakaoMap mapCompactMap"
                 />
+                <button
+                  type="button"
+                  className="mapExpandFab"
+                  aria-label="전체화면으로 지도 크게 보기"
+                  onClick={() => setMapExpanded(true)}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path d="M2 6V2H6M10 2H14V6M14 10V14H10M6 14H2V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                  크게 보기
+                </button>
+                <button
+                  type="button"
+                  className="mapExpandHint"
+                  aria-label="전체화면으로 지도 크게 보기"
+                  onClick={() => setMapExpanded(true)}
+                >
+                  지도를 탭하면 전체화면으로 크게 볼 수 있어요
+                </button>
               </div>
+              {savedPlaces.length > 0 && (
+                <div className="mapSecondaryActions">
+                  <button
+                    type="button"
+                    className="mapHideAllBtn"
+                    title="릴스로 추가된 장소 목록을 지웁니다 (저장·핀은 유지)"
+                    onClick={() => setHiddenIds(new Set(savedPlaces.map((p) => p.id)))}
+                  >
+                    🗑️ 검색기록 삭제
+                  </button>
+                </div>
+              )}
               {mapExpanded &&
                 !isNativeMapAvailable() &&
                 typeof document !== "undefined" &&
@@ -9651,7 +9688,7 @@ function HomePageContent() {
                     <button onClick={(e) => { e.stopPropagation(); hideFromMap(place.id); }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
                   </article>
                 ))}
-                {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>모든 장소가 숨겨졌어요.{" "}<button onClick={resetHiddenPlaces} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
+                {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>검색기록을 지웠어요.{" "}<button onClick={resetHiddenPlaces} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
                 {savedPlaces.length === 0 && (
                   <EmptyState
                     icon="📍"
