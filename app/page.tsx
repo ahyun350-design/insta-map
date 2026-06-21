@@ -232,6 +232,7 @@ function sortChatRoomsByRecency(rooms: ChatRoom[]): ChatRoom[] {
     (a, b) => new Date(b.lastTime).getTime() - new Date(a.lastTime).getTime(),
   );
 }
+
 type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; status?: "pending" | "sent" | "failed"; };
 
 const CHAT_MESSAGES_PAGE_SIZE = 50;
@@ -2776,10 +2777,18 @@ function HomePageContent() {
 
       const roomsData = roomsRes.data;
       if (roomsData && roomsData.length > 0) {
-        const rooms: ChatRoom[] = await withTimeout(Promise.all(
+        const rooms = (await withTimeout(Promise.all(
           roomsData.map(async (r: any) => {
             const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
-            const { data: friendData } = await supabase.from("users").select("username, avatar_url").eq("id", friendId).maybeSingle();
+            const { data: friendData, error: friendLookupError } = await supabase
+              .from("users")
+              .select("username, avatar_url")
+              .eq("id", friendId)
+              .maybeSingle();
+            if (!friendLookupError && !friendData) {
+              console.log("[PindMap:chat] 유령 방 제외 roomId=%s friendId=%s", r.id, friendId);
+              return null;
+            }
             if (friendData) userAvatarCacheRef.current.setFromRow({ id: friendId, username: friendData.username, avatar_url: friendData.avatar_url });
             const [msgsRes, unreadRes] = await Promise.all([
               supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1),
@@ -2796,7 +2805,7 @@ function HomePageContent() {
               unreadCount: unread,
             };
           }),
-        ), 8000);
+        ), 8000)).filter((room) => room !== null) as ChatRoom[];
         setChatRooms(sortChatRoomsByRecency(rooms));
       } else {
         setChatRooms([]);
@@ -6738,9 +6747,17 @@ function HomePageContent() {
     const refreshRooms = async () => {
       const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`);
       if (!roomsData) return;
-      const rooms: ChatRoom[] = await Promise.all(roomsData.map(async (r: any) => {
+      const rooms = (await Promise.all(roomsData.map(async (r: any) => {
         const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
-        const { data: friendData } = await supabase.from("users").select("username, avatar_url").eq("id", friendId).maybeSingle();
+        const { data: friendData, error: friendLookupError } = await supabase
+          .from("users")
+          .select("username, avatar_url")
+          .eq("id", friendId)
+          .maybeSingle();
+        if (!friendLookupError && !friendData) {
+          console.log("[PindMap:chat] 유령 방 제외 roomId=%s friendId=%s", r.id, friendId);
+          return null;
+        }
         if (friendData) {
           userAvatarCacheRef.current.setFromRow({ id: friendId, username: friendData.username, avatar_url: friendData.avatar_url });
         }
@@ -6755,7 +6772,7 @@ function HomePageContent() {
           lastTime: msgs?.[0]?.created_at ?? r.created_at,
           unreadCount: unread ?? 0,
         };
-      }));
+      }))).filter((room) => room !== null) as ChatRoom[];
       setChatRooms(sortChatRoomsByRecency(rooms));
     };
     refreshRooms();
