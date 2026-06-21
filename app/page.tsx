@@ -1224,10 +1224,6 @@ function HomePageContent() {
   const [isKakaoMapLoaded, setIsKakaoMapLoaded] = useState(false);
   /** 지도 탭 작은 지도 패널에 Map 인스턴스 생성까지 완료 */
   const [compactMapReady, setCompactMapReady] = useState(false);
-  /** 큐레이션 상세 닫힘 후 미니맵 DOM·카카오맵 인스턴스 강제 재생성 */
-  const [compactMapMountKey, setCompactMapMountKey] = useState(0);
-  const pendingCompactMapRemountRef = useRef(false);
-  const prevDetailPostIdForMapRemountRef = useRef<string | null>(null);
   const [mapExpanded, setMapExpanded] = useState(false);
   const [reelInputExpanded, setReelInputExpanded] = useState(false);
   /** V-7-1: 확장 지도 상단 50% Kakao Native 오버레이 (iOS만, JS API와 병행) */
@@ -2943,6 +2939,15 @@ function HomePageContent() {
       prev.map((n) => (n.actor_id === user.id ? { ...n, actorAvatarUrl: avatarUrl } : n)),
     );
   }, [user?.id, user?.avatar_url, user?.username, syncCurrentUserToAvatarCache, hydrateFeedPostsWithAvatars]);
+
+  useEffect(() => {
+    if (!detailPostId) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [detailPostId]);
 
   useEffect(() => {
     if (!detailPostId || !user) return;
@@ -5791,28 +5796,6 @@ function HomePageContent() {
     });
   };
 
-  const remountCompactMap = useCallback(() => {
-    detachCompactMapResizeObserver();
-    clearCompactMapRelayoutTimers();
-    if (mapRef.current) {
-      try {
-        markersRef.current.forEach((m) => m.setMap(null));
-      } catch {
-        /* noop */
-      }
-      mapRef.current = null;
-    }
-    markersRef.current = [];
-    myLocationMarkerRef.current.main = null;
-    mapInstanceIdRef.current += 1;
-    setCompactMapReady(false);
-    initialPinTriggeredRef.current = false;
-    prevSavedPlacesKeyRef.current = "";
-    relayoutTriggeredRef.current = false;
-    orchestratorSuccessKeyRef.current = "";
-    setCompactMapMountKey((k) => k + 1);
-  }, []);
-
   // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
   const initMap = (places: Place[], posts: FeedPost[]) => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -6545,24 +6528,6 @@ function HomePageContent() {
     orchestratorSuccessKeyRef.current = "";
   }, [mapExpanded]);
 
-  // 큐레이션 상세 닫힘 후 MAP 탭 미니맵 강제 재생성 (detailPostId 언마운트→재마운트로 카카오맵 상태 꼬임 방지)
-  useEffect(() => {
-    const prev = prevDetailPostIdForMapRemountRef.current;
-    prevDetailPostIdForMapRemountRef.current = detailPostId;
-    if (!prev || detailPostId) return;
-    if (activeTabRef.current === "map") {
-      remountCompactMap();
-      return;
-    }
-    pendingCompactMapRemountRef.current = true;
-  }, [detailPostId, remountCompactMap]);
-
-  useEffect(() => {
-    if (activeTab !== "map" || !pendingCompactMapRemountRef.current) return;
-    pendingCompactMapRemountRef.current = false;
-    remountCompactMap();
-  }, [activeTab, remountCompactMap]);
-
   // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 재시도로 해소
   useEffect(() => {
     if (kakaoStatus !== "ready" || activeTab !== "map") return;
@@ -6608,7 +6573,7 @@ function HomePageContent() {
       cancelled = true;
       timeouts.forEach((tid) => window.clearTimeout(tid));
     };
-  }, [kakaoStatus, activeTab, savedPlaces, feedPosts, mapExpanded, compactMapMountKey]);
+  }, [kakaoStatus, activeTab, savedPlaces, feedPosts, mapExpanded]);
 
   // 탭 전환·미니맵 생성 시 지도 relayout
   useEffect(() => {
@@ -8674,32 +8639,28 @@ function HomePageContent() {
         )
       : null;
 
-  if (detailPostId && !detailPost) {
-    return (
+  const curationDetailOverlayEl = detailPostId ? (
+    <div className="curationDetailOverlay">
       <main className="mobileRoot">
         <section className="phoneFrame">
-          <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
-            <button onClick={closeDetailPost} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </button>
-            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>큐레이션</span>
-          </header>
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
-            <p style={{ margin: 0, fontSize: 13, color: "#888" }}>불러오는 중...</p>
-          </div>
-        </section>
-      </main>
-    );
-  }
-
-  if (detailPost) {
+          {!detailPost ? (
+            <>
+              <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
+                <button onClick={closeDetailPost} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a" }}>큐레이션</span>
+              </header>
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
+                <p style={{ margin: 0, fontSize: 13, color: "#888" }}>불러오는 중...</p>
+              </div>
+            </>
+          ) : (() => {
     const liked = detailPost.liked_by_me;
     const detailIsLegacyPlace = !hasPhotoPlaceTags(detailPost) && !!detailPost.placeName.trim();
     const detailCommentComposerHeight = 56;
     return (
       <>
-      <main className="mobileRoot">
-        <section className="phoneFrame">
           <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
             <button onClick={closeDetailPost} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -8948,16 +8909,13 @@ function HomePageContent() {
               게시
             </button>
           </div>
-          {lightboxImg && <div onClick={() => setLightboxImg(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center" }}><img src={lightboxImg} style={{ maxWidth: "95%", maxHeight: "90vh", objectFit: "contain", borderRadius: "4px" }} /></div>}
-          {courseModalLayerEl}
-          {courseShareModalEl}
-          {sharePostModalEl}
-          {notificationModalEl}
-        </section>
-      </main>
       </>
     );
-  }
+          })()}
+        </section>
+      </main>
+    </div>
+  ) : null;
 
   return (
     <>
@@ -9714,7 +9672,6 @@ function HomePageContent() {
                     </div>
                   )}
                   <div
-                    key={`compact-map-${compactMapMountKey}`}
                     ref={mapContainerRef}
                     className="kakaoMap mapCompactMap"
                   />
@@ -10943,6 +10900,7 @@ function HomePageContent() {
         />,
         document.body,
       )}
+    {curationDetailOverlayEl}
     </>
   );
 }
