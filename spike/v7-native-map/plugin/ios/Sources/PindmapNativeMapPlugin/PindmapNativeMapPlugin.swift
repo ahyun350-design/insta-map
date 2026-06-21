@@ -787,6 +787,7 @@ private final class KakaoMapTestViewController: UIViewController {
     private static let photoThumbnailSize: CGFloat = 88
     private static let placeSheetCompactDismissOffset: CGFloat = 300
     private static let placeSheetExpandedDismissOffset: CGFloat = 440
+    private static let placeSheetSaveButtonTag = 7710201
     private weak var searchResultsCard: UIView?
     private weak var searchResultsTitleLabel: UILabel?
     private weak var searchResultsTableView: UITableView?
@@ -886,13 +887,28 @@ private final class KakaoMapTestViewController: UIViewController {
         applyPendingCamera(animated: animated)
     }
 
-    func updateMarkers(_ markers: [MapMarkerInput], clearPrefix: String?) {
-        if let prefix = clearPrefix, !prefix.isEmpty {
-            clearMarkers(withPrefix: prefix)
-        } else {
-            clearAllMarkers()
+    func updateMarkers(_ markers: [MapMarkerInput], clearPrefix: String?, removeIds: [String]? = nil) {
+        let work = { [weak self] in
+            guard let self else { return }
+            if let ids = removeIds?.filter({ !$0.isEmpty }), !ids.isEmpty {
+                self.removeMarkersByIds(ids)
+            }
+            if let prefix = clearPrefix, !prefix.isEmpty {
+                self.clearMarkers(withPrefix: prefix)
+            } else if removeIds == nil || removeIds!.isEmpty {
+                self.clearAllMarkers()
+            }
+            if !markers.isEmpty {
+                _ = self.addMarkers(markers)
+            } else {
+                self.refreshMapImmediately()
+            }
         }
-        _ = addMarkers(markers)
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.async(execute: work)
+        }
     }
 
     func setRoute(path: [(lat: Double, lng: Double)], mode: String, fitCamera: Bool = true) {
@@ -1405,12 +1421,21 @@ private final class KakaoMapTestViewController: UIViewController {
         return markerLayer
     }
 
+    private func refreshMapImmediately() {
+        kakaoMapView()?.refresh()
+        placeSheetCard?.setNeedsLayout()
+        placeSheetCard?.layoutIfNeeded()
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        CATransaction.flush()
+    }
+
     private func clearAllMarkers() {
         markerLayer?.clearAllItems()
         markerPois.removeAll()
         markerMetadata.removeAll()
         hidePlaceBottomSheet(animated: false)
-        kakaoMapView()?.refresh()
+        refreshMapImmediately()
     }
 
     private func clearMarkers(withPrefix prefix: String) {
@@ -1426,8 +1451,23 @@ private final class KakaoMapTestViewController: UIViewController {
                 markerMetadata.removeValue(forKey: id)
             }
         }
-        hidePlaceBottomSheet(animated: true)
-        kakaoMapView()?.refresh()
+        if let currentSheetId = placeSheetMarkerId, currentSheetId.hasPrefix(prefix) {
+            hidePlaceBottomSheet(animated: true)
+        }
+        refreshMapImmediately()
+    }
+
+    private func removeMarkersByIds(_ ids: [String]) {
+        for id in ids {
+            if let layer = markerLayer {
+                layer.removePoi(poiID: id)
+            }
+            markerPois.removeValue(forKey: id)
+            if placeSheetMarkerId != id {
+                markerMetadata.removeValue(forKey: id)
+            }
+        }
+        refreshMapImmediately()
     }
 
     @discardableResult
@@ -1453,6 +1493,9 @@ private final class KakaoMapTestViewController: UIViewController {
                 isSaved: marker.isSaved,
                 photoPostIds: marker.photoPostIds
             )
+            if marker.isSaved {
+                syncColocatedMarkersSavedState(anchorId: marker.id, saved: true)
+            }
             let styleID = ensureStyle(for: marker.category, order: marker.order)
             let option = PoiOptions(styleID: styleID, poiID: marker.id)
             option.rank = 0
@@ -1470,7 +1513,7 @@ private final class KakaoMapTestViewController: UIViewController {
         }
         layer.visible = true
         layer.showAllPois()
-        map.refresh()
+        refreshMapImmediately()
         CAPLog.print("[PindmapNativeMap][Fullscreen] markers added count=\(added)")
         return added
     }
@@ -1604,6 +1647,7 @@ private final class KakaoMapTestViewController: UIViewController {
         saveButton.translatesAutoresizingMaskIntoConstraints = false
         saveButton.setImage(UIImage(systemName: "heart"), for: .normal)
         saveButton.tintColor = .secondaryLabel
+        saveButton.tag = Self.placeSheetSaveButtonTag
         saveButton.addTarget(self, action: #selector(placeSheetSaveTapped), for: .touchUpInside)
         card.addSubview(saveButton)
         placeSheetSaveButton = saveButton
@@ -1803,10 +1847,72 @@ private final class KakaoMapTestViewController: UIViewController {
         }
     }
 
+    private func resolvePlaceSheetSaveButton() -> UIButton? {
+        if let button = placeSheetSaveButton {
+            return button
+        }
+        if let card = placeSheetCard,
+           let button = card.viewWithTag(Self.placeSheetSaveButtonTag) as? UIButton {
+            placeSheetSaveButton = button
+            return button
+        }
+        return nil
+    }
+
+    private func savedStateForPlaceSheetMarker() -> Bool {
+        guard let markerId = placeSheetMarkerId else { return false }
+        return markerMetadata[markerId]?.isSaved ?? false
+    }
+
+    private func forcePlaceSheetHeartResync(isSaved: Bool) {
+        let apply = { [weak self] in
+            guard let self else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            guard let button = self.resolvePlaceSheetSaveButton() else {
+                CATransaction.commit()
+                return
+            }
+            let symbol = isSaved ? "heart.fill" : "heart"
+            button.setImage(UIImage(systemName: symbol), for: .normal)
+            button.tintColor = isSaved ? UIColor(hex: 0xe07070) : .secondaryLabel
+            button.setNeedsDisplay()
+            button.setNeedsLayout()
+            button.layoutIfNeeded()
+            self.placeSheetCard?.setNeedsDisplay()
+            self.placeSheetCard?.setNeedsLayout()
+            self.placeSheetCard?.layoutIfNeeded()
+            self.view.setNeedsLayout()
+            self.view.layoutIfNeeded()
+            CATransaction.commit()
+            CATransaction.flush()
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
+    }
+
+    private func syncPlaceSheetSaveButtonFromMetadata() {
+        guard placeSheetMarkerId != nil else { return }
+        forcePlaceSheetHeartResync(isSaved: savedStateForPlaceSheetMarker())
+    }
+
+    private func scheduleForcePlaceSheetHeartResync() {
+        DispatchQueue.main.async { [weak self] in
+            self?.syncPlaceSheetSaveButtonFromMetadata()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.syncPlaceSheetSaveButtonFromMetadata()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.syncPlaceSheetSaveButtonFromMetadata()
+        }
+    }
+
     private func updatePlaceSheetSaveButton(isSaved: Bool) {
-        let symbol = isSaved ? "heart.fill" : "heart"
-        placeSheetSaveButton?.setImage(UIImage(systemName: symbol), for: .normal)
-        placeSheetSaveButton?.tintColor = isSaved ? UIColor(hex: 0xe07070) : .secondaryLabel
+        forcePlaceSheetHeartResync(isSaved: isSaved)
     }
 
     private func formatDirectionsInfo(durationSec: Int, distanceM: Int) -> String {
@@ -1823,13 +1929,47 @@ private final class KakaoMapTestViewController: UIViewController {
         return "약 \(minutes)분 · \(distanceText)"
     }
 
-    func setPlaceSaved(markerId: String, saved: Bool) {
-        if var meta = markerMetadata[markerId] {
-            meta.isSaved = saved
-            markerMetadata[markerId] = meta
+    private func coordinatesAreColocated(_ a: (lat: Double, lng: Double), _ b: (lat: Double, lng: Double)) -> Bool {
+        let dLat = abs(a.lat - b.lat)
+        let dLng = abs(a.lng - b.lng)
+        return dLat < 0.0005 && dLng < 0.0005
+    }
+
+    private func syncColocatedMarkersSavedState(anchorId: String, saved: Bool) {
+        guard var anchorMeta = markerMetadata[anchorId] else { return }
+        anchorMeta.isSaved = saved
+        markerMetadata[anchorId] = anchorMeta
+
+        guard let anchorLat = anchorMeta.lat, let anchorLng = anchorMeta.lng else { return }
+        let anchorCoord = (lat: anchorLat, lng: anchorLng)
+
+        for id in Array(markerMetadata.keys) {
+            if id == anchorId { continue }
+            guard var meta = markerMetadata[id],
+                  let lat = meta.lat, let lng = meta.lng else { continue }
+            if coordinatesAreColocated(anchorCoord, (lat: lat, lng: lng)) {
+                meta.isSaved = saved
+                markerMetadata[id] = meta
+            }
         }
-        if placeSheetMarkerId == markerId {
-            updatePlaceSheetSaveButton(isSaved: saved)
+    }
+
+    func setPlaceSaved(markerId: String, saved: Bool) {
+        let apply = { [weak self] in
+            guard let self else { return }
+            if self.markerMetadata[markerId] != nil {
+                self.syncColocatedMarkersSavedState(anchorId: markerId, saved: saved)
+            }
+
+            if self.placeSheetMarkerId == markerId {
+                self.forcePlaceSheetHeartResync(isSaved: saved)
+                self.scheduleForcePlaceSheetHeartResync()
+            }
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
         }
     }
 
@@ -1877,7 +2017,7 @@ private final class KakaoMapTestViewController: UIViewController {
         }
 
         updatePlaceSheetMedia(for: meta)
-        updatePlaceSheetSaveButton(isSaved: meta?.isSaved ?? false)
+        forcePlaceSheetHeartResync(isSaved: meta?.isSaved ?? false)
         placeSheetDirectionsInfoLabel?.text = nil
         placeSheetDirectionsInfoLabel?.isHidden = true
 
@@ -1890,6 +2030,8 @@ private final class KakaoMapTestViewController: UIViewController {
             if let searchCard = searchResultsCard, !searchCard.isHidden {
                 view.insertSubview(searchCard, belowSubview: backdrop)
             }
+            syncPlaceSheetSaveButtonFromMetadata()
+            scheduleForcePlaceSheetHeartResync()
             return
         }
 
@@ -1902,10 +2044,13 @@ private final class KakaoMapTestViewController: UIViewController {
         view.layoutIfNeeded()
         placeSheetBottomConstraint?.constant = 0
 
-        UIView.animate(withDuration: 0.28, delay: 0, options: [.curveEaseOut]) {
+        UIView.animate(withDuration: 0.28, delay: 0, options: [.curveEaseOut], animations: {
             backdrop.alpha = 1
             self.view.layoutIfNeeded()
-        }
+        }, completion: { [weak self] _ in
+            self?.syncPlaceSheetSaveButtonFromMetadata()
+            self?.scheduleForcePlaceSheetHeartResync()
+        })
     }
 
     private func hidePlaceBottomSheet(animated: Bool) {
@@ -3025,12 +3170,13 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func updateFullscreenMarkers(_ call: CAPPluginCall) {
         let clearPrefix = call.getString("clearPrefix")
         let markers = Self.toMapMarkerInputs(Self.parseMarkerInputs(from: call))
+        let removeIds = call.getArray("removeIds", String.self) ?? (call.options["removeIds"] as? [String] ?? [])
         DispatchQueue.main.async { [weak self] in
             guard let vc = self?.fullscreenMapVC else {
                 call.resolve()
                 return
             }
-            vc.updateMarkers(markers, clearPrefix: clearPrefix)
+            vc.updateMarkers(markers, clearPrefix: clearPrefix, removeIds: removeIds.isEmpty ? nil : removeIds)
             call.resolve()
         }
     }
@@ -3202,7 +3348,11 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         let saved = call.getBool("saved") ?? false
         DispatchQueue.main.async { [weak self] in
-            self?.fullscreenMapVC?.setPlaceSaved(markerId: id, saved: saved)
+            guard let vc = self?.fullscreenMapVC else {
+                call.resolve()
+                return
+            }
+            vc.setPlaceSaved(markerId: id, saved: saved)
             call.resolve()
         }
     }

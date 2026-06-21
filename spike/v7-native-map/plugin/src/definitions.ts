@@ -118,6 +118,8 @@ export interface PresentFullscreenMapOptions {
 export interface UpdateFullscreenMarkersOptions {
   markers: MarkerInput[];
   clearPrefix?: string;
+  /** Remove specific marker POIs without clearing an entire prefix (e.g. search-N after save). */
+  removeIds?: string[];
 }
 
 export interface SetFullscreenCameraOptions {

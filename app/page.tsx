@@ -1224,7 +1224,12 @@ function HomePageContent() {
   const [isKakaoMapLoaded, setIsKakaoMapLoaded] = useState(false);
   /** 지도 탭 작은 지도 패널에 Map 인스턴스 생성까지 완료 */
   const [compactMapReady, setCompactMapReady] = useState(false);
+  /** 큐레이션 상세 닫힘 후 미니맵 DOM·카카오맵 인스턴스 강제 재생성 */
+  const [compactMapMountKey, setCompactMapMountKey] = useState(0);
+  const pendingCompactMapRemountRef = useRef(false);
+  const prevDetailPostIdForMapRemountRef = useRef<string | null>(null);
   const [mapExpanded, setMapExpanded] = useState(false);
+  const [reelInputExpanded, setReelInputExpanded] = useState(false);
   /** V-7-1: 확장 지도 상단 50% Kakao Native 오버레이 (iOS만, JS API와 병행) */
   const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
   const fullscreenSearchListenerRegisteredRef = useRef(false);
@@ -1451,6 +1456,8 @@ function HomePageContent() {
   const initialPinTriggeredRef = useRef(false);
   const prevSavedPlacesKeyRef = useRef("");
   const relayoutTriggeredRef = useRef(false);
+  const compactMapResizeObserverRef = useRef<ResizeObserver | null>(null);
+  const compactMapRelayoutTimersRef = useRef<number[]>([]);
   const mapInstanceIdRef = useRef(0);
   const orchestratorSuccessKeyRef = useRef("");
   const orchestratorCycleRef = useRef(0);
@@ -2492,15 +2499,16 @@ function HomePageContent() {
 
   const resolveSavedMatch = useCallback((candidate: any): Place | undefined => {
     if (!candidate) return undefined;
+    const savedPlacesSnapshot = savedPlacesRef.current;
     const candidateId = String(candidate._savedPlaceId || "").trim();
     if (candidateId) {
-      const byId = savedPlaces.find((p) => p.id === candidateId);
+      const byId = savedPlacesSnapshot.find((p) => p.id === candidateId);
       if (byId) return byId;
     }
     const cy = Number(candidate.y);
     const cx = Number(candidate.x);
     if (Number.isFinite(cy) && Number.isFinite(cx)) {
-      const byDistance = savedPlaces.find((p) => {
+      const byDistance = savedPlacesSnapshot.find((p) => {
         const c = savedPlaceCoordsRef.current[p.id];
         if (!c) return false;
         if (!namesAreSimilar(p.name, String(candidate.place_name ?? ""))) return false;
@@ -2513,14 +2521,14 @@ function HomePageContent() {
     const candAddr = String(candidate.address_name ?? "");
     const nRoad = normalizeAddress(candRoad);
     const nAddr = normalizeAddress(candAddr);
-    return savedPlaces.find((p) => {
+    return savedPlacesSnapshot.find((p) => {
       if (!namesAreSimilar(p.name, candName)) return false;
       const np = normalizeAddress(p.address);
       if (!np) return true;
       if (!nRoad && !nAddr) return true;
       return np === nRoad || np === nAddr || np.includes(nRoad) || nRoad.includes(np) || np.includes(nAddr) || nAddr.includes(np);
     });
-  }, [savedPlaces]);
+  }, []);
 
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
   const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
@@ -3198,12 +3206,13 @@ function HomePageContent() {
   }, [activeJobs, user?.id, showPlaceExtractionGuideToast, showToast]);
 
   const addPlace = async (place: Place) => {
-    if (!user?.id) {
+    if (!userIdRef.current) {
       showToast("로그인 후 이용해주세요", "info");
       return;
     }
 
     const optimisticPlace = { ...place };
+    savedPlacesRef.current = [optimisticPlace, ...savedPlacesRef.current.filter((p) => p.id !== place.id)];
     setSavedPlaces((prev) => [optimisticPlace, ...prev.filter((p) => p.id !== place.id)]);
 
     try {
@@ -3220,17 +3229,20 @@ function HomePageContent() {
       });
 
       if (!res.ok) {
+        savedPlacesRef.current = savedPlacesRef.current.filter((p) => p.id !== place.id);
         setSavedPlaces((prev) => prev.filter((p) => p.id !== place.id));
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || `저장 실패 (${res.status})`);
       }
     } catch (err) {
+      savedPlacesRef.current = savedPlacesRef.current.filter((p) => p.id !== place.id);
       setSavedPlaces((prev) => prev.filter((p) => p.id !== place.id));
       showToast(err instanceof Error ? err.message : "저장에 실패했어요", "error");
     }
   };
   const deletePlace = async (id: string) => {
-    const previous = savedPlaces.slice();
+    const previous = savedPlacesRef.current.slice();
+    savedPlacesRef.current = savedPlacesRef.current.filter((p) => p.id !== id);
     setSavedPlaces((prev) => prev.filter((p) => p.id !== id));
 
     try {
@@ -3243,11 +3255,13 @@ function HomePageContent() {
       });
 
       if (!res.ok) {
+        savedPlacesRef.current = previous;
         setSavedPlaces(previous);
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || `삭제 실패 (${res.status})`);
       }
     } catch (err) {
+      savedPlacesRef.current = previous;
       setSavedPlaces(previous);
       showToast(err instanceof Error ? err.message : "삭제에 실패했어요", "error");
     }
@@ -4676,6 +4690,26 @@ function HomePageContent() {
     setDetailPostId(null);
   };
 
+  const openMapFullscreen = useCallback(() => {
+    setMapExpanded(true);
+  }, []);
+
+  const expandReelInput = useCallback(() => {
+    setReelInputExpanded(true);
+  }, []);
+
+  const collapseReelInput = useCallback(() => {
+    setReelInputExpanded(false);
+  }, []);
+
+  useEffect(() => {
+    if (!reelInputExpanded) return;
+    const timer = window.setTimeout(() => {
+      instagramUrlInputRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [reelInputExpanded]);
+
   // 지도 탭의 작은 목록에서 장소 클릭 → 상세 카드만 띄움 (전체화면 X)
   const handleMiniListClick = (place: Place) => {
     const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
@@ -5289,6 +5323,7 @@ function HomePageContent() {
       };
       setActiveJobs((prev) => [newJob, ...prev.filter((job) => job.jobId !== newJob.jobId)]);
       setInstagramUrl("");
+      setReelInputExpanded(false);
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
       console.log("[PindMap:url] extraction message shown");
       showToast("분석 작업을 백그라운드에서 시작했어요", "success");
@@ -5650,9 +5685,139 @@ function HomePageContent() {
     })();
   };
 
+  const detachCompactMapResizeObserver = () => {
+    compactMapResizeObserverRef.current?.disconnect();
+    compactMapResizeObserverRef.current = null;
+  };
+
+  const clearCompactMapRelayoutTimers = () => {
+    compactMapRelayoutTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    compactMapRelayoutTimersRef.current = [];
+  };
+
+  const attachCompactMapResizeObserver = () => {
+    if (typeof ResizeObserver === "undefined") return;
+    const container = mapContainerRef.current;
+    if (!container) return;
+
+    detachCompactMapResizeObserver();
+
+    const sizeState = new Map<Element, { w: number; h: number }>();
+    const seedSize = (el: Element) => {
+      if (el === container) {
+        const rect = container.getBoundingClientRect();
+        sizeState.set(el, { w: rect.width, h: rect.height });
+        return;
+      }
+      const htmlEl = el as HTMLElement;
+      sizeState.set(el, { w: htmlEl.clientWidth, h: htmlEl.clientHeight });
+    };
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        const prev = sizeState.get(entry.target) ?? { w: 0, h: 0 };
+        const wasZero = prev.w <= 0 || prev.h <= 0;
+        sizeState.set(entry.target, { w: width, h: height });
+        if (wasZero && width > 0 && height > 0 && mapRef.current) {
+          scheduleCompactMapRelayout();
+        }
+      }
+    });
+
+    seedSize(container);
+    observer.observe(container);
+    const parent = container.parentElement;
+    if (parent) {
+      seedSize(parent);
+      observer.observe(parent);
+    }
+    compactMapResizeObserverRef.current = observer;
+  };
+
+  const scheduleCompactMapRectPoll = () => {
+    let ticks = 0;
+    const maxTicks = 10;
+    let lastWasZero = true;
+    let relayoutDone = false;
+
+    const poll = () => {
+      if (relayoutDone || activeTabRef.current !== "map" || !mapRef.current) return;
+      ticks += 1;
+      const container = mapContainerRef.current;
+      if (!container) {
+        lastWasZero = true;
+        if (ticks < maxTicks) window.setTimeout(poll, 200);
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      const parent = container.parentElement;
+      const hasSize =
+        rect.width > 0 &&
+        rect.height > 0 &&
+        (!parent || (parent.clientWidth > 0 && parent.clientHeight > 0));
+      if (lastWasZero && hasSize) {
+        relayoutDone = true;
+        scheduleCompactMapRelayout();
+        return;
+      }
+      lastWasZero = !hasSize;
+      if (ticks < maxTicks && !relayoutDone) window.setTimeout(poll, 200);
+    };
+
+    window.setTimeout(poll, 0);
+  };
+
+  const relayoutCompactMap = () => {
+    const map = mapRef.current;
+    if (!map || !isKakaoMapsApiReady()) return;
+    map.relayout?.();
+    try {
+      const center = map.getCenter?.();
+      const level = map.getLevel?.();
+      if (center) map.setCenter(center);
+      if (typeof level === "number") map.setLevel(level);
+    } catch {
+      /* noop */
+    }
+  };
+
+  const scheduleCompactMapRelayout = () => {
+    clearCompactMapRelayoutTimers();
+    requestAnimationFrame(() => relayoutCompactMap());
+    [0, 100, 300, 600, 1000, 1500, 2000].forEach((delay) => {
+      const timerId = window.setTimeout(() => relayoutCompactMap(), delay);
+      compactMapRelayoutTimersRef.current.push(timerId);
+    });
+  };
+
+  const remountCompactMap = useCallback(() => {
+    detachCompactMapResizeObserver();
+    clearCompactMapRelayoutTimers();
+    if (mapRef.current) {
+      try {
+        markersRef.current.forEach((m) => m.setMap(null));
+      } catch {
+        /* noop */
+      }
+      mapRef.current = null;
+    }
+    markersRef.current = [];
+    myLocationMarkerRef.current.main = null;
+    mapInstanceIdRef.current += 1;
+    setCompactMapReady(false);
+    initialPinTriggeredRef.current = false;
+    prevSavedPlacesKeyRef.current = "";
+    relayoutTriggeredRef.current = false;
+    orchestratorSuccessKeyRef.current = "";
+    setCompactMapMountKey((k) => k + 1);
+  }, []);
+
   // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
   const initMap = (places: Place[], posts: FeedPost[]) => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    if (!mapContainerRef.current || mapRef.current) {
+      return;
+    }
     const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
     mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 9 });
     mapInstanceIdRef.current += 1;
@@ -5660,6 +5825,9 @@ function HomePageContent() {
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
     addMyLocation(mapRef.current, "main");
     setCompactMapReady(true);
+    attachCompactMapResizeObserver();
+    scheduleCompactMapRelayout();
+    scheduleCompactMapRectPoll();
   };
 
   const addPlacePins = (map: any, arr: any[], posts: FeedPost[], places: Place[], scope: "main" | "expanded" = "main") => {
@@ -6360,7 +6528,11 @@ function HomePageContent() {
   // 확장 지도 닫히면 메인 지도 참조 무효화 → 아래 초기화 effect가 initMap 재호출
   useEffect(() => {
     if (mapExpanded) return;
-    if (!mapRef.current) return;
+    if (!mapRef.current) {
+      return;
+    }
+    detachCompactMapResizeObserver();
+    clearCompactMapRelayoutTimers();
     mapRef.current = null;
     mapInstanceIdRef.current += 1;
     myLocationMarkerRef.current.main = null;
@@ -6373,10 +6545,30 @@ function HomePageContent() {
     orchestratorSuccessKeyRef.current = "";
   }, [mapExpanded]);
 
+  // 큐레이션 상세 닫힘 후 MAP 탭 미니맵 강제 재생성 (detailPostId 언마운트→재마운트로 카카오맵 상태 꼬임 방지)
+  useEffect(() => {
+    const prev = prevDetailPostIdForMapRemountRef.current;
+    prevDetailPostIdForMapRemountRef.current = detailPostId;
+    if (!prev || detailPostId) return;
+    if (activeTabRef.current === "map") {
+      remountCompactMap();
+      return;
+    }
+    pendingCompactMapRemountRef.current = true;
+  }, [detailPostId, remountCompactMap]);
+
+  useEffect(() => {
+    if (activeTab !== "map" || !pendingCompactMapRemountRef.current) return;
+    pendingCompactMapRemountRef.current = false;
+    remountCompactMap();
+  }, [activeTab, remountCompactMap]);
+
   // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 재시도로 해소
   useEffect(() => {
     if (kakaoStatus !== "ready" || activeTab !== "map") return;
-    if (mapRef.current) return;
+    if (mapRef.current) {
+      return;
+    }
 
     let cancelled = false;
     const timeouts: number[] = [];
@@ -6395,6 +6587,7 @@ function HomePageContent() {
         return;
       }
       const rect = container.getBoundingClientRect();
+      attachCompactMapResizeObserver();
       if (rect.width > 0 && rect.height > 0) {
         initMap(savedPlaces, feedPosts);
         return;
@@ -6415,24 +6608,13 @@ function HomePageContent() {
       cancelled = true;
       timeouts.forEach((tid) => window.clearTimeout(tid));
     };
-  }, [kakaoStatus, activeTab, savedPlaces, feedPosts, mapExpanded]);
+  }, [kakaoStatus, activeTab, savedPlaces, feedPosts, mapExpanded, compactMapMountKey]);
 
-  // 탭 전환 시 지도 relayout
+  // 탭 전환·미니맵 생성 시 지도 relayout
   useEffect(() => {
     if (activeTab !== "map" || !mapRef.current || kakaoStatus !== "ready") return;
-    const relayoutTimers = [100, 300, 600].map((delay) => setTimeout(() => {
-      const map = mapRef.current;
-      if (!map || !isKakaoMapsApiReady()) return;
-      map.relayout();
-      const container = mapContainerRef.current;
-      const parent = container?.parentElement;
-      if (parent && (parent.clientWidth === 0 || parent.clientHeight === 0)) {
-        const center = map.getCenter?.() ?? new window.kakao.maps.LatLng(37.5665, 126.978);
-        map.setCenter(center);
-      }
-    }, delay));
-    return () => relayoutTimers.forEach(clearTimeout);
-  }, [activeTab, kakaoStatus]);
+    scheduleCompactMapRelayout();
+  }, [activeTab, kakaoStatus, compactMapReady]);
 
   useEffect(() => {
     if (activeTab !== "map") return;
@@ -6442,9 +6624,7 @@ function HomePageContent() {
     console.log("[PindMap:pin] relayout trigger (initial)");
 
     const runRelayoutAndRepaint = () => {
-      const map = mapRef.current;
-      if (!map) return;
-      map.relayout?.();
+      relayoutCompactMap();
       console.log("[PindMap:pin] relayout completed");
     };
 
@@ -7358,36 +7538,50 @@ function HomePageContent() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [activeTab, user?.id, refreshMyTotalLikes, refreshMyCourses]);
 
-  const togglePlaceSheetSave = useCallback(async (placeData: PlaceSheetData, onAfterSave?: () => void) => {
-    if (!user?.id) {
+  const togglePlaceSheetSave = useCallback(async (placeData: PlaceSheetData, onAfterSave?: () => void): Promise<boolean | undefined> => {
+    const uid = userIdRef.current;
+    if (!uid) {
       showToast("로그인 후 이용해주세요", "info");
-      return;
+      return undefined;
     }
     const saved = resolveSavedMatch(placeData);
     if (saved) {
       await deletePlace(saved.id);
       showToast("저장이 취소되었어요", "info");
-      return;
+      return false;
     }
     const category = inferCategoryFromKakaoCategoryName(placeData.category_name) as Category;
     const heartCoords = kakaoYXToLatLng(placeData.y, placeData.x);
-    await addPlace({
+    const placeToAdd = {
       id: Math.random().toString(36).substring(2) + Date.now().toString(36),
       name: placeData.place_name,
       address: placeData.road_address_name || placeData.address_name || "",
       category,
       ...(heartCoords ? { lat: heartCoords.lat, lng: heartCoords.lng } : {}),
-    });
+    };
+    if (heartCoords) {
+      savedPlaceCoordsRef.current[placeToAdd.id] = heartCoords;
+    }
+    try {
+      await addPlace(placeToAdd);
+    } catch (err) {
+      throw err;
+    }
     showToast("저장됐어요", "success");
     onAfterSave?.();
-  }, [user?.id, resolveSavedMatch, deletePlace, addPlace, showToast]);
+    return true;
+  }, [resolveSavedMatch, deletePlace, addPlace, showToast]);
 
   const resolveFullscreenMarkerPlaceSheet = useCallback((markerId: string): PlaceSheetData | null => {
     const id = String(markerId ?? "").trim();
-    if (!id) return null;
+    if (!id) {
+      return null;
+    }
     if (id.startsWith("place-")) {
       const place = placePinByIdRef.current.get(id);
-      if (!place) return null;
+      if (!place) {
+        return null;
+      }
       const stored = savedPlaceCoordsRef.current[place.id] ?? latLngFromRow(place);
       const lat = stored?.lat;
       const lng = stored?.lng;
@@ -7399,7 +7593,9 @@ function HomePageContent() {
     }
     if (id.startsWith("search-")) {
       const place = searchPinPlaceByIdRef.current.get(id);
-      if (!place) return null;
+      if (!place) {
+        return null;
+      }
       const expandedRef = placeRefFromKakaoPlace(place);
       return {
         ...place,
@@ -7416,10 +7612,61 @@ function HomePageContent() {
       showToast("장소 정보를 찾을 수 없어요", "error");
       return;
     }
-    await togglePlaceSheetSave(placeData);
-    const isSaved = !!resolveSavedMatch(placeData);
-    await setFullscreenNativePlaceSaved({ id: markerId, saved: isSaved }, { silent: false });
-  }, [resolveFullscreenMarkerPlaceSheet, togglePlaceSheetSave, resolveSavedMatch, showToast]);
+
+    const currentlySaved = !!resolveSavedMatch(placeData);
+    const willBeSaved = !currentlySaved;
+    const previousSaved = currentlySaved;
+
+    if (!userIdRef.current) {
+      await togglePlaceSheetSave(placeData);
+      return;
+    }
+
+    await setFullscreenNativePlaceSaved({ id: markerId, saved: willBeSaved }, { silent: false });
+
+    let result: boolean | undefined;
+    try {
+      result = await togglePlaceSheetSave(placeData);
+    } catch {
+      result = undefined;
+    }
+
+    const savedAfter = !!resolveSavedMatch(placeData);
+    const success = result !== undefined && result === willBeSaved && savedAfter === willBeSaved;
+    if (!success) {
+      await setFullscreenNativePlaceSaved({ id: markerId, saved: previousSaved }, { silent: false });
+      return;
+    }
+
+    if (!mapExpandedLiveRef.current) return;
+
+    const savedPlaceMarkers = savedPlacesRef.current.flatMap((place) => {
+      const stored = latLngFromRow(place);
+      const cached = savedPlaceCoordsRef.current[place.id];
+      const coords = stored ?? cached;
+      if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) return [];
+      placePinByIdRef.current.set(`place-${place.id}`, place);
+      savedPlaceCoordsRef.current[place.id] = coords;
+      const { photos, postCount, photoPostIds } = getMarkerPhotoMetaForPlace(feedPostsRef.current, place, coords);
+      return [{
+        id: `place-${place.id}`,
+        lat: coords.lat,
+        lng: coords.lng,
+        category: place.category,
+        title: place.name,
+        address: place.address,
+        isSaved: true,
+        ...(photos.length > 0 ? { photos } : {}),
+        ...(postCount > 0 ? { postCount } : {}),
+        ...(photoPostIds.length > 0 ? { photoPostIds } : {}),
+      }];
+    });
+
+    await updateFullscreenNativeMarkers(
+      { markers: savedPlaceMarkers, clearPrefix: "place-" },
+      { silent: false },
+    );
+  }, [resolveFullscreenMarkerPlaceSheet, resolveSavedMatch, togglePlaceSheetSave, showToast]);
 
   const handleFullscreenNativeOpenExternal = useCallback((markerId: string, type: "apple" | "transit") => {
     const placeData = resolveFullscreenMarkerPlaceSheet(markerId);
@@ -8915,11 +9162,14 @@ function HomePageContent() {
 
           {activeTab === "messages" && (
   <div
-    className={activeChatRoom ? "screen messagesChatShell" : "screen"}
+    className={activeChatRoom ? "screen messagesChatShell" : "screen messagesListShell"}
     style={{
       paddingTop: "env(safe-area-inset-top, 0px)",
       boxSizing: "border-box",
-      ...(activeChatRoom ? { display: "flex", flexDirection: "column", minHeight: 0, flex: 1 } : {}),
+      display: "flex",
+      flexDirection: "column",
+      minHeight: 0,
+      flex: 1,
     }}
   >
     {activeChatRoom ? (
@@ -9199,10 +9449,6 @@ function HomePageContent() {
     ) : (
       <div
         className="messagesListScreen"
-        style={{
-          paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 8}px` : undefined,
-          transition: "padding-bottom 0.25s ease",
-        }}
       >
         <div className="messagesListHeader">
           <p className="screenTitle" style={{ margin: 0 }}>메시지</p>
@@ -9276,6 +9522,13 @@ function HomePageContent() {
             )}
           </div>
         </div>
+        <div
+          className="messagesListScroll"
+          style={{
+            paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 8}px` : undefined,
+            transition: "padding-bottom 0.25s ease",
+          }}
+        >
         {messageUserSearchQuery.trim() ? (
           <div className="messagesUserSearchResults">
             {messageUserSearchLoading && (
@@ -9346,6 +9599,7 @@ function HomePageContent() {
             ))}
           </>
         )}
+        </div>
       </div>
     )}
   </div>
@@ -9360,18 +9614,6 @@ function HomePageContent() {
               boxSizing: "border-box",
             }}
           >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <p className="screenTitle" style={{ marginBottom: 0 }}>지도</p>
-                {activeJobs.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowJobsModal(true)}
-                    style={{ border: "0.5px solid #d9deec", borderRadius: "999px", background: "#f7f9ff", color: "#1a2a7a", fontSize: "11px", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit" }}
-                  >
-                    분석 중인 작업: {activeJobs.length}개
-                  </button>
-                )}
-              </div>
               {showJobsModal && (
                 <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "flex-end" }}>
                   <div style={{ width: "100%", background: "#fff", borderRadius: "18px 18px 0 0", padding: "18px 16px 24px", maxHeight: "62vh", overflowY: "auto" }}>
@@ -9389,102 +9631,123 @@ function HomePageContent() {
                   </div>
                 </div>
               )}
-              <div className="mapReelInputSection">
-                <p className="mapReelInputTitle">릴스로 장소 추가</p>
-                <p className="mapReelInputHint">
-                  📱 인스타그램 릴스·게시물 링크를 붙여넣으면 지도에 자동으로 핀이 찍혀요
-                </p>
-                <div className="mapReelInputWrap">
-                  <div className="mapReelInputField">
-                    <span className="mapReelInputIcon" aria-hidden>
-                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                        <rect x="3" y="3" width="14" height="14" rx="3.5" stroke="currentColor" strokeWidth="1.5" />
-                        <path
-                          d="M8.5 11.5L6.5 9.5l1.2-1.2M11.5 8.5l2 2-1.2 1.2M7.5 12.5h5"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </span>
-                    <input
-                      ref={instagramUrlInputRef}
-                      className="mapInputReel"
-                      placeholder="여기에 인스타 릴스 링크를 붙여넣으세요"
-                      value={instagramUrl}
-                      onChange={(e) => setInstagramUrl(e.target.value)}
-                    />
-                  </div>
+              <div className="mapTabStickyTop">
+                <div className="mapTabHeaderRow">
+                  <p className="mapTabTitle">지도</p>
+                  {activeJobs.length > 0 && (
+                    <button
+                      type="button"
+                      className="mapTabJobsBtn"
+                      onClick={() => setShowJobsModal(true)}
+                    >
+                      분석 중인 작업: {activeJobs.length}개
+                    </button>
+                  )}
+                </div>
+                <div className="mapReelInputSection">
+                  {!reelInputExpanded ? (
+                    <>
+                      <button
+                        type="button"
+                        className="mapReelExpandBtn"
+                        onClick={expandReelInput}
+                      >
+                        <span className="mapReelExpandBtnIcon" aria-hidden>+</span>
+                        릴스로 장소 추가하기
+                      </button>
+                      <p className="mapReelExpandHint">
+                        인스타 릴스 링크를 붙여넣으면 지도에 핀이 찍혀요
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mapReelInputPanel">
+                        <div className="mapReelInputRow">
+                          <span className="mapReelInstaIcon" aria-hidden>
+                            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                              <rect x="2.5" y="2.5" width="13" height="13" rx="4" stroke="currentColor" strokeWidth="1.4" />
+                              <circle cx="9" cy="9" r="3.2" stroke="currentColor" strokeWidth="1.4" />
+                              <circle cx="13.2" cy="4.8" r="0.9" fill="currentColor" />
+                            </svg>
+                          </span>
+                          <input
+                            ref={instagramUrlInputRef}
+                            className="mapInputReel"
+                            placeholder="릴스·게시물 링크 붙여넣기"
+                            value={instagramUrl}
+                            onChange={(e) => setInstagramUrl(e.target.value)}
+                          />
+                          <button
+                            className="mapReelSubmitBtn"
+                            onClick={handleAddFromInstagram}
+                            type="button"
+                            disabled={!canSubmit}
+                          >
+                            {isSubmitting ? "분석 중..." : "핀 추가"}
+                          </button>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="mapReelCollapseBtn"
+                        onClick={collapseReelInput}
+                      >
+                        닫기
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="mapTabScrollBody">
+              <div className="mapHeroBlock">
+                <div className="mapCompactWrap">
+                  {(kakaoStatus === "idle" || kakaoStatus === "loading" || (kakaoStatus === "ready" && !compactMapReady)) && (
+                    <div
+                      className="mapCompactLoading"
+                      aria-hidden={compactMapReady}
+                    >
+                      <span style={{ fontSize: "28px", lineHeight: 1 }}>🗺️</span>
+                      <p className="mapCompactLoadingTitle">지도를 불러오는 중...</p>
+                      <p className="mapCompactLoadingSub">
+                        {kakaoStatus !== "ready" ? "카카오맵 SDK를 불러오고 있어요" : "지도를 그리고 있어요"}
+                      </p>
+                    </div>
+                  )}
+                  <div
+                    key={`compact-map-${compactMapMountKey}`}
+                    ref={mapContainerRef}
+                    className="kakaoMap mapCompactMap"
+                  />
                   <button
-                    className="mapReelSubmitBtn"
-                    onClick={handleAddFromInstagram}
                     type="button"
-                    disabled={!canSubmit}
+                    className="mapCompactTapLayer"
+                    aria-label="지도를 열어 검색 및 길찾기"
+                    onClick={openMapFullscreen}
+                  />
+                  <button
+                    type="button"
+                    className="mapCompactFeatureChip"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openMapFullscreen();
+                    }}
                   >
-                    {isSubmitting ? "분석 중..." : "핀 추가"}
+                    <span className="mapCompactFeatureChipIcon" aria-hidden>🔍</span>
+                    지도 열어서 검색·길찾기
+                    <span className="mapCompactFeatureChipArrow" aria-hidden>→</span>
                   </button>
                 </div>
               </div>
               {isAnalyzing && (
-                <div style={{ marginTop: "6px" }}>
-                  <p style={{ margin: 0, color: "#1a2a7a", fontSize: "12px" }}>{analyzingMainText}</p>
-                  <p style={{ margin: "3px 0 0", color: "#888", fontSize: "11px" }}>{analyzingSubText}</p>
+                <div className="mapTabStatusBlock">
+                  <p className="mapTabStatusMain">{analyzingMainText}</p>
+                  <p className="mapTabStatusSub">{analyzingSubText}</p>
                 </div>
               )}
               {!isAnalyzing && status && <p className="hintText">{status}</p>}
               {error && <p className="emptyText">{error}</p>}
               {kakaoStatus === "loading" && <p className="hintText">카카오맵 SDK를 불러오는 중입니다</p>}
               {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}
-              <div className="mapCompactWrap">
-                {(kakaoStatus === "idle" || kakaoStatus === "loading" || (kakaoStatus === "ready" && !compactMapReady)) && (
-                  <div
-                    className="mapCompactLoading"
-                    aria-hidden={compactMapReady}
-                  >
-                    <span style={{ fontSize: "28px", lineHeight: 1 }}>🗺️</span>
-                    <p style={{ margin: 0, fontSize: "13px", color: "#1a2a7a", fontWeight: 600, letterSpacing: "0.3px" }}>지도를 불러오는 중...</p>
-                    <p style={{ margin: 0, fontSize: "11px", color: "#7a849e", textAlign: "center", paddingInline: "12px" }}>
-                      {kakaoStatus !== "ready" ? "카카오맵 SDK를 불러오고 있어요" : "지도를 그리고 있어요"}
-                    </p>
-                  </div>
-                )}
-                <div
-                  ref={mapContainerRef}
-                  className="kakaoMap mapCompactMap"
-                />
-                <button
-                  type="button"
-                  className="mapExpandFab"
-                  aria-label="전체화면으로 지도 크게 보기"
-                  onClick={() => setMapExpanded(true)}
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-                    <path d="M2 6V2H6M10 2H14V6M14 10V14H10M6 14H2V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                  크게 보기
-                </button>
-                <button
-                  type="button"
-                  className="mapExpandHint"
-                  aria-label="전체화면으로 지도 크게 보기"
-                  onClick={() => setMapExpanded(true)}
-                >
-                  지도를 탭하면 전체화면으로 크게 볼 수 있어요
-                </button>
-              </div>
-              {savedPlaces.length > 0 && (
-                <div className="mapSecondaryActions">
-                  <button
-                    type="button"
-                    className="mapHideAllBtn"
-                    title="릴스로 추가된 장소 목록을 지웁니다 (저장·핀은 유지)"
-                    onClick={() => setHiddenIds(new Set(savedPlaces.map((p) => p.id)))}
-                  >
-                    🗑️ 검색기록 삭제
-                  </button>
-                </div>
-              )}
               {mapExpanded &&
                 !isNativeMapAvailable() &&
                 typeof document !== "undefined" &&
@@ -9680,29 +9943,57 @@ function HomePageContent() {
                   </div>,
                   document.body,
                 )}
-              <div className="miniList">
-                {savedPlaces.filter(p => !hiddenIds.has(p.id)).map((place) => (
-                  <article key={place.id} className="miniItem" onClick={() => handleMiniListClick(place)} style={{ cursor: "pointer" }}>
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[place.category], flexShrink: 0, display: "inline-block" }} />
-                    <div style={{ flex: 1 }}><p className="miniName">{place.name}</p><p className="miniMeta">{place.address} · {place.category}</p></div>
-                    <button onClick={(e) => { e.stopPropagation(); hideFromMap(place.id); }} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "16px", padding: "0 4px", lineHeight: 1, flexShrink: 0 }}>×</button>
-                  </article>
-                ))}
-                {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && savedPlaces.length > 0 && (<p className="hintText" style={{ textAlign: "center" }}>검색기록을 지웠어요.{" "}<button onClick={resetHiddenPlaces} style={{ border: "none", background: "none", color: "#1a2a7a", cursor: "pointer", fontSize: "12px", textDecoration: "underline" }}>다시 보기</button></p>)}
-                {savedPlaces.length === 0 && (
-                  <EmptyState
-                    icon="📍"
-                    title="아직 핀이 없어요"
-                    description="인스타그램 릴스나 게시물 URL을 붙여넣으면 지도에 자동으로 핀이 찍혀요"
-                    action={{
-                      label: "릴스 붙여넣기",
-                      onClick: () => {
-                        instagramUrlInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-                        instagramUrlInputRef.current?.focus();
-                      },
-                    }}
-                  />
+              <div className="mapPlacesPanel">
+                {savedPlaces.length > 0 && (
+                  <>
+                    <div className="mapPlacesSectionHeader">
+                      <button
+                        type="button"
+                        className="mapHideAllBtn"
+                        title="릴스로 추가된 장소 목록을 지웁니다 (저장·핀은 유지)"
+                        onClick={() => setHiddenIds(new Set(savedPlaces.map((p) => p.id)))}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+                          <path d="M2.5 4.5h11M6 4.5V3.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1M12.5 4.5l-.6 8.2a1 1 0 0 1-1 .8H5.1a1 1 0 0 1-1-.8l-.6-8.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        검색기록 삭제
+                      </button>
+                    </div>
+                    <div className="miniList">
+                      {savedPlaces.filter(p => !hiddenIds.has(p.id)).map((place) => (
+                        <article key={place.id} className="miniItem" onClick={() => handleMiniListClick(place)} style={{ cursor: "pointer" }}>
+                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[place.category], flexShrink: 0, display: "inline-block" }} />
+                          <div style={{ flex: 1 }}><p className="miniName">{place.name}</p><p className="miniMeta">{place.address} · {place.category}</p></div>
+                          <button className="miniItemRemoveBtn" onClick={(e) => { e.stopPropagation(); hideFromMap(place.id); }} type="button" aria-label={`${place.name} 목록에서 숨기기`}>×</button>
+                        </article>
+                      ))}
+                      {savedPlaces.filter(p => !hiddenIds.has(p.id)).length === 0 && (
+                        <p className="mapPlacesEmptyHint">
+                          검색기록을 지웠어요.{" "}
+                          <button type="button" onClick={resetHiddenPlaces}>다시 보기</button>
+                        </p>
+                      )}
+                    </div>
+                  </>
                 )}
+                {savedPlaces.length === 0 && (
+                  <div className="miniList">
+                    <EmptyState
+                      icon="📍"
+                      title="아직 핀이 없어요"
+                      description="인스타그램 릴스나 게시물 URL을 붙여넣으면 지도에 자동으로 핀이 찍혀요"
+                      action={{
+                        label: "릴스 붙여넣기",
+                        onClick: () => {
+                          setReelInputExpanded(true);
+                          instagramUrlInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                          instagramUrlInputRef.current?.focus();
+                        },
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
               </div>
           </div>
 

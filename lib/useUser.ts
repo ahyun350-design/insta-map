@@ -63,6 +63,78 @@ function usernameFromSessionAndRow(
   );
 }
 
+function resolveUsernameForEnsure(
+  userId: string,
+  email?: string,
+  preferredUsername?: string,
+): string {
+  const preferred =
+    typeof preferredUsername === "string" ? preferredUsername.trim() : "";
+  if (preferred) return preferred;
+  const emailLocal = email?.split("@")[0]?.trim();
+  if (emailLocal) return emailLocal;
+  return `user_${userId.slice(0, 8)}`;
+}
+
+async function verifyUserRowExists(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) {
+    console.error("[PindMap:auth] users verify select failed:", error);
+    return false;
+  }
+  return !!data;
+}
+
+async function ensureUserExists(
+  userId: string,
+  email?: string,
+  preferredUsername?: string,
+): Promise<boolean> {
+  console.log("[PindMap:auth] users 테이블 체크 시작", { userId });
+
+  const { data: existing, error: selectError } = await supabase
+    .from("users")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (selectError) {
+    console.error("[PindMap:auth] users 체크 select 실패 — upsert 시도:", selectError);
+  } else if (existing) {
+    console.log("[PindMap:auth] users 이미 존재:", userId);
+    return true;
+  }
+
+  const username = resolveUsernameForEnsure(userId, email, preferredUsername);
+
+  const upsertOnce = () =>
+    supabase.from("users").upsert({ id: userId, username }, { onConflict: "id" });
+
+  let { error: upsertError } = await upsertOnce();
+  if (upsertError) {
+    console.error("[PindMap:auth] users upsert 실패, 1회 재시도:", upsertError);
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    ({ error: upsertError } = await upsertOnce());
+  }
+
+  if (upsertError) {
+    console.error("[PindMap:auth] users upsert 최종 실패:", upsertError, { userId, username });
+    return false;
+  }
+
+  const verified = await verifyUserRowExists(userId);
+  if (verified) {
+    console.log("[PindMap:auth] users upsert 성공 확인:", username);
+  } else {
+    console.error("[PindMap:auth] users upsert 후 행 검증 실패:", userId);
+  }
+  return verified;
+}
+
 // 현재 로그인된 사용자 정보를 가져오는 훅
 export function useUser() {
   const [user, setUser] = useState<AppUser | null>(null);
@@ -134,40 +206,6 @@ export function useUser() {
       }
     };
 
-    const ensureUserExists = async (userId: string, email?: string, preferredUsername?: string) => {
-      console.log("users 테이블 체크 시작", { userId });
-      const { data: existing, error: selectError } = await supabase
-        .from("users")
-        .select("id")
-        .eq("id", userId)
-        .maybeSingle();
-
-      if (selectError) {
-        console.error("users 체크 실패:", selectError);
-        return;
-      }
-
-      if (existing) {
-        console.log("users 이미 존재:", preferredUsername?.trim() || email?.split("@")[0] || email || userId);
-        return;
-      }
-
-      const fallbackUsername =
-        preferredUsername?.trim() ||
-        email?.split("@")[0] ||
-        "user";
-
-      const { error } = await supabase.from("users").upsert({
-        id: userId,
-        username: fallbackUsername,
-      }, { onConflict: "id" });
-      if (error) {
-        console.error("users 자동 INSERT 실패:", error);
-      } else {
-        console.log("users INSERT 성공:", fallbackUsername);
-      }
-    };
-
     // 1) 페이지 처음 로드시 현재 세션 확인
     const loadUser = async () => {
       console.log("[PindMap:home][auth] loadUser start");
@@ -191,11 +229,14 @@ export function useUser() {
         hadAuthedSessionFromGet = true;
         loadUserHadAuthUser = true;
 
-        await ensureUserExists(
+        const ensured = await ensureUserExists(
           session.user.id,
           session.user.email,
           session.user.user_metadata?.username || session.user.user_metadata?.name
         );
+        if (!ensured) {
+          console.error("[PindMap:auth] ensureUserExists failed on loadUser", session.user.id);
+        }
 
         // users 테이블에서 username 가져오기
         const { data } = await supabase
@@ -270,11 +311,14 @@ export function useUser() {
         setTimeout(() => {
           void (async () => {
             try {
-              await ensureUserExists(
+              const ensured = await ensureUserExists(
                 sessionUser.id,
                 sessionUser.email,
                 sessionUser.user_metadata?.username || sessionUser.user_metadata?.name,
               );
+              if (!ensured) {
+                console.error("[PindMap:auth] ensureUserExists failed on auth change", sessionUser.id);
+              }
 
               const { data } = await supabase
                 .from("users")
