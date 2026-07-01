@@ -9199,10 +9199,12 @@ function HomePageContent() {
                     <PostGridCell
                       key={post.id}
                       variant="home"
+                      craftStyled
                       imageUrl={post.images[0]}
                       titleLine={(post.title || post.comment || repPlace.placeName || "").trim()}
                       placeName={repPlace.placeName}
                       address={repPlace.address}
+                      category={repPlace.category}
                       likeCount={post.likes_count}
                       imageCount={post.images.length}
                       showUsername

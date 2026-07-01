@@ -20,7 +20,11 @@ export function HomeFeedTopBar({
   onAddClick,
 }: Props) {
   return (
-    <div className="homeFeedToolbar">
+    <>
+      <p className="homeFeedBrand pixel-font" aria-hidden>
+        pin<span className="homeFeedBrandAccent">d</span>map
+      </p>
+      <div className="homeFeedToolbar">
       <HomeFeedSearchBar
         value={searchQuery}
         onChange={onSearchChange}
@@ -67,5 +71,6 @@ export function HomeFeedTopBar({
         </svg>
       </button>
     </div>
+    </>
   );
 }

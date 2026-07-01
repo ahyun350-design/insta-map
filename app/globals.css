@@ -391,6 +391,7 @@ body {
   box-sizing: border-box;
   overflow: hidden;
   min-height: 0;
+  background: var(--craft-cream);
 }
 
 .homeFeedStickyBar {
@@ -398,10 +399,24 @@ body {
   top: 0;
   z-index: 6;
   flex-shrink: 0;
-  background: #fff;
-  border-bottom: 0.5px solid var(--border);
+  background: var(--craft-cream);
+  border-bottom: 0.5px solid rgba(244, 184, 200, 0.45);
   padding-top: env(safe-area-inset-top, 0px);
   box-sizing: border-box;
+}
+
+.homeFeedBrand {
+  margin: 0;
+  padding: 10px 16px 2px;
+  font-family: var(--font-pixel);
+  font-size: 17px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  color: var(--craft-ink);
+}
+
+.homeFeedBrandAccent {
+  color: var(--craft-coral);
 }
 
 .homeFeedToolbar {
@@ -822,6 +837,7 @@ body {
   padding-top: 0;
   padding-bottom: var(--tab-bar-scroll-padding);
   transition: padding-bottom 0.25s ease;
+  background: var(--craft-cream);
 }
 
 .homeFeedScroll::-webkit-scrollbar {
@@ -896,6 +912,50 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
+}
+
+/* dooo0t craft — 홈 메인 피드 카드 */
+.postGridCellHomeCraft {
+  filter: drop-shadow(0 3px 10px rgba(42, 42, 42, 0.06));
+}
+
+.postGridCellHomeThumb {
+  border: 2px dashed var(--craft-stitch);
+  box-sizing: border-box;
+}
+
+.postGridCellHomePlaceChip {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 52px);
+  padding: 4px 9px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--craft-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+  box-shadow: 0 2px 8px rgba(42, 42, 42, 0.14);
+  pointer-events: none;
+}
+
+.postGridCellHomeBody {
+  padding: 8px 4px 10px;
+}
+
+.postGridCellHomeUsername {
+  color: #8b90a3;
+}
+
+.postGridCellHomeTitleCraft {
+  color: var(--craft-ink);
+}
+
+.homeFeedGrid:not(.homeSearchFeedGrid) {
+  padding: 4px 2px 8px;
 }
 
 .homeFeedGridSkeleton {

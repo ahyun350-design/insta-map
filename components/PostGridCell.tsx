@@ -7,14 +7,35 @@ type PostGridCellProps = {
   titleLine: string;
   placeName: string;
   address?: string;
+  category?: string;
   likeCount: number;
   onClick: () => void;
   variant?: "default" | "home";
+  /** 홈 메인 피드 dooo0t craft 스타일 (검색 오버레이 등은 false) */
+  craftStyled?: boolean;
   username?: string;
   showUsername?: boolean;
   imageCount?: number;
   showMultiIcon?: boolean;
   onProfileClick?: () => void;
+};
+
+const CATEGORY_EMOJI: Record<string, string> = {
+  맛집: "🍽️",
+  카페: "☕",
+  쇼핑: "🛍️",
+  숙소: "🏠",
+  놀거리: "🎮",
+  여행지: "🗺️",
+};
+
+const CRAFT_CAT_BG: Record<string, string> = {
+  카페: "var(--craft-cat-cafe)",
+  맛집: "var(--craft-cat-food)",
+  쇼핑: "var(--craft-cat-shopping)",
+  숙소: "var(--craft-cat-stay)",
+  놀거리: "var(--craft-cat-play)",
+  여행지: "var(--craft-cat-travel)",
 };
 
 function MultiImageIcon() {
@@ -31,9 +52,11 @@ export function PostGridCell({
   titleLine,
   placeName,
   address,
+  category,
   likeCount,
   onClick,
   variant = "default",
+  craftStyled = false,
   username,
   showUsername = false,
   imageCount = 1,
@@ -41,6 +64,7 @@ export function PostGridCell({
   onProfileClick,
 }: PostGridCellProps) {
   const isHome = variant === "home";
+  const isCraft = isHome && craftStyled;
   const thumb = imageUrl?.trim();
   const region = extractRegion(address);
   const trimmedPlaceName = placeName.trim();
@@ -60,6 +84,12 @@ export function PostGridCell({
     return region || trimmedPlaceName || null;
   })();
 
+  const homePlaceChipText = (() => {
+    if (!homePlaceLine) return null;
+    const emoji = (category && CATEGORY_EMOJI[category]) || "📍";
+    return `${emoji} ${homePlaceLine}`;
+  })();
+
   const homeMetaLineStyle = {
     margin: "0 0 2px",
     fontSize: 11,
@@ -70,11 +100,20 @@ export function PostGridCell({
     lineHeight: 1.3,
   };
 
+  const craftChipBg =
+    (category && CRAFT_CAT_BG[category]) || "var(--craft-sky)";
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className={isHome ? "postGridCell postGridCellHome" : "postGridCell"}
+      className={
+        isCraft
+          ? "postGridCell postGridCellHome postGridCellHomeCraft"
+          : isHome
+            ? "postGridCell postGridCellHome"
+            : "postGridCell"
+      }
       style={{
         display: "flex",
         flexDirection: "column",
@@ -82,7 +121,7 @@ export function PostGridCell({
         border: "none",
         cursor: "pointer",
         overflow: "hidden",
-        background: "#fff",
+        background: isCraft ? "transparent" : "#fff",
         fontFamily: "inherit",
         textAlign: "left",
         width: "100%",
@@ -90,13 +129,14 @@ export function PostGridCell({
       }}
     >
       <div
+        className={isCraft ? "postGridCellHomeThumb" : undefined}
         style={{
           position: "relative",
           width: "100%",
           aspectRatio: "1",
-          background: thumb ? "#eee" : "#e8eaf0",
+          background: thumb ? (isCraft ? "var(--craft-cream)" : "#eee") : isCraft ? "var(--craft-cream)" : "#e8eaf0",
           overflow: "hidden",
-          borderRadius: isHome ? 10 : 0,
+          borderRadius: isCraft ? 15 : isHome ? 10 : 0,
         }}
       >
         {thumb ? (
@@ -111,7 +151,7 @@ export function PostGridCell({
               height: "100%",
               padding: 8,
               fontSize: 11,
-              color: "#666",
+              color: isCraft ? "var(--craft-ink)" : "#666",
               textAlign: "center",
               lineHeight: 1.35,
               overflow: "hidden",
@@ -120,6 +160,14 @@ export function PostGridCell({
             {primaryLabel}
           </span>
         )}
+        {isCraft && homePlaceChipText ? (
+          <span
+            className="postGridCellHomePlaceChip"
+            style={{ background: craftChipBg }}
+          >
+            {homePlaceChipText}
+          </span>
+        ) : null}
         {multi && (
           <span
             style={{
@@ -159,10 +207,11 @@ export function PostGridCell({
         )}
       </div>
       <div
+        className={isCraft ? "postGridCellHomeBody" : undefined}
         style={{
           padding: isHome ? "8px 2px 10px" : "6px 4px 8px",
           minWidth: 0,
-          background: "#fff",
+          background: isCraft ? "transparent" : "#fff",
         }}
       >
         {isHome && showUsername && username ? (
@@ -172,15 +221,16 @@ export function PostGridCell({
               e.stopPropagation();
               onProfileClick?.();
             }}
+            className={isCraft ? "postGridCellHomeUsername" : undefined}
             style={{
               display: "block",
               width: "100%",
-              margin: homePlaceLine ? "0 0 2px" : "0 0 4px",
+              margin: !isCraft && homePlaceLine ? "0 0 2px" : isCraft ? "0 0 3px" : "0 0 4px",
               padding: 0,
               border: "none",
               background: "transparent",
               fontSize: 11,
-              color: "#8b90a3",
+              color: isCraft ? "#8b90a3" : "#8b90a3",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -195,8 +245,10 @@ export function PostGridCell({
         ) : null}
         {isHome ? (
           <>
-            {homePlaceLine ? <p style={homeMetaLineStyle}>{homePlaceLine}</p> : null}
-            <p className="postGridCellHomeTitle">{primaryLabel}</p>
+            {!isCraft && homePlaceLine ? <p style={homeMetaLineStyle}>{homePlaceLine}</p> : null}
+            <p className={isCraft ? "postGridCellHomeTitle postGridCellHomeTitleCraft" : "postGridCellHomeTitle"}>
+              {primaryLabel}
+            </p>
           </>
         ) : (
           <p
