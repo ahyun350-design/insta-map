@@ -43,8 +43,22 @@ export function PostGridCell({
   const isHome = variant === "home";
   const thumb = imageUrl?.trim();
   const region = extractRegion(address);
-  const primaryLabel = (titleLine.trim() || placeName.trim() || "").trim() || "—";
+  const trimmedPlaceName = placeName.trim();
+  const primaryLabel = (titleLine.trim() || trimmedPlaceName || "").trim() || "—";
   const multi = showMultiIcon && imageCount > 1;
+
+  const homePlaceLine = (() => {
+    if (!isHome) return null;
+    const titleMatchesPlace =
+      primaryLabel !== "—" && !!trimmedPlaceName && primaryLabel === trimmedPlaceName;
+    if (titleMatchesPlace) {
+      return region || null;
+    }
+    if (region && trimmedPlaceName) {
+      return `${region} · ${trimmedPlaceName}`;
+    }
+    return region || trimmedPlaceName || null;
+  })();
 
   return (
     <button
@@ -170,7 +184,24 @@ export function PostGridCell({
           </button>
         ) : null}
         {isHome ? (
-          <p className="postGridCellHomeTitle">{primaryLabel}</p>
+          <>
+            <p className="postGridCellHomeTitle">{primaryLabel}</p>
+            {homePlaceLine ? (
+              <p
+                style={{
+                  margin: "3px 0 0",
+                  fontSize: 11,
+                  color: "#8b90a3",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  lineHeight: 1.3,
+                }}
+              >
+                📍 {homePlaceLine}
+              </p>
+            ) : null}
+          </>
         ) : (
           <p
             style={{
