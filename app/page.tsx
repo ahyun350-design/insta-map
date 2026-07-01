@@ -113,6 +113,7 @@ import {
   getDisplayPlaceForPhoto,
   getRelatedPostImagesForPlace,
   getRepresentativePhotoPlaceTag,
+  getRepresentativePlaceForPost,
   hasPhotoPlaceTags,
   buildUniqueCourseItemsFromPhotoPlaceTags,
   mergeRelatedFeedPostsForPlaceSheet,
@@ -4710,8 +4711,9 @@ function HomePageContent() {
   /** 큐레이션 상세 → 저장된 장소면 저장 클릭과 동일, 아니면 임시로 지도만 열고 빈 하트(미저장) */
   const goToMapFromDetailPost = () => {
     if (!detailPost) return;
-    const name = detailPost.placeName.trim();
-    const addr = detailPost.address.trim();
+    const rep = getRepresentativePlaceForPost(detailPost);
+    const name = rep.placeName.trim();
+    const addr = rep.address.trim();
     const matchedPlace = savedPlaces.find(
       (p) => String(p.name).trim() === name && String(p.address).trim() === addr,
     );
@@ -4721,7 +4723,8 @@ function HomePageContent() {
       return;
     }
 
-    const postCoords = latLngFromRow(detailPost);
+    const postCoords =
+      rep.lat != null && rep.lng != null ? { lat: rep.lat, lng: rep.lng } : latLngFromRow(detailPost);
     setActiveTab("map");
     if (postCoords && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(postCoords.lat, postCoords.lng));
@@ -4729,10 +4732,10 @@ function HomePageContent() {
       const detailRef = placeRefFromFeedPost(detailPost);
       const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, detailRef);
       setSelectedPlace({
-        place_name: detailPost.placeName,
-        category_name: detailPost.category,
-        road_address_name: detailPost.address,
-        address_name: detailPost.address,
+        place_name: rep.placeName,
+        category_name: rep.category,
+        road_address_name: rep.address,
+        address_name: rep.address,
         phone: "",
         place_url: "",
         y: String(postCoords.lat),
@@ -4746,7 +4749,7 @@ function HomePageContent() {
     }
 
     if (mapRef.current && geocoderRef.current) {
-      geocoderRef.current.addressSearch(detailPost.address, (result: any[], sv: string) => {
+      geocoderRef.current.addressSearch(rep.address, (result: any[], sv: string) => {
         if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
         const geocodedLat = parseFloat(result[0].y);
         const geocodedLng = parseFloat(result[0].x);
@@ -4759,14 +4762,14 @@ function HomePageContent() {
             : {}),
         };
         const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, detailRef);
-        new window.kakao.maps.services.Places().keywordSearch(detailPost.placeName, (data: any[], st: string) => {
+        new window.kakao.maps.services.Places().keywordSearch(rep.placeName, (data: any[], st: string) => {
           const base =
             st === window.kakao.maps.services.Status.OK && data[0]
               ? data[0]
               : {
-                  place_name: detailPost.placeName,
-                  category_name: detailPost.category,
-                  road_address_name: detailPost.address,
+                  place_name: rep.placeName,
+                  category_name: rep.category,
+                  road_address_name: rep.address,
                   phone: "",
                   place_url: "",
                 };
@@ -8753,7 +8756,8 @@ function HomePageContent() {
             </>
           ) : (() => {
     const liked = detailPost.liked_by_me;
-    const detailIsLegacyPlace = !hasPhotoPlaceTags(detailPost) && !!detailPost.placeName.trim();
+    const detailRepPlace = getRepresentativePlaceForPost(detailPost);
+    const detailShowPlaceCard = !!detailRepPlace.placeName.trim();
     const detailCommentComposerHeight = 56;
     return (
       <>
@@ -8761,7 +8765,7 @@ function HomePageContent() {
             <button onClick={closeDetailPost} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
-            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailPost.placeName}</span>
+            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailRepPlace.placeName}</span>
           </header>
           <div
             ref={detailPostScrollRef}
@@ -8777,7 +8781,7 @@ function HomePageContent() {
               transition: "padding-bottom 0.25s ease",
             }}
           >
-            <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p></div>
+            <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailRepPlace.placeName}</p></div>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "12px 20px 0" }}>
               <button
                 type="button"
@@ -8837,15 +8841,15 @@ function HomePageContent() {
                 )}
               </div>
             </div>
-            {detailIsLegacyPlace && (
+            {detailShowPlaceCard && (
               <div style={{ margin: "12px 20px 0", padding: "12px 14px", background: "#f8f8fc", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "10px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{ fontSize: "22px" }}>{CATEGORY_PIN[detailPost.category].emoji}</span>
+                  <span style={{ fontSize: "22px" }}>{CATEGORY_PIN[detailRepPlace.category].emoji}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: 0, fontSize: "14px", fontFamily: "'Playfair Display', serif", color: "#1a1a2e" }}>{detailPost.placeName}</p>
-                    <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.address}</p>
+                    <p style={{ margin: 0, fontSize: "14px", fontFamily: "'Playfair Display', serif", color: "#1a1a2e" }}>{detailRepPlace.placeName}</p>
+                    <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailRepPlace.address}</p>
                   </div>
-                  <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[detailPost.category], padding: "3px 8px", borderRadius: "10px", flexShrink: 0 }}>{detailPost.category}</span>
+                  <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[detailRepPlace.category], padding: "3px 8px", borderRadius: "10px", flexShrink: 0 }}>{detailRepPlace.category}</span>
                 </div>
                 <button
                   type="button"
@@ -9189,14 +9193,16 @@ function HomePageContent() {
               )}
               {filteredHomeFeedPosts.length > 0 && (
                 <PostGrid columns={2} className="homeFeedGrid">
-                  {filteredHomeFeedPosts.map((post) => (
+                  {filteredHomeFeedPosts.map((post) => {
+                    const repPlace = getRepresentativePlaceForPost(post);
+                    return (
                     <PostGridCell
                       key={post.id}
                       variant="home"
                       imageUrl={post.images[0]}
-                      titleLine={(post.title || post.comment || post.placeName || "").trim()}
-                      placeName={post.placeName}
-                      address={post.address}
+                      titleLine={(post.title || post.comment || repPlace.placeName || "").trim()}
+                      placeName={repPlace.placeName}
+                      address={repPlace.address}
                       likeCount={post.likes_count}
                       imageCount={post.images.length}
                       showUsername
@@ -9207,7 +9213,8 @@ function HomePageContent() {
                       }
                       onClick={() => setDetailPostId(post.id)}
                     />
-                  ))}
+                    );
+                  })}
                 </PostGrid>
               )}
               </div>
@@ -10413,13 +10420,15 @@ function HomePageContent() {
                   empty={myMypagePosts.length === 0}
                   emptyMessage="아직 작성한 게시물이 없어요"
                 >
-                  {myMypagePosts.map((post) => (
+                  {myMypagePosts.map((post) => {
+                    const repPlace = getRepresentativePlaceForPost(post);
+                    return (
                     <PostGridCell
                       key={post.id}
                       imageUrl={post.images[0]}
-                      titleLine={(post.title || post.placeName || "").trim()}
-                      placeName={post.placeName}
-                      address={post.address}
+                      titleLine={(post.title || repPlace.placeName || "").trim()}
+                      placeName={repPlace.placeName}
+                      address={repPlace.address}
                       likeCount={post.likes_count}
                       onClick={() => {
                         setDetailReturnTo({ type: "mypage" });
@@ -10427,7 +10436,8 @@ function HomePageContent() {
                         setDetailPostId(post.id);
                       }}
                     />
-                  ))}
+                    );
+                  })}
                 </PostGrid>
               </div>
             </div>
@@ -10957,14 +10967,16 @@ function HomePageContent() {
           />
         ) : (
           <PostGrid columns={2} className="homeFeedGrid homeSearchFeedGrid">
-            {homeSearchResultPosts.map((post) => (
+            {homeSearchResultPosts.map((post) => {
+              const repPlace = getRepresentativePlaceForPost(post);
+              return (
               <PostGridCell
                 key={post.id}
                 variant="home"
                 imageUrl={post.images[0]}
-                titleLine={(post.title || post.comment || post.placeName || "").trim()}
-                placeName={post.placeName}
-                address={post.address}
+                titleLine={(post.title || post.comment || repPlace.placeName || "").trim()}
+                placeName={repPlace.placeName}
+                address={repPlace.address}
                 likeCount={post.likes_count}
                 imageCount={post.images.length}
                 showUsername
@@ -10975,7 +10987,8 @@ function HomePageContent() {
                 }
                 onClick={() => setDetailPostId(post.id)}
               />
-            ))}
+              );
+            })}
           </PostGrid>
         )}
       </HomeSearchScreen>

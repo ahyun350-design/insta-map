@@ -1,4 +1,9 @@
-import type { FeedPost, FeedPostCategory, PhotoPlaceTag } from "@/lib/feedPost";
+import {
+  FEED_POST_CATEGORIES,
+  type FeedPost,
+  type FeedPostCategory,
+  type PhotoPlaceTag,
+} from "@/lib/feedPost";
 import type { SavedCourseItem } from "@/lib/courses";
 
 /** 카카오 `category_name` → PindMap 카테고리 */
@@ -45,6 +50,45 @@ export function getPhotoPlaceTag(tags: PhotoPlaceTag[], photoIndex: number): Pho
 /** 대표 장소(INSERT·카드 폴백): photoIndex 0 우선, 없으면 첫 태그 */
 export function getRepresentativePhotoPlaceTag(tags: PhotoPlaceTag[]): PhotoPlaceTag | undefined {
   return tags.find((t) => t.photoIndex === 0) ?? tags[0];
+}
+
+export type RepresentativePlaceFields = {
+  placeName: string;
+  address: string;
+  category: FeedPostCategory;
+  lat?: number;
+  lng?: number;
+};
+
+/** 카드·상세 헤더용 대표 장소: photoPlaceTags 대표 태그 → legacy placeName/address/category 폴백 */
+export function getRepresentativePlaceForPost(
+  post: Pick<FeedPost, "photoPlaceTags" | "placeName" | "address" | "category" | "lat" | "lng">,
+): RepresentativePlaceFields {
+  if (hasPhotoPlaceTags(post)) {
+    const tag = getRepresentativePhotoPlaceTag(post.photoPlaceTags!);
+    if (tag) {
+      const category =
+        tag.category && (FEED_POST_CATEGORIES as readonly string[]).includes(tag.category)
+          ? (tag.category as FeedPostCategory)
+          : post.category;
+      return {
+        placeName: tag.placeName,
+        address: tag.address,
+        category,
+        ...(typeof tag.lat === "number" && typeof tag.lng === "number"
+          ? { lat: tag.lat, lng: tag.lng }
+          : {}),
+      };
+    }
+  }
+  return {
+    placeName: post.placeName ?? "",
+    address: post.address ?? "",
+    category: post.category,
+    ...(typeof post.lat === "number" && typeof post.lng === "number"
+      ? { lat: post.lat, lng: post.lng }
+      : {}),
+  };
 }
 
 export type DisplayPlaceForPhoto = {
