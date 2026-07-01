@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DotGothic16&family=Silkscreen:wght@400;700&family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -35,6 +35,25 @@
 
   /* 하단 플로팅 탭바 아래 콘텐츠 여유 (스크롤 영역 padding-bottom) */
   --tab-bar-scroll-padding: calc(72px + env(safe-area-inset-bottom, 0px));
+
+  /* ── dooo0t craft 디자인 토큰 (리뉴얼 1단계 — 정의만, 미적용) ── */
+  --font-pixel: 'DotGothic16', 'Silkscreen', monospace;
+  --craft-sky: #a8d8f0;
+  --craft-cream: #f5f2ea;
+  --craft-stitch: #f4b8c8;
+  --craft-mint: #a8d88a;
+  --craft-coral: #f4a0c0;
+  --craft-blue: #8ac0e8;
+  --craft-lilac: #c9a8dc;
+  --craft-yellow: #f4c04d;
+  --craft-ink: #2a2a2a;
+  /* 카테고리별 craft 색 매핑 */
+  --craft-cat-cafe: var(--craft-mint);       /* 카페 */
+  --craft-cat-food: var(--craft-coral);      /* 맛집 */
+  --craft-cat-shopping: var(--craft-blue);   /* 쇼핑 */
+  --craft-cat-stay: var(--craft-sky);        /* 숙소 */
+  --craft-cat-play: var(--craft-yellow);     /* 놀거리 */
+  --craft-cat-travel: var(--craft-lilac);    /* 여행지 */
 }
 
 * {
@@ -4074,4 +4093,20 @@ body {
 @keyframes skeleton-loading {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* ── dooo0t craft 유틸 클래스 (리뉴얼 1단계 — 정의만, 미적용) ── */
+.stitch-border {
+  border: 2px dashed var(--craft-stitch);
+  border-radius: 12px;
+}
+
+.pixel-font {
+  font-family: var(--font-pixel);
+}
+
+.craft-card {
+  background: var(--craft-cream);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(42, 42, 42, 0.08);
 }
