@@ -246,6 +246,8 @@ const CHAT_MESSAGES_PAGE_SIZE = 50;
 const PROFILE_BIO_MAX_LENGTH = 150;
 const REALTIME_REMOUNT_DEBOUNCE_MS = 1000;
 const REALTIME_REMOUNT_BACKOFFS_MS = [1000, 3000, 10000] as const;
+/** 동일 유저·짧은 시간 내 auth 이벤트 중복으로 loadData가 2회+ 실행되는 것 방지 */
+const LOAD_DATA_DEDUP_MS = 2000;
 const REALTIME_REMOUNT_MAX_RETRIES = 5;
 const REALTIME_ERROR_STATUSES = new Set(["CHANNEL_ERROR", "CLOSED", "TIMED_OUT"]);
 
@@ -1460,6 +1462,9 @@ function HomePageContent() {
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
+  const loadDataInFlightRef = useRef(false);
+  const lastLoadDataSuccessAtRef = useRef(0);
+  const lastLoadDataUserIdRef = useRef("");
   const initialPinTriggeredRef = useRef(false);
   const prevSavedPlacesKeyRef = useRef("");
   const relayoutTriggeredRef = useRef(false);
@@ -2739,6 +2744,25 @@ function HomePageContent() {
   };
 
   const loadData = async (isRetry = false) => {
+    const uid = user?.id ?? "";
+    if (!isRetry) {
+      if (loadDataInFlightRef.current) {
+        console.log("[PindMap:home] loadData skipped (in-flight)");
+        return;
+      }
+      const now = perfNow();
+      if (
+        uid.length > 0 &&
+        lastLoadDataUserIdRef.current === uid &&
+        lastLoadDataSuccessAtRef.current > 0 &&
+        now - lastLoadDataSuccessAtRef.current < LOAD_DATA_DEDUP_MS
+      ) {
+        console.log("[PindMap:home] loadData skipped (recent success, dedup)");
+        return;
+      }
+    }
+
+    loadDataInFlightRef.current = true;
     const loadDataT0 = perfNow();
     const perfScreen = "home:initial";
     dlog.perf.start(perfScreen);
@@ -2747,7 +2771,6 @@ function HomePageContent() {
     setLoading(true);
     setHomeLoadError(null);
     try {
-      const uid = user?.id ?? "";
       const [placesRes, postsRes, roomsRes, followsRes, notificationsRes, myLikesRes] = await withTimeout(Promise.all([
         timedLoadQuery("places", supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false })),
         timedLoadQuery("feed_posts", supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false })),
@@ -2826,6 +2849,8 @@ function HomePageContent() {
         setChatRooms([]);
       }
       homeAutoRetryCountRef.current = 0;
+      lastLoadDataSuccessAtRef.current = perfNow();
+      lastLoadDataUserIdRef.current = uid;
       dlog.perf.fetchEnd(perfScreen);
       logPerf("loadData", perfNow() - loadDataT0);
       console.log("[PindMap:home] 로딩 완료");
@@ -2844,6 +2869,7 @@ function HomePageContent() {
         }, 350);
       }
     } finally {
+      loadDataInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -2856,6 +2882,10 @@ function HomePageContent() {
   useEffect(() => {
     if (!sessionChecked) return;
     if (userLoading) return;
+    if (!user?.id) {
+      lastLoadDataSuccessAtRef.current = 0;
+      lastLoadDataUserIdRef.current = "";
+    }
     if (user) {
       void loadData();
       return;
