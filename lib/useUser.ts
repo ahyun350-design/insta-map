@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { safeGetSession } from "./authFallback";
 import { supabase } from "./supabase";
-import { debugLog } from "./debugLog";
+import { debugLog, logPerf, perfNow } from "./debugLog";
 import { runConnectionWarmupWithRetry, runExtraRefreshSession } from "./connectionRecovery";
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -208,6 +208,7 @@ export function useUser() {
 
     // 1) 페이지 처음 로드시 현재 세션 확인
     const loadUser = async () => {
+      const loadUserT0 = perfNow();
       console.log("[PindMap:home][auth] loadUser start");
       startAuthWatchdogOnce();
       /** getSession에서 user가 확인되면 리스너 대기 없이 sessionChecked (로딩 단축). null 세션만 리스너+워치독 게이트 유지 (N-1 WK). */
@@ -254,8 +255,10 @@ export function useUser() {
           total_likes_received: normalizeTotalLikesReceived(data?.total_likes_received),
         });
         console.log("[PindMap:home][auth] loadUser done");
+        logPerf("loadUser", perfNow() - loadUserT0);
       } catch (err) {
         console.error("[PindMap:home][auth] loadUser failed", err);
+        logPerf("loadUser.failed", perfNow() - loadUserT0);
         if (!hadAuthedSessionFromGet) {
           setUser(null);
         }

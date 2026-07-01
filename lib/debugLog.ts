@@ -78,6 +78,20 @@ function perfEmit(screen: string, session: PerfSession): void {
   console.log(
     `[PERF] ${screen}: 총${Math.round(total)}ms (fetch: ${fetchMs !== null ? Math.round(fetchMs) : "-"}ms, render: ${Math.round(renderMs)}ms)`,
   );
+  console.log(`[PindMap:perf] ${screen} ${Math.round(total)}ms`);
+  if (fetchMs !== null) {
+    console.log(`[PindMap:perf] ${screen}.fetch ${Math.round(fetchMs)}ms`);
+    console.log(`[PindMap:perf] ${screen}.render ${Math.round(renderMs)}ms`);
+  }
+}
+
+/** 체감 속도 진단 — [PindMap:perf] prefix (debugMode 무관) */
+export function perfNow(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+export function logPerf(label: string, ms: number): void {
+  console.log(`[PindMap:perf] ${label} ${Math.round(ms)}ms`);
 }
 
 /** FORCE_DEBUG와 무관하게 console.log만 출력 (체감 속도 진단) */

@@ -59,6 +59,7 @@ function buildPlaces(resolved: ResolvedPlace[]): Place[] {
 }
 
 export async function POST(req: Request) {
+  const routeT0 = Date.now();
   let jobId = "";
   try {
     const body = await req.json() as { jobId?: string };
@@ -79,12 +80,17 @@ export async function POST(req: Request) {
     }
     if (job.status === "completed") return NextResponse.json({ ok: true, skipped: true });
     await updateJobProgress(jobId, "인스타 캡션 가져오는 중");
+    const scrapeT0 = Date.now();
     const caption = await scrapeInstagramCaption(job.instagram_url);
+    console.log(`[PindMap:perf] extract.process.scrape ${Date.now() - scrapeT0}ms`);
 
     await updateJobProgress(jobId, "AI가 장소 분석하는 중");
+    const aiT0 = Date.now();
     const rawPlaces = await extractPlacesByClaude(caption);
+    console.log(`[PindMap:perf] extract.process.ai ${Date.now() - aiT0}ms`);
 
     await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
+    const kakaoT0 = Date.now();
     const resolved: ResolvedPlace[] = [];
     for (const item of rawPlaces) {
       const name = typeof item.name === "string" ? item.name.trim() : "";
@@ -102,9 +108,11 @@ export async function POST(req: Request) {
         });
       }
     }
+    console.log(`[PindMap:perf] extract.process.kakao ${Date.now() - kakaoT0}ms`);
 
     if (resolved.length === 0) throw new Error("장소 추출에 실패했습니다.");
 
+    const dbT0 = Date.now();
     const { data: existingRows, error: existingErr } = await supabase
       .from("places")
       .select("name, address")
@@ -137,6 +145,8 @@ export async function POST(req: Request) {
         })
         .eq("id", jobId);
       if (dupDoneError) throw dupDoneError;
+      console.log(`[PindMap:perf] extract.process.db ${Date.now() - dbT0}ms`);
+      console.log(`[PindMap:perf] extract.process.total ${Date.now() - routeT0}ms`);
       return NextResponse.json({ ok: true, inserted: 0 });
     }
 
@@ -176,10 +186,13 @@ export async function POST(req: Request) {
       })
       .eq("id", jobId);
     if (doneError) throw doneError;
+    console.log(`[PindMap:perf] extract.process.db ${Date.now() - dbT0}ms`);
+    console.log(`[PindMap:perf] extract.process.total ${Date.now() - routeT0}ms`);
     return NextResponse.json({ ok: true, inserted: rows.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "작업 처리 중 오류가 발생했습니다.";
     console.error("[extract] process route failed", { jobId, message });
+    console.log(`[PindMap:perf] extract.process.failed ${Date.now() - routeT0}ms`);
     if (jobId) {
       try {
         const supabase = createServiceSupabase();

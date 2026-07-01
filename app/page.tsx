@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Sus
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { debugLog, dlog } from "@/lib/debugLog";
+import { debugLog, dlog, logPerf, perfNow } from "@/lib/debugLog";
 import { withAutoRetry, withAutoRetryAndMessageSendRecovery } from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
 import { usePushNotifications } from "@/lib/usePushNotifications";
@@ -231,6 +231,13 @@ function sortChatRoomsByRecency(rooms: ChatRoom[]): ChatRoom[] {
   return [...rooms].sort(
     (a, b) => new Date(b.lastTime).getTime() - new Date(a.lastTime).getTime(),
   );
+}
+
+async function timedLoadQuery<T>(label: string, query: PromiseLike<T>): Promise<T> {
+  const t0 = perfNow();
+  const result = await query;
+  logPerf(`loadData.${label}`, perfNow() - t0);
+  return result;
 }
 
 type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; status?: "pending" | "sent" | "failed"; };
@@ -1403,6 +1410,9 @@ function HomePageContent() {
   const courseTitleOriginalRef = useRef("");
   const courseTitleInlineInputRef = useRef<HTMLInputElement>(null);
   const pollAttemptsRef = useRef<Record<string, number>>({});
+  const extractPollStartRef = useRef<Record<string, number>>({});
+  const detailOpenPerfRef = useRef<{ postId: string; t: number } | null>(null);
+  const detailOpenLoggedRef = useRef<string | null>(null);
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const handleAddSubmittingRef = useRef(false);
   const completedJobIdsRef = useRef<Set<string>>(new Set());
@@ -2729,6 +2739,7 @@ function HomePageContent() {
   };
 
   const loadData = async (isRetry = false) => {
+    const loadDataT0 = perfNow();
     const perfScreen = "home:initial";
     dlog.perf.start(perfScreen);
     dlog.perf.fetchStart(perfScreen);
@@ -2738,14 +2749,18 @@ function HomePageContent() {
     try {
       const uid = user?.id ?? "";
       const [placesRes, postsRes, roomsRes, followsRes, notificationsRes, myLikesRes] = await withTimeout(Promise.all([
-        supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
-        supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false }),
-        supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`),
-        supabase.from("follows").select("following_id").eq("follower_id", uid),
-        supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50),
-        uid
-          ? supabase.from("likes").select("post_id").eq("user_id", uid)
-          : Promise.resolve({ data: [] as { post_id: string }[], error: null }),
+        timedLoadQuery("places", supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false })),
+        timedLoadQuery("feed_posts", supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false })),
+        timedLoadQuery("chat_rooms", supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`)),
+        timedLoadQuery("follows", supabase.from("follows").select("following_id").eq("follower_id", uid)),
+        timedLoadQuery("notifications", supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50)),
+        timedLoadQuery(
+          "likes",
+          (async () => {
+            if (!uid) return { data: [] as { post_id: string }[], error: null };
+            return supabase.from("likes").select("post_id").eq("user_id", uid);
+          })(),
+        ),
       ]), 8000);
 
       const myLikedSet = new Set((myLikesRes.data ?? []).map((l: { post_id: string }) => l.post_id));
@@ -2812,9 +2827,11 @@ function HomePageContent() {
       }
       homeAutoRetryCountRef.current = 0;
       dlog.perf.fetchEnd(perfScreen);
+      logPerf("loadData", perfNow() - loadDataT0);
       console.log("[PindMap:home] 로딩 완료");
     } catch (err) {
       dlog.perf.fetchEnd(perfScreen);
+      logPerf("loadData.failed", perfNow() - loadDataT0);
       console.error("[PindMap:home] 로딩 실패", err);
       const friendlyMessage = "연결이 불안정해요. 다시 시도해주세요 🌐";
       setHomeLoadError(friendlyMessage);
@@ -2959,6 +2976,25 @@ function HomePageContent() {
   }, [detailPostId]);
 
   useEffect(() => {
+    if (!detailPostId) {
+      detailOpenLoggedRef.current = null;
+      return;
+    }
+    detailOpenPerfRef.current = { postId: detailPostId, t: perfNow() };
+    detailOpenLoggedRef.current = null;
+  }, [detailPostId]);
+
+  useEffect(() => {
+    if (!detailPostId || !detailPost || detailPost.id !== detailPostId) return;
+    if (detailOpenLoggedRef.current === detailPostId) return;
+    const start = detailOpenPerfRef.current;
+    if (start?.postId === detailPostId) {
+      logPerf("detail.open", perfNow() - start.t);
+      detailOpenLoggedRef.current = detailPostId;
+    }
+  }, [detailPostId, detailPost]);
+
+  useEffect(() => {
     if (!detailPostId || !user) return;
     void (async () => {
       try {
@@ -3072,6 +3108,11 @@ function HomePageContent() {
     if (pollingTargets.length === 0) return;
 
     const removeJob = (jobId: string) => {
+      const pollStart = extractPollStartRef.current[jobId];
+      if (pollStart !== undefined) {
+        logPerf(`extract.poll.${jobId.slice(0, 8)}`, perfNow() - pollStart);
+        delete extractPollStartRef.current[jobId];
+      }
       delete pollAttemptsRef.current[jobId];
       pollInFlightRef.current.delete(jobId);
       setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
@@ -3079,6 +3120,9 @@ function HomePageContent() {
 
     const pollJob = async (jobId: string) => {
       if (pollInFlightRef.current.has(jobId)) return;
+      if (extractPollStartRef.current[jobId] === undefined) {
+        extractPollStartRef.current[jobId] = perfNow();
+      }
 
       const attempts = (pollAttemptsRef.current[jobId] ?? 0) + 1;
       pollAttemptsRef.current[jobId] = attempts;
@@ -5302,6 +5346,7 @@ function HomePageContent() {
     try {
     const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
     const perfScreen = "extract:start";
+    const extractStartT0 = perfNow();
     dlog.perf.start(perfScreen);
     const controller = new AbortController();
     console.log("[PindMap:url] extraction start", { url: trimmedUrl });
@@ -5324,6 +5369,7 @@ function HomePageContent() {
       window.clearTimeout(timeout);
       const data = await response.json() as { jobId?: string; error?: string };
       dlog.perf.fetchEnd(perfScreen);
+      logPerf("extract.start", perfNow() - extractStartT0);
       console.log("[PindMap:url] /api/extract/start response status:", response.status, "body:", data);
       if (!response.ok || !data.jobId) {
         console.log("[PindMap:url] /api/extract/start failed - status:", response.status, "error:", data?.error ?? "missing_job_id");
@@ -5336,6 +5382,7 @@ function HomePageContent() {
         progressStep: "대기 중",
       };
       setActiveJobs((prev) => [newJob, ...prev.filter((job) => job.jobId !== newJob.jobId)]);
+      extractPollStartRef.current[data.jobId] = perfNow();
       setInstagramUrl("");
       setReelInputExpanded(false);
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
@@ -6699,11 +6746,13 @@ function HomePageContent() {
     if (!detailPostId || feedPosts.some((p) => p.id === detailPostId)) return;
     let cancelled = false;
     void (async () => {
+      const fetchT0 = perfNow();
       const { data } = await supabase
         .from("feed_posts")
         .select("*, comments(*)")
         .eq("id", detailPostId)
         .maybeSingle();
+      logPerf("detail.fetch", perfNow() - fetchT0);
       if (cancelled || !data) return;
       const coords = latLngFromRow(data);
       const likedByMe = user?.id ? await fetchIsPostLikedByUser(detailPostId, user.id) : false;
