@@ -60,6 +60,16 @@ export function PostGridCell({
     return region || trimmedPlaceName || null;
   })();
 
+  const homeMetaLineStyle = {
+    margin: "0 0 2px",
+    fontSize: 11,
+    color: "#9a9fad",
+    overflow: "hidden" as const,
+    textOverflow: "ellipsis" as const,
+    whiteSpace: "nowrap" as const,
+    lineHeight: 1.3,
+  };
+
   return (
     <button
       type="button"
@@ -165,7 +175,7 @@ export function PostGridCell({
             style={{
               display: "block",
               width: "100%",
-              margin: "0 0 4px",
+              margin: homePlaceLine ? "0 0 2px" : "0 0 4px",
               padding: 0,
               border: "none",
               background: "transparent",
@@ -185,22 +195,8 @@ export function PostGridCell({
         ) : null}
         {isHome ? (
           <>
+            {homePlaceLine ? <p style={homeMetaLineStyle}>{homePlaceLine}</p> : null}
             <p className="postGridCellHomeTitle">{primaryLabel}</p>
-            {homePlaceLine ? (
-              <p
-                style={{
-                  margin: "3px 0 0",
-                  fontSize: 11,
-                  color: "#8b90a3",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  lineHeight: 1.3,
-                }}
-              >
-                📍 {homePlaceLine}
-              </p>
-            ) : null}
           </>
         ) : (
           <p
