@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { debugLog, dlog, logPerf, perfNow } from "@/lib/debugLog";
 import { withAutoRetry, withAutoRetryAndMessageSendRecovery } from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
+import { hideNativeSplash } from "@/lib/nativeSplash";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import {
@@ -1249,6 +1250,7 @@ function HomePageContent() {
   const fullscreenImageLightboxListenerRegisteredRef = useRef(false);
   const fullscreenDismissListenerRegisteredRef = useRef(false);
   const fullscreenAutoOpenedRef = useRef(false);
+  const handleOpenFullscreenNativeMapRef = useRef<() => Promise<void>>(async () => {});
   const fullscreenGeocodeRunRef = useRef(0);
   /** iOS 전체화면 Native 코스 모드 — showCourseOnMap에서 설정, 닫을 때 null */
   const fullscreenCourseRef = useRef<CoursePlace[] | null>(null);
@@ -2435,6 +2437,8 @@ function HomePageContent() {
     }
   }, [savedPlaces, runFullscreenNativeSearch, runFullscreenNativeDirections, showToast, registerFullscreenNativeListeners, restoreFullscreenNativeMyLocation, scheduleRestoreFullscreenPlaceSheet, drawFullscreenNativeCourseRoute]);
 
+  handleOpenFullscreenNativeMapRef.current = handleOpenFullscreenNativeMap;
+
   useEffect(() => {
     mapExpandedLiveRef.current = mapExpanded;
   }, [mapExpanded]);
@@ -2445,10 +2449,11 @@ function HomePageContent() {
     if (mapExpanded) {
       if (fullscreenAutoOpenedRef.current) return;
       fullscreenAutoOpenedRef.current = true;
-      void handleOpenFullscreenNativeMap();
+      void handleOpenFullscreenNativeMapRef.current();
       return;
     }
 
+    if (!fullscreenAutoOpenedRef.current) return;
     fullscreenAutoOpenedRef.current = false;
     fullscreenCourseRouteSessionRef.current += 1;
     fullscreenCourseRef.current = null;
@@ -2459,7 +2464,7 @@ function HomePageContent() {
     void clearFullscreenNativeRoute({ silent: true });
     void clearFullscreenNativeCourseNavigation({ silent: true });
     void dismissFullscreenNativeMap({ silent: true });
-  }, [mapExpanded, handleOpenFullscreenNativeMap]);
+  }, [mapExpanded]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
@@ -2929,6 +2934,13 @@ function HomePageContent() {
   useEffect(() => {
     if (!sessionChecked || userLoading || !user || loading) return;
     dlog.perf.markRender("home:initial");
+  }, [sessionChecked, userLoading, user, loading]);
+
+  /** 네이티브 스플래시: 인증·홈 초기 데이터 준비 후 숨김 (흰 화면 구간 제거) */
+  useEffect(() => {
+    if (!sessionChecked || userLoading) return;
+    if (user && loading) return;
+    void hideNativeSplash();
   }, [sessionChecked, userLoading, user, loading]);
 
   useEffect(() => {

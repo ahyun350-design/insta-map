@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { hasSeenOnboarding } from "@/lib/onboarding";
+import { hideNativeSplash } from "@/lib/nativeSplash";
 
 function formatLoginError(error: AuthError): string {
   const raw = (error.message || "").trim();
@@ -40,6 +41,10 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
+
+  useEffect(() => {
+    void hideNativeSplash();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

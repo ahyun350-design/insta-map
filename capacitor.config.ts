@@ -25,7 +25,16 @@ const config: CapacitorConfig = {
     FirebaseMessaging: {
       presentationOptions: [],
     },
+    SplashScreen: {
+      launchShowDuration: 0,
+      launchAutoHide: false,
+      backgroundColor: "#ffffff",
+      showSpinner: false,
+      splashFullScreen: true,
+      splashImmersive: true,
+    },
   },
 };
+
 
 export default config;
