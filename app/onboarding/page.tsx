@@ -257,12 +257,22 @@ export default function OnboardingPage() {
   }, [router]);
 
   const goNext = useCallback(() => {
-    if (isLast) {
+    setIndex((i) => {
+      if (i >= SLIDES.length - 1) {
+        void finish();
+        return i;
+      }
+      return i + 1;
+    });
+  }, [finish]);
+
+  const handlePrimaryClick = () => {
+    if (index >= SLIDES.length - 1) {
       void finish();
       return;
     }
-    setIndex((i) => Math.min(i + 1, SLIDES.length - 1));
-  }, [finish, isLast]);
+    setIndex((i) => i + 1);
+  };
 
   const goPrev = useCallback(() => {
     setIndex((i) => Math.max(i - 1, 0));
@@ -336,7 +346,7 @@ export default function OnboardingPage() {
               ? "onboardingPrimary onboardingPrimaryFinal"
               : "onboardingPrimary"
           }
-          onClick={goNext}
+          onClick={handlePrimaryClick}
         >
           {isLast ? "시작하기" : "다음"}
         </button>
