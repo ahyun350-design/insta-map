@@ -2192,7 +2192,7 @@ private final class KakaoMapTestViewController: UIViewController {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: Self.searchResultCellID)
+        tableView.register(SearchResultSubtitleCell.self, forCellReuseIdentifier: Self.searchResultCellID)
         tableView.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
         tableView.rowHeight = 64
         card.addSubview(tableView)
@@ -2729,6 +2729,17 @@ extension KakaoMapTestViewController: KakaoMapEventDelegate {
     }
 }
 
+/// UITableViewCell default style has no detailTextLabel; force .subtitle so address shows under name.
+private final class SearchResultSubtitleCell: UITableViewCell {
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: .subtitle, reuseIdentifier: reuseIdentifier)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
 extension KakaoMapTestViewController: UITableViewDataSource, UITableViewDelegate {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         searchResults.count
@@ -2741,6 +2752,7 @@ extension KakaoMapTestViewController: UITableViewDataSource, UITableViewDelegate
         cell.textLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
         cell.textLabel?.numberOfLines = 1
         cell.detailTextLabel?.text = item.address
+        cell.detailTextLabel?.font = .systemFont(ofSize: 13, weight: .regular)
         cell.detailTextLabel?.textColor = .secondaryLabel
         cell.detailTextLabel?.numberOfLines = 2
         if let category = item.category, !category.isEmpty {

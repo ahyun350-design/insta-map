@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Sus
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { debugLog, dlog } from "@/lib/debugLog";
+import { debugLog, dlog, logPerf, perfNow } from "@/lib/debugLog";
 import { withAutoRetry, withAutoRetryAndMessageSendRecovery } from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
 import { usePushNotifications } from "@/lib/usePushNotifications";
@@ -113,6 +113,7 @@ import {
   getDisplayPlaceForPhoto,
   getRelatedPostImagesForPlace,
   getRepresentativePhotoPlaceTag,
+  getRepresentativePlaceForPost,
   hasPhotoPlaceTags,
   buildUniqueCourseItemsFromPhotoPlaceTags,
   mergeRelatedFeedPostsForPlaceSheet,
@@ -233,12 +234,21 @@ function sortChatRoomsByRecency(rooms: ChatRoom[]): ChatRoom[] {
   );
 }
 
+async function timedLoadQuery<T>(label: string, query: PromiseLike<T>): Promise<T> {
+  const t0 = perfNow();
+  const result = await query;
+  logPerf(`loadData.${label}`, perfNow() - t0);
+  return result;
+}
+
 type Message = { id: string; senderId: string; text: string; createdAt: string; read?: boolean; status?: "pending" | "sent" | "failed"; };
 
 const CHAT_MESSAGES_PAGE_SIZE = 50;
 const PROFILE_BIO_MAX_LENGTH = 150;
 const REALTIME_REMOUNT_DEBOUNCE_MS = 1000;
 const REALTIME_REMOUNT_BACKOFFS_MS = [1000, 3000, 10000] as const;
+/** 동일 유저·짧은 시간 내 auth 이벤트 중복으로 loadData가 2회+ 실행되는 것 방지 */
+const LOAD_DATA_DEDUP_MS = 2000;
 const REALTIME_REMOUNT_MAX_RETRIES = 5;
 const REALTIME_ERROR_STATUSES = new Set(["CHANNEL_ERROR", "CLOSED", "TIMED_OUT"]);
 
@@ -1403,6 +1413,9 @@ function HomePageContent() {
   const courseTitleOriginalRef = useRef("");
   const courseTitleInlineInputRef = useRef<HTMLInputElement>(null);
   const pollAttemptsRef = useRef<Record<string, number>>({});
+  const extractPollStartRef = useRef<Record<string, number>>({});
+  const detailOpenPerfRef = useRef<{ postId: string; t: number } | null>(null);
+  const detailOpenLoggedRef = useRef<string | null>(null);
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const handleAddSubmittingRef = useRef(false);
   const completedJobIdsRef = useRef<Set<string>>(new Set());
@@ -1450,6 +1463,9 @@ function HomePageContent() {
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
+  const loadDataInFlightRef = useRef(false);
+  const lastLoadDataSuccessAtRef = useRef(0);
+  const lastLoadDataUserIdRef = useRef("");
   const initialPinTriggeredRef = useRef(false);
   const prevSavedPlacesKeyRef = useRef("");
   const relayoutTriggeredRef = useRef(false);
@@ -2729,6 +2745,26 @@ function HomePageContent() {
   };
 
   const loadData = async (isRetry = false) => {
+    const uid = user?.id ?? "";
+    if (!isRetry) {
+      if (loadDataInFlightRef.current) {
+        console.log("[PindMap:home] loadData skipped (in-flight)");
+        return;
+      }
+      const now = perfNow();
+      if (
+        uid.length > 0 &&
+        lastLoadDataUserIdRef.current === uid &&
+        lastLoadDataSuccessAtRef.current > 0 &&
+        now - lastLoadDataSuccessAtRef.current < LOAD_DATA_DEDUP_MS
+      ) {
+        console.log("[PindMap:home] loadData skipped (recent success, dedup)");
+        return;
+      }
+    }
+
+    loadDataInFlightRef.current = true;
+    const loadDataT0 = perfNow();
     const perfScreen = "home:initial";
     dlog.perf.start(perfScreen);
     dlog.perf.fetchStart(perfScreen);
@@ -2736,16 +2772,19 @@ function HomePageContent() {
     setLoading(true);
     setHomeLoadError(null);
     try {
-      const uid = user?.id ?? "";
       const [placesRes, postsRes, roomsRes, followsRes, notificationsRes, myLikesRes] = await withTimeout(Promise.all([
-        supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
-        supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false }),
-        supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`),
-        supabase.from("follows").select("following_id").eq("follower_id", uid),
-        supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50),
-        uid
-          ? supabase.from("likes").select("post_id").eq("user_id", uid)
-          : Promise.resolve({ data: [] as { post_id: string }[], error: null }),
+        timedLoadQuery("places", supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false })),
+        timedLoadQuery("feed_posts", supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false })),
+        timedLoadQuery("chat_rooms", supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`)),
+        timedLoadQuery("follows", supabase.from("follows").select("following_id").eq("follower_id", uid)),
+        timedLoadQuery("notifications", supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50)),
+        timedLoadQuery(
+          "likes",
+          (async () => {
+            if (!uid) return { data: [] as { post_id: string }[], error: null };
+            return supabase.from("likes").select("post_id").eq("user_id", uid);
+          })(),
+        ),
       ]), 8000);
 
       const myLikedSet = new Set((myLikesRes.data ?? []).map((l: { post_id: string }) => l.post_id));
@@ -2811,10 +2850,14 @@ function HomePageContent() {
         setChatRooms([]);
       }
       homeAutoRetryCountRef.current = 0;
+      lastLoadDataSuccessAtRef.current = perfNow();
+      lastLoadDataUserIdRef.current = uid;
       dlog.perf.fetchEnd(perfScreen);
+      logPerf("loadData", perfNow() - loadDataT0);
       console.log("[PindMap:home] 로딩 완료");
     } catch (err) {
       dlog.perf.fetchEnd(perfScreen);
+      logPerf("loadData.failed", perfNow() - loadDataT0);
       console.error("[PindMap:home] 로딩 실패", err);
       const friendlyMessage = "연결이 불안정해요. 다시 시도해주세요 🌐";
       setHomeLoadError(friendlyMessage);
@@ -2827,6 +2870,7 @@ function HomePageContent() {
         }, 350);
       }
     } finally {
+      loadDataInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -2839,6 +2883,10 @@ function HomePageContent() {
   useEffect(() => {
     if (!sessionChecked) return;
     if (userLoading) return;
+    if (!user?.id) {
+      lastLoadDataSuccessAtRef.current = 0;
+      lastLoadDataUserIdRef.current = "";
+    }
     if (user) {
       void loadData();
       return;
@@ -2959,6 +3007,25 @@ function HomePageContent() {
   }, [detailPostId]);
 
   useEffect(() => {
+    if (!detailPostId) {
+      detailOpenLoggedRef.current = null;
+      return;
+    }
+    detailOpenPerfRef.current = { postId: detailPostId, t: perfNow() };
+    detailOpenLoggedRef.current = null;
+  }, [detailPostId]);
+
+  useEffect(() => {
+    if (!detailPostId || !detailPost || detailPost.id !== detailPostId) return;
+    if (detailOpenLoggedRef.current === detailPostId) return;
+    const start = detailOpenPerfRef.current;
+    if (start?.postId === detailPostId) {
+      logPerf("detail.open", perfNow() - start.t);
+      detailOpenLoggedRef.current = detailPostId;
+    }
+  }, [detailPostId, detailPost]);
+
+  useEffect(() => {
     if (!detailPostId || !user) return;
     void (async () => {
       try {
@@ -3072,6 +3139,11 @@ function HomePageContent() {
     if (pollingTargets.length === 0) return;
 
     const removeJob = (jobId: string) => {
+      const pollStart = extractPollStartRef.current[jobId];
+      if (pollStart !== undefined) {
+        logPerf(`extract.poll.${jobId.slice(0, 8)}`, perfNow() - pollStart);
+        delete extractPollStartRef.current[jobId];
+      }
       delete pollAttemptsRef.current[jobId];
       pollInFlightRef.current.delete(jobId);
       setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
@@ -3079,6 +3151,9 @@ function HomePageContent() {
 
     const pollJob = async (jobId: string) => {
       if (pollInFlightRef.current.has(jobId)) return;
+      if (extractPollStartRef.current[jobId] === undefined) {
+        extractPollStartRef.current[jobId] = perfNow();
+      }
 
       const attempts = (pollAttemptsRef.current[jobId] ?? 0) + 1;
       pollAttemptsRef.current[jobId] = attempts;
@@ -4636,8 +4711,9 @@ function HomePageContent() {
   /** 큐레이션 상세 → 저장된 장소면 저장 클릭과 동일, 아니면 임시로 지도만 열고 빈 하트(미저장) */
   const goToMapFromDetailPost = () => {
     if (!detailPost) return;
-    const name = detailPost.placeName.trim();
-    const addr = detailPost.address.trim();
+    const rep = getRepresentativePlaceForPost(detailPost);
+    const name = rep.placeName.trim();
+    const addr = rep.address.trim();
     const matchedPlace = savedPlaces.find(
       (p) => String(p.name).trim() === name && String(p.address).trim() === addr,
     );
@@ -4647,7 +4723,8 @@ function HomePageContent() {
       return;
     }
 
-    const postCoords = latLngFromRow(detailPost);
+    const postCoords =
+      rep.lat != null && rep.lng != null ? { lat: rep.lat, lng: rep.lng } : latLngFromRow(detailPost);
     setActiveTab("map");
     if (postCoords && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(postCoords.lat, postCoords.lng));
@@ -4655,10 +4732,10 @@ function HomePageContent() {
       const detailRef = placeRefFromFeedPost(detailPost);
       const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, detailRef);
       setSelectedPlace({
-        place_name: detailPost.placeName,
-        category_name: detailPost.category,
-        road_address_name: detailPost.address,
-        address_name: detailPost.address,
+        place_name: rep.placeName,
+        category_name: rep.category,
+        road_address_name: rep.address,
+        address_name: rep.address,
         phone: "",
         place_url: "",
         y: String(postCoords.lat),
@@ -4672,7 +4749,7 @@ function HomePageContent() {
     }
 
     if (mapRef.current && geocoderRef.current) {
-      geocoderRef.current.addressSearch(detailPost.address, (result: any[], sv: string) => {
+      geocoderRef.current.addressSearch(rep.address, (result: any[], sv: string) => {
         if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
         const geocodedLat = parseFloat(result[0].y);
         const geocodedLng = parseFloat(result[0].x);
@@ -4685,14 +4762,14 @@ function HomePageContent() {
             : {}),
         };
         const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, detailRef);
-        new window.kakao.maps.services.Places().keywordSearch(detailPost.placeName, (data: any[], st: string) => {
+        new window.kakao.maps.services.Places().keywordSearch(rep.placeName, (data: any[], st: string) => {
           const base =
             st === window.kakao.maps.services.Status.OK && data[0]
               ? data[0]
               : {
-                  place_name: detailPost.placeName,
-                  category_name: detailPost.category,
-                  road_address_name: detailPost.address,
+                  place_name: rep.placeName,
+                  category_name: rep.category,
+                  road_address_name: rep.address,
                   phone: "",
                   place_url: "",
                 };
@@ -5302,6 +5379,7 @@ function HomePageContent() {
     try {
     const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
     const perfScreen = "extract:start";
+    const extractStartT0 = perfNow();
     dlog.perf.start(perfScreen);
     const controller = new AbortController();
     console.log("[PindMap:url] extraction start", { url: trimmedUrl });
@@ -5324,6 +5402,7 @@ function HomePageContent() {
       window.clearTimeout(timeout);
       const data = await response.json() as { jobId?: string; error?: string };
       dlog.perf.fetchEnd(perfScreen);
+      logPerf("extract.start", perfNow() - extractStartT0);
       console.log("[PindMap:url] /api/extract/start response status:", response.status, "body:", data);
       if (!response.ok || !data.jobId) {
         console.log("[PindMap:url] /api/extract/start failed - status:", response.status, "error:", data?.error ?? "missing_job_id");
@@ -5336,6 +5415,7 @@ function HomePageContent() {
         progressStep: "대기 중",
       };
       setActiveJobs((prev) => [newJob, ...prev.filter((job) => job.jobId !== newJob.jobId)]);
+      extractPollStartRef.current[data.jobId] = perfNow();
       setInstagramUrl("");
       setReelInputExpanded(false);
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
@@ -6699,11 +6779,13 @@ function HomePageContent() {
     if (!detailPostId || feedPosts.some((p) => p.id === detailPostId)) return;
     let cancelled = false;
     void (async () => {
+      const fetchT0 = perfNow();
       const { data } = await supabase
         .from("feed_posts")
         .select("*, comments(*)")
         .eq("id", detailPostId)
         .maybeSingle();
+      logPerf("detail.fetch", perfNow() - fetchT0);
       if (cancelled || !data) return;
       const coords = latLngFromRow(data);
       const likedByMe = user?.id ? await fetchIsPostLikedByUser(detailPostId, user.id) : false;
@@ -8674,7 +8756,8 @@ function HomePageContent() {
             </>
           ) : (() => {
     const liked = detailPost.liked_by_me;
-    const detailIsLegacyPlace = !hasPhotoPlaceTags(detailPost) && !!detailPost.placeName.trim();
+    const detailRepPlace = getRepresentativePlaceForPost(detailPost);
+    const detailShowPlaceCard = !!detailRepPlace.placeName.trim();
     const detailCommentComposerHeight = 56;
     return (
       <>
@@ -8682,7 +8765,7 @@ function HomePageContent() {
             <button onClick={closeDetailPost} type="button" style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
-            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailPost.placeName}</span>
+            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "16px", color: "#1a2a7a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.title || detailRepPlace.placeName}</span>
           </header>
           <div
             ref={detailPostScrollRef}
@@ -8698,7 +8781,7 @@ function HomePageContent() {
               transition: "padding-bottom 0.25s ease",
             }}
           >
-            <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailPost.placeName}</p></div>
+            <div style={{ padding: "16px 20px 0" }}><p style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontSize: "22px", color: "#1a2a7a", lineHeight: 1.3 }}>{detailPost.title || detailRepPlace.placeName}</p></div>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "12px 20px 0" }}>
               <button
                 type="button"
@@ -8758,15 +8841,15 @@ function HomePageContent() {
                 )}
               </div>
             </div>
-            {detailIsLegacyPlace && (
+            {detailShowPlaceCard && (
               <div style={{ margin: "12px 20px 0", padding: "12px 14px", background: "#f8f8fc", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "10px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{ fontSize: "22px" }}>{CATEGORY_PIN[detailPost.category].emoji}</span>
+                  <span style={{ fontSize: "22px" }}>{CATEGORY_PIN[detailRepPlace.category].emoji}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: 0, fontSize: "14px", fontFamily: "'Playfair Display', serif", color: "#1a1a2e" }}>{detailPost.placeName}</p>
-                    <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailPost.address}</p>
+                    <p style={{ margin: 0, fontSize: "14px", fontFamily: "'Playfair Display', serif", color: "#1a1a2e" }}>{detailRepPlace.placeName}</p>
+                    <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailRepPlace.address}</p>
                   </div>
-                  <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[detailPost.category], padding: "3px 8px", borderRadius: "10px", flexShrink: 0 }}>{detailPost.category}</span>
+                  <span style={{ fontSize: "10px", color: "#fff", background: CATEGORY_COLORS[detailRepPlace.category], padding: "3px 8px", borderRadius: "10px", flexShrink: 0 }}>{detailRepPlace.category}</span>
                 </div>
                 <button
                   type="button"
@@ -9110,14 +9193,16 @@ function HomePageContent() {
               )}
               {filteredHomeFeedPosts.length > 0 && (
                 <PostGrid columns={2} className="homeFeedGrid">
-                  {filteredHomeFeedPosts.map((post) => (
+                  {filteredHomeFeedPosts.map((post) => {
+                    const repPlace = getRepresentativePlaceForPost(post);
+                    return (
                     <PostGridCell
                       key={post.id}
                       variant="home"
                       imageUrl={post.images[0]}
-                      titleLine={(post.title || post.comment || post.placeName || "").trim()}
-                      placeName={post.placeName}
-                      address={post.address}
+                      titleLine={(post.title || post.comment || repPlace.placeName || "").trim()}
+                      placeName={repPlace.placeName}
+                      address={repPlace.address}
                       likeCount={post.likes_count}
                       imageCount={post.images.length}
                       showUsername
@@ -9128,7 +9213,8 @@ function HomePageContent() {
                       }
                       onClick={() => setDetailPostId(post.id)}
                     />
-                  ))}
+                    );
+                  })}
                 </PostGrid>
               )}
               </div>
@@ -10334,13 +10420,15 @@ function HomePageContent() {
                   empty={myMypagePosts.length === 0}
                   emptyMessage="아직 작성한 게시물이 없어요"
                 >
-                  {myMypagePosts.map((post) => (
+                  {myMypagePosts.map((post) => {
+                    const repPlace = getRepresentativePlaceForPost(post);
+                    return (
                     <PostGridCell
                       key={post.id}
                       imageUrl={post.images[0]}
-                      titleLine={(post.title || post.placeName || "").trim()}
-                      placeName={post.placeName}
-                      address={post.address}
+                      titleLine={(post.title || repPlace.placeName || "").trim()}
+                      placeName={repPlace.placeName}
+                      address={repPlace.address}
                       likeCount={post.likes_count}
                       onClick={() => {
                         setDetailReturnTo({ type: "mypage" });
@@ -10348,7 +10436,8 @@ function HomePageContent() {
                         setDetailPostId(post.id);
                       }}
                     />
-                  ))}
+                    );
+                  })}
                 </PostGrid>
               </div>
             </div>
@@ -10878,14 +10967,16 @@ function HomePageContent() {
           />
         ) : (
           <PostGrid columns={2} className="homeFeedGrid homeSearchFeedGrid">
-            {homeSearchResultPosts.map((post) => (
+            {homeSearchResultPosts.map((post) => {
+              const repPlace = getRepresentativePlaceForPost(post);
+              return (
               <PostGridCell
                 key={post.id}
                 variant="home"
                 imageUrl={post.images[0]}
-                titleLine={(post.title || post.comment || post.placeName || "").trim()}
-                placeName={post.placeName}
-                address={post.address}
+                titleLine={(post.title || post.comment || repPlace.placeName || "").trim()}
+                placeName={repPlace.placeName}
+                address={repPlace.address}
                 likeCount={post.likes_count}
                 imageCount={post.images.length}
                 showUsername
@@ -10896,7 +10987,8 @@ function HomePageContent() {
                 }
                 onClick={() => setDetailPostId(post.id)}
               />
-            ))}
+              );
+            })}
           </PostGrid>
         )}
       </HomeSearchScreen>
