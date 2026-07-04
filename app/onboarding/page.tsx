@@ -1,152 +1,246 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { setOnboardingSeen } from "@/lib/onboarding";
 
+const NAVY = "#1B2A6B";
+
 const SLIDES = [
   {
-    title: "인스타 릴스를 지도에 콕",
-    description: "맘에 든 릴스 URL 붙여넣으면 자동으로 핀.",
-    Illustration: ReelToPinIllustration,
+    title: "릴스 속 그곳, 지도에 저장",
+    description: "URL 붙여넣으면 위치까지 자동으로",
+    Illustration: Slide1Illustration,
   },
   {
-    title: "검색하고 걸어가기까지",
-    description: "카카오·네이버 없이 핀맵 안에서 도보 길찾기.",
-    Illustration: WalkDirectionsIllustration,
+    title: "찾기 쉽게 자동 정리",
+    description: "맛집·카페·쇼핑 알아서 나눠 담아요",
+    Illustration: Slide2Illustration,
   },
   {
-    title: "나만의 코스로 묶기",
-    description: "가고 싶은 곳들을 순서대로 코스로, 도보로 안내.",
-    Illustration: CourseIllustration,
+    title: "내 지도가 곧 여행 코스",
+    description: "저장한 곳들을 골라 코스로 만들어요",
+    Illustration: Slide3Illustration,
   },
   {
-    title: "친구들의 추천도 지도에서",
-    description: "큐레이션을 지도에서 발견.",
-    Illustration: SocialIllustration,
+    title: "이제 내 지도를 채울 차례",
+    description: "첫 릴스를 저장해보세요",
+    Illustration: Slide4Illustration,
   },
 ] as const;
 
-function ReelToPinIllustration() {
+function MapPinIcon({ size = 24, color = "currentColor" }: { size?: number; color?: string }) {
   return (
-    <svg viewBox="0 0 280 200" className="onboardingIllustration" aria-hidden>
-      <rect x="24" y="28" width="88" height="144" rx="14" fill="#fff" stroke="#e8ecf7" strokeWidth="2" />
-      <rect x="34" y="40" width="68" height="88" rx="8" fill="#fce6b7" />
-      <polygon points="58,68 58,92 76,80" fill="#513229" opacity="0.85" />
-      <path d="M34 136h68" stroke="#ddd" strokeWidth="2" strokeLinecap="round" />
-      <path d="M130 100h36" stroke="#1a2a7a" strokeWidth="2.5" strokeLinecap="round" markerEnd="url(#arrow)" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
-        d="M190 52c0-14 11-25 25-25s25 11 25 25c0 19-25 45-25 45S190 71 190 52z"
-        fill="#1a2a7a"
-        stroke="#fff"
-        strokeWidth="2"
-      />
-      <circle cx="215" cy="52" r="10" fill="#fff" />
-      <text x="215" y="56" textAnchor="middle" fontSize="11" fill="#1a2a7a" fontWeight="700">
-        📍
-      </text>
-      <defs>
-        <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-          <path d="M0,0 L6,3 L0,6 Z" fill="#1a2a7a" />
-        </marker>
-      </defs>
-    </svg>
-  );
-}
-
-function WalkDirectionsIllustration() {
-  return (
-    <svg viewBox="0 0 280 200" className="onboardingIllustration" aria-hidden>
-      <rect x="20" y="24" width="240" height="152" rx="16" fill="#f5f7fd" stroke="#e4e9f7" strokeWidth="2" />
-      <path
-        d="M48 140 Q90 110 120 128 T180 96 T228 72"
-        fill="none"
-        stroke="#16a34a"
-        strokeWidth="4"
-        strokeLinecap="round"
-        strokeDasharray="8 6"
-      />
-      <circle cx="48" cy="140" r="8" fill="#1a2a7a" stroke="#fff" strokeWidth="2" />
-      <path
-        d="M228 72c0-10 8-18 18-18s18 8 18 18c0 14-18 32-18 32S228 86 228 72z"
-        fill="#513229"
-        stroke="#fff"
-        strokeWidth="2"
-      />
-      <circle cx="246" cy="72" r="6" fill="#fff" />
-      <g fill="#1a2a7a" opacity="0.7">
-        <ellipse cx="130" cy="158" rx="5" ry="8" />
-        <path d="M130 148v-12M126 152l4-4 4 4" stroke="#1a2a7a" strokeWidth="2" fill="none" strokeLinecap="round" />
-        <ellipse cx="158" cy="152" rx="5" ry="8" />
-        <path d="M158 142v-12M154 146l4-4 4 4" stroke="#1a2a7a" strokeWidth="2" fill="none" strokeLinecap="round" />
-      </g>
-    </svg>
-  );
-}
-
-function CourseIllustration() {
-  const pins = [
-    { x: 56, y: 130, n: "1" },
-    { x: 128, y: 88, n: "2" },
-    { x: 210, y: 118, n: "3" },
-  ];
-  return (
-    <svg viewBox="0 0 280 200" className="onboardingIllustration" aria-hidden>
-      <rect x="20" y="24" width="240" height="152" rx="16" fill="#f5f7fd" stroke="#e4e9f7" strokeWidth="2" />
-      <path
-        d="M56 130 L128 88 L210 118"
-        fill="none"
-        stroke="#1a2a7a"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {pins.map((pin) => (
-        <g key={pin.n}>
-          <path
-            d={`M${pin.x} ${pin.y - 18}c-8 0-14 6-14 14c0 10 14 26 14 26s14-16 14-26c0-8-6-14-14-14z`}
-            fill="#1a2a7a"
-            stroke="#fff"
-            strokeWidth="1.5"
-          />
-          <circle cx={pin.x} cy={pin.y - 16} r="9" fill="#fff" />
-          <text x={pin.x} y={pin.y - 12} textAnchor="middle" fontSize="11" fill="#1a2a7a" fontWeight="700">
-            {pin.n}
-          </text>
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-function SocialIllustration() {
-  return (
-    <svg viewBox="0 0 280 200" className="onboardingIllustration" aria-hidden>
-      <rect x="20" y="24" width="240" height="152" rx="16" fill="#f5f7fd" stroke="#e4e9f7" strokeWidth="2" />
-      <circle cx="72" cy="88" r="22" fill="#d8ebf9" stroke="#1a2a7a" strokeWidth="2" />
-      <circle cx="72" cy="82" r="8" fill="#1a2a7a" />
-      <path d="M56 104c4-8 12-12 16-12s12 4 16 12" fill="none" stroke="#1a2a7a" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="208" cy="88" r="22" fill="#fce6b7" stroke="#513229" strokeWidth="2" />
-      <circle cx="208" cy="82" r="8" fill="#513229" />
-      <path d="M192 104c4-8 12-12 16-12s12 4 16 12" fill="none" stroke="#513229" strokeWidth="2" strokeLinecap="round" />
-      <path
-        d="M118 100c0-12 10-22 22-22s22 10 22 22c0 16-22 38-22 38S118 116 118 100z"
-        fill="#1a2a7a"
-        stroke="#fff"
-        strokeWidth="2"
-      />
-      <circle cx="140" cy="100" r="8" fill="#fff" />
-      <path
-        d="M148 132c6 4 14 6 22 6 8 0 16-2 22-6"
-        fill="#e53935"
-        stroke="#fff"
+        d="M12 21s7-4.5 7-11a7 7 0 1 0-14 0c0 6.5 7 11 7 11z"
+        fill={color}
+        stroke={color}
         strokeWidth="1.5"
-        transform="translate(0,-8)"
       />
-      <text x="140" y="168" textAnchor="middle" fontSize="22">
-        ♥
-      </text>
+      <circle cx="12" cy="10" r="2.5" fill={color === "#fff" ? NAVY : "#fff"} />
     </svg>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff" aria-hidden>
+      <polygon points="8,5 19,12 8,19" />
+    </svg>
+  );
+}
+
+function PinDrop({
+  size,
+  color,
+  children,
+  style,
+}: {
+  size: number;
+  color: string;
+  children: ReactNode;
+  style?: CSSProperties;
+}) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50% 50% 50% 0",
+        transform: "rotate(-45deg)",
+        background: color,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        ...style,
+      }}
+    >
+      <div style={{ transform: "rotate(45deg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function IllustrationPlate({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        width: 150,
+        height: 130,
+        borderRadius: 18,
+        background: "#EEF0FA",
+        position: "relative",
+        margin: "0 auto",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Slide1Illustration() {
+  return (
+    <div
+      className="onboardingIllustrationStage"
+      style={{ position: "relative", width: "min(100%, 200px)", height: 150, margin: "0 auto" }}
+      aria-hidden
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          transform: "translate(-58%, -50%)",
+          width: 88,
+          height: 120,
+          borderRadius: 16,
+          border: "1.5px solid #E4E7F2",
+          background: "#fff",
+          boxShadow: "0 10px 28px rgba(27, 42, 107, 0.1)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: "50%",
+            background: NAVY,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <PlayIcon />
+        </div>
+      </div>
+      <div style={{ position: "absolute", right: "4%", top: "6%" }}>
+        <PinDrop size={48} color={NAVY}>
+          <MapPinIcon size={22} color="#fff" />
+        </PinDrop>
+      </div>
+    </div>
+  );
+}
+
+function Slide2Illustration() {
+  const pins = [
+    { color: NAVY, emoji: "🍜", top: "18%", left: "12%" },
+    { color: "#D8543A", emoji: "☕", top: "8%", right: "14%", left: "auto" as const },
+    { color: "#1D9E75", emoji: "🛍️", bottom: "16%", left: "18%", top: "auto" as const },
+    { color: "#BA7517", emoji: "📷", bottom: "10%", right: "10%", left: "auto" as const, top: "auto" as const },
+  ];
+
+  return (
+    <IllustrationPlate>
+      {pins.map((pin) => (
+        <div
+          key={pin.emoji}
+          style={{
+            position: "absolute",
+            top: pin.top,
+            left: pin.left,
+            right: pin.right,
+            bottom: pin.bottom,
+          }}
+        >
+          <PinDrop size={40} color={pin.color}>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>{pin.emoji}</span>
+          </PinDrop>
+        </div>
+      ))}
+    </IllustrationPlate>
+  );
+}
+
+function Slide3Illustration() {
+  return (
+    <IllustrationPlate>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <svg width="112" height="88" viewBox="0 0 112 88" fill="none" aria-hidden>
+          <path
+            d="M16 68 C34 58, 42 28, 56 24 S78 40, 96 20"
+            stroke={NAVY}
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray="5 5"
+            opacity="0.45"
+          />
+          <circle cx="16" cy="68" r="7" fill={NAVY} />
+          <circle cx="16" cy="68" r="3" fill="#EEF0FA" />
+          <circle cx="56" cy="24" r="7" fill={NAVY} />
+          <circle cx="56" cy="24" r="3" fill="#EEF0FA" />
+          <circle cx="96" cy="20" r="7" fill={NAVY} />
+          <circle cx="96" cy="20" r="3" fill="#EEF0FA" />
+          <path
+            d="M44 52 L52 44 L60 52 L68 40"
+            stroke={NAVY}
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <circle cx="44" cy="52" r="4" fill={NAVY} />
+          <circle cx="68" cy="40" r="4" fill={NAVY} />
+        </svg>
+      </div>
+    </IllustrationPlate>
+  );
+}
+
+function Slide4Illustration() {
+  return (
+    <div
+      className="onboardingIllustrationStage"
+      style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 180 }}
+      aria-hidden
+    >
+      <div
+        style={{
+          width: 82,
+          height: 82,
+          borderRadius: "50%",
+          background: "rgba(255, 255, 255, 0.12)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <MapPinIcon size={42} color="#fff" />
+      </div>
+    </div>
   );
 }
 
@@ -189,27 +283,31 @@ export default function OnboardingPage() {
   };
 
   return (
-    <main className="onboardingRoot">
-      <header className="onboardingHeader">
-        <span className="onboardingBrand">PindMap</span>
-        <button type="button" className="onboardingSkip" onClick={() => void finish()}>
-          건너뛰기
-        </button>
-      </header>
+    <main className={isLast ? "onboardingRoot onboardingRootFinal" : "onboardingRoot"}>
+      {!isLast && (
+        <header className="onboardingHeader">
+          <span className="onboardingBrand">PindMap</span>
+          <button type="button" className="onboardingSkip" onClick={() => void finish()}>
+            건너뛰기
+          </button>
+        </header>
+      )}
 
       <div
-        className="onboardingSlideArea"
+        className={isLast ? "onboardingSlideArea onboardingSlideAreaFinal" : "onboardingSlideArea onboardingSlideAreaCard"}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
         <div className="onboardingIllustrationWrap">
           <slide.Illustration />
         </div>
-        <h1 className="onboardingTitle">{slide.title}</h1>
-        <p className="onboardingDescription">{slide.description}</p>
+        <h1 className={isLast ? "onboardingTitle onboardingTitleFinal" : "onboardingTitle"}>{slide.title}</h1>
+        <p className={isLast ? "onboardingDescription onboardingDescriptionFinal" : "onboardingDescription"}>
+          {slide.description}
+        </p>
       </div>
 
-      <div className="onboardingFooter">
+      <div className={isLast ? "onboardingFooter onboardingFooterFinal" : "onboardingFooter"}>
         <div className="onboardingDots" role="tablist" aria-label="온보딩 진행">
           {SLIDES.map((_, i) => (
             <button
@@ -218,14 +316,26 @@ export default function OnboardingPage() {
               role="tab"
               aria-selected={i === index}
               aria-label={`${i + 1}번째 소개`}
-              className={i === index ? "onboardingDot onboardingDotActive" : "onboardingDot"}
+              className={
+                i === index
+                  ? isLast
+                    ? "onboardingDot onboardingDotActive onboardingDotActiveFinal"
+                    : "onboardingDot onboardingDotActive"
+                  : isLast
+                    ? "onboardingDot onboardingDotFinal"
+                    : "onboardingDot"
+              }
               onClick={() => setIndex(i)}
             />
           ))}
         </div>
         <button
           type="button"
-          className={isLast ? "onboardingPrimary onboardingPrimaryLarge" : "onboardingPrimary"}
+          className={
+            isLast
+              ? "onboardingPrimary onboardingPrimaryFinal"
+              : "onboardingPrimary"
+          }
           onClick={goNext}
         >
           {isLast ? "시작하기" : "다음"}

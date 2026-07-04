@@ -3942,10 +3942,14 @@ body {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #fafbff 0%, #fff 45%, #f7f9ff 100%);
+  background: #fff;
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
     env(safe-area-inset-left, 0px);
   box-sizing: border-box;
+}
+
+.onboardingRootFinal {
+  background: #1b2a6b;
 }
 
 .onboardingHeader {
@@ -3957,17 +3961,17 @@ body {
 }
 
 .onboardingBrand {
-  font-family: "Playfair Display", serif;
-  font-size: 20px;
-  color: #1a2a7a;
-  letter-spacing: 0.3px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #1b2a6b;
+  letter-spacing: 0.2px;
 }
 
 .onboardingSkip {
   border: none;
   background: transparent;
-  color: #7a849e;
-  font-size: 14px;
+  color: #a6abc2;
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
   padding: 8px 4px;
@@ -3982,35 +3986,57 @@ body {
   padding: 12px 28px 24px;
   text-align: center;
   touch-action: pan-y;
+  min-height: 0;
+}
+
+.onboardingSlideAreaCard {
+  background: #f5f6fb;
+  margin: 0 16px;
+  border-radius: 24px;
+}
+
+.onboardingSlideAreaFinal {
+  background: transparent;
+  margin: 0;
 }
 
 .onboardingIllustrationWrap {
   width: 100%;
   max-width: 320px;
   margin-bottom: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.onboardingIllustration {
-  width: 100%;
-  height: auto;
-  display: block;
+.onboardingIllustrationStage {
+  max-width: 100%;
 }
 
 .onboardingTitle {
   margin: 0 0 10px;
-  font-size: 22px;
-  font-weight: 700;
-  color: #1a2a7a;
+  font-size: 18px;
+  font-weight: 500;
+  color: #1b2a6b;
   line-height: 1.35;
   letter-spacing: -0.2px;
 }
 
+.onboardingTitleFinal {
+  font-size: 20px;
+  color: #fff;
+}
+
 .onboardingDescription {
   margin: 0;
-  font-size: 15px;
-  line-height: 1.5;
-  color: #5c6478;
-  max-width: 300px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #868dab;
+  max-width: 280px;
+}
+
+.onboardingDescriptionFinal {
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .onboardingFooter {
@@ -4022,6 +4048,10 @@ body {
   gap: 20px;
 }
 
+.onboardingFooterFinal {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+}
+
 .onboardingDots {
   display: flex;
   gap: 8px;
@@ -4029,19 +4059,28 @@ body {
 }
 
 .onboardingDot {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   border: none;
   padding: 0;
-  background: #d8deef;
+  background: #d2d6e5;
   cursor: pointer;
 }
 
 .onboardingDotActive {
-  width: 22px;
+  width: 20px;
+  height: 5px;
   border-radius: 999px;
-  background: #1a2a7a;
+  background: #1b2a6b;
+}
+
+.onboardingDotFinal {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.onboardingDotActiveFinal {
+  background: #fff;
 }
 
 .onboardingPrimary {
@@ -4049,19 +4088,23 @@ body {
   max-width: 320px;
   border: none;
   border-radius: 12px;
-  padding: 14px 20px;
-  background: #1a2a7a;
+  padding: 13px 20px;
+  background: #1b2a6b;
   color: #fff;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 500;
   font-family: inherit;
   cursor: pointer;
 }
 
-.onboardingPrimaryLarge {
-  padding: 16px 20px;
-  font-size: 16px;
-  box-shadow: 0 8px 24px rgba(26, 42, 122, 0.22);
+.onboardingPrimaryFinal {
+  background: #fff;
+  color: #1b2a6b;
+  border-radius: 14px;
+  padding: 13px 20px;
+  font-size: 15px;
+  font-weight: 500;
+  box-shadow: none;
 }
 
 /* ── 스켈레톤 로딩 ── */
