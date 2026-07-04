@@ -4075,3 +4075,196 @@ body {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* ── 릴스 추출 로딩 오버레이 ── */
+.extractLoadingOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100010;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+  padding-top: calc(24px + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+  background: rgba(15, 20, 40, 0.52);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.extractLoadingCard {
+  position: relative;
+  width: min(340px, 100%);
+  padding: 36px 28px 24px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 16px 48px rgba(26, 42, 122, 0.22);
+  text-align: center;
+}
+
+.extractLoadingCloseBtn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #f2f4f8;
+  color: #76809a;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.extractLoadingTipHero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 148px;
+  margin: 8px 0 28px;
+  padding: 8px 8px 4px;
+  animation: extractLoadingTipIn 0.5s ease;
+}
+
+.extractLoadingTipEmoji {
+  font-size: 38px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.extractLoadingTipTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a2a7a;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+
+.extractLoadingTipDesc {
+  margin: 0;
+  max-width: 280px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #8b93aa;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.extractLoadingProgressText {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #9aa3b8;
+  line-height: 1.4;
+  animation: extractLoadingTextIn 0.45s ease;
+}
+
+@keyframes extractLoadingTextIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.extractLoadingProgressTrack {
+  height: 3px;
+  margin: 0 12px 24px;
+  border-radius: 999px;
+  background: #eef1f8;
+  overflow: hidden;
+  opacity: 0.85;
+}
+
+.extractLoadingProgressFill {
+  height: 100%;
+  width: 36%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(26, 42, 122, 0.55), rgba(74, 108, 240, 0.7), rgba(26, 42, 122, 0.55));
+  background-size: 200% 100%;
+  animation: extractLoadingBarMove 2s ease-in-out infinite;
+}
+
+@keyframes extractLoadingBarMove {
+  0% {
+    transform: translateX(-120%);
+    background-position: 0% 50%;
+  }
+  100% {
+    transform: translateX(320%);
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes extractLoadingTipIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.extractLoadingFooterNote {
+  margin: 0 0 16px;
+  font-size: 10px;
+  color: #b0b8c8;
+  line-height: 1.35;
+}
+
+.extractLoadingDismissBtn {
+  width: 100%;
+  margin: 0;
+  padding: 13px 16px;
+  border: none;
+  border-radius: 12px;
+  background: #1a2a7a;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.extractLoadingDismissBtn:active {
+  opacity: 0.88;
+}
+
+.extractLoadingComplete {
+  padding: 12px 0 8px;
+}
+
+.extractLoadingCompleteEmoji {
+  margin: 0 0 8px;
+  font-size: 36px;
+  line-height: 1;
+}
+
+.extractLoadingCompleteTitle {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a2a7a;
+}
+
+.extractLoadingCompleteSub {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: #666;
+}

@@ -235,7 +235,12 @@ export default function SignupPage() {
             style={inputStyle}
           />
           <input
-            type="email"
+            type="text"
+            inputMode="email"
+            autoComplete="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             placeholder="이메일"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -244,6 +249,9 @@ export default function SignupPage() {
           />
           <input
             type="password"
+            autoComplete="new-password"
+            autoCapitalize="none"
+            autoCorrect="off"
             placeholder="비밀번호 (6자 이상)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

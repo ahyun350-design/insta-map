@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Capacitor } from "@capacitor/core";
 import type { AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { hasSeenOnboarding } from "@/lib/onboarding";
@@ -41,9 +42,112 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const warmupInputRef = useRef<HTMLInputElement>(null);
+  const warmupDoneRef = useRef(false);
+  const userFocusedRealInputRef = useRef(false);
+
+  const WARMUP_DELAY_MS = 400;
+  const WARMUP_FOCUS_HOLD_MS = 400;
+
+  const releaseWarmupFocus = (el: HTMLInputElement) => {
+    el.blur();
+    if (document.activeElement === el) {
+      el.blur();
+    }
+    requestAnimationFrame(() => {
+      if (document.activeElement === el) {
+        el.blur();
+      }
+    });
+  };
 
   useEffect(() => {
-    void hideNativeSplash();
+    if (!onboardingChecked || warmupDoneRef.current) return;
+    if (!Capacitor.isNativePlatform()) {
+      warmupDoneRef.current = true;
+      return;
+    }
+
+    let cancelled = false;
+    let holdTimerId: number | null = null;
+
+    const finishSplash = () => {
+      void hideNativeSplash();
+    };
+
+    const timerId = window.setTimeout(() => {
+      void (async () => {
+        if (cancelled || warmupDoneRef.current) return;
+        if (userFocusedRealInputRef.current) {
+          warmupDoneRef.current = true;
+          finishSplash();
+          return;
+        }
+
+        const el = warmupInputRef.current;
+        if (!el) {
+          warmupDoneRef.current = true;
+          finishSplash();
+          return;
+        }
+
+        warmupDoneRef.current = true;
+
+        el.readOnly = true;
+        el.focus({ preventScroll: true });
+        el.blur();
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            if (document.activeElement === el) {
+              el.blur();
+            }
+            resolve();
+          });
+        });
+
+        if (cancelled || userFocusedRealInputRef.current) {
+          releaseWarmupFocus(el);
+          finishSplash();
+          return;
+        }
+
+        el.readOnly = false;
+        el.focus({ preventScroll: true });
+
+        await new Promise<void>((resolve) => {
+          holdTimerId = window.setTimeout(() => {
+            holdTimerId = null;
+            resolve();
+          }, WARMUP_FOCUS_HOLD_MS);
+        });
+
+        if (cancelled) return;
+
+        releaseWarmupFocus(el);
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            releaseWarmupFocus(el);
+            resolve();
+          });
+        });
+
+        finishSplash();
+      })();
+    }, WARMUP_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+      if (holdTimerId != null) {
+        window.clearTimeout(holdTimerId);
+      }
+    };
+  }, [onboardingChecked]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) {
+      void hideNativeSplash();
+    }
   }, []);
 
   useEffect(() => {
@@ -52,6 +156,7 @@ export default function LoginPage() {
       const seen = await hasSeenOnboarding();
       if (cancelled) return;
       if (!seen) {
+        void hideNativeSplash();
         router.replace("/onboarding");
         return;
       }
@@ -62,11 +167,14 @@ export default function LoginPage() {
     };
   }, [router]);
 
+  const handleRealInputFocus = () => {
+    userFocusedRealInputRef.current = true;
+  };
+
   if (!onboardingChecked) {
     return null;
   }
 
-  // 이메일 로그인
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -88,7 +196,6 @@ export default function LoginPage() {
     router.refresh();
   };
 
-  // 카카오 로그인
   const handleKakaoLogin = async () => {
     setError("");
     const { error } = await supabase.auth.signInWithOAuth({
@@ -113,6 +220,28 @@ export default function LoginPage() {
       background: "#fafafa",
       padding: "20px",
     }}>
+      <input
+        ref={warmupInputRef}
+        type="text"
+        inputMode="email"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="none"
+        tabIndex={-1}
+        aria-hidden
+        style={{
+          position: "fixed",
+          left: -9999,
+          top: 0,
+          width: 0,
+          height: 0,
+          opacity: 0,
+          pointerEvents: "none",
+          border: "none",
+          padding: 0,
+          margin: 0,
+        }}
+      />
       <div style={{
         width: "100%",
         maxWidth: "380px",
@@ -121,7 +250,6 @@ export default function LoginPage() {
         padding: "40px 28px",
         boxShadow: "0 4px 20px rgba(0,0,0,0.04)",
       }}>
-        {/* 로고 */}
         <div style={{ textAlign: "center", marginBottom: "32px" }}>
           <svg width="48" height="48" viewBox="0 0 32 32" style={{ marginBottom: "12px" }}>
             <rect width="32" height="32" rx="8" fill="#1a1a1a" />
@@ -144,12 +272,17 @@ export default function LoginPage() {
           }}>인스타에서 본 그곳, 지도 위에서 다시 만나다</p>
         </div>
 
-        {/* 이메일 로그인 폼 */}
         <form onSubmit={handleEmailLogin} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           <input
-            type="email"
+            type="text"
+            inputMode="email"
+            autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             placeholder="이메일"
             value={email}
+            onFocus={handleRealInputFocus}
             onChange={(e) => setEmail(e.target.value)}
             required
             style={{
@@ -163,8 +296,12 @@ export default function LoginPage() {
           />
           <input
             type="password"
+            autoComplete="current-password"
+            autoCapitalize="none"
+            autoCorrect="off"
             placeholder="비밀번호"
             value={password}
+            onFocus={handleRealInputFocus}
             onChange={(e) => setPassword(e.target.value)}
             required
             style={{
@@ -236,7 +373,6 @@ export default function LoginPage() {
         </button>
         */}
 
-        {/* 회원가입 링크 */}
         <p style={{ textAlign: "center", marginTop: "16px", fontSize: "12px", color: "#888" }}>
           <Link href="/forgot-password" style={{ color: "#888", textDecoration: "none" }}>
             비밀번호를 잊으셨나요?

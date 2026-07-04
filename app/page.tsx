@@ -10,6 +10,7 @@ import { useUser } from "@/lib/useUser";
 import { hideNativeSplash } from "@/lib/nativeSplash";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
+import { ExtractLoadingOverlay } from "@/components/ExtractLoadingOverlay";
 import {
   formatInAppNotificationFromRow,
   formatMessageInAppText,
@@ -1263,6 +1264,8 @@ function HomePageContent() {
   const [expandedMapPinsTick, setExpandedMapPinsTick] = useState(0);
   const [showJobsModal, setShowJobsModal] = useState(false);
   const [activeJobs, setActiveJobs] = useState<ActiveExtractJob[]>([]);
+  const [showExtractOverlay, setShowExtractOverlay] = useState(false);
+  const [extractOverlayComplete, setExtractOverlayComplete] = useState(false);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const selectedPlaceRef = useRef<any>(null);
   selectedPlaceRef.current = selectedPlace;
@@ -3136,6 +3139,20 @@ function HomePageContent() {
     }
     window.localStorage.setItem(ACTIVE_JOBS_STORAGE_KEY, JSON.stringify(incomplete));
   }, [activeJobs]);
+
+  useEffect(() => {
+    if (!showExtractOverlay) return;
+    if (activeJobs.length > 0) {
+      setExtractOverlayComplete(false);
+      return;
+    }
+    setExtractOverlayComplete(true);
+    const timer = window.setTimeout(() => {
+      setShowExtractOverlay(false);
+      setExtractOverlayComplete(false);
+    }, 1800);
+    return () => window.clearTimeout(timer);
+  }, [showExtractOverlay, activeJobs.length]);
 
   useEffect(() => {
     return () => {
@@ -5428,6 +5445,8 @@ function HomePageContent() {
       };
       setActiveJobs((prev) => [newJob, ...prev.filter((job) => job.jobId !== newJob.jobId)]);
       extractPollStartRef.current[data.jobId] = perfNow();
+      setShowExtractOverlay(true);
+      setExtractOverlayComplete(false);
       setInstagramUrl("");
       setReelInputExpanded(false);
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
@@ -11018,6 +11037,18 @@ function HomePageContent() {
             void navigateFromInAppNotification(inAppNotificationCurrent);
           }}
           onDismiss={handleInAppNotificationDismiss}
+        />,
+        document.body,
+      )}
+    {typeof document !== "undefined" &&
+      createPortal(
+        <ExtractLoadingOverlay
+          open={showExtractOverlay}
+          complete={extractOverlayComplete}
+          onDismiss={() => {
+            setShowExtractOverlay(false);
+            setExtractOverlayComplete(false);
+          }}
         />,
         document.body,
       )}
