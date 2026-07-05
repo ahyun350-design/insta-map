@@ -8,7 +8,7 @@ function isHeicLike(file: File): boolean {
 }
 
 /**
- * HEIC → JPEG 변환(가능 시) 후 1MB 이하·1920px 이내로 압축해 Storage 업로드용 File 생성
+ * HEIC → JPEG 변환(가능 시) 후 0.5MB 이하·1080px 이내로 압축해 Storage 업로드용 File 생성
  */
 export async function prepareImageForUpload(original: File): Promise<File> {
   let source: File = original;
@@ -34,11 +34,11 @@ export async function prepareImageForUpload(original: File): Promise<File> {
   }
 
   const compressed = await imageCompression(source, {
-    maxSizeMB: 1,
-    maxWidthOrHeight: 1920,
+    maxSizeMB: 0.5,
+    maxWidthOrHeight: 1080,
     useWebWorker: true,
     fileType: "image/jpeg",
-    initialQuality: 0.82,
+    initialQuality: 0.78,
   });
 
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
