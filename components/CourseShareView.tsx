@@ -20,7 +20,7 @@ type Props = {
 
 export function CourseShareView({ course, isIOS }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
-  const [monkeyHidden, setMonkeyHidden] = useState(false);
+  const [monkeyFailed, setMonkeyFailed] = useState(false);
   const [runAwayOffset, setRunAwayOffset] = useState({ x: 0, y: 0 });
   const runAwayCountRef = useRef(0);
 
@@ -43,12 +43,19 @@ export function CourseShareView({ course, isIOS }: Props) {
     return (
       <div className="courseSharePage courseSharePageInvite">
         <div className="courseShareInviteInner">
-          {!monkeyHidden && (
+          {monkeyFailed ? (
+            <div className="courseShareMonkeyFallback" aria-hidden>
+              🐵
+            </div>
+          ) : (
             <img
               src="/date-monkey.png"
               alt=""
               className="courseShareMonkeyImg"
-              onError={() => setMonkeyHidden(true)}
+              width={120}
+              height={180}
+              decoding="async"
+              onError={() => setMonkeyFailed(true)}
             />
           )}
           <p className="courseShareInviteLine">나랑 데이트 할래…??</p>
@@ -75,7 +82,7 @@ export function CourseShareView({ course, isIOS }: Props) {
   return (
     <div className="courseSharePage courseSharePageReveal">
       <main className="courseShareRevealMain">
-        <p className="courseShareRevealLead">그래서 나 몰래 코스 짰어…</p>
+        <p className="courseShareRevealLead">그래서 내가 코스 준비해 왔어!</p>
         <p className="courseShareRevealTitle">
           {course.title} · {placeCount}곳
         </p>
