@@ -51,6 +51,8 @@ function PlaceDetailCurationImages({
         <img
           src={images[0]}
           alt=""
+          loading="lazy"
+          decoding="async"
           onClick={(ev) => {
             ev.stopPropagation();
             onImageLightbox(images[0]);
@@ -69,6 +71,7 @@ function PlaceDetailCurationImages({
             src={img}
             alt=""
             className="placeDetailSheetCurationCarouselImg"
+            decoding="async"
             onClick={(ev) => {
               ev.stopPropagation();
               onImageLightbox(img);

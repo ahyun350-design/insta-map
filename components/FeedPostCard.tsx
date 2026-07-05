@@ -185,7 +185,7 @@ export function FeedPostMedia({
       >
         {images.map((src, i) => (
           <div key={`${src}-${i}`} className="feedPostMediaSlide">
-            <img src={src} alt="" className="feedPostMediaImg" draggable={false} />
+            <img src={src} alt="" className="feedPostMediaImg" draggable={false} decoding="async" />
           </div>
         ))}
       </div>

@@ -142,7 +142,7 @@ export function Step2PlaceTags({
                   role={tag ? undefined : "button"}
                   aria-label={tag ? undefined : `사진 ${index + 1}에 장소 추가`}
                 >
-                  <img src={thumbSrc} alt={`사진 ${index + 1}`} className="curationPhotoTapImg" />
+                  <img src={thumbSrc} alt={`사진 ${index + 1}`} className="curationPhotoTapImg" loading="lazy" decoding="async" />
                   {tag && <PhotoTagMarker tag={tag} onMarkerClick={(e) => { e.stopPropagation(); setActionMenuIndex(index); }} />}
                 </div>
               </div>

@@ -100,7 +100,7 @@ export function PostGridCell({
         }}
       >
         {thumb ? (
-          <img src={thumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+          <img src={thumb} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
         ) : (
           <span
             style={{
