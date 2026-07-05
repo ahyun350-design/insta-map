@@ -10070,7 +10070,7 @@ function HomePageContent() {
                 {savedPlaces.length === 0 && (
                   <div className="miniList">
                     <EmptyState
-                      icon="📍"
+                      icon=""
                       title="아직 핀이 없어요"
                       description="인스타그램 릴스나 게시물 URL을 붙여넣으면 지도에 자동으로 핀이 찍혀요"
                       action={{

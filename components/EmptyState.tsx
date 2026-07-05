@@ -25,13 +25,15 @@ export default function EmptyState({ icon = "✨", title, description, action, v
       width: "100%",
       boxSizing: "border-box",
     }}>
-      <div style={{
-        fontSize: "56px",
-        marginBottom: "16px",
-        opacity: 0.7,
-      }}>
-        {icon}
-      </div>
+      {icon ? (
+        <div style={{
+          fontSize: "56px",
+          marginBottom: "16px",
+          opacity: 0.7,
+        }}>
+          {icon}
+        </div>
+      ) : null}
       <h3 style={{
         margin: "0 0 8px",
         fontFamily: "'Playfair Display', serif",
