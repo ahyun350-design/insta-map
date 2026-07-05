@@ -1,3 +1,6 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
 import type { SavedCourse } from "@/lib/courses";
 import { getAppStoreUrl } from "@/lib/pindmapLinks";
 
@@ -16,42 +19,76 @@ type Props = {
 };
 
 export function CourseShareView({ course, isIOS }: Props) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [monkeyHidden, setMonkeyHidden] = useState(false);
+  const [runAwayOffset, setRunAwayOffset] = useState({ x: 0, y: 0 });
+  const runAwayCountRef = useRef(0);
+
   const placeCount = course.place_count ?? course.items.length;
   const appStoreUrl = getAppStoreUrl();
   const showAppStoreCta = isIOS && !!appStoreUrl;
 
+  const handleRunAway = useCallback(() => {
+    runAwayCountRef.current += 1;
+    const n = runAwayCountRef.current;
+    const angle = n * 2.1 + Math.random() * 0.8;
+    const dist = 36 + Math.random() * 72;
+    setRunAwayOffset({
+      x: Math.cos(angle) * dist + (Math.random() - 0.5) * 48,
+      y: Math.sin(angle) * dist + (Math.random() - 0.5) * 32,
+    });
+  }, []);
+
+  if (step === 1) {
+    return (
+      <div className="courseSharePage courseSharePageInvite">
+        <div className="courseShareInviteInner">
+          {!monkeyHidden && (
+            <img
+              src="/date-monkey.png"
+              alt=""
+              className="courseShareMonkeyImg"
+              onError={() => setMonkeyHidden(true)}
+            />
+          )}
+          <p className="courseShareInviteLine">나랑 데이트 할래…??</p>
+          <div className="courseShareInviteActions">
+            <button type="button" className="courseShareBtnYes" onClick={() => setStep(2)}>
+              좋아 ㅎㅎ
+            </button>
+            <button
+              type="button"
+              className="courseShareBtnNah"
+              style={{ transform: `translate(${runAwayOffset.x}px, ${runAwayOffset.y}px)` }}
+              onClick={handleRunAway}
+              onMouseEnter={handleRunAway}
+              aria-label="음…"
+            >
+              음…
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="courseSharePage">
-      <header className="courseShareHeader">
-        <div className="courseShareBrand">
-          <span className="courseShareBrandIcon" aria-hidden>
-            📍
-          </span>
-          <span className="courseShareBrandName">PindMap</span>
-        </div>
-        {showAppStoreCta ? (
-          <a className="courseShareHeaderCta" href={appStoreUrl} rel="noopener noreferrer">
-            앱에서 보기
-          </a>
-        ) : (
-          <span className="courseShareHeaderHint">iOS 앱</span>
-        )}
-      </header>
+    <div className="courseSharePage courseSharePageReveal">
+      <main className="courseShareRevealMain">
+        <p className="courseShareRevealLead">그래서 나 몰래 코스 짰어…</p>
+        <p className="courseShareRevealTitle">
+          {course.title} · {placeCount}곳
+        </p>
 
-      <main className="courseShareMain">
-        <h1 className="courseShareTitle">{course.title}</h1>
-        <p className="courseShareSubtitle">📍 {placeCount}곳 코스</p>
-
-        <div className="courseShareMapPlaceholder" aria-label="지도 미리보기">
-          <p className="courseShareMapPlaceholderText">🗺️ 앱에서 지도와 경로 보기</p>
-          <p className="courseShareMapPlaceholderSub">인터랙티브 지도는 PindMap 앱에서 이용할 수 있어요</p>
-        </div>
-
-        <ol className="courseShareList">
+        <ol className="courseShareList courseShareListStagger">
           {course.items.map((place, idx) => {
             const emoji = PLACE_CATEGORY_EMOJI[place.category] ?? "📍";
             return (
-              <li key={`${place.id}-${idx}`} className="courseShareListItem">
+              <li
+                key={`${place.id}-${idx}`}
+                className="courseShareListItem courseShareListItemReveal"
+                style={{ animationDelay: `${idx * 0.15}s` }}
+              >
                 <div className="courseShareListIndex">{idx + 1}</div>
                 <div className="courseShareListBody">
                   <p className="courseShareListName">{place.name}</p>
@@ -64,22 +101,22 @@ export function CourseShareView({ course, isIOS }: Props) {
             );
           })}
         </ol>
-      </main>
 
-      <footer className="courseShareFooter">
-        {showAppStoreCta ? (
-          <a className="courseShareFooterCta" href={appStoreUrl} rel="noopener noreferrer">
-            PindMap 앱에서 보기
-          </a>
-        ) : isIOS ? (
-          <p className="courseShareFooterNote">
-            PindMap은 iOS 앱 스토어에서 이용할 수 있어요.
-            {appStoreUrl ? null : " (앱 스토어 링크 준비 중)"}
-          </p>
-        ) : (
-          <p className="courseShareFooterNote">PindMap은 현재 iOS에서 이용할 수 있어요.</p>
-        )}
-      </footer>
+        <footer className="courseShareRevealFooter">
+          {showAppStoreCta ? (
+            <a className="courseShareMapCta" href={appStoreUrl} rel="noopener noreferrer">
+              📍 코스 전체 보기
+            </a>
+          ) : isIOS ? (
+            <p className="courseShareFooterNote">
+              PindMap은 iOS 앱 스토어에서 이용할 수 있어요.
+              {appStoreUrl ? null : " (앱 스토어 링크 준비 중)"}
+            </p>
+          ) : (
+            <p className="courseShareFooterNote">PindMap은 현재 iOS에서 이용할 수 있어요.</p>
+          )}
+        </footer>
+      </main>
     </div>
   );
 }

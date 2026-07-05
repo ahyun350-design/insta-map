@@ -1345,58 +1345,116 @@ body {
   line-height: 1.3;
 }
 
-/* F-1a: 웹 코스 공유 페이지 (/course/[id]) */
+/* F-1a: 웹 코스 공유 페이지 (/course/[id]) — 데이트 초대장 연출 */
 .courseSharePage {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: #f5f6fa;
-  color: #1a1a2e;
+  background: #e1f5ee;
+  color: #0f6e56;
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-sizing: border-box;
 }
 
-.courseShareHeader {
-  display: flex;
+.courseSharePageInvite {
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 20px 12px;
-  background: #fff;
-  border-bottom: 0.5px solid #efefef;
+  justify-content: center;
+  padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
 }
 
-.courseShareBrand {
+.courseShareInviteInner {
+  width: 100%;
+  max-width: 340px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
+  text-align: center;
 }
 
-.courseShareBrandIcon {
-  font-size: 20px;
-  line-height: 1;
+.courseShareMonkeyImg {
+  width: 120px;
+  height: auto;
+  border-radius: 14px;
+  margin-bottom: 20px;
+  object-fit: cover;
 }
 
-.courseShareBrandName {
-  font-family: "Playfair Display", Georgia, serif;
+.courseShareInviteLine {
+  margin: 0 0 28px;
   font-size: 18px;
   font-weight: 500;
-  color: #1a2a7a;
+  color: #0f6e56;
+  line-height: 1.45;
 }
 
-.courseShareHeaderCta {
-  flex-shrink: 0;
-  padding: 8px 14px;
-  border-radius: 20px;
-  background: #1a2a7a;
+.courseShareInviteActions {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-height: 120px;
+}
+
+.courseShareBtnYes {
+  width: 100%;
+  max-width: 260px;
+  border: none;
+  border-radius: 18px;
+  padding: 14px 20px;
+  background: #1d9e75;
   color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
+  font-size: 15px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
 }
 
-.courseShareHeaderHint {
-  font-size: 11px;
-  color: #888;
+.courseShareBtnNah {
+  width: 100%;
+  max-width: 260px;
+  border: none;
+  border-radius: 18px;
+  padding: 14px 20px;
+  background: #c5e8dc;
+  color: #0f6e56;
+  font-size: 15px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: default;
+  transition: transform 0.12s ease-out;
+  touch-action: manipulation;
+}
+
+.courseSharePageReveal {
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(24px + env(safe-area-inset-bottom, 0px));
+}
+
+.courseShareRevealMain {
+  flex: 1;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.courseShareRevealLead {
+  margin: 0;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: #0f6e56;
+  line-height: 1.45;
+}
+
+.courseShareRevealTitle {
+  margin: 10px 0 20px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: #0f6e56;
+  line-height: 1.4;
 }
 
 .courseShareMain {
@@ -1421,69 +1479,67 @@ body {
   font-family: "Playfair Display", Georgia, serif;
   font-size: 26px;
   font-weight: 500;
-  color: #1a2a7a;
+  color: #1b2a6b;
   line-height: 1.3;
 }
 
 .courseShareSubtitle {
   margin: 8px 0 0;
   font-size: 14px;
-  color: #666;
-}
-
-.courseShareMapPlaceholder {
-  margin-top: 20px;
-  padding: 28px 16px;
-  border-radius: 12px;
-  background: linear-gradient(145deg, #e8ecf7 0%, #f4f5fb 100%);
-  border: 1px dashed #c5cde8;
-  text-align: center;
-}
-
-.courseShareMapPlaceholderText {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: #1a2a7a;
-}
-
-.courseShareMapPlaceholderSub {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: #76809a;
-  line-height: 1.45;
+  color: #0f6e56;
+  opacity: 0.75;
 }
 
 .courseShareList {
-  margin: 20px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+
+.courseShareListStagger {
+  margin-bottom: 24px;
+}
+
+@keyframes courseShareItemReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .courseShareListItem {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px;
+  padding: 12px 14px;
   background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 1px 4px rgba(26, 42, 122, 0.06);
+  border-radius: 11px;
+  box-shadow: 0 2px 8px rgba(27, 42, 107, 0.06);
+}
+
+.courseShareListItemReveal {
+  opacity: 0;
+  animation: courseShareItemReveal 0.45s ease forwards;
 }
 
 .courseShareListIndex {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: #1a2a7a;
+  background: #1b2a6b;
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
@@ -1494,8 +1550,8 @@ body {
 
 .courseShareListName {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   color: #1a1a2e;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1504,17 +1560,29 @@ body {
 
 .courseShareListMeta {
   margin: 4px 0 0;
-  font-size: 11px;
-  color: #888;
+  font-size: 9.5px;
+  color: #868dab;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.courseShareFooter {
-  padding: 16px 20px calc(20px + env(safe-area-inset-bottom, 0px));
-  background: #fff;
-  border-top: 0.5px solid #efefef;
+.courseShareRevealFooter {
+  padding-top: 4px;
+}
+
+.courseShareMapCta {
+  display: block;
+  width: 100%;
+  padding: 14px 20px;
+  border-radius: 13px;
+  background: #1b2a6b;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 
 .courseShareFooterCta {
@@ -1524,7 +1592,7 @@ body {
   margin: 0 auto;
   padding: 14px 20px;
   border-radius: 12px;
-  background: #1a2a7a;
+  background: #1b2a6b;
   color: #fff;
   font-size: 15px;
   font-weight: 600;
@@ -1543,7 +1611,8 @@ body {
   margin: 0 auto;
   max-width: 480px;
   font-size: 13px;
-  color: #666;
+  color: #0f6e56;
+  opacity: 0.85;
   text-align: center;
   line-height: 1.5;
 }
