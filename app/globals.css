@@ -1408,10 +1408,11 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  min-height: 120px;
 }
 
 .courseShareBtnYes {
+  position: relative;
+  z-index: 2;
   width: 100%;
   max-width: 260px;
   border: none;
@@ -1423,9 +1424,22 @@ body {
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
+  flex-shrink: 0;
+}
+
+.courseShareNahPlayfield {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  min-height: 156px;
+  overflow: hidden;
+  touch-action: none;
 }
 
 .courseShareBtnNah {
+  position: absolute;
+  left: 50%;
+  top: 0;
   width: 100%;
   max-width: 260px;
   border: none;
@@ -1437,8 +1451,11 @@ body {
   font-weight: 500;
   font-family: inherit;
   cursor: default;
-  transition: transform 0.12s ease-out;
-  touch-action: manipulation;
+  transition: transform 0.15s ease-out;
+  touch-action: none;
+  z-index: 3;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .courseSharePageReveal {
@@ -1514,7 +1531,30 @@ body {
 }
 
 .courseShareListStagger {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
+}
+
+.courseShareAppBanner {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #d6efe6;
+  text-align: center;
+}
+
+.courseShareAppBannerLine1 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: #0f6e56;
+  line-height: 1.45;
+}
+
+.courseShareAppBannerLine2 {
+  margin: 4px 0 0;
+  font-size: 9.5px;
+  color: #4a9c82;
+  line-height: 1.45;
 }
 
 @keyframes courseShareItemReveal {
@@ -1583,6 +1623,33 @@ body {
 
 .courseShareRevealFooter {
   padding-top: 4px;
+}
+
+.courseShareAppCta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 13px 20px;
+  border-radius: 14px;
+  background: #1b2a6b;
+  color: #fff;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.courseShareAppCtaMain {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.courseShareAppCtaSub {
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.35;
 }
 
 .courseShareMapCta {
