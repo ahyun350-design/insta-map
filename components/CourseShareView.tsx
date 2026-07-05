@@ -13,12 +13,12 @@ const PLACE_CATEGORY_EMOJI: Record<string, string> = {
   여행지: "🗺️",
 };
 
-const NAH_PROXIMITY_PX = 80;
-const NAH_PLAYFIELD_MIN_H = 156;
+const NAH_PROXIMITY_PX = 130;
+const NAH_PLAYFIELD_MIN_H = 168;
 const NAH_BTN_MAX_W = 260;
 const NAH_BTN_H = 48;
 const NAH_PAD = 10;
-const NAH_RUN_COOLDOWN_MS = 70;
+const NAH_RUN_COOLDOWN_MS = 45;
 
 type Props = {
   course: SavedCourse;
@@ -38,15 +38,95 @@ export function CourseShareView({ course, isIOS }: Props) {
   const appStoreUrl = getAppStoreUrl();
   const showAppStoreCta = isIOS && !!appStoreUrl;
 
-  const clampNahPos = useCallback((x: number, y: number, playW: number, playH: number) => {
+  const getNahBounds = useCallback((playW: number, playH: number) => {
     const btnW = Math.min(NAH_BTN_MAX_W, playW - NAH_PAD * 2);
     const maxX = Math.max(0, (playW - btnW) / 2 - NAH_PAD);
-    const maxY = Math.max(NAH_PAD, playH - NAH_BTN_H - NAH_PAD);
-    return {
-      x: Math.max(-maxX, Math.min(maxX, x)),
-      y: Math.max(NAH_PAD, Math.min(maxY, y)),
-    };
+    const minY = NAH_PAD;
+    const maxY = Math.max(minY, playH - NAH_BTN_H - NAH_PAD);
+    return { maxX, minY, maxY };
   }, []);
+
+  const clampNahPos = useCallback(
+    (x: number, y: number, playW: number, playH: number) => {
+      const { maxX, minY, maxY } = getNahBounds(playW, playH);
+      return {
+        x: Math.max(-maxX, Math.min(maxX, x)),
+        y: Math.max(minY, Math.min(maxY, y)),
+      };
+    },
+    [getNahBounds],
+  );
+
+  const pickFarNahPos = useCallback(
+    (
+      playW: number,
+      playH: number,
+      pointerX?: number,
+      pointerY?: number,
+      fieldRect?: DOMRect,
+    ) => {
+      const { maxX, minY, maxY } = getNahBounds(playW, playH);
+      const curX = nahPosRef.current.x;
+      const curY = nahPosRef.current.y;
+      const minJump = Math.max(maxX * 0.55, playW * 0.42, 56);
+      const minJumpY = Math.max((maxY - minY) * 0.45, 36);
+
+      let best: { x: number; y: number } | null = null;
+      let bestScore = -1;
+
+      const scoreCandidate = (x: number, y: number) => {
+        const jumpDist = Math.hypot(x - curX, y - curY);
+        if (jumpDist < minJump && Math.abs(y - curY) < minJumpY) return -1;
+
+        let score = jumpDist;
+        if (pointerX != null && pointerY != null && fieldRect) {
+          const btnCx = fieldRect.left + playW / 2 + x;
+          const btnCy = fieldRect.top + y + NAH_BTN_H / 2;
+          score += Math.hypot(btnCx - pointerX, btnCy - pointerY) * 0.35;
+        }
+        return score;
+      };
+
+      const cornerSeeds = [
+        { x: -maxX, y: minY },
+        { x: maxX, y: minY },
+        { x: -maxX, y: maxY },
+        { x: maxX, y: maxY },
+        { x: 0, y: maxY },
+        { x: 0, y: minY },
+        { x: -maxX * 0.85, y: (minY + maxY) / 2 },
+        { x: maxX * 0.85, y: (minY + maxY) / 2 },
+      ];
+
+      for (const seed of cornerSeeds) {
+        const s = scoreCandidate(seed.x, seed.y);
+        if (s > bestScore) {
+          bestScore = s;
+          best = seed;
+        }
+      }
+
+      for (let i = 0; i < 16; i += 1) {
+        const x = (Math.random() * 2 - 1) * maxX;
+        const y = minY + Math.random() * (maxY - minY);
+        const s = scoreCandidate(x, y);
+        if (s > bestScore) {
+          bestScore = s;
+          best = { x, y };
+        }
+      }
+
+      if (!best) {
+        best = {
+          x: curX >= 0 ? -maxX * (0.75 + Math.random() * 0.25) : maxX * (0.75 + Math.random() * 0.25),
+          y: curY >= (minY + maxY) / 2 ? minY + 6 : maxY - 6,
+        };
+      }
+
+      return clampNahPos(best.x, best.y, playW, playH);
+    },
+    [clampNahPos, getNahBounds],
+  );
 
   const moveNahAway = useCallback(
     (pointerX?: number, pointerY?: number) => {
@@ -55,37 +135,17 @@ export function CourseShareView({ course, isIOS }: Props) {
       lastNahRunRef.current = now;
 
       const field = nahPlayfieldRef.current;
-      const nah = nahBtnRef.current;
-      if (!field || !nah) return;
+      if (!field) return;
 
       const fieldRect = field.getBoundingClientRect();
       const playW = fieldRect.width;
       const playH = field.clientHeight || NAH_PLAYFIELD_MIN_H;
 
-      const nahRect = nah.getBoundingClientRect();
-      const nahCx = nahRect.left + nahRect.width / 2;
-      const nahCy = nahRect.top + nahRect.height / 2;
-
-      let nextX = nahPosRef.current.x;
-      let nextY = nahPosRef.current.y;
-
-      if (pointerX != null && pointerY != null) {
-        const dx = nahCx - pointerX;
-        const dy = nahCy - pointerY;
-        const len = Math.hypot(dx, dy) || 1;
-        const push = 52 + Math.random() * 36;
-        nextX += (dx / len) * push + (Math.random() - 0.5) * 24;
-        nextY += (dy / len) * push + (Math.random() - 0.5) * 20;
-      } else {
-        nextX += (Math.random() - 0.5) * 110;
-        nextY += (Math.random() - 0.5) * 72;
-      }
-
-      const clamped = clampNahPos(nextX, nextY, playW, playH);
-      nahPosRef.current = clamped;
-      setNahPos(clamped);
+      const next = pickFarNahPos(playW, playH, pointerX, pointerY, fieldRect);
+      nahPosRef.current = next;
+      setNahPos(next);
     },
-    [clampNahPos],
+    [pickFarNahPos],
   );
 
   const handleNahZonePointerMove = useCallback(
