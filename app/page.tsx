@@ -10092,7 +10092,12 @@ function HomePageContent() {
   <div className="screen" style={{ paddingTop: "env(safe-area-inset-top, 0px)", boxSizing: "border-box" }}>
   <div
     style={{
-      paddingBottom: keyboardHeight > 0 ? keyboardHeight : 0,
+      paddingBottom:
+        keyboardHeight > 0
+          ? keyboardHeight
+          : savedPlaces.length > 0 && !showCourseModal
+            ? "calc(100px + env(safe-area-inset-bottom, 0px))"
+            : 0,
       transition: "padding-bottom 0.25s ease",
       boxSizing: "border-box",
     }}
@@ -10207,6 +10212,55 @@ function HomePageContent() {
         </div>
       ));
     })()}
+    {savedPlaces.length > 0 && !showCourseModal && (
+      <div
+        style={{
+          position: "fixed",
+          left: 16,
+          right: 16,
+          bottom: "calc(72px + env(safe-area-inset-bottom, 0px))",
+          zIndex: 90,
+          boxSizing: "border-box",
+        }}
+      >
+        <p
+          style={{
+            margin: "0 0 8px",
+            fontSize: 12,
+            color: "#888",
+            textAlign: "center",
+            lineHeight: 1.4,
+          }}
+        >
+          저장한 장소 {savedPlaces.length}곳으로 데이트·나들이 코스를 만들어보세요
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setShowCourseModal(true);
+            setCourseResult(null);
+            viewingSavedCourseIdRef.current = null;
+            setViewedCourseUserId(null);
+            setIsReadOnlyCourse(false);
+            setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
+          }}
+          style={{
+            width: "100%",
+            border: "none",
+            background: "#1a2a7a",
+            color: "#fff",
+            borderRadius: 16,
+            padding: 16,
+            fontSize: 16,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          🗺️ 저장한 곳으로 코스 만들기
+        </button>
+      </div>
+    )}
   </div>
   </div>
 )}
