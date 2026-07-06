@@ -10486,8 +10486,9 @@ function HomePageContent() {
               left: 16,
               right: 16,
               bottom: "calc(72px + env(safe-area-inset-bottom, 0px))",
-              zIndex: 90,
+              zIndex: 9999,
               boxSizing: "border-box",
+              pointerEvents: "auto",
             }}
           >
             <p
