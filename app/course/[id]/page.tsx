@@ -35,7 +35,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   const placeCount = course.place_count ?? course.items.length;
   const description = `PindMap에서 ${placeCount}곳 코스 보기`;
-  const ogImage = `${siteOrigin}/pindmap-logo.png`;
+  const ogImage = `${siteOrigin}/pindmap-og-card.png`;
 
   return {
     title: `${course.title} | PindMap`,
@@ -50,8 +50,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       images: [
         {
           url: ogImage,
-          width: 1080,
-          height: 1080,
+          width: 1200,
+          height: 630,
           alt: "PindMap",
         },
       ],
