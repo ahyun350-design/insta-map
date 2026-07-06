@@ -35,7 +35,34 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   const placeCount = course.place_count ?? course.items.length;
   const description = `PindMap에서 ${placeCount}곳 코스 보기`;
-  const ogImage = `${siteOrigin}/icon.svg`;
+  const ogImage = `${siteOrigin}/date-monkey.png`;
+
+  let ogImageWidth: number | undefined;
+  let ogImageHeight: number | undefined;
+  try {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const buffer = await fs.readFile(path.join(process.cwd(), "public", "date-monkey.png"));
+    if (buffer.length >= 24 && buffer[0] === 0x89 && buffer[1] === 0x50) {
+      const w = buffer.readUInt32BE(16);
+      const h = buffer.readUInt32BE(20);
+      if (w > 0 && h > 0) {
+        ogImageWidth = w;
+        ogImageHeight = h;
+      }
+    }
+  } catch {
+    /* width/height omitted when unreadable */
+  }
+
+  const ogImageEntry: { url: string; alt: string; width?: number; height?: number } = {
+    url: ogImage,
+    alt: "PindMap 데이트 코스 초대장",
+  };
+  if (ogImageWidth != null && ogImageHeight != null) {
+    ogImageEntry.width = ogImageWidth;
+    ogImageEntry.height = ogImageHeight;
+  }
 
   return {
     title: `${course.title} | PindMap`,
@@ -47,17 +74,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       url: `${siteOrigin}/course/${id}`,
       siteName: "PindMap",
       locale: "ko_KR",
-      images: [
-        {
-          url: ogImage,
-          width: 512,
-          height: 512,
-          alt: "PindMap",
-        },
-      ],
+      images: [ogImageEntry],
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
       title: course.title,
       description,
       images: [ogImage],
