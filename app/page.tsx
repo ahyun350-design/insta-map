@@ -74,6 +74,8 @@ import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
 import { MapResearchAreaButton } from "@/components/MapResearchAreaButton";
 import { CourseNavigationOverlay } from "@/components/CourseNavigationOverlay";
+import { Coachmark } from "@/components/Coachmark";
+import { nextCoachToShow, setCoachSeen, COACHMARK_DEFS } from "@/lib/coachmarks";
 import {
   buildCourseWalkNavigationFromTmap,
   parseTmapWalkGeoJsonToPath,
@@ -1200,6 +1202,8 @@ function HomePageContent() {
   const [courseShareSendingRoomId, setCourseShareSendingRoomId] = useState<string | null>(null);
   const [courseShareSearchQuery, setCourseShareSearchQuery] = useState("");
   const [courseShareSentRoomIds, setCourseShareSentRoomIds] = useState<string[]>([]);
+  const [activeCoach, setActiveCoach] = useState<string | null>(null);
+  const [coachTick, setCoachTick] = useState(0);
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [profileEditName, setProfileEditName] = useState("");
   const [profileEditBio, setProfileEditBio] = useState("");
@@ -3078,6 +3082,78 @@ function HomePageContent() {
       }
     })();
   }, [showNotifications, user]);
+
+  useEffect(() => {
+    let candidates: string[] = [];
+    if (showCourseModal) {
+      candidates = ["course_share"];
+    } else if (activeTab === "map" && !mapExpanded) {
+      candidates = ["reels_save", "map_search"];
+    } else if (activeTab === "map" && mapExpanded) {
+      candidates = [];
+    } else if (activeTab === "home") {
+      candidates = ["curation_new"];
+    } else if (activeTab === "saved") {
+      candidates = ["course_create"];
+    } else if (activeTab === "messages") {
+      candidates = ["message_friend"];
+    }
+
+    const overlaysOpen =
+      showPostModal ||
+      showCourseShareModal ||
+      showCourseEditScreen ||
+      showCourseSaveModal ||
+      !!lightboxImg ||
+      showNotifications ||
+      showJobsModal ||
+      !!detailPostId ||
+      !!sharePost ||
+      !!editingPost ||
+      isHomeSearchOpen ||
+      showProfileEditModal ||
+      !!showFollowList ||
+      (showCourseModal && !candidates.includes("course_share")) ||
+      mapExpanded;
+
+    if (candidates.length === 0 || !user?.id || overlaysOpen) {
+      setActiveCoach(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const next = await nextCoachToShow(candidates);
+        if (cancelled) return;
+        setActiveCoach(next);
+      })();
+    }, 800);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    activeTab,
+    user?.id,
+    showPostModal,
+    showCourseModal,
+    showCourseShareModal,
+    showCourseEditScreen,
+    showCourseSaveModal,
+    mapExpanded,
+    lightboxImg,
+    showNotifications,
+    showJobsModal,
+    detailPostId,
+    sharePost,
+    editingPost,
+    isHomeSearchOpen,
+    showProfileEditModal,
+    showFollowList,
+    coachTick,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -8553,6 +8629,7 @@ function HomePageContent() {
                                     )}
                                     <button
                                       type="button"
+                                      data-coach="course_share"
                                       onClick={openCourseShareFromSheet}
                                       style={{
                                         width: "100%",
@@ -9593,6 +9670,7 @@ function HomePageContent() {
               ref={messageUserSearchInputRef}
               type="search"
               className="messagesUserSearchInput"
+              data-coach="message_friend"
               placeholder="친구 검색"
               value={messageUserSearchQuery}
               onChange={(e) => setMessageUserSearchQuery(e.target.value)}
@@ -9742,6 +9820,7 @@ function HomePageContent() {
                       <button
                         type="button"
                         className="mapReelExpandBtn"
+                        data-coach="reels_save"
                         onClick={expandReelInput}
                       >
                         <span className="mapReelExpandBtnIcon" aria-hidden>+</span>
@@ -9818,6 +9897,7 @@ function HomePageContent() {
                   <button
                     type="button"
                     className="mapCompactFeatureChip"
+                    data-coach="map_search"
                     onClick={(e) => {
                       e.stopPropagation();
                       openMapFullscreen();
@@ -10107,6 +10187,7 @@ function HomePageContent() {
     {savedPlaces.length > 0 && (
       <button
         type="button"
+        data-coach="course_create"
         onClick={() => {
           setShowCourseModal(true);
           setCourseResult(null);
@@ -11029,6 +11110,26 @@ function HomePageContent() {
         )}
       </HomeSearchScreen>
     )}
+    {(() => {
+      const def = COACHMARK_DEFS.find((d) => d.id === activeCoach);
+      if (!def) return null;
+      return (
+        <Coachmark
+          targetSelector={`[data-coach="${def.id}"]`}
+          title={def.title}
+          body={def.body}
+          placement={def.placement}
+          onDismiss={async () => {
+            await setCoachSeen(def.id);
+            setActiveCoach(null);
+            setCoachTick((v) => v + 1);
+          }}
+          onTargetMissing={() => {
+            console.warn(`[coachmark] target missing: ${def.id}`);
+          }}
+        />
+      );
+    })()}
     {inAppNotificationCurrent &&
       typeof document !== "undefined" &&
       createPortal(

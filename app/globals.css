@@ -4464,3 +4464,98 @@ body {
   font-size: 13px;
   color: #666;
 }
+
+/* ── Coachmark (spotlight tip) ── */
+.coachmarkRoot {
+  position: fixed;
+  inset: 0;
+  z-index: 100020;
+  pointer-events: none;
+}
+
+.coachmarkBackdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.coachmarkHole {
+  position: fixed;
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  z-index: 100020;
+}
+
+.coachmarkBubble {
+  position: fixed;
+  box-sizing: border-box;
+  background: #1b2a4a;
+  color: #fff8ec;
+  border-radius: 14px;
+  padding: 16px 16px 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  pointer-events: auto;
+  z-index: 100021;
+}
+
+.coachmarkArrow {
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  margin-left: -8px;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+}
+
+.coachmarkArrowUp {
+  top: -8px;
+  border-bottom: 8px solid #1b2a4a;
+}
+
+.coachmarkArrowDown {
+  bottom: -8px;
+  border-top: 8px solid #1b2a4a;
+}
+
+.coachmarkTitle {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #fff8ec;
+}
+
+.coachmarkBody {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: #fff8ec;
+  opacity: 0.92;
+}
+
+.coachmarkBtn {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  padding: 11px 14px;
+  background: #fff8ec;
+  color: #1b2a4a;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.coachmarkBtn:active {
+  opacity: 0.9;
+}
+

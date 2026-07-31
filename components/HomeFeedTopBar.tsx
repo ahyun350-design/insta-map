@@ -59,6 +59,7 @@ export function HomeFeedTopBar({
       <button
         type="button"
         className="homeFeedToolbarBtn homeFeedToolbarBtnAdd"
+        data-coach="curation_new"
         onClick={onAddClick}
         aria-label="새 큐레이션"
       >
