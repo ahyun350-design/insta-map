@@ -91,10 +91,99 @@ type UserProfileRow = {
 const ENSURE_OK_PREFS_KEY = "pindmap_ensure_ok";
 /** 크리티컬 패스용 sync 미러 (Preferences 동적 import/브릿지 대기 방지) */
 const ENSURE_OK_LS_KEY = "pindmap_ensure_ok";
+/** 마지막 성공 프로필 — 부팅 시 게이트를 먼저 열기 위함 */
+const PROFILE_CACHE_LS_KEY = "pindmap_user_profile";
 /** 이 시간 안이면 upsert(신규 ensure) 경로를 바로 타지 않음 — 프로필 select만 */
 const ENSURE_OK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 type EnsureOkPayload = { userId: string; at: number };
+
+type CachedUserProfile = {
+  id: string;
+  username: string;
+  email?: string;
+  avatar_url?: string;
+  bio?: string;
+  total_likes_received: number;
+  at: number;
+};
+
+function readCachedUserProfile(sessionUserId: string): CachedUserProfile | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PROFILE_CACHE_LS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedUserProfile;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.id !== "string" || typeof parsed.username !== "string") return null;
+    if (parsed.id !== sessionUserId) {
+      window.localStorage.removeItem(PROFILE_CACHE_LS_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    try {
+      window.localStorage.removeItem(PROFILE_CACHE_LS_KEY);
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+}
+
+function writeCachedUserProfile(user: AppUser): void {
+  if (typeof window === "undefined") return;
+  try {
+    const payload: CachedUserProfile = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      avatar_url: user.avatar_url,
+      bio: user.bio,
+      total_likes_received: user.total_likes_received,
+      at: Date.now(),
+    };
+    window.localStorage.setItem(PROFILE_CACHE_LS_KEY, JSON.stringify(payload));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearCachedUserProfile(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(PROFILE_CACHE_LS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function appUserFromSessionAndRow(
+  sessionUser: { id: string; email?: string; user_metadata?: Record<string, unknown> },
+  data: UserProfileRow | CachedUserProfile | null,
+): AppUser {
+  return {
+    id: sessionUser.id,
+    username: usernameFromSessionAndRow(data, sessionUser),
+    email: sessionUser.email,
+    avatar_url: normalizeAvatarUrl(data?.avatar_url),
+    bio: normalizeBio(data?.bio),
+    total_likes_received: normalizeTotalLikesReceived(
+      data && "total_likes_received" in data ? data.total_likes_received : 0,
+    ),
+  };
+}
+
+function appUserProfileChanged(a: AppUser, b: AppUser): boolean {
+  return (
+    a.id !== b.id ||
+    a.username !== b.username ||
+    a.email !== b.email ||
+    (a.avatar_url ?? "") !== (b.avatar_url ?? "") ||
+    (a.bio ?? "") !== (b.bio ?? "") ||
+    a.total_likes_received !== b.total_likes_received
+  );
+}
 
 function readEnsureOkSync(userId: string): boolean {
   if (typeof window === "undefined") return false;
@@ -173,34 +262,42 @@ async function fetchUserProfileRow(userId: string): Promise<UserProfileRow | nul
 
 /**
  * ensure(id 존재 확인) + 프로필 조회를 한 번의 select로 합침.
- * Preferences는 크리티컬 패스에 두지 않음 (동적 import/네이티브 브릿지가 ensure로 오인되던 원인).
+ * Preferences는 크리티컬 패스에 두지 않음.
+ * @param markTiming false면 백그라운드 갱신용 (boot mark 오염 방지)
  */
 async function loadUserProfileOrEnsure(
   userId: string,
   email?: string,
   preferredUsername?: string,
+  markTiming = true,
 ): Promise<UserProfileRow | null> {
-  console.log("[PindMap:auth] users 프로필/ensure 시작", { userId });
-  try {
-    mark("auth_ensure_start");
-  } catch {
-    /* ignore */
+  console.log("[PindMap:auth] users 프로필/ensure 시작", { userId, markTiming });
+  if (markTiming) {
+    try {
+      mark("auth_ensure_start");
+    } catch {
+      /* ignore */
+    }
   }
 
   const existing = await fetchUserProfileRow(userId);
-  try {
-    mark("auth_profile_query_done");
-  } catch {
-    /* ignore */
+  if (markTiming) {
+    try {
+      mark("auth_profile_query_done");
+    } catch {
+      /* ignore */
+    }
   }
 
   if (existing) {
     console.log("[PindMap:auth] users 이미 존재 (프로필 select)", userId);
-    try {
-      mark("auth_ensure_done");
-      mark("auth_profile_done");
-    } catch {
-      /* ignore */
+    if (markTiming) {
+      try {
+        mark("auth_ensure_done");
+        mark("auth_profile_done");
+      } catch {
+        /* ignore */
+      }
     }
     writeEnsureOk(userId);
     return existing;
@@ -227,21 +324,25 @@ async function loadUserProfileOrEnsure(
 
   if (upsertError) {
     console.error("[PindMap:auth] users upsert 최종 실패:", upsertError, { userId, username });
+    if (markTiming) {
+      try {
+        mark("auth_ensure_done");
+        mark("auth_profile_done");
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
+  }
+
+  const verified = await fetchUserProfileRow(userId);
+  if (markTiming) {
     try {
       mark("auth_ensure_done");
       mark("auth_profile_done");
     } catch {
       /* ignore */
     }
-    return null;
-  }
-
-  const verified = await fetchUserProfileRow(userId);
-  try {
-    mark("auth_ensure_done");
-    mark("auth_profile_done");
-  } catch {
-    /* ignore */
   }
   if (verified) {
     console.log("[PindMap:auth] users upsert 성공 확인:", username);
@@ -278,6 +379,7 @@ export function useUser() {
     loggingOutRef.current = true;
     setLoggingOut(true);
     try {
+      clearCachedUserProfile();
       void clearEnsureOk();
       await supabase.auth.signOut();
     } catch (err) {
@@ -358,25 +460,71 @@ export function useUser() {
           /* ignore */
         }
 
-        const data = await loadUserProfileOrEnsure(
-          session.user.id,
-          session.user.email,
-          session.user.user_metadata?.username || session.user.user_metadata?.name,
-        );
-        if (!data) {
-          console.error("[PindMap:auth] loadUserProfileOrEnsure failed on loadUser", session.user.id);
-        }
+        const sessionUser = session.user;
+        const preferredUsername =
+          sessionUser.user_metadata?.username || sessionUser.user_metadata?.name;
+        const cached = readCachedUserProfile(sessionUser.id);
 
-        setUser({
-          id: session.user.id,
-          username: usernameFromSessionAndRow(data, session.user),
-          email: session.user.email,
-          avatar_url: normalizeAvatarUrl(data?.avatar_url),
-          bio: normalizeBio(data?.bio),
-          total_likes_received: normalizeTotalLikesReceived(data?.total_likes_received),
-        });
-        console.log("[PindMap:home][auth] loadUser done");
-        logPerf("loadUser", perfNow() - loadUserT0);
+        if (cached) {
+          try {
+            mark("auth_ensure_start");
+            mark("auth_profile_cache_hit");
+            mark("auth_ensure_done");
+            mark("auth_profile_done");
+          } catch {
+            /* ignore */
+          }
+          const cachedUser = appUserFromSessionAndRow(sessionUser, cached);
+          setUser(cachedUser);
+          console.log("[PindMap:home][auth] loadUser cache hit — bg refresh");
+          logPerf("loadUser.cacheHit", perfNow() - loadUserT0);
+
+          void (async () => {
+            try {
+              if (loggingOutRef.current) return;
+              const data = await loadUserProfileOrEnsure(
+                sessionUser.id,
+                sessionUser.email,
+                preferredUsername,
+                false,
+              );
+              if (loggingOutRef.current) return;
+              if (!data) {
+                console.error(
+                  "[PindMap:auth] bg loadUserProfileOrEnsure failed",
+                  sessionUser.id,
+                );
+                return;
+              }
+              const next = appUserFromSessionAndRow(sessionUser, data);
+              writeCachedUserProfile(next);
+              const prev = authUiRef.current.user;
+              if (!prev || prev.id !== sessionUser.id || appUserProfileChanged(prev, next)) {
+                setUser(next);
+              }
+            } catch (e) {
+              console.error("[PindMap:auth] bg profile refresh failed", e);
+            }
+          })();
+        } else {
+          const data = await loadUserProfileOrEnsure(
+            sessionUser.id,
+            sessionUser.email,
+            preferredUsername,
+          );
+          if (!data) {
+            console.error(
+              "[PindMap:auth] loadUserProfileOrEnsure failed on loadUser",
+              sessionUser.id,
+            );
+          }
+
+          const next = appUserFromSessionAndRow(sessionUser, data);
+          setUser(next);
+          if (data) writeCachedUserProfile(next);
+          console.log("[PindMap:home][auth] loadUser done");
+          logPerf("loadUser", perfNow() - loadUserT0);
+        }
       } catch (err) {
         console.error("[PindMap:home][auth] loadUser failed", err);
         logPerf("loadUser.failed", perfNow() - loadUserT0);
@@ -421,6 +569,7 @@ export function useUser() {
         }
         if (event === "SIGNED_OUT") {
           if (loggingOutRef.current) {
+            clearCachedUserProfile();
             setUser(null);
           } else {
             console.warn("[PindMap:auth] external SIGNED_OUT ignored; session will be re-checked on visibility");
@@ -440,23 +589,20 @@ export function useUser() {
         setTimeout(() => {
           void (async () => {
             try {
+              // boot mark는 loadUser 전용 — INITIAL_SESSION 중복 조회로 mark 오염 방지
               const data = await loadUserProfileOrEnsure(
                 sessionUser.id,
                 sessionUser.email,
                 sessionUser.user_metadata?.username || sessionUser.user_metadata?.name,
+                false,
               );
               if (!data) {
                 console.error("[PindMap:auth] loadUserProfileOrEnsure failed on auth change", sessionUser.id);
               }
 
-              setUser({
-                id: sessionUser.id,
-                username: usernameFromSessionAndRow(data, sessionUser),
-                email: sessionUser.email,
-                avatar_url: normalizeAvatarUrl(data?.avatar_url),
-                bio: normalizeBio(data?.bio),
-                total_likes_received: normalizeTotalLikesReceived(data?.total_likes_received),
-              });
+              const next = appUserFromSessionAndRow(sessionUser, data);
+              setUser(next);
+              if (data) writeCachedUserProfile(next);
               console.log("[PindMap:home][auth] onAuthStateChange done");
             } catch (err) {
               console.error("[PindMap:home][auth] onAuthStateChange failed", err);
