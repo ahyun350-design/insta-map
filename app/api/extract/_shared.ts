@@ -69,29 +69,98 @@ export type KakaoPlaceLookup = {
   lng: number;
 };
 
-export async function searchKakaoPlace(name: string, hint: string): Promise<KakaoPlaceLookup | null> {
+function stripKakaoBranchSuffix(name: string): string {
+  return name.replace(/\s+[^\s]+점$/u, "").trim();
+}
+
+function regionFromKakaoHint(hint: string): string {
+  return (
+    hint.replace(/[-~]/g, " ").split(/[\s,]+/).find((w) => w.length >= 2 && /[가-힣]/.test(w)) ?? ""
+  );
+}
+
+/**
+ * 카카오 키워드 검색 — 단발 실패를 줄이기 위해 쿼리 폴백을 순차 시도.
+ * @param hint 기존 호출 호환용(Claude hint). region 미지정 시 지역명 후보로 사용.
+ * @param region 알고 있는 지역명(선택). 있으면 5차 폴백에 우선 사용.
+ */
+export async function searchKakaoPlace(
+  name: string,
+  hint: string = "",
+  region?: string,
+): Promise<KakaoPlaceLookup | null> {
   const kakaoKey = process.env.KAKAO_REST_API_KEY;
   if (!kakaoKey) return null;
-  const regionHint = hint.replace(/[-~]/g, " ").split(/[\s,]+/).find((w) => w.length >= 2 && /[가-힣]/.test(w)) ?? "";
-  const query = regionHint ? `${name} ${regionHint}` : name;
-  try {
-    const res = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=1`, { headers: { Authorization: `KakaoAK ${kakaoKey}` } });
-    if (!res.ok) return null;
-    const data = await res.json() as { documents?: Array<{ address_name: string; road_address_name: string; x: string; y: string }> };
-    const first = data.documents?.[0];
-    if (!first) return null;
-    const lat = parseFloat(first.y);
-    const lng = parseFloat(first.x);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-    return {
-      address: first.address_name,
-      roadAddress: first.road_address_name || first.address_name,
-      lat,
-      lng,
-    };
-  } catch {
-    return null;
+
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+
+  const noSpace = trimmed.replace(/\s+/g, "");
+  const withoutBranch = stripKakaoBranchSuffix(trimmed);
+  const withoutBranchNoSpace = withoutBranch.replace(/\s+/g, "");
+  const regionName = (region?.trim() || regionFromKakaoHint(hint)).trim();
+
+  const queries: string[] = [];
+  const pushUnique = (q: string) => {
+    const t = q.trim();
+    if (!t) return;
+    if (!queries.includes(t)) queries.push(t);
+  };
+
+  // 1차: 원본 / 2차: 공백 제거 / 3차: ○○점 제거 / 4차: 지점+공백 제거 / 5차: 지역 붙이기
+  pushUnique(trimmed);
+  pushUnique(noSpace);
+  pushUnique(withoutBranch);
+  pushUnique(withoutBranchNoSpace);
+  if (regionName) {
+    pushUnique(`${trimmed} ${regionName}`);
   }
+
+  const lookupOnce = async (query: string): Promise<KakaoPlaceLookup | null> => {
+    try {
+      const res = await fetch(
+        `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=1`,
+        { headers: { Authorization: `KakaoAK ${kakaoKey}` } },
+      );
+      if (!res.ok) {
+        console.log("[extract] kakao search", { query, hit: false, status: res.status });
+        return null;
+      }
+      const data = (await res.json()) as {
+        documents?: Array<{ address_name: string; road_address_name: string; x: string; y: string }>;
+      };
+      const first = data.documents?.[0];
+      if (!first) {
+        console.log("[extract] kakao search", { query, hit: false });
+        return null;
+      }
+      const lat = parseFloat(first.y);
+      const lng = parseFloat(first.x);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        console.log("[extract] kakao search", { query, hit: false });
+        return null;
+      }
+      console.log("[extract] kakao search", { query, hit: true });
+      return {
+        address: first.address_name,
+        roadAddress: first.road_address_name || first.address_name,
+        lat,
+        lng,
+      };
+    } catch {
+      console.log("[extract] kakao search", { query, hit: false });
+      return null;
+    }
+  };
+
+  for (let i = 0; i < queries.length; i++) {
+    if (i > 0) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    const result = await lookupOnce(queries[i]!);
+    if (result) return result;
+  }
+  return null;
 }
 
 export async function scrapeInstagramCaption(url: string): Promise<string> {
