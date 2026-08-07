@@ -6,6 +6,7 @@ export type BootMarkName =
   | "auth_start"
   | "auth_session_restored"
   | "auth_ensure_start"
+  | "auth_profile_query_done"
   | "auth_ensure_done"
   | "auth_profile_done"
   | "auth_done"
@@ -24,6 +25,7 @@ export const BOOT_MARK_ORDER: BootMarkName[] = [
   "auth_start",
   "auth_session_restored",
   "auth_ensure_start",
+  "auth_profile_query_done",
   "auth_ensure_done",
   "auth_profile_done",
   "auth_done",

@@ -89,59 +89,17 @@ type UserProfileRow = {
 };
 
 const ENSURE_OK_PREFS_KEY = "pindmap_ensure_ok";
+/** 크리티컬 패스용 sync 미러 (Preferences 동적 import/브릿지 대기 방지) */
+const ENSURE_OK_LS_KEY = "pindmap_ensure_ok";
 /** 이 시간 안이면 upsert(신규 ensure) 경로를 바로 타지 않음 — 프로필 select만 */
 const ENSURE_OK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 type EnsureOkPayload = { userId: string; at: number };
 
-async function prefsGetRaw(key: string): Promise<string | null> {
-  if (typeof window === "undefined") return null;
+function readEnsureOkSync(userId: string): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    const { Preferences } = await import("@capacitor/preferences");
-    const { value } = await Preferences.get({ key });
-    return value;
-  } catch {
-    try {
-      return window.localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  }
-}
-
-async function prefsSetRaw(key: string, value: string): Promise<void> {
-  if (typeof window === "undefined") return;
-  try {
-    const { Preferences } = await import("@capacitor/preferences");
-    await Preferences.set({ key, value });
-    return;
-  } catch {
-    try {
-      window.localStorage.setItem(key, value);
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-async function prefsRemoveRaw(key: string): Promise<void> {
-  if (typeof window === "undefined") return;
-  try {
-    const { Preferences } = await import("@capacitor/preferences");
-    await Preferences.remove({ key });
-    return;
-  } catch {
-    try {
-      window.localStorage.removeItem(key);
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-async function isRecentEnsureOk(userId: string): Promise<boolean> {
-  try {
-    const raw = await prefsGetRaw(ENSURE_OK_PREFS_KEY);
+    const raw = window.localStorage.getItem(ENSURE_OK_LS_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw) as EnsureOkPayload;
     if (!parsed || parsed.userId !== userId || typeof parsed.at !== "number") return false;
@@ -151,21 +109,53 @@ async function isRecentEnsureOk(userId: string): Promise<boolean> {
   }
 }
 
-async function writeEnsureOk(userId: string): Promise<void> {
+function writeEnsureOkSync(userId: string): void {
+  if (typeof window === "undefined") return;
   try {
     const payload: EnsureOkPayload = { userId, at: Date.now() };
-    await prefsSetRaw(ENSURE_OK_PREFS_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(ENSURE_OK_LS_KEY, JSON.stringify(payload));
   } catch {
     /* ignore */
   }
 }
 
-async function clearEnsureOk(): Promise<void> {
+function clearEnsureOkSync(): void {
+  if (typeof window === "undefined") return;
   try {
-    await prefsRemoveRaw(ENSURE_OK_PREFS_KEY);
+    window.localStorage.removeItem(ENSURE_OK_LS_KEY);
   } catch {
     /* ignore */
   }
+}
+
+/** Preferences는 백그라운드만 — auth ensure 크리티컬 패스에서 await 금지 */
+async function writeEnsureOkPrefsBackground(userId: string): Promise<void> {
+  try {
+    const payload: EnsureOkPayload = { userId, at: Date.now() };
+    const { Preferences } = await import("@capacitor/preferences");
+    await Preferences.set({ key: ENSURE_OK_PREFS_KEY, value: JSON.stringify(payload) });
+  } catch {
+    /* ignore */
+  }
+}
+
+async function clearEnsureOkPrefsBackground(): Promise<void> {
+  try {
+    const { Preferences } = await import("@capacitor/preferences");
+    await Preferences.remove({ key: ENSURE_OK_PREFS_KEY });
+  } catch {
+    /* ignore */
+  }
+}
+
+function writeEnsureOk(userId: string): void {
+  writeEnsureOkSync(userId);
+  void writeEnsureOkPrefsBackground(userId);
+}
+
+async function clearEnsureOk(): Promise<void> {
+  clearEnsureOkSync();
+  await clearEnsureOkPrefsBackground();
 }
 
 async function fetchUserProfileRow(userId: string): Promise<UserProfileRow | null> {
@@ -183,9 +173,7 @@ async function fetchUserProfileRow(userId: string): Promise<UserProfileRow | nul
 
 /**
  * ensure(id 존재 확인) + 프로필 조회를 한 번의 select로 합침.
- * - 행이 있으면 upsert 생략
- * - Preferences에 최근 성공이 있어도 프로필은 항상 1회 select (캐시된 프로필 없음)
- * - 신규(행 없음)만 기존과 동일한 upsert+재조회
+ * Preferences는 크리티컬 패스에 두지 않음 (동적 import/네이티브 브릿지가 ensure로 오인되던 원인).
  */
 async function loadUserProfileOrEnsure(
   userId: string,
@@ -199,11 +187,12 @@ async function loadUserProfileOrEnsure(
     /* ignore */
   }
 
-  // Preferences 읽기와 프로필 select 병렬 — prefs 대기가 DB를 막지 않게
-  const [recentOk, existing] = await Promise.all([
-    isRecentEnsureOk(userId),
-    fetchUserProfileRow(userId),
-  ]);
+  const existing = await fetchUserProfileRow(userId);
+  try {
+    mark("auth_profile_query_done");
+  } catch {
+    /* ignore */
+  }
 
   if (existing) {
     console.log("[PindMap:auth] users 이미 존재 (프로필 select)", userId);
@@ -213,11 +202,12 @@ async function loadUserProfileOrEnsure(
     } catch {
       /* ignore */
     }
-    void writeEnsureOk(userId);
+    writeEnsureOk(userId);
     return existing;
   }
 
-  // 최근 ensure 성공인데 행이 없음 → 이상 케이스, 아래로 신규 경로 폴백
+  // sync 로컬만 (Preferences await 없음) — 행 없을 때 upsert 여부 참고용
+  const recentOk = readEnsureOkSync(userId);
   if (recentOk) {
     console.warn("[PindMap:auth] ensure prefs ok but users row missing — upsert fallback", userId);
   } else {
@@ -255,7 +245,7 @@ async function loadUserProfileOrEnsure(
   }
   if (verified) {
     console.log("[PindMap:auth] users upsert 성공 확인:", username);
-    void writeEnsureOk(userId);
+    writeEnsureOk(userId);
   } else {
     console.error("[PindMap:auth] users upsert 후 행 검증 실패:", userId);
   }
