@@ -51,7 +51,7 @@ function normalizeTotalLikesReceived(value: unknown): number {
 }
 
 function usernameFromSessionAndRow(
-  row: { username?: string } | null,
+  row: { username?: string | null } | null,
   sessionUser: { email?: string; user_metadata?: Record<string, unknown> },
 ): string {
   const meta = sessionUser.user_metadata;
@@ -77,41 +77,154 @@ function resolveUsernameForEnsure(
   return `user_${userId.slice(0, 8)}`;
 }
 
-async function verifyUserRowExists(userId: string): Promise<boolean> {
+/** ensure+프로필 통합 select — select * 금지 */
+const USER_PROFILE_SELECT = "id, username, avatar_url, bio, total_likes_received";
+
+type UserProfileRow = {
+  id: string;
+  username?: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
+  total_likes_received?: number | null;
+};
+
+const ENSURE_OK_PREFS_KEY = "pindmap_ensure_ok";
+/** 이 시간 안이면 upsert(신규 ensure) 경로를 바로 타지 않음 — 프로필 select만 */
+const ENSURE_OK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+type EnsureOkPayload = { userId: string; at: number };
+
+async function prefsGetRaw(key: string): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  try {
+    const { Preferences } = await import("@capacitor/preferences");
+    const { value } = await Preferences.get({ key });
+    return value;
+  } catch {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function prefsSetRaw(key: string, value: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const { Preferences } = await import("@capacitor/preferences");
+    await Preferences.set({ key, value });
+    return;
+  } catch {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function prefsRemoveRaw(key: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const { Preferences } = await import("@capacitor/preferences");
+    await Preferences.remove({ key });
+    return;
+  } catch {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function isRecentEnsureOk(userId: string): Promise<boolean> {
+  try {
+    const raw = await prefsGetRaw(ENSURE_OK_PREFS_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as EnsureOkPayload;
+    if (!parsed || parsed.userId !== userId || typeof parsed.at !== "number") return false;
+    return Date.now() - parsed.at < ENSURE_OK_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+async function writeEnsureOk(userId: string): Promise<void> {
+  try {
+    const payload: EnsureOkPayload = { userId, at: Date.now() };
+    await prefsSetRaw(ENSURE_OK_PREFS_KEY, JSON.stringify(payload));
+  } catch {
+    /* ignore */
+  }
+}
+
+async function clearEnsureOk(): Promise<void> {
+  try {
+    await prefsRemoveRaw(ENSURE_OK_PREFS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function fetchUserProfileRow(userId: string): Promise<UserProfileRow | null> {
   const { data, error } = await supabase
     .from("users")
-    .select("id")
+    .select(USER_PROFILE_SELECT)
     .eq("id", userId)
     .maybeSingle();
   if (error) {
-    console.error("[PindMap:auth] users verify select failed:", error);
-    return false;
+    console.error("[PindMap:auth] users profile select failed:", error);
+    return null;
   }
-  return !!data;
+  return (data as UserProfileRow | null) ?? null;
 }
 
-async function ensureUserExists(
+/**
+ * ensure(id 존재 확인) + 프로필 조회를 한 번의 select로 합침.
+ * - 행이 있으면 upsert 생략
+ * - Preferences에 최근 성공이 있어도 프로필은 항상 1회 select (캐시된 프로필 없음)
+ * - 신규(행 없음)만 기존과 동일한 upsert+재조회
+ */
+async function loadUserProfileOrEnsure(
   userId: string,
   email?: string,
   preferredUsername?: string,
-): Promise<boolean> {
-  console.log("[PindMap:auth] users 테이블 체크 시작", { userId });
+): Promise<UserProfileRow | null> {
+  console.log("[PindMap:auth] users 프로필/ensure 시작", { userId });
+  try {
+    mark("auth_ensure_start");
+  } catch {
+    /* ignore */
+  }
 
-  const { data: existing, error: selectError } = await supabase
-    .from("users")
-    .select("id")
-    .eq("id", userId)
-    .maybeSingle();
+  // Preferences 읽기와 프로필 select 병렬 — prefs 대기가 DB를 막지 않게
+  const [recentOk, existing] = await Promise.all([
+    isRecentEnsureOk(userId),
+    fetchUserProfileRow(userId),
+  ]);
 
-  if (selectError) {
-    console.error("[PindMap:auth] users 체크 select 실패 — upsert 시도:", selectError);
-  } else if (existing) {
-    console.log("[PindMap:auth] users 이미 존재:", userId);
-    return true;
+  if (existing) {
+    console.log("[PindMap:auth] users 이미 존재 (프로필 select)", userId);
+    try {
+      mark("auth_ensure_done");
+      mark("auth_profile_done");
+    } catch {
+      /* ignore */
+    }
+    void writeEnsureOk(userId);
+    return existing;
+  }
+
+  // 최근 ensure 성공인데 행이 없음 → 이상 케이스, 아래로 신규 경로 폴백
+  if (recentOk) {
+    console.warn("[PindMap:auth] ensure prefs ok but users row missing — upsert fallback", userId);
+  } else {
+    console.log("[PindMap:auth] users 행 없음 — 신규 ensure upsert", userId);
   }
 
   const username = resolveUsernameForEnsure(userId, email, preferredUsername);
-
   const upsertOnce = () =>
     supabase.from("users").upsert({ id: userId, username }, { onConflict: "id" });
 
@@ -124,12 +237,25 @@ async function ensureUserExists(
 
   if (upsertError) {
     console.error("[PindMap:auth] users upsert 최종 실패:", upsertError, { userId, username });
-    return false;
+    try {
+      mark("auth_ensure_done");
+      mark("auth_profile_done");
+    } catch {
+      /* ignore */
+    }
+    return null;
   }
 
-  const verified = await verifyUserRowExists(userId);
+  const verified = await fetchUserProfileRow(userId);
+  try {
+    mark("auth_ensure_done");
+    mark("auth_profile_done");
+  } catch {
+    /* ignore */
+  }
   if (verified) {
     console.log("[PindMap:auth] users upsert 성공 확인:", username);
+    void writeEnsureOk(userId);
   } else {
     console.error("[PindMap:auth] users upsert 후 행 검증 실패:", userId);
   }
@@ -162,6 +288,7 @@ export function useUser() {
     loggingOutRef.current = true;
     setLoggingOut(true);
     try {
+      void clearEnsureOk();
       await supabase.auth.signOut();
     } catch (err) {
       console.error("[PindMap:home][auth] signOut failed", err);
@@ -235,22 +362,20 @@ export function useUser() {
         }
         hadAuthedSessionFromGet = true;
         loadUserHadAuthUser = true;
-
-        const ensured = await ensureUserExists(
-          session.user.id,
-          session.user.email,
-          session.user.user_metadata?.username || session.user.user_metadata?.name
-        );
-        if (!ensured) {
-          console.error("[PindMap:auth] ensureUserExists failed on loadUser", session.user.id);
+        try {
+          mark("auth_session_restored");
+        } catch {
+          /* ignore */
         }
 
-        // users 테이블에서 username 가져오기
-        const { data } = await supabase
-          .from("users")
-          .select("username, avatar_url, bio, total_likes_received")
-          .eq("id", session.user.id)
-          .single();
+        const data = await loadUserProfileOrEnsure(
+          session.user.id,
+          session.user.email,
+          session.user.user_metadata?.username || session.user.user_metadata?.name,
+        );
+        if (!data) {
+          console.error("[PindMap:auth] loadUserProfileOrEnsure failed on loadUser", session.user.id);
+        }
 
         setUser({
           id: session.user.id,
@@ -325,20 +450,14 @@ export function useUser() {
         setTimeout(() => {
           void (async () => {
             try {
-              const ensured = await ensureUserExists(
+              const data = await loadUserProfileOrEnsure(
                 sessionUser.id,
                 sessionUser.email,
                 sessionUser.user_metadata?.username || sessionUser.user_metadata?.name,
               );
-              if (!ensured) {
-                console.error("[PindMap:auth] ensureUserExists failed on auth change", sessionUser.id);
+              if (!data) {
+                console.error("[PindMap:auth] loadUserProfileOrEnsure failed on auth change", sessionUser.id);
               }
-
-              const { data } = await supabase
-                .from("users")
-                .select("username, avatar_url, bio, total_likes_received")
-                .eq("id", sessionUser.id)
-                .single();
 
               setUser({
                 id: sessionUser.id,

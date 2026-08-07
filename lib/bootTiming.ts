@@ -4,6 +4,10 @@ export type BootMarkName =
   | "webview_start"
   | "bundle_loaded"
   | "auth_start"
+  | "auth_session_restored"
+  | "auth_ensure_start"
+  | "auth_ensure_done"
+  | "auth_profile_done"
   | "auth_done"
   | "cache_read_start"
   | "cache_read_done"
@@ -18,6 +22,10 @@ export const BOOT_MARK_ORDER: BootMarkName[] = [
   "webview_start",
   "bundle_loaded",
   "auth_start",
+  "auth_session_restored",
+  "auth_ensure_start",
+  "auth_ensure_done",
+  "auth_profile_done",
   "auth_done",
   "cache_read_start",
   "cache_read_done",
