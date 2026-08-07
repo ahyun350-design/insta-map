@@ -56,24 +56,41 @@ type ResolvedPlace = {
 
 
 const OVERSEAS_CITY_PATTERN =
-  /도쿄|오사카|교토|후쿠오카|삿포로|나고야|요코하마|오키나와|방콕|다낭|하노이|호치민|싱가포르|타이베이|대만|상하이|베이징|홍콩|마카오|파리|런던|뉴욕|로마|로스앤젤레스|\bLA\b|Tokyo|Osaka|Kyoto|Fukuoka|Sapporo|Nagoya|Yokohama|Bangkok|Danang|Da\s*Nang|Hanoi|Ho\s*Chi\s*Minh|Singapore|Taipei|Shanghai|Beijing|Hong\s*Kong|Macau|Paris|London|New\s*York|Rome/i;
+  /도쿄|오사카|교토|후쿠오카|삿포로|나고야|요코하마|오키나와|일본|방콕|치앙마이|태국|다낭|하노이|호치민|베트남|싱가포르|타이베이|대만|상하이|베이징|홍콩|마카오|중국|파리|프랑스|런던|영국|뉴욕|미국|로마|이탈리아|바르셀로나|스페인|로스앤젤레스|\bLA\b|Tokyo|Osaka|Kyoto|Fukuoka|Sapporo|Nagoya|Yokohama|Okinawa|Japan|Bangkok|Chiang\s*Mai|Thailand|Danang|Da\s*Nang|Hanoi|Ho\s*Chi\s*Minh|Vietnam|Singapore|Taipei|Taiwan|Shanghai|Beijing|Hong\s*Kong|Macau|China|Paris|France|London|UK|England|New\s*York|USA|America|Rome|Italy|Barcelona|Spain/i;
+
+function hasKana(text: string): boolean {
+  return /[\u3040-\u309F\u30A0-\u30FF]/.test(text);
+}
 
 function hasOverseasScriptName(name: string): boolean {
   const t = name.trim();
   if (!t) return false;
-  // 히라가나·가타카나
-  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(t)) return true;
+  if (hasKana(t)) return true;
   // 한자만(한글 없음) 상호
   if (/[\u4E00-\u9FFF]/.test(t) && !/[가-힣]/.test(t)) return true;
   return false;
 }
 
+/** 로마자만으로 된 상호 (한글 상호 아님) */
+function isRomanOnlyPlaceName(name: string): boolean {
+  const t = name.trim();
+  if (!t || /[가-힣]/.test(t)) return false;
+  if (hasKana(t) || /[\u4E00-\u9FFF]/.test(t)) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9\s\-'&.,]*$/.test(t) && /[A-Za-z]{3,}/.test(t);
+}
+
 function hasOverseasSignal(caption: string, placeNames: string[]): boolean {
   const blob = `${caption}\n${placeNames.join("\n")}`;
   if (OVERSEAS_CITY_PATTERN.test(blob)) return true;
-  if (/(東京都|大阪府|京都府|北海道|City,|Chome)/i.test(blob)) return true;
-  if (placeNames.some(hasOverseasScriptName)) return true;
+  if (hasKana(caption)) return true;
+  if (/(東京都|大阪府|京都府|北海道|City,|Chome|\bPrefecture\b)/i.test(blob)) return true;
+  if (placeNames.some((n) => hasOverseasScriptName(n) || isRomanOnlyPlaceName(n))) return true;
   return false;
+}
+
+function formatExtractFailCode(code: string, names: string[]): string {
+  const joined = names.slice(0, 8).join(",");
+  return joined ? `${code}|${joined}` : code;
 }
 
 /** resolved === 0 원인 코드 (+ 카카오 미스 장소명, 분석용) */
@@ -81,11 +98,8 @@ function buildZeroResolvedErrorMessage(caption: string, candidateNames: string[]
   if (candidateNames.length === 0) {
     return "no_places_in_caption";
   }
-  const code = hasOverseasSignal(caption, candidateNames)
-    ? "overseas_unsupported"
-    : "kakao_unresolved";
-  const names = candidateNames.slice(0, 8).join(",");
-  return names ? `${code}|${names}` : code;
+  // 카카오 이전에 해외는 이미 걸러지므로 여기선 미해결로 분류
+  return formatExtractFailCode("kakao_unresolved", candidateNames);
 }
 
 function buildPlaces(resolved: ResolvedPlace[]): Place[] {
@@ -123,21 +137,43 @@ export async function POST(req: Request) {
     const rawPlaces = await extractPlacesByClaude(caption);
     console.log(`[PindMap:perf] extract.process.ai ${Date.now() - aiT0}ms`);
 
-    await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
-    const kakaoT0 = Date.now();
-    const resolved: ResolvedPlace[] = [];
-    const candidateNames: string[] = [];
+    type PlaceCandidate = {
+      name: string;
+      hint: string;
+      category: Place["category"];
+    };
+    const candidates: PlaceCandidate[] = [];
     for (const item of rawPlaces) {
       const name = typeof item.name === "string" ? item.name.trim() : "";
       const hint = typeof item.hint === "string" ? item.hint.trim() : "";
       const category = normalizeCategory(item.category);
       if (!name || !category) continue;
-      candidateNames.push(name);
-      const kakaoResult = await searchKakaoPlace(name, hint);
+      candidates.push({ name, hint, category });
+    }
+    const candidateNames = candidates.map((c) => c.name);
+
+    if (candidates.length === 0) {
+      throw new Error("no_places_in_caption");
+    }
+
+    // 해외 신호면 카카오 검색 전에 종료 (국내 동명 오매칭 방지)
+    if (hasOverseasSignal(caption, candidateNames)) {
+      console.log("[extract] overseas detected before kakao", {
+        jobId,
+        names: candidateNames.slice(0, 8),
+      });
+      throw new Error(formatExtractFailCode("overseas_unsupported", candidateNames));
+    }
+
+    await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
+    const kakaoT0 = Date.now();
+    const resolved: ResolvedPlace[] = [];
+    for (const item of candidates) {
+      const kakaoResult = await searchKakaoPlace(item.name, item.hint, undefined, caption);
       if (kakaoResult) {
         resolved.push({
-          name,
-          category,
+          name: item.name,
+          category: item.category,
           address: kakaoResult.roadAddress || kakaoResult.address,
           lat: kakaoResult.lat,
           lng: kakaoResult.lng,

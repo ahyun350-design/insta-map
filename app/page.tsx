@@ -3335,6 +3335,7 @@ function HomePageContent() {
           removeJob(jobId);
           const places = data.result_places ?? [];
           if (places.length === 0) {
+            // all_saved_already 는 서버가 신규 insert 없이 끝난 경우만
             if (nextStep.includes("all_saved_already")) {
               showToast("이미 저장된 장소만 추출됐어요", "info");
               setExtractOverlayError(null);
@@ -3349,43 +3350,30 @@ function HomePageContent() {
               setExtractOverlayComplete(false);
             }
             setStatus("");
-            console.log("[PindMap:url] extraction message hidden (failed)");
+            console.log("[PindMap:url] extraction message hidden (empty result_places)");
             return;
           }
-          const existingSet = new Set(
-            savedPlaces.map((p) => `${String(p.name).trim()}::${String(p.address).trim()}`),
-          );
-          const uniquePlaces = places.filter((p) => {
-            const key = `${p.name.trim()}::${p.address.trim()}`;
-            if (existingSet.has(key)) return false;
-            existingSet.add(key);
-            return true;
-          });
-          const duplicateCount = places.length - uniquePlaces.length;
-          if (uniquePlaces.length === 0) {
-            showToast(
-              places.length > 0 ? "추출된 장소는 이미 저장 목록에 있어요" : "추가할 새 장소가 없어요",
-              "info",
-            );
-            setStatus("");
-            setExtractOverlayError(null);
-            setExtractOverlayComplete(true);
-            console.log("[PindMap:url] extraction completed — all duplicates vs savedPlaces");
-            return;
-          }
-          const merged: Place[] = uniquePlaces.map((p) => {
+
+          // 서버가 result_places 를 준 경우(= insert 성공)는 로컬 savedPlaces 와
+          // 이름+주소 비교로 "이미 있음" 처리하지 않는다.
+          // (폴링 전에 DB 동기화가 된 경우 성공인데도 중복 토스트가 뜨는 레이스 방지)
+          const existingIds = new Set(savedPlaces.map((p) => String(p.id)));
+          const merged: Place[] = places.map((p) => {
             const coords = latLngFromRow(p);
+            const id =
+              typeof p.id === "string" && p.id.trim().length > 0
+                ? p.id.trim()
+                : `${Math.random().toString(36).substring(2)}${Date.now().toString(36)}`;
             return {
-              id:
-                typeof p.id === "string" && p.id.trim().length > 0
-                  ? p.id.trim()
-                  : `${Math.random().toString(36).substring(2)}${Date.now().toString(36)}`,
+              id,
               name: p.name,
               address: p.address,
               category: p.category as Category,
               ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
             };
           });
+          const newlyAddedCount = merged.filter((m) => !existingIds.has(m.id)).length;
+          const displayCount = newlyAddedCount > 0 ? newlyAddedCount : merged.length;
           const mergedIds = new Set(merged.map((m) => m.id));
           setSavedPlaces((prev) => [...merged, ...prev.filter((p) => !mergedIds.has(p.id))]);
           merged.forEach((place) => {
@@ -3399,11 +3387,14 @@ function HomePageContent() {
           } else if (lastAdded?.address) {
             focusExpandedMapOnAddress(lastAdded.address, 3);
           }
-          showToast(`✨ ${uniquePlaces.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
+          showToast(`✨ ${displayCount}개 장소를 추가했어요`, "success");
           setStatus("");
           setExtractOverlayError(null);
           setExtractOverlayComplete(true);
-          console.log("[PindMap:url] extraction message hidden (success)");
+          console.log("[PindMap:url] extraction message hidden (success)", {
+            resultPlaces: places.length,
+            newlyAddedCount,
+          });
           return;
         }
 

@@ -67,6 +67,9 @@ export type KakaoPlaceLookup = {
   roadAddress: string;
   lat: number;
   lng: number;
+  placeName: string;
+  /** 0=1차 원본 쿼리, 1+=폴백 */
+  queryIndex: number;
 };
 
 function stripKakaoBranchSuffix(name: string): string {
@@ -79,15 +82,76 @@ function regionFromKakaoHint(hint: string): string {
   );
 }
 
+function normalizePlaceNameKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[()（）\[\]【】·・.'"`ʼʹ]/g, "")
+    .replace(/점$/u, "");
+}
+
+/** 이름 정합: 정규화 후 동일, 또는 공식 지점 수식어가 붙은 확장만 허용(느슨한 부분일치 거부). */
+function isExactKakaoNameMatch(queryName: string, placeName: string): boolean {
+  const q = normalizePlaceNameKey(queryName);
+  const p = normalizePlaceNameKey(placeName);
+  if (!q || !p) return false;
+  if (q === p) return true;
+  const q2 = normalizePlaceNameKey(stripKakaoBranchSuffix(queryName));
+  if (q2 && q2 === p) return true;
+  // 예: 검색 "오일리버거잠실" → 결과 "오일리버거잠실석촌호수직영점"
+  const branchSuffixOk = (base: string) =>
+    Boolean(base) &&
+    p.startsWith(base) &&
+    p.length - base.length <= 16 &&
+    /점$/.test(p);
+  return branchSuffixOk(q) || branchSuffixOk(q2);
+}
+
+const KR_AREA_SHORT = [
+  "서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종", "제주",
+  "성수", "성수동", "홍대", "연남", "합정", "망원", "이태원", "한남", "잠실", "여의도",
+  "판교", "해운대", "광안리", "서면", "강남", "역삼", "선릉", "삼성", "청담", "압구정",
+  "신사", "명동", "을지로", "종로", "인사동", "삼청", "북촌", "서촌", "건대", "신촌",
+  "마포", "영등포", "노량진", "혜화", "속초", "강릉", "여수", "경주", "전주", "수원",
+];
+
+function collectExpectedRegions(caption: string, hint: string, placeName: string): string[] {
+  const regions = new Set<string>();
+  const add = (raw: string) => {
+    const t = raw.trim();
+    if (t.length >= 2) regions.add(t);
+  };
+  const fromHint = regionFromKakaoHint(hint);
+  if (fromHint) add(fromHint);
+  for (const a of KR_AREA_SHORT) {
+    if (caption.includes(a)) add(a);
+  }
+  for (const m of caption.matchAll(/([가-힣]{2,12}(?:시|군|구|동|읍|면))/g)) {
+    add(m[1]);
+  }
+  const branch = placeName.match(/([^\s]+)점$/u)?.[1];
+  if (branch && branch.length >= 2 && /[가-힣]/.test(branch)) add(branch);
+  return [...regions];
+}
+
+function addressMatchesExpectedRegions(address: string, regions: string[]): boolean {
+  if (regions.length === 0) return true;
+  const compact = address.replace(/\s+/g, "");
+  return regions.some((r) => compact.includes(r.replace(/\s+/g, "")));
+}
+
 /**
  * 카카오 키워드 검색 — 단발 실패를 줄이기 위해 쿼리 폴백을 순차 시도.
+ * 결과는 이름 완전일치(+지역 정합) 검증을 통과해야만 반환한다.
  * @param hint 기존 호출 호환용(Claude hint). region 미지정 시 지역명 후보로 사용.
  * @param region 알고 있는 지역명(선택). 있으면 5차 폴백에 우선 사용.
+ * @param caption 캡션(선택). 지역 정합 검증에 사용.
  */
 export async function searchKakaoPlace(
   name: string,
   hint: string = "",
   region?: string,
+  caption: string = "",
 ): Promise<KakaoPlaceLookup | null> {
   const kakaoKey = process.env.KAKAO_REST_API_KEY;
   if (!kakaoKey) return null;
@@ -99,6 +163,8 @@ export async function searchKakaoPlace(
   const withoutBranch = stripKakaoBranchSuffix(trimmed);
   const withoutBranchNoSpace = withoutBranch.replace(/\s+/g, "");
   const regionName = (region?.trim() || regionFromKakaoHint(hint)).trim();
+  const expectedRegions = collectExpectedRegions(caption, hint, trimmed);
+  if (regionName) expectedRegions.push(regionName);
 
   const queries: string[] = [];
   const pushUnique = (q: string) => {
@@ -116,39 +182,94 @@ export async function searchKakaoPlace(
     pushUnique(`${trimmed} ${regionName}`);
   }
 
-  const lookupOnce = async (query: string): Promise<KakaoPlaceLookup | null> => {
+  type Doc = {
+    place_name?: string;
+    address_name: string;
+    road_address_name: string;
+    x: string;
+    y: string;
+  };
+
+  const lookupOnce = async (
+    query: string,
+    queryIndex: number,
+  ): Promise<KakaoPlaceLookup | null> => {
     try {
       const res = await fetch(
         `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=1`,
         { headers: { Authorization: `KakaoAK ${kakaoKey}` } },
       );
       if (!res.ok) {
-        console.log("[extract] kakao search", { query, hit: false, status: res.status });
+        console.log("[extract] kakao search", { query, queryIndex, hit: false, status: res.status });
         return null;
       }
-      const data = (await res.json()) as {
-        documents?: Array<{ address_name: string; road_address_name: string; x: string; y: string }>;
-      };
+      const data = (await res.json()) as { documents?: Doc[] };
       const first = data.documents?.[0];
       if (!first) {
-        console.log("[extract] kakao search", { query, hit: false });
+        console.log("[extract] kakao search", { query, queryIndex, hit: false });
         return null;
       }
+      const placeName = (first.place_name || "").trim();
+      const address = first.road_address_name || first.address_name || "";
       const lat = parseFloat(first.y);
       const lng = parseFloat(first.x);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        console.log("[extract] kakao search", { query, hit: false });
+        console.log("[extract] kakao search", { query, queryIndex, hit: false, reason: "invalid_coords" });
         return null;
       }
-      console.log("[extract] kakao search", { query, hit: true });
+
+      const nameOk = isExactKakaoNameMatch(trimmed, placeName);
+      if (!nameOk) {
+        console.log("[extract] kakao search", {
+          query,
+          queryIndex,
+          hit: false,
+          reason: "name_mismatch",
+          placeName,
+        });
+        return null;
+      }
+
+      const regionsUnique = [...new Set(expectedRegions)];
+      const regionOk = addressMatchesExpectedRegions(address, regionsUnique);
+      // 폴백(2차~)은 지역 힌트가 있을 때만 채택. 지역 힌트 없으면 1차만 허용.
+      if (queryIndex >= 1) {
+        if (regionsUnique.length === 0 || !regionOk) {
+          console.log("[extract] kakao search", {
+            query,
+            queryIndex,
+            hit: false,
+            reason: "fallback_region_strict",
+            placeName,
+            address,
+            regions: regionsUnique,
+          });
+          return null;
+        }
+      } else if (regionsUnique.length > 0 && !regionOk) {
+        console.log("[extract] kakao search", {
+          query,
+          queryIndex,
+          hit: false,
+          reason: "region_mismatch",
+          placeName,
+          address,
+          regions: regionsUnique,
+        });
+        return null;
+      }
+
+      console.log("[extract] kakao search", { query, queryIndex, hit: true, placeName });
       return {
         address: first.address_name,
         roadAddress: first.road_address_name || first.address_name,
         lat,
         lng,
+        placeName,
+        queryIndex,
       };
     } catch {
-      console.log("[extract] kakao search", { query, hit: false });
+      console.log("[extract] kakao search", { query, queryIndex, hit: false, reason: "exception" });
       return null;
     }
   };
@@ -157,7 +278,7 @@ export async function searchKakaoPlace(
     if (i > 0) {
       await new Promise((r) => setTimeout(r, 150));
     }
-    const result = await lookupOnce(queries[i]!);
+    const result = await lookupOnce(queries[i]!, i);
     if (result) return result;
   }
   return null;
