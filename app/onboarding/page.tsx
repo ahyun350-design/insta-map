@@ -9,13 +9,13 @@ const NAVY = "#1B2A6B";
 const SLIDES = [
   {
     title: "릴스 속 그곳, 지도에 저장",
-    description: "URL 붙여넣으면 위치까지 자동으로",
+    description: "링크만 붙여넣으면 가게 이름·위치까지 알아서",
     Illustration: Slide1Illustration,
     toneClass: "onboardingTone1",
   },
   {
     title: "찾기 쉽게 자동 정리",
-    description: "맛집·카페·쇼핑 알아서 나눠 담아요",
+    description: "맛집, 카페, 쇼핑 — 종류별로 저절로 나뉘어요",
     Illustration: Slide2Illustration,
     toneClass: "onboardingTone2",
   },
@@ -26,8 +26,8 @@ const SLIDES = [
     toneClass: "onboardingTone3",
   },
   {
-    title: "이제 내 지도를 채울 차례",
-    description: "첫 릴스를 저장해보세요",
+    title: "이제 시작해볼까요",
+    description: "인스타에서 저장해둔 릴스 하나만 가져와 보세요",
     Illustration: Slide4Illustration,
     toneClass: "",
   },
