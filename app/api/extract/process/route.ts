@@ -54,6 +54,40 @@ type ResolvedPlace = {
   lng: number;
 };
 
+
+const OVERSEAS_CITY_PATTERN =
+  /도쿄|오사카|교토|후쿠오카|삿포로|나고야|요코하마|오키나와|방콕|다낭|하노이|호치민|싱가포르|타이베이|대만|상하이|베이징|홍콩|마카오|파리|런던|뉴욕|로마|로스앤젤레스|\bLA\b|Tokyo|Osaka|Kyoto|Fukuoka|Sapporo|Nagoya|Yokohama|Bangkok|Danang|Da\s*Nang|Hanoi|Ho\s*Chi\s*Minh|Singapore|Taipei|Shanghai|Beijing|Hong\s*Kong|Macau|Paris|London|New\s*York|Rome/i;
+
+function hasOverseasScriptName(name: string): boolean {
+  const t = name.trim();
+  if (!t) return false;
+  // 히라가나·가타카나
+  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(t)) return true;
+  // 한자만(한글 없음) 상호
+  if (/[\u4E00-\u9FFF]/.test(t) && !/[가-힣]/.test(t)) return true;
+  return false;
+}
+
+function hasOverseasSignal(caption: string, placeNames: string[]): boolean {
+  const blob = `${caption}\n${placeNames.join("\n")}`;
+  if (OVERSEAS_CITY_PATTERN.test(blob)) return true;
+  if (/(東京都|大阪府|京都府|北海道|City,|Chome)/i.test(blob)) return true;
+  if (placeNames.some(hasOverseasScriptName)) return true;
+  return false;
+}
+
+/** resolved === 0 원인 코드 (+ 카카오 미스 장소명, 분석용) */
+function buildZeroResolvedErrorMessage(caption: string, candidateNames: string[]): string {
+  if (candidateNames.length === 0) {
+    return "no_places_in_caption";
+  }
+  const code = hasOverseasSignal(caption, candidateNames)
+    ? "overseas_unsupported"
+    : "kakao_unresolved";
+  const names = candidateNames.slice(0, 8).join(",");
+  return names ? `${code}|${names}` : code;
+}
+
 function buildPlaces(resolved: ResolvedPlace[]): Place[] {
   return resolved.map((p) => ({ name: p.name, category: p.category, address: p.address }));
 }
@@ -92,11 +126,13 @@ export async function POST(req: Request) {
     await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
     const kakaoT0 = Date.now();
     const resolved: ResolvedPlace[] = [];
+    const candidateNames: string[] = [];
     for (const item of rawPlaces) {
       const name = typeof item.name === "string" ? item.name.trim() : "";
       const hint = typeof item.hint === "string" ? item.hint.trim() : "";
       const category = normalizeCategory(item.category);
       if (!name || !category) continue;
+      candidateNames.push(name);
       const kakaoResult = await searchKakaoPlace(name, hint);
       if (kakaoResult) {
         resolved.push({
@@ -110,7 +146,9 @@ export async function POST(req: Request) {
     }
     console.log(`[PindMap:perf] extract.process.kakao ${Date.now() - kakaoT0}ms`);
 
-    if (resolved.length === 0) throw new Error("장소 추출에 실패했습니다.");
+    if (resolved.length === 0) {
+      throw new Error(buildZeroResolvedErrorMessage(caption, candidateNames));
+    }
 
     const dbT0 = Date.now();
     const { data: existingRows, error: existingErr } = await supabase
@@ -150,7 +188,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, inserted: 0 });
     }
 
-    if (places.length === 0) throw new Error("장소 추출에 실패했습니다.");
+    if (places.length === 0) {
+      // 113과 동일 원인 분류(이론상 resolved===0일 때만 도달; 중복은 위에서 completed 처리)
+      throw new Error(buildZeroResolvedErrorMessage(caption, candidateNames));
+    }
 
     const rows = uniqueResolved.map((p) => ({
       id: typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
