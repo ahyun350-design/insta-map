@@ -66,8 +66,8 @@ export async function POST(req: Request) {
     try {
       admin = getSupabaseAdmin();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Supabase 관리 클라이언트를 만들 수 없습니다.";
-      return NextResponse.json({ error: msg }, { status: 500 });
+      console.error("[places/upsert] admin client", e);
+      return NextResponse.json({ error: "server_misconfigured" }, { status: 500 });
     }
 
     const { error } = await admin.from("places").upsert({
@@ -82,13 +82,15 @@ export async function POST(req: Request) {
 
     if (error) {
       console.error("[places/upsert]", error);
-      return NextResponse.json({ error: error.message || "저장에 실패했습니다." }, { status: 500 });
+      return NextResponse.json(
+        { error: "save_failed", code: error.code ?? null },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "요청 처리 중 오류가 발생했습니다.";
     console.error("[places/upsert] 예외", error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "save_failed" }, { status: 500 });
   }
 }

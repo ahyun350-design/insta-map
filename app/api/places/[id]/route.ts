@@ -44,8 +44,8 @@ export async function DELETE(req: Request, context: RouteContext) {
     try {
       admin = getSupabaseAdmin();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Supabase 관리 클라이언트를 만들 수 없습니다.";
-      return NextResponse.json({ error: msg }, { status: 500 });
+      console.error("[places/delete] admin client", e);
+      return NextResponse.json({ error: "server_misconfigured" }, { status: 500 });
     }
 
     const { data: row, error: fetchErr } = await admin
@@ -56,7 +56,10 @@ export async function DELETE(req: Request, context: RouteContext) {
 
     if (fetchErr) {
       console.error("[places/delete] select", fetchErr);
-      return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+      return NextResponse.json(
+        { error: "fetch_failed", code: fetchErr.code ?? null },
+        { status: 500 },
+      );
     }
     if (!row) {
       return NextResponse.json({ error: "장소를 찾을 수 없습니다." }, { status: 404 });
@@ -68,13 +71,15 @@ export async function DELETE(req: Request, context: RouteContext) {
     const { error: delErr } = await admin.from("places").delete().eq("id", placeId);
     if (delErr) {
       console.error("[places/delete]", delErr);
-      return NextResponse.json({ error: delErr.message || "삭제에 실패했습니다." }, { status: 500 });
+      return NextResponse.json(
+        { error: "delete_failed", code: delErr.code ?? null },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "요청 처리 중 오류가 발생했습니다.";
     console.error("[places/delete] 예외", error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "delete_failed" }, { status: 500 });
   }
 }

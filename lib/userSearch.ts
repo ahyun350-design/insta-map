@@ -39,7 +39,8 @@ export async function searchUsersByUsername(
     .limit(20);
 
   if (error) {
-    return { data: [], error: error.message || "검색에 실패했어요" };
+    console.error("[userSearch]", error);
+    return { data: [], error: error.code || "search_failed" };
   }
 
   const followingSet = new Set(followingIds);

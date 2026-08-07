@@ -31,7 +31,7 @@ function formatLoginError(error: AuthError): string {
   if (/rate limit|too many requests|over_request_rate|429/i.test(raw) || code === "over_request_rate_limit") {
     return "요청이 많아 잠시 후 다시 시도해 주세요.";
   }
-  if (raw) return raw;
+  console.error("[formatLoginError]", error);
   return "로그인에 실패했어요. 잠시 후 다시 시도해 주세요.";
 }
 

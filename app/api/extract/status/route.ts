@@ -67,7 +67,7 @@ export async function GET(req: Request) {
       },
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "상태 조회 중 오류가 발생했습니다.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[extract/status]", error);
+    return NextResponse.json({ error: "status_failed" }, { status: 500 });
   }
 }

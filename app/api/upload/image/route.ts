@@ -40,9 +40,8 @@ export async function POST(req: Request) {
     try {
       admin = getSupabaseAdmin();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Supabase 관리 클라이언트를 만들 수 없습니다.";
-      console.error("[upload/image] admin client", msg);
-      return NextResponse.json({ error: msg }, { status: 500 });
+      console.error("[upload/image] admin client", e);
+      return NextResponse.json({ error: "server_misconfigured" }, { status: 500 });
     }
 
     const form = await req.formData();
@@ -78,15 +77,17 @@ export async function POST(req: Request) {
 
     if (uploadError) {
       console.error("[upload/image] storage upload", uploadError);
-      return NextResponse.json({ error: uploadError.message || "스토리지 업로드에 실패했습니다." }, { status: 500 });
+      return NextResponse.json(
+        { error: "upload_failed", code: (uploadError as { statusCode?: string }).statusCode ?? null },
+        { status: 500 },
+      );
     }
 
     const { data: urlData } = admin.storage.from("post-images").getPublicUrl(fileName);
     const publicUrl = urlData.publicUrl;
     return NextResponse.json({ publicUrl });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "업로드 처리 중 오류가 발생했습니다.";
     console.error("[upload/image] 예외", error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "upload_failed" }, { status: 500 });
   }
 }

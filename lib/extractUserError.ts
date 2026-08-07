@@ -10,6 +10,7 @@ export function mapExtractErrorToUserMessage(raw: string | null | undefined): st
     /claude/i.test(msg) ||
     /anthropic/i.test(msg) ||
     /credit balance/i.test(msg) ||
+    /insufficient.?credits?/i.test(msg) ||
     /api 오류/i.test(msg) ||
     /api error/i.test(lower)
   ) {

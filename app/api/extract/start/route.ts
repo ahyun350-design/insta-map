@@ -84,7 +84,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ jobId });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "작업 시작 중 오류가 발생했습니다.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[extract/start]", error);
+    return NextResponse.json({ error: "start_failed" }, { status: 500 });
   }
 }

@@ -12,6 +12,7 @@ import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay } from "@/components/ExtractLoadingOverlay";
 import { mapExtractErrorToUserMessage } from "@/lib/extractUserError";
+import { toUserMessage } from "@/lib/userErrorMessage";
 import {
   formatInAppNotificationFromRow,
   formatMessageInAppText,
@@ -2733,7 +2734,7 @@ function HomePageContent() {
     try {
       const { data, error } = await saveCourse(user.id, courseSaveTitle, items);
       if (error) {
-        showToast(error, "error");
+        showToast(toUserMessage(error, "코스를 저장하지 못했어요"), "error");
         return;
       }
       closeCourseSaveModal();
@@ -3449,13 +3450,16 @@ function HomePageContent() {
       if (!res.ok) {
         savedPlacesRef.current = savedPlacesRef.current.filter((p) => p.id !== place.id);
         setSavedPlaces((prev) => prev.filter((p) => p.id !== place.id));
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error || `저장 실패 (${res.status})`);
+        const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string | null };
+        const err = new Error(data.error || "save_failed");
+        if (data.code) (err as Error & { code?: string }).code = String(data.code);
+        else if (res.status === 401 || res.status === 403) (err as Error & { code?: string }).code = String(res.status);
+        throw err;
       }
     } catch (err) {
       savedPlacesRef.current = savedPlacesRef.current.filter((p) => p.id !== place.id);
       setSavedPlaces((prev) => prev.filter((p) => p.id !== place.id));
-      showToast(err instanceof Error ? err.message : "저장에 실패했어요", "error");
+      showToast(toUserMessage(err, "저장에 실패했어요"), "error");
     }
   };
   const deletePlace = async (id: string) => {
@@ -3475,13 +3479,16 @@ function HomePageContent() {
       if (!res.ok) {
         savedPlacesRef.current = previous;
         setSavedPlaces(previous);
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(data.error || `삭제 실패 (${res.status})`);
+        const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string | null };
+        const err = new Error(data.error || "delete_failed");
+        if (data.code) (err as Error & { code?: string }).code = String(data.code);
+        else if (res.status === 401 || res.status === 403) (err as Error & { code?: string }).code = String(res.status);
+        throw err;
       }
     } catch (err) {
       savedPlacesRef.current = previous;
       setSavedPlaces(previous);
-      showToast(err instanceof Error ? err.message : "삭제에 실패했어요", "error");
+      showToast(toUserMessage(err, "삭제에 실패했어요"), "error");
     }
   };
   const submitPost = async (post: FeedPost): Promise<{ error: string | null }> => {
@@ -3772,8 +3779,7 @@ function HomePageContent() {
       setShowProfileEditModal(false);
     } catch (err) {
       console.error("[PindMap:mypage] save profile failed", err);
-      const message = err instanceof Error ? err.message : "프로필 저장에 실패했어요";
-      showToast(message, "error");
+      showToast(toUserMessage(err, "프로필 저장에 실패했어요"), "error");
     } finally {
       setProfileEditSaving(false);
     }
@@ -3938,7 +3944,7 @@ function HomePageContent() {
         editingCourseDraft.items,
       );
       if (error) {
-        showToast(error, "error");
+        showToast(toUserMessage(error, "코스를 수정하지 못했어요"), "error");
         return;
       }
       viewingSavedCourseIdRef.current = editingCourseDraft.id;
@@ -3986,7 +3992,7 @@ function HomePageContent() {
     try {
       const { data, error } = await updateCourseTitle(savedCourseId, trimmed);
       if (error) {
-        showToast(error, "error");
+        showToast(toUserMessage(error, "제목을 변경하지 못했어요"), "error");
         return;
       }
       setEditingCourseTitle(trimmed);
@@ -4019,7 +4025,7 @@ function HomePageContent() {
       setShowCourseDeleteConfirm(false);
       setCourseActionTarget(null);
       if (error) {
-        showToast(error, "error");
+        showToast(toUserMessage(error, "코스를 삭제하지 못했어요"), "error");
         return;
       }
       showToast("코스를 삭제했어요", "success");
@@ -5241,7 +5247,7 @@ function HomePageContent() {
         return;
       }
       if (error) {
-        showToast(error, "error");
+        showToast(toUserMessage(error, "코스를 불러오지 못했어요"), "error");
         return;
       }
       if (data) {
@@ -5771,7 +5777,7 @@ function HomePageContent() {
           "curation",
         );
         if (courseError || !savedCourse) {
-          showToast(courseError ?? "코스를 저장하지 못했어요", "error");
+          showToast(toUserMessage(courseError, "코스를 저장하지 못했어요"), "error");
           return;
         }
         linkedCourseId = savedCourse.id;
@@ -5807,7 +5813,8 @@ function HomePageContent() {
     };
     const { error: postError } = await submitPost(newPost);
     if (postError) {
-      showToast(`큐레이션 등록에 실패했어요: ${postError}`, "error");
+      console.error("[PindMap:curation] submitPost failed", postError);
+      showToast("큐레이션 등록에 실패했어요", "error");
       return;
     }
 
@@ -7149,7 +7156,7 @@ function HomePageContent() {
         setMessageUserSearchLoading(true);
         const { data, error } = await searchUsersByUsername(q, user.id, followingIds);
         if (cancelled) return;
-        if (error) showToast(error, "error");
+        if (error) showToast(toUserMessage(error, "검색에 실패했어요"), "error");
         for (const hit of data) {
           userAvatarCacheRef.current.setFromRow({
             id: hit.id,

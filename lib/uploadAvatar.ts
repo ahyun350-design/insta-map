@@ -27,7 +27,13 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
   });
 
   if (error) {
-    throw new Error(error.message || "아바타 업로드에 실패했어요");
+    console.error("[uploadAvatar]", error);
+    const err = new Error("avatar_upload_failed");
+    const code = (error as { statusCode?: string | number; error?: string; name?: string }).statusCode
+      ?? (error as { error?: string }).error
+      ?? "avatar_upload_failed";
+    (err as Error & { code?: string }).code = String(code);
+    throw err;
   }
 
   const { data } = supabase.storage.from("avatars").getPublicUrl(path);

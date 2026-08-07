@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { toUserMessage } from "./userErrorMessage";
 
 export type CourseSource = "manual" | "curation";
 
@@ -24,10 +25,7 @@ export type SavedCourse = {
 };
 
 function mapDbError(error: { code?: string; message?: string }, fallback: string): string {
-  if (error.code === "23505" || error.code === "42501") {
-    return `${fallback} 다시 시도해주세요`;
-  }
-  return error.message || fallback;
+  return toUserMessage(error, fallback);
 }
 
 function mapInsertError(error: { code?: string; message?: string }): string {
