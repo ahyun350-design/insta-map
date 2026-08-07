@@ -2813,12 +2813,11 @@ function HomePageContent() {
     setLoading(true);
     setHomeLoadError(null);
     try {
-      const [placesRes, postsRes, roomsRes, followsRes, notificationsRes, myLikesRes] = await withTimeout(Promise.all([
+      // critical path: places / feed / follows / likes only (chat·notifications·avatar await는 스플래시 밖)
+      const [placesRes, postsRes, followsRes, myLikesRes] = await withTimeout(Promise.all([
         timedLoadQuery("places", supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false })),
         timedLoadQuery("feed_posts", supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false })),
-        timedLoadQuery("chat_rooms", supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`)),
         timedLoadQuery("follows", supabase.from("follows").select("following_id").eq("follower_id", uid)),
-        timedLoadQuery("notifications", supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50)),
         timedLoadQuery(
           "likes",
           (async () => {
@@ -2833,10 +2832,6 @@ function HomePageContent() {
       setFollowingIds((followsRes.data || []).map((f: any) => f.following_id));
       syncCurrentUserToAvatarCache();
 
-      const rawNotifications = (notificationsRes.data || []) as Notification[];
-      await prefetchAvatarsForNotifications(rawNotifications);
-      setNotifications(hydrateNotificationsWithAvatars(rawNotifications));
-
       if (placesRes.data) {
         const mappedPlaces = placesRes.data.map((p) => mapPlaceRow(p));
         mappedPlaces.forEach((place) => {
@@ -2849,47 +2844,14 @@ function HomePageContent() {
         const rawPosts: FeedPost[] = postsRes.data.map((p: any) =>
           parseFeedPostFromRow(p, { likedByMe: myLikedSet.has(p.id) }),
         );
-        await prefetchAvatarsForFeedPosts(rawPosts);
         setFeedPosts(hydrateFeedPostsWithAvatars(rawPosts));
+        void prefetchAvatarsForFeedPosts(rawPosts).then(() => {
+          setFeedPosts((prev) => hydrateFeedPostsWithAvatars(prev));
+        });
       } else {
         setFeedPosts([]);
       }
 
-      const roomsData = roomsRes.data;
-      if (roomsData && roomsData.length > 0) {
-        const rooms = (await withTimeout(Promise.all(
-          roomsData.map(async (r: any) => {
-            const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
-            const { data: friendData, error: friendLookupError } = await supabase
-              .from("users")
-              .select("username, avatar_url")
-              .eq("id", friendId)
-              .maybeSingle();
-            if (!friendLookupError && !friendData) {
-              console.log("[PindMap:chat] 유령 방 제외 roomId=%s friendId=%s", r.id, friendId);
-              return null;
-            }
-            if (friendData) userAvatarCacheRef.current.setFromRow({ id: friendId, username: friendData.username, avatar_url: friendData.avatar_url });
-            const [msgsRes, unreadRes] = await Promise.all([
-              supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1),
-              supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false),
-            ]);
-            const unread = typeof unreadRes.count === "number" ? unreadRes.count : 0;
-            return {
-              id: r.id,
-              friendId,
-              friendName: friendData?.username || friendId,
-              friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
-              lastMessage: msgsRes.data?.[0]?.text ?? "",
-              lastTime: msgsRes.data?.[0]?.created_at ?? r.created_at,
-              unreadCount: unread,
-            };
-          }),
-        ), 8000)).filter((room) => room !== null) as ChatRoom[];
-        setChatRooms(sortChatRoomsByRecency(rooms));
-      } else {
-        setChatRooms([]);
-      }
       homeAutoRetryCountRef.current = 0;
       lastLoadDataSuccessAtRef.current = perfNow();
       lastLoadDataUserIdRef.current = uid;
@@ -2978,6 +2940,119 @@ function HomePageContent() {
     if (user && loading) return;
     void hideNativeSplash();
   }, [sessionChecked, userLoading, user, loading]);
+
+  /** 스플래시 비차단: 알림·채팅방(+N+1)은 loadData 종료 후 백그라운드 로드 */
+  useEffect(() => {
+    if (!sessionChecked || userLoading || loading) return;
+    const uid = user?.id;
+    if (!uid) return;
+    let cancelled = false;
+
+    const loadNotificationsBg = async () => {
+      try {
+        const notificationsRes = await withTimeout(
+          timedLoadQuery(
+            "notifications",
+            supabase
+              .from("notifications")
+              .select("*")
+              .eq("user_id", uid)
+              .order("created_at", { ascending: false })
+              .limit(50),
+          ),
+          8000,
+        );
+        if (cancelled) return;
+        const rawNotifications = (notificationsRes.data || []) as Notification[];
+        setNotifications(hydrateNotificationsWithAvatars(rawNotifications));
+        void prefetchAvatarsForNotifications(rawNotifications).then(() => {
+          if (cancelled) return;
+          setNotifications((prev) => hydrateNotificationsWithAvatars(prev));
+        });
+      } catch (err) {
+        console.error("[PindMap:home] background notifications load failed", err);
+      }
+    };
+
+    const loadChatRoomsBg = async () => {
+      try {
+        const roomsRes = await withTimeout(
+          timedLoadQuery(
+            "chat_rooms",
+            supabase.from("chat_rooms").select("*").or(`user1_id.eq.${uid},user2_id.eq.${uid}`),
+          ),
+          8000,
+        );
+        if (cancelled) return;
+        const roomsData = roomsRes.data;
+        if (roomsData && roomsData.length > 0) {
+          const rooms = (
+            await withTimeout(
+              Promise.all(
+                roomsData.map(async (r: any) => {
+                  const friendId = r.user1_id === uid ? r.user2_id : r.user1_id;
+                  const { data: friendData, error: friendLookupError } = await supabase
+                    .from("users")
+                    .select("username, avatar_url")
+                    .eq("id", friendId)
+                    .maybeSingle();
+                  if (!friendLookupError && !friendData) {
+                    console.log("[PindMap:chat] 유령 방 제외 roomId=%s friendId=%s", r.id, friendId);
+                    return null;
+                  }
+                  if (friendData) {
+                    userAvatarCacheRef.current.setFromRow({
+                      id: friendId,
+                      username: friendData.username,
+                      avatar_url: friendData.avatar_url,
+                    });
+                  }
+                  const [msgsRes, unreadRes] = await Promise.all([
+                    supabase
+                      .from("messages")
+                      .select("*")
+                      .eq("room_id", r.id)
+                      .order("created_at", { ascending: false })
+                      .limit(1),
+                    supabase
+                      .from("messages")
+                      .select("*", { count: "exact", head: true })
+                      .eq("room_id", r.id)
+                      .neq("sender_id", uid)
+                      .eq("read", false),
+                  ]);
+                  const unread = typeof unreadRes.count === "number" ? unreadRes.count : 0;
+                  return {
+                    id: r.id,
+                    friendId,
+                    friendName: friendData?.username || friendId,
+                    friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
+                    lastMessage: msgsRes.data?.[0]?.text ?? "",
+                    lastTime: msgsRes.data?.[0]?.created_at ?? r.created_at,
+                    unreadCount: unread,
+                  };
+                }),
+              ),
+              8000,
+            )
+          ).filter((room) => room !== null) as ChatRoom[];
+          if (cancelled) return;
+          setChatRooms(sortChatRoomsByRecency(rooms));
+        } else {
+          setChatRooms([]);
+        }
+      } catch (err) {
+        console.error("[PindMap:home] background chat rooms load failed", err);
+      }
+    };
+
+    void loadNotificationsBg();
+    void loadChatRoomsBg();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionChecked, userLoading, user?.id, loading]);
 
   useEffect(() => {
     const screen = `tab:${activeTab}`;
