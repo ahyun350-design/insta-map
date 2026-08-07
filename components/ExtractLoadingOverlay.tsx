@@ -53,29 +53,39 @@ const TIP_ROTATE_MS = 6500;
 type Props = {
   open: boolean;
   complete?: boolean;
+  errorMessage?: string | null;
   onDismiss: () => void;
+  onRetry?: () => void;
 };
 
-export function ExtractLoadingOverlay({ open, complete = false, onDismiss }: Props) {
+export function ExtractLoadingOverlay({
+  open,
+  complete = false,
+  errorMessage = null,
+  onDismiss,
+  onRetry,
+}: Props) {
   const [progressIndex, setProgressIndex] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
   const tip = TIPS[tipIndex];
+  const showError = !!errorMessage;
+  const showComplete = complete && !showError;
 
   useEffect(() => {
-    if (!open || complete) return;
+    if (!open || showComplete || showError) return;
     const id = window.setInterval(() => {
       setProgressIndex((i) => (i + 1) % PROGRESS_MESSAGES.length);
     }, 2800);
     return () => window.clearInterval(id);
-  }, [open, complete]);
+  }, [open, showComplete, showError]);
 
   useEffect(() => {
-    if (!open || complete) return;
+    if (!open || showComplete || showError) return;
     const id = window.setInterval(() => {
       setTipIndex((i) => (i + 1) % TIPS.length);
     }, TIP_ROTATE_MS);
     return () => window.clearInterval(id);
-  }, [open, complete]);
+  }, [open, showComplete, showError]);
 
   useEffect(() => {
     if (!open) {
@@ -91,7 +101,7 @@ export function ExtractLoadingOverlay({ open, complete = false, onDismiss }: Pro
       className="extractLoadingOverlay"
       role="dialog"
       aria-modal="true"
-      aria-label={complete ? "추출 완료" : "장소 추출 중"}
+      aria-label={showError ? "추출 실패" : showComplete ? "추출 완료" : "장소 추출 중"}
       onClick={onDismiss}
     >
       <div
@@ -107,7 +117,20 @@ export function ExtractLoadingOverlay({ open, complete = false, onDismiss }: Pro
           ✕
         </button>
 
-        {complete ? (
+        {showError ? (
+          <div className="extractLoadingComplete">
+            <p className="extractLoadingCompleteEmoji" aria-hidden>
+              😢
+            </p>
+            <p className="extractLoadingCompleteTitle">추출에 실패했어요</p>
+            <p className="extractLoadingCompleteSub">{errorMessage}</p>
+            {onRetry && (
+              <button type="button" className="extractLoadingDismissBtn" onClick={onRetry}>
+                다시 시도
+              </button>
+            )}
+          </div>
+        ) : showComplete ? (
           <div className="extractLoadingComplete">
             <p className="extractLoadingCompleteEmoji" aria-hidden>
               ✨
@@ -137,7 +160,7 @@ export function ExtractLoadingOverlay({ open, complete = false, onDismiss }: Pro
 
         <p className="extractLoadingFooterNote">앱을 닫아도 계속 저장돼요 · 여러 개 OK</p>
 
-        {!complete && (
+        {!showComplete && !showError && (
           <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
             백그라운드에서 계속하기
           </button>

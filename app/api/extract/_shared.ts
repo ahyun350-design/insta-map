@@ -164,6 +164,12 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
     "놀거리: 노래방, 볼링장, 영화관, 오락실, 방탈출, 액티비티·체험, 전시·팝업 체험형.",
     "여행지: 관광명소, 공원, 랜드마크, 자연경관, 포토스팟.",
     "복합공간(카페+매장 등)은 주된 기능으로 판단하되, 매장·쇼핑 비중이 크면 쇼핑으로 분류하세요.",
+    "게시물이 실제로 소개하는 장소만 추출한다.",
+    "지나가듯 언급된 지명, 만나는 장소, 근처 랜드마크는 추출하지 않는다.",
+    '예: "스타필드에서 만나서 ○○카페 갔어요" → ○○카페만 추출. 스타필드는 제외.',
+    "백화점, 쇼핑몰, 역 이름 같은 큰 시설은 그 안의 특정 가게를 소개하는 경우에만 추출한다.",
+    "확신이 없으면 넣지 않는다. 적게 뽑는 쪽이 낫다.",
+    "카테고리는 그 장소의 주된 용도로 판단한다. 술집·바·전시·공연장은 카페가 아니다.",
     "",
     `caption: ${caption}`,
   ].join("\n");
@@ -172,7 +178,7 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 2000,
       temperature: 0,
       system:

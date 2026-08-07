@@ -11,6 +11,7 @@ import { hideNativeSplash } from "@/lib/nativeSplash";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay } from "@/components/ExtractLoadingOverlay";
+import { mapExtractErrorToUserMessage } from "@/lib/extractUserError";
 import {
   formatInAppNotificationFromRow,
   formatMessageInAppText,
@@ -1270,6 +1271,8 @@ function HomePageContent() {
   const [activeJobs, setActiveJobs] = useState<ActiveExtractJob[]>([]);
   const [showExtractOverlay, setShowExtractOverlay] = useState(false);
   const [extractOverlayComplete, setExtractOverlayComplete] = useState(false);
+  const [extractOverlayError, setExtractOverlayError] = useState<string | null>(null);
+  const [extractRetryUrl, setExtractRetryUrl] = useState<string | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const selectedPlaceRef = useRef<any>(null);
   selectedPlaceRef.current = selectedPlace;
@@ -3217,18 +3220,15 @@ function HomePageContent() {
   }, [activeJobs]);
 
   useEffect(() => {
-    if (!showExtractOverlay) return;
-    if (activeJobs.length > 0) {
-      setExtractOverlayComplete(false);
-      return;
-    }
-    setExtractOverlayComplete(true);
+    if (!showExtractOverlay || !extractOverlayComplete || extractOverlayError) return;
     const timer = window.setTimeout(() => {
       setShowExtractOverlay(false);
       setExtractOverlayComplete(false);
+      setExtractOverlayError(null);
+      setExtractRetryUrl(null);
     }, 1800);
     return () => window.clearTimeout(timer);
-  }, [showExtractOverlay, activeJobs.length]);
+  }, [showExtractOverlay, extractOverlayComplete, extractOverlayError]);
 
   useEffect(() => {
     return () => {
@@ -3290,7 +3290,7 @@ function HomePageContent() {
           placesCount: data.result_places?.length ?? "no_array",
         });
         if (!res.ok) {
-          throw new Error(data.error || data.error_message || "작업 상태를 확인할 수 없어요.");
+          throw new Error(data.error || "작업 상태를 확인할 수 없어요.");
         }
 
         const nextStatus = data.status;
@@ -3304,15 +3304,23 @@ function HomePageContent() {
             return;
           }
           completedJobIdsRef.current.add(jobId);
+          const failedUrl =
+            activeJobs.find((j) => j.jobId === jobId)?.instagramUrl ?? null;
           removeJob(jobId);
           const places = data.result_places ?? [];
           if (places.length === 0) {
             if (nextStep.includes("all_saved_already")) {
               showToast("이미 저장된 장소만 추출됐어요", "info");
+              setExtractOverlayError(null);
+              setExtractOverlayComplete(true);
             } else {
+              const userMsg = "장소를 찾지 못했어요. 다른 릴스로 시도해 주세요";
               showPlaceExtractionGuideToast();
-              showToast("장소를 찾지 못했어요.", "info");
-              setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
+              showToast(userMsg, "info");
+              setError(userMsg);
+              setExtractOverlayError(userMsg);
+              setExtractRetryUrl(failedUrl);
+              setExtractOverlayComplete(false);
             }
             setStatus("");
             console.log("[PindMap:url] extraction message hidden (failed)");
@@ -3334,6 +3342,8 @@ function HomePageContent() {
               "info",
             );
             setStatus("");
+            setExtractOverlayError(null);
+            setExtractOverlayComplete(true);
             console.log("[PindMap:url] extraction completed — all duplicates vs savedPlaces");
             return;
           }
@@ -3365,24 +3375,38 @@ function HomePageContent() {
           }
           showToast(`✨ ${uniquePlaces.length}개 장소를 추가했어요${duplicateCount > 0 ? ` (중복 ${duplicateCount}개 제외)` : ""}`, "success");
           setStatus("");
+          setExtractOverlayError(null);
+          setExtractOverlayComplete(true);
           console.log("[PindMap:url] extraction message hidden (success)");
           return;
         }
 
         if (nextStatus === "failed") {
-          const message = data.error_message || "장소 분석 작업에 실패했어요.";
-          showToast(message, "error");
+          const userMsg = mapExtractErrorToUserMessage(data.error_message);
+          const failedUrl =
+            activeJobs.find((j) => j.jobId === jobId)?.instagramUrl ?? null;
+          showToast(userMsg, "error");
           showPlaceExtractionGuideToast();
           setStatus("");
+          setError(userMsg);
+          setExtractOverlayError(userMsg);
+          setExtractRetryUrl(failedUrl);
+          setExtractOverlayComplete(false);
           console.log("[PindMap:url] extraction message hidden (failed)");
-          setError("릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요");
           removeJob(jobId);
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : "작업 상태 확인 중 오류가 발생했어요.";
-        showToast(message, "error");
+        const raw = err instanceof Error ? err.message : "작업 상태 확인 중 오류가 발생했어요.";
+        const userMsg = mapExtractErrorToUserMessage(raw);
+        const failedUrl =
+          activeJobs.find((j) => j.jobId === jobId)?.instagramUrl ?? null;
+        showToast(userMsg, "error");
         showPlaceExtractionGuideToast();
         setStatus("");
+        setError(userMsg);
+        setExtractOverlayError(userMsg);
+        setExtractRetryUrl(failedUrl);
+        setExtractOverlayComplete(false);
         console.log("[PindMap:url] extraction message hidden (failed)");
         removeJob(jobId);
       } finally {
@@ -5473,8 +5497,9 @@ function HomePageContent() {
       setDirectionsLoading(false);
     }
   };
-  const handleAddFromInstagram = async () => {
-    if (!canSubmit) return;
+  const handleAddFromInstagram = async (urlOverride?: string) => {
+    const sourceUrl = (urlOverride ?? instagramUrl).trim();
+    if (!sourceUrl || isSubmitting) return;
     if (!user?.id) {
       showToast("로그인이 필요합니다.", "error");
       return;
@@ -5482,13 +5507,15 @@ function HomePageContent() {
     if (handleAddSubmittingRef.current) return;
     handleAddSubmittingRef.current = true;
     try {
-    const trimmedUrl = cleanInstagramUrl(instagramUrl.trim());
+    const trimmedUrl = cleanInstagramUrl(sourceUrl);
     const perfScreen = "extract:start";
     const extractStartT0 = perfNow();
     dlog.perf.start(perfScreen);
     const controller = new AbortController();
     console.log("[PindMap:url] extraction start", { url: trimmedUrl });
     setIsSubmitting(true); setStatus(""); setError("");
+    setExtractOverlayError(null);
+    setExtractRetryUrl(null);
     orchestratorSuccessKeyRef.current = "";
     window.localStorage.removeItem(ACTIVE_JOBS_STORAGE_KEY);
     completedJobIdsRef.current.clear();
@@ -5523,6 +5550,8 @@ function HomePageContent() {
       extractPollStartRef.current[data.jobId] = perfNow();
       setShowExtractOverlay(true);
       setExtractOverlayComplete(false);
+      setExtractOverlayError(null);
+      setExtractRetryUrl(trimmedUrl);
       setInstagramUrl("");
       setReelInputExpanded(false);
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
@@ -5535,14 +5564,19 @@ function HomePageContent() {
       const isTimeout = e instanceof Error && e.name === "AbortError";
       console.log(`[PindMap:url] extraction ${isTimeout ? "timeout" : "failed"}`, { error: e });
       dlog.perf.markRender(perfScreen);
-      const message = e instanceof Error && e.name === "AbortError"
+      const rawMessage = e instanceof Error && e.name === "AbortError"
         ? "요청이 지연되고 있어요. 잠시 후 다시 시도해주세요."
         : e instanceof Error
           ? e.message
           : "요청 처리 중 오류가 발생했습니다.";
+      const message = isTimeout ? rawMessage : mapExtractErrorToUserMessage(rawMessage);
       setStatus("");
       console.log(`[PindMap:url] extraction message hidden (${isTimeout ? "timeout" : "failed"})`);
       setError(message);
+      setExtractOverlayError(message);
+      setExtractRetryUrl(trimmedUrl);
+      setShowExtractOverlay(true);
+      setExtractOverlayComplete(false);
     }
     finally {
       if (typeof timeout === "number") window.clearTimeout(timeout);
@@ -9850,7 +9884,7 @@ function HomePageContent() {
                           />
                           <button
                             className="mapReelSubmitBtn"
-                            onClick={handleAddFromInstagram}
+                            onClick={() => { void handleAddFromInstagram(); }}
                             type="button"
                             disabled={!canSubmit}
                           >
@@ -11151,10 +11185,23 @@ function HomePageContent() {
         <ExtractLoadingOverlay
           open={showExtractOverlay}
           complete={extractOverlayComplete}
+          errorMessage={extractOverlayError}
           onDismiss={() => {
             setShowExtractOverlay(false);
             setExtractOverlayComplete(false);
+            setExtractOverlayError(null);
           }}
+          onRetry={
+            extractRetryUrl
+              ? () => {
+                  const url = extractRetryUrl;
+                  setExtractOverlayError(null);
+                  setExtractOverlayComplete(false);
+                  setShowExtractOverlay(false);
+                  void handleAddFromInstagram(url);
+                }
+              : undefined
+          }
         />,
         document.body,
       )}
