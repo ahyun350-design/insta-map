@@ -286,6 +286,14 @@ function Slide2Illustration() {
 }
 
 function Slide3Illustration() {
+  const routeNavy = "#1B2A4A";
+  // 1 좌하 → 2 중앙 → 3 우상, 완만한 상승 곡선
+  const p1 = { x: 28, y: 118 };
+  const p2 = { x: 110, y: 78 };
+  const p3 = { x: 188, y: 36 };
+  const r = 16;
+  const pathD = `M ${p1.x} ${p1.y} C 58 112, 78 92, ${p2.x} ${p2.y} S 158 48, ${p3.x} ${p3.y}`;
+
   return (
     <IllustrationPlate tone="mint">
       <div
@@ -295,33 +303,97 @@ function Slide3Illustration() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          filter: "drop-shadow(0 12px 20px rgba(27, 42, 107, 0.14))",
         }}
       >
-        <svg width="200" height="150" viewBox="0 0 112 88" fill="none" aria-hidden>
+        <svg width="220" height="168" viewBox="0 0 220 160" fill="none" aria-hidden>
+          <defs>
+            <filter id="onboardingRouteGlow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="6" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <filter id="onboardingRouteShadow" x="-20%" y="-20%" width="140%" height="160%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="10" />
+            </filter>
+          </defs>
+
+          {/* 경로 아래 옅은 그림자 */}
           <path
-            d="M16 68 C34 58, 42 28, 56 24 S78 40, 96 20"
-            stroke={NAVY}
-            strokeWidth="2.5"
+            d={pathD}
+            stroke="rgba(27, 42, 74, 0.06)"
+            strokeWidth="14"
             strokeLinecap="round"
-            strokeDasharray="5 5"
-            opacity="0.5"
+            fill="none"
+            transform="translate(0 8)"
+            filter="url(#onboardingRouteShadow)"
           />
-          <circle cx="16" cy="68" r="8" fill={NAVY} />
-          <circle cx="16" cy="68" r="3.2" fill="#F4F9F8" />
-          <circle cx="56" cy="24" r="8" fill={NAVY} />
-          <circle cx="56" cy="24" r="3.2" fill="#F4F9F8" />
-          <circle cx="96" cy="20" r="8" fill={NAVY} />
-          <circle cx="96" cy="20" r="3.2" fill="#F4F9F8" />
+
+          {/* 점선 경로 */}
           <path
-            d="M44 52 L52 44 L60 52 L68 40"
-            stroke={NAVY}
+            d={pathD}
+            stroke={routeNavy}
+            strokeWidth="2.75"
+            strokeLinecap="round"
+            strokeDasharray="5 7"
+            fill="none"
+            opacity="0.72"
+          />
+
+          {/* 1 */}
+          <circle cx={p1.x} cy={p1.y} r={r} fill={routeNavy} />
+          <text
+            x={p1.x}
+            y={p1.y + 1}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="#fff"
+            fontSize="13"
+            fontWeight="700"
+            fontFamily="system-ui, -apple-system, sans-serif"
+          >
+            1
+          </text>
+
+          {/* 2 */}
+          <circle cx={p2.x} cy={p2.y} r={r} fill={routeNavy} />
+          <text
+            x={p2.x}
+            y={p2.y + 1}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="#fff"
+            fontSize="13"
+            fontWeight="700"
+            fontFamily="system-ui, -apple-system, sans-serif"
+          >
+            2
+          </text>
+
+          {/* 3 — 도착 링 + 점 */}
+          <circle
+            cx={p3.x}
+            cy={p3.y}
+            r={r + 8}
+            fill="none"
+            stroke="rgba(27, 42, 74, 0.18)"
             strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+            filter="url(#onboardingRouteGlow)"
           />
-          <circle cx="44" cy="52" r="4.5" fill={NAVY} />
-          <circle cx="68" cy="40" r="4.5" fill={NAVY} />
+          <circle cx={p3.x} cy={p3.y} r={r} fill={routeNavy} />
+          <text
+            x={p3.x}
+            y={p3.y + 1}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="#fff"
+            fontSize="13"
+            fontWeight="700"
+            fontFamily="system-ui, -apple-system, sans-serif"
+          >
+            3
+          </text>
         </svg>
       </div>
     </IllustrationPlate>
