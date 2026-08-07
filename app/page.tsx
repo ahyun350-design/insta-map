@@ -18,6 +18,7 @@ import {
   writeCachedPlaces,
   type CachedMapView,
 } from "@/lib/homeBootstrapCache";
+import { fetchChatRoomList } from "@/lib/fetchChatRoomList";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay } from "@/components/ExtractLoadingOverlay";
@@ -308,6 +309,8 @@ const REALTIME_REMOUNT_DEBOUNCE_MS = 1000;
 const REALTIME_REMOUNT_BACKOFFS_MS = [1000, 3000, 10000] as const;
 /** 동일 유저·짧은 시간 내 auth 이벤트 중복으로 loadData가 2회+ 실행되는 것 방지 */
 const LOAD_DATA_DEDUP_MS = 2000;
+/** 메시지 탭 방 목록 재조회 TTL — Realtime은 별도로 즉시 반영 */
+const CHAT_ROOMS_LIST_TTL_MS = 30_000;
 const REALTIME_REMOUNT_MAX_RETRIES = 5;
 const REALTIME_ERROR_STATUSES = new Set(["CHANNEL_ERROR", "CLOSED", "TIMED_OUT"]);
 
@@ -1536,6 +1539,9 @@ function HomePageContent() {
   const loadDataInFlightRef = useRef(false);
   const lastLoadDataSuccessAtRef = useRef(0);
   const lastLoadDataUserIdRef = useRef("");
+  /** 채팅방 목록 배치 조회 성공 시각 — 메시지 탭 TTL 스킵용 */
+  const chatRoomsListFetchedAtRef = useRef(0);
+  const chatRoomsListFetchInFlightRef = useRef<Promise<ChatRoom[]> | null>(null);
   /** Preferences places 캐시 히트 — loadData silent refresh / 스플래시 조기 hide */
   const bootstrapCacheHitRef = useRef(false);
   const bootstrapCacheUserIdRef = useRef<string | null>(null);
@@ -2824,6 +2830,41 @@ function HomePageContent() {
     ]);
   };
 
+  /** 채팅방 목록 배치 조회 (N+1 제거). 성공 시 TTL 타임스탬프 갱신. */
+  const loadChatRoomsList = async (uid: string): Promise<ChatRoom[]> => {
+    if (!uid) return [];
+    if (chatRoomsListFetchInFlightRef.current) {
+      return chatRoomsListFetchInFlightRef.current;
+    }
+    const run = (async () => {
+      const rooms = await fetchChatRoomList({
+        uid,
+        onMissingFriend: (roomId, friendId) => {
+          console.log("[PindMap:chat] 유령 방 제외 roomId=%s friendId=%s", roomId, friendId);
+        },
+        onFriendRow: (row) => {
+          userAvatarCacheRef.current.setFromRow({
+            id: row.id,
+            username: row.username ?? "",
+            avatar_url: row.avatar_url,
+          });
+        },
+      });
+      return sortChatRoomsByRecency(rooms);
+    })();
+    chatRoomsListFetchInFlightRef.current = run;
+    try {
+      const rooms = await run;
+      setChatRooms(rooms);
+      chatRoomsListFetchedAtRef.current = Date.now();
+      return rooms;
+    } finally {
+      if (chatRoomsListFetchInFlightRef.current === run) {
+        chatRoomsListFetchInFlightRef.current = null;
+      }
+    }
+  };
+
   const loadData = async (isRetry = false) => {
     const uid = user?.id ?? "";
     if (!isRetry) {
@@ -3116,71 +3157,7 @@ function HomePageContent() {
 
     const loadChatRoomsBg = async () => {
       try {
-        const roomsRes = await withTimeout(
-          timedLoadQuery(
-            "chat_rooms",
-            supabase.from("chat_rooms").select("*").or(`user1_id.eq.${uid},user2_id.eq.${uid}`),
-          ),
-          8000,
-        );
-        if (cancelled) return;
-        const roomsData = roomsRes.data;
-        if (roomsData && roomsData.length > 0) {
-          const rooms = (
-            await withTimeout(
-              Promise.all(
-                roomsData.map(async (r: any) => {
-                  const friendId = r.user1_id === uid ? r.user2_id : r.user1_id;
-                  const { data: friendData, error: friendLookupError } = await supabase
-                    .from("users")
-                    .select("username, avatar_url")
-                    .eq("id", friendId)
-                    .maybeSingle();
-                  if (!friendLookupError && !friendData) {
-                    console.log("[PindMap:chat] 유령 방 제외 roomId=%s friendId=%s", r.id, friendId);
-                    return null;
-                  }
-                  if (friendData) {
-                    userAvatarCacheRef.current.setFromRow({
-                      id: friendId,
-                      username: friendData.username,
-                      avatar_url: friendData.avatar_url,
-                    });
-                  }
-                  const [msgsRes, unreadRes] = await Promise.all([
-                    supabase
-                      .from("messages")
-                      .select("*")
-                      .eq("room_id", r.id)
-                      .order("created_at", { ascending: false })
-                      .limit(1),
-                    supabase
-                      .from("messages")
-                      .select("*", { count: "exact", head: true })
-                      .eq("room_id", r.id)
-                      .neq("sender_id", uid)
-                      .eq("read", false),
-                  ]);
-                  const unread = typeof unreadRes.count === "number" ? unreadRes.count : 0;
-                  return {
-                    id: r.id,
-                    friendId,
-                    friendName: friendData?.username || friendId,
-                    friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
-                    lastMessage: msgsRes.data?.[0]?.text ?? "",
-                    lastTime: msgsRes.data?.[0]?.created_at ?? r.created_at,
-                    unreadCount: unread,
-                  };
-                }),
-              ),
-              8000,
-            )
-          ).filter((room) => room !== null) as ChatRoom[];
-          if (cancelled) return;
-          setChatRooms(sortChatRoomsByRecency(rooms));
-        } else {
-          setChatRooms([]);
-        }
+        await withTimeout(loadChatRoomsList(uid), 8000);
       } catch (err) {
         console.error("[PindMap:home] background chat rooms load failed", err);
       }
@@ -7233,42 +7210,18 @@ function HomePageContent() {
     };
   }, [detailPostId, feedPosts, prefetchAvatarsForFeedPosts, hydrateFeedPostsWithAvatars]);
 
-  // 메시지 탭 진입 시 안 읽은 개수 갱신
+  // 메시지 탭 진입 시 방 목록 갱신 (TTL 내·이미 로드됐으면 스킵, Realtime은 별도)
   useEffect(() => {
     if (activeTab !== "messages" || activeChatRoom) return;
-    const refreshRooms = async () => {
-      const { data: roomsData } = await supabase.from("chat_rooms").select("*").or(`user1_id.eq.${MY_USER},user2_id.eq.${MY_USER}`);
-      if (!roomsData) return;
-      const rooms = (await Promise.all(roomsData.map(async (r: any) => {
-        const friendId = r.user1_id === MY_USER ? r.user2_id : r.user1_id;
-        const { data: friendData, error: friendLookupError } = await supabase
-          .from("users")
-          .select("username, avatar_url")
-          .eq("id", friendId)
-          .maybeSingle();
-        if (!friendLookupError && !friendData) {
-          console.log("[PindMap:chat] 유령 방 제외 roomId=%s friendId=%s", r.id, friendId);
-          return null;
-        }
-        if (friendData) {
-          userAvatarCacheRef.current.setFromRow({ id: friendId, username: friendData.username, avatar_url: friendData.avatar_url });
-        }
-        const { data: msgs } = await supabase.from("messages").select("*").eq("room_id", r.id).order("created_at", { ascending: false }).limit(1);
-        const { count: unread } = await supabase.from("messages").select("*", { count: "exact", head: true }).eq("room_id", r.id).neq("sender_id", MY_USER).eq("read", false);
-        return {
-          id: r.id,
-          friendId,
-          friendName: friendData?.username || friendId,
-          friendAvatarUrl: normalizeAvatarUrl(friendData?.avatar_url),
-          lastMessage: msgs?.[0]?.text ?? "",
-          lastTime: msgs?.[0]?.created_at ?? r.created_at,
-          unreadCount: unread ?? 0,
-        };
-      }))).filter((room) => room !== null) as ChatRoom[];
-      setChatRooms(sortChatRoomsByRecency(rooms));
-    };
-    refreshRooms();
-  }, [activeTab, activeChatRoom]);
+    if (!MY_USER) return;
+    const fetchedAt = chatRoomsListFetchedAtRef.current;
+    if (fetchedAt > 0 && Date.now() - fetchedAt < CHAT_ROOMS_LIST_TTL_MS) {
+      return;
+    }
+    void loadChatRoomsList(MY_USER).catch((err) => {
+      console.error("[PindMap:chat] messages-tab rooms refresh failed", err);
+    });
+  }, [activeTab, activeChatRoom, MY_USER]);
 
   useEffect(() => {
     if (!user?.id) {
