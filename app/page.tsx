@@ -8,6 +8,15 @@ import { debugLog, dlog, logPerf, perfNow } from "@/lib/debugLog";
 import { withAutoRetry, withAutoRetryAndMessageSendRecovery } from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
 import { hideNativeSplash } from "@/lib/nativeSplash";
+import {
+  clearHomeBootstrapCache,
+  placesAreEqual,
+  readCachedMapView,
+  readCachedPlaces,
+  writeCachedMapView,
+  writeCachedPlaces,
+  type CachedMapView,
+} from "@/lib/homeBootstrapCache";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay } from "@/components/ExtractLoadingOverlay";
@@ -1136,6 +1145,7 @@ function HomePageContent() {
   const handleLogoutClick = async () => {
     if (!confirm("정말 로그아웃하시겠어요?")) return;
     try {
+      await clearHomeBootstrapCache();
       await logout();
     } catch (err) {
       console.error("[PindMap:home][auth] logout handler failed", err);
@@ -1504,6 +1514,13 @@ function HomePageContent() {
   const loadDataInFlightRef = useRef(false);
   const lastLoadDataSuccessAtRef = useRef(0);
   const lastLoadDataUserIdRef = useRef("");
+  /** Preferences places 캐시 히트 — loadData silent refresh / 스플래시 조기 hide */
+  const bootstrapCacheHitRef = useRef(false);
+  const bootstrapCacheUserIdRef = useRef<string | null>(null);
+  const mapViewBootstrapRef = useRef<CachedMapView | null>(null);
+  const mapViewSaveTimerRef = useRef<number | null>(null);
+  const [bootstrapCacheResolved, setBootstrapCacheResolved] = useState(false);
+  const [bootstrapCacheHit, setBootstrapCacheHit] = useState(false);
   const initialPinTriggeredRef = useRef(false);
   const prevSavedPlacesKeyRef = useRef("");
   const relayoutTriggeredRef = useRef(false);
@@ -2809,8 +2826,11 @@ function HomePageContent() {
     const perfScreen = "home:initial";
     dlog.perf.start(perfScreen);
     dlog.perf.fetchStart(perfScreen);
-    console.log("[PindMap:home] 로딩 시작", { isRetry });
-    setLoading(true);
+    console.log("[PindMap:home] 로딩 시작", { isRetry, warmCache: bootstrapCacheHitRef.current });
+    // 캐시로 이미 그린 경우 스켈레톤/스피너를 다시 띄우지 않음
+    if (!bootstrapCacheHitRef.current) {
+      setLoading(true);
+    }
     setHomeLoadError(null);
     try {
       // critical path: places / feed / follows / likes only (chat·notifications·avatar await는 스플래시 밖)
@@ -2838,7 +2858,12 @@ function HomePageContent() {
           const coords = latLngFromRow(place);
           if (coords) savedPlaceCoordsRef.current[place.id] = coords;
         });
-        setSavedPlaces(mappedPlaces);
+        if (!placesAreEqual(mappedPlaces, savedPlacesRef.current)) {
+          setSavedPlaces(mappedPlaces);
+        }
+        if (uid) {
+          void writeCachedPlaces(uid, mappedPlaces);
+        }
       }
       if (postsRes.data) {
         const rawPosts: FeedPost[] = postsRes.data.map((p: any) =>
@@ -2850,6 +2875,24 @@ function HomePageContent() {
         });
       } else {
         setFeedPosts([]);
+      }
+
+      const map = mapRef.current;
+      if (map?.getCenter && map?.getLevel) {
+        try {
+          const c = map.getCenter();
+          const view: CachedMapView = {
+            lat: c.getLat(),
+            lng: c.getLng(),
+            level: map.getLevel(),
+          };
+          if (Number.isFinite(view.lat) && Number.isFinite(view.lng)) {
+            mapViewBootstrapRef.current = view;
+            void writeCachedMapView(view);
+          }
+        } catch {
+          /* ignore map snapshot errors */
+        }
       }
 
       homeAutoRetryCountRef.current = 0;
@@ -2934,12 +2977,87 @@ function HomePageContent() {
     dlog.perf.markRender("home:initial");
   }, [sessionChecked, userLoading, user, loading]);
 
-  /** 네이티브 스플래시: 인증·홈 초기 데이터 준비 후 숨김 (흰 화면 구간 제거) */
+  /** 네이티브 스플래시: 캐시 히트면 인증 직후 hide, 미스면 기존처럼 loadData 대기 */
   useEffect(() => {
     if (!sessionChecked || userLoading) return;
-    if (user && loading) return;
+    if (!user) {
+      void hideNativeSplash();
+      return;
+    }
+    if (!bootstrapCacheResolved) return;
+    if (bootstrapCacheHit) {
+      void hideNativeSplash();
+      return;
+    }
+    if (loading) return;
     void hideNativeSplash();
-  }, [sessionChecked, userLoading, user, loading]);
+  }, [sessionChecked, userLoading, user, loading, bootstrapCacheResolved, bootstrapCacheHit]);
+
+  /** 인증과 병렬: Preferences 캐시로 places/mapview 즉시 반영 */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [placesPayload, mapView] = await Promise.all([readCachedPlaces(), readCachedMapView()]);
+        if (cancelled) return;
+        if (mapView) {
+          mapViewBootstrapRef.current = mapView;
+        }
+        if (placesPayload && placesPayload.places.length > 0) {
+          const uid = userIdRef.current;
+          if (uid && uid !== placesPayload.userId) {
+            bootstrapCacheHitRef.current = false;
+            setBootstrapCacheHit(false);
+          } else {
+            bootstrapCacheUserIdRef.current = placesPayload.userId;
+            const asPlaces = placesPayload.places.map((p) =>
+              mapPlaceRow({
+                id: p.id,
+                name: p.name,
+                address: p.address,
+                category: p.category,
+                lat: p.lat,
+                lng: p.lng,
+              }),
+            );
+            asPlaces.forEach((place) => {
+              const coords = latLngFromRow(place);
+              if (coords) savedPlaceCoordsRef.current[place.id] = coords;
+            });
+            setSavedPlaces(asPlaces);
+            bootstrapCacheHitRef.current = true;
+            setBootstrapCacheHit(true);
+            setLoading(false);
+          }
+        } else {
+          bootstrapCacheHitRef.current = false;
+          setBootstrapCacheHit(false);
+        }
+      } catch (err) {
+        console.error("[PindMap:home] bootstrap cache read failed", err);
+        bootstrapCacheHitRef.current = false;
+        setBootstrapCacheHit(false);
+      } finally {
+        if (!cancelled) setBootstrapCacheResolved(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** 로그인 유저가 캐시 소유자와 다르면 캐시 폐기 */
+  useEffect(() => {
+    if (!user?.id || !bootstrapCacheResolved) return;
+    const cachedUid = bootstrapCacheUserIdRef.current;
+    if (!cachedUid || cachedUid === user.id) return;
+    bootstrapCacheHitRef.current = false;
+    setBootstrapCacheHit(false);
+    bootstrapCacheUserIdRef.current = null;
+    mapViewBootstrapRef.current = null;
+    setSavedPlaces([]);
+    void clearHomeBootstrapCache();
+  }, [user?.id, bootstrapCacheResolved]);
 
   /** 스플래시 비차단: 알림·채팅방(+N+1)은 loadData 종료 후 백그라운드 로드 */
   useEffect(() => {
@@ -6130,10 +6248,41 @@ function HomePageContent() {
       return;
     }
     const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
-    mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, { center: new window.kakao.maps.LatLng(37.5665, 126.978), level: 9 });
+    const cachedView = mapViewBootstrapRef.current;
+    const centerLat = cachedView && Number.isFinite(cachedView.lat) ? cachedView.lat : 37.5665;
+    const centerLng = cachedView && Number.isFinite(cachedView.lng) ? cachedView.lng : 126.978;
+    const level =
+      cachedView && Number.isFinite(cachedView.level) ? cachedView.level : 9;
+    mapRef.current = new window.kakao.maps.Map(mapContainerRef.current, {
+      center: new window.kakao.maps.LatLng(centerLat, centerLng),
+      level,
+    });
     mapInstanceIdRef.current += 1;
     mapRef.current.setMapTypeId && mapRef.current.setMapTypeId(mapTypeId);
     geocoderRef.current = new window.kakao.maps.services.Geocoder();
+    window.kakao.maps.event.addListener(mapRef.current, "idle", () => {
+      const map = mapRef.current;
+      if (!map?.getCenter || !map?.getLevel) return;
+      try {
+        const c = map.getCenter();
+        const view: CachedMapView = {
+          lat: c.getLat(),
+          lng: c.getLng(),
+          level: map.getLevel(),
+        };
+        if (!Number.isFinite(view.lat) || !Number.isFinite(view.lng)) return;
+        mapViewBootstrapRef.current = view;
+        if (mapViewSaveTimerRef.current !== null) {
+          window.clearTimeout(mapViewSaveTimerRef.current);
+        }
+        mapViewSaveTimerRef.current = window.setTimeout(() => {
+          mapViewSaveTimerRef.current = null;
+          void writeCachedMapView(view);
+        }, 400);
+      } catch {
+        /* ignore */
+      }
+    });
     addMyLocation(mapRef.current, "main");
     setCompactMapReady(true);
     attachCompactMapResizeObserver();
