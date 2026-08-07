@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from "react";
 import { createPortal } from "react-dom";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { debugLog, dlog, logPerf, perfNow } from "@/lib/debugLog";
@@ -82,10 +83,7 @@ import {
 import { PindmapNativeMap } from "@pindmap/native-map";
 import { uploadAvatar } from "@/lib/uploadAvatar";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
-import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
-import { ChatCourseCard } from "@/components/ChatCourseCard";
-import { CourseEditScreen } from "@/components/CourseEditScreen";
-import { NewCurationScreen } from "@/components/NewCurationScreen";
+import type { FollowListType } from "@/components/FollowListModal";
 import { MAX_CURATION_PHOTOS } from "@/components/curation/types";
 import {
   companionFilterChipLabel,
@@ -95,7 +93,6 @@ import {
 } from "@/lib/companionTag";
 import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
 import { HomeFeedTopBar } from "@/components/HomeFeedTopBar";
-import { HomeSearchScreen } from "@/components/HomeSearchScreen";
 import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
 import { feedPostMatchesCategoryFilter, getDisplayCategories } from "@/lib/categoryUtil";
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
@@ -106,7 +103,6 @@ import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
 import { MapResearchAreaButton } from "@/components/MapResearchAreaButton";
-import { CourseNavigationOverlay } from "@/components/CourseNavigationOverlay";
 import { Coachmark } from "@/components/Coachmark";
 import { nextCoachToShow, setCoachSeen, COACHMARK_DEFS } from "@/lib/coachmarks";
 import {
@@ -137,7 +133,6 @@ import {
   getCurrentPositionForMapStage2,
   isGeolocationPermissionDenied,
 } from "@/lib/getCurrentPositionForMap";
-import { MessageUserSearchRow } from "@/components/MessageUserSearchRow";
 import { getDisplayFriendName } from "@/lib/friendDisplay";
 import { searchUsersByUsername, type UserSearchHit } from "@/lib/userSearch";
 import {
@@ -156,6 +151,58 @@ import {
   mergeRelatedFeedPostsForPlaceSheet,
   type PlaceRefForPhotoTagMatch,
 } from "@/lib/photoPlaceTag";
+
+const dynamicFullscreenLoading = () => (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 100000,
+      background: "#fafafa",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    }}
+  >
+    <p style={{ margin: 0, fontSize: 13, color: "#888" }}>불러오는 중...</p>
+  </div>
+);
+
+const CourseEditScreen = dynamic(
+  () => import("@/components/CourseEditScreen").then((m) => ({ default: m.CourseEditScreen })),
+  { ssr: false, loading: dynamicFullscreenLoading },
+);
+const NewCurationScreen = dynamic(
+  () => import("@/components/NewCurationScreen").then((m) => ({ default: m.NewCurationScreen })),
+  { ssr: false, loading: dynamicFullscreenLoading },
+);
+const HomeSearchScreen = dynamic(
+  () => import("@/components/HomeSearchScreen").then((m) => ({ default: m.HomeSearchScreen })),
+  { ssr: false, loading: dynamicFullscreenLoading },
+);
+const FollowListModal = dynamic(
+  () => import("@/components/FollowListModal").then((m) => ({ default: m.FollowListModal })),
+  { ssr: false, loading: () => null },
+);
+const CourseNavigationOverlay = dynamic(
+  () =>
+    import("@/components/CourseNavigationOverlay").then((m) => ({
+      default: m.CourseNavigationOverlay,
+    })),
+  { ssr: false, loading: () => null },
+);
+const ChatCourseCard = dynamic(
+  () => import("@/components/ChatCourseCard").then((m) => ({ default: m.ChatCourseCard })),
+  { ssr: false, loading: () => null },
+);
+const MessageUserSearchRow = dynamic(
+  () =>
+    import("@/components/MessageUserSearchRow").then((m) => ({
+      default: m.MessageUserSearchRow,
+    })),
+  { ssr: false, loading: () => null },
+);
+
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -1338,6 +1385,8 @@ function HomePageContent() {
   const [editingPost, setEditingPost] = useState<FeedPost | null>(null);
   const [editComment, setEditComment] = useState("");
   const [showPostModal, setShowPostModal] = useState(false);
+  /** NewCurationScreen 퇴장 애니 동안 마운트 유지 (dynamic 청크는 열릴 때만) */
+  const [newCurationMounted, setNewCurationMounted] = useState(false);
   const [selectedCompanionTag, setSelectedCompanionTag] = useState<CompanionTagFilter>("all");
   const [selectedHomeCategory, setSelectedHomeCategory] = useState<HomeCategoryFilter>("all");
   const [homeSearchQuery, setHomeSearchQuery] = useState("");
@@ -6066,6 +6115,10 @@ function HomePageContent() {
     resetPostForm();
   };
 
+  useEffect(() => {
+    if (showPostModal) setNewCurationMounted(true);
+  }, [showPostModal]);
+
   const applyMyLocationOnMap = (
     map: any,
     scope: "main" | "expanded",
@@ -9525,10 +9578,14 @@ function HomePageContent() {
 
           {courseModalLayerEl}
 
+          {newCurationMounted && (
           <NewCurationScreen
             open={showPostModal}
             onClose={closePostScreen}
-            onExited={resetPostForm}
+            onExited={() => {
+              resetPostForm();
+              setNewCurationMounted(false);
+            }}
             onSubmit={() => { void handleSubmitPost(); }}
             canPost={canPost}
             validationHint={postValidationHint}
@@ -9555,6 +9612,7 @@ function HomePageContent() {
             courseTitle={postCourseTitle}
             onCourseTitleChange={setPostCourseTitle}
           />
+          )}
 
           {activeTab === "home" && (
             <div className="screen homeFeed">

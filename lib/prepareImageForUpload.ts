@@ -1,5 +1,3 @@
-import imageCompression from "browser-image-compression";
-
 const HEIC_EXT = /\.(heic|heif)$/i;
 
 function isHeicLike(file: File): boolean {
@@ -33,6 +31,7 @@ export async function prepareImageForUpload(original: File): Promise<File> {
     });
   }
 
+  const { default: imageCompression } = await import("browser-image-compression");
   const compressed = await imageCompression(source, {
     maxSizeMB: 0.5,
     maxWidthOrHeight: 1080,
