@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isValidInstagramPostUrl } from "@/app/api/extract/_shared";
+import {
+  EXTRACT_PROCESS_TRIGGER_FAILED,
+  markExtractJobFailed,
+  reclaimStaleExtractJobs,
+} from "@/app/api/extract/_reclaim";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +46,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "유효하지 않은 사용자" }, { status: 401 });
     }
 
+    // 신규 추출 전에 이 유저의 오래된 멈춤 job 정리 (크론 대용)
+    void reclaimStaleExtractJobs(adminClient, { userId });
+
     const jobId = crypto.randomUUID();
     const { error: insertError } = await adminClient.from("extract_jobs").insert({
       id: jobId,
@@ -78,6 +86,12 @@ export async function POST(req: Request) {
           await triggerProcess();
         } catch (secondErr) {
           console.error("[extract] process trigger second attempt failed", secondErr);
+          await markExtractJobFailed(
+            adminClient,
+            jobId,
+            EXTRACT_PROCESS_TRIGGER_FAILED,
+            "처리 시작 실패",
+          );
         }
       }
     })();

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { Place } from "@/app/api/extract/_shared";
+import { reclaimStaleExtractJobs } from "@/app/api/extract/_reclaim";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +42,9 @@ export async function GET(req: Request) {
     if (userError || !userData.user) {
       return NextResponse.json({ error: "유효하지 않은 사용자" }, { status: 401 });
     }
+
+    // 폴링마다 해당 유저의 10분+ 멈춤 job을 failed로 (현재 job 포함)
+    await reclaimStaleExtractJobs(adminClient, { userId });
 
     const { data, error } = await adminClient
       .from("extract_jobs")

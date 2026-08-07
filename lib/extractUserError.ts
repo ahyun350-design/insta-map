@@ -7,6 +7,15 @@ export function mapExtractErrorToUserMessage(raw: string | null | undefined): st
   const lower = msg.toLowerCase();
 
   if (
+    msg === "timeout" ||
+    msg === "process_trigger_failed" ||
+    /^timeout\b/i.test(msg) ||
+    /시간이 오래 걸려/i.test(msg)
+  ) {
+    return "시간이 오래 걸려 중단됐어요. 다시 시도해 주세요";
+  }
+
+  if (
     /claude/i.test(msg) ||
     /anthropic/i.test(msg) ||
     /credit balance/i.test(msg) ||
