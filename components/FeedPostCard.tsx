@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
 import type { PhotoPlaceTag } from "@/lib/feedPost";
@@ -68,12 +68,29 @@ function formatLikeCount(n: number): string {
 const SWIPE_MOVE_PX = 10;
 const SWIPE_SCROLL_PX = 2;
 
+type FeedPostMediaVariant = "list" | "detail";
+
+function initialLoadIndices(variant: FeedPostMediaVariant, count: number): Set<number> {
+  const s = new Set<number>();
+  if (count <= 0) return s;
+  if (variant === "detail") {
+    for (let i = 0; i < Math.min(3, count); i++) s.add(i);
+    // 캐러셀 이웃 (첫 장 기준)
+    if (count > 1) s.add(1);
+  } else {
+    s.add(0);
+    if (count > 1) s.add(1);
+  }
+  return s;
+}
+
 export function FeedPostMedia({
   images,
   placeSource,
   onMediaClick,
   onPlaceOverlayClick,
   mediaAriaLabel = "게시물 상세 보기",
+  variant = "list",
 }: {
   images: string[];
   placeSource: Pick<
@@ -83,12 +100,75 @@ export function FeedPostMedia({
   onMediaClick: (payload: { imageUrl: string; index: number }) => void;
   onPlaceOverlayClick?: (placeRef: PlaceRefForPhotoTagMatch) => void;
   mediaAriaLabel?: string;
+  /** list: 홈/카드 lazy / detail: 상세 eager·프리로드 */
+  variant?: FeedPostMediaVariant;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [loadIndices, setLoadIndices] = useState<Set<number>>(() =>
+    initialLoadIndices(variant, images.length),
+  );
   const multi = images.length > 1;
   const pointerStartRef = useRef<{ x: number; y: number; scrollLeft: number } | null>(null);
   const suppressTapRef = useRef(false);
+
+  const expandLoadIndices = useCallback(
+    (center: number) => {
+      setLoadIndices((prev) => {
+        const next = new Set(prev);
+        const add = (i: number) => {
+          if (i >= 0 && i < images.length) next.add(i);
+        };
+        add(center);
+        add(center - 1);
+        add(center + 1);
+        if (variant === "detail") {
+          for (let i = 0; i < Math.min(3, images.length); i++) add(i);
+        }
+        if (next.size === prev.size) {
+          for (const i of next) {
+            if (!prev.has(i)) return next;
+          }
+          return prev;
+        }
+        return next;
+      });
+    },
+    [images.length, variant],
+  );
+
+  useEffect(() => {
+    setLoadIndices(initialLoadIndices(variant, images.length));
+    setActiveIndex(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 이미지 URL 집합이 바뀔 때만 리셋
+  }, [variant, images.join("\0")]);
+
+  useEffect(() => {
+    expandLoadIndices(activeIndex);
+  }, [activeIndex, expandLoadIndices]);
+
+  /** 상세: 가로 스크롤 IO로 여유(400px) 있게 미리 마운트 — native lazy 대신 */
+  useEffect(() => {
+    if (variant !== "detail") return;
+    const root = scrollRef.current;
+    if (!root) return;
+    const slides = root.querySelectorAll<HTMLElement>("[data-slide-index]");
+    if (slides.length === 0) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const raw = (entry.target as HTMLElement).dataset.slideIndex;
+          const i = raw != null ? Number(raw) : NaN;
+          if (!Number.isFinite(i)) continue;
+          expandLoadIndices(i);
+        }
+      },
+      { root, rootMargin: "0px 400px", threshold: 0 },
+    );
+    slides.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [variant, images.length, expandLoadIndices]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -161,7 +241,7 @@ export function FeedPostMedia({
   }
 
   return (
-    <div className="feedPostMedia">
+    <div className={`feedPostMedia${variant === "detail" ? " feedPostMedia--detail" : ""}`}>
       <div
         ref={scrollRef}
         className="feedPostMediaTrack"
@@ -184,20 +264,26 @@ export function FeedPostMedia({
         }}
       >
         {images.map((src, i) => {
-          const shouldLoad = i <= activeIndex + 1;
+          const shouldLoad = loadIndices.has(i);
+          const eager =
+            variant === "detail" && (i < 3 || Math.abs(i - activeIndex) <= 1);
           return (
-            <div key={`${src}-${i}`} className="feedPostMediaSlide">
+            <div key={`${src}-${i}`} className="feedPostMediaSlide" data-slide-index={i}>
               {shouldLoad ? (
                 <img
                   src={src}
                   alt=""
                   className="feedPostMediaImg"
                   draggable={false}
-                  loading="lazy"
                   decoding="async"
+                  {...(variant === "detail"
+                    ? eager
+                      ? { loading: "eager" as const, fetchPriority: i === 0 ? ("high" as const) : undefined }
+                      : {}
+                    : { loading: "lazy" as const })}
                 />
               ) : (
-                <div className="feedPostMediaImg" aria-hidden />
+                <div className="feedPostMediaImg feedPostMediaImgSkeleton" aria-hidden />
               )}
             </div>
           );

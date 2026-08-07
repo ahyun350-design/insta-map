@@ -9494,6 +9494,7 @@ function HomePageContent() {
                 <FeedPostMedia
                   images={detailPost.images}
                   placeSource={detailPost}
+                  variant="detail"
                   mediaAriaLabel="사진 확대"
                   onMediaClick={({ imageUrl }) => setLightboxImg(imageUrl)}
                   onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(detailPost, placeRef)}

@@ -1053,6 +1053,8 @@ body {
   width: 100%;
   scroll-snap-align: start;
   aspect-ratio: 1 / 1;
+  background: #f0f0f0;
+  position: relative;
 }
 
 .feedPostMediaImg {
@@ -1061,6 +1063,11 @@ body {
   object-fit: cover;
   display: block;
   cursor: pointer;
+  background: #f0f0f0;
+}
+
+.feedPostMediaImgSkeleton {
+  background: #ececee;
 }
 
 .feedPostMediaPlaceholder {
