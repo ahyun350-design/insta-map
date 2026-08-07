@@ -29,6 +29,7 @@ import {
   mark,
   type BootTimingReport,
 } from "@/lib/bootTiming";
+import { loadBootFailReport, type BootFailReport } from "@/lib/webviewRecovery";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay } from "@/components/ExtractLoadingOverlay";
@@ -1292,6 +1293,7 @@ function HomePageContent() {
   const [adminStatusLoading, setAdminStatusLoading] = useState(false);
   const [adminStatusExpanded, setAdminStatusExpanded] = useState(false);
   const [lastBootTiming, setLastBootTiming] = useState<BootTimingReport | null>(null);
+  const [bootFailReport, setBootFailReport] = useState<BootFailReport | null>(null);
   const [showFollowList, setShowFollowList] = useState<FollowListType | null>(null);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [showDeleteAccountFinalModal, setShowDeleteAccountFinalModal] = useState(false);
@@ -8024,14 +8026,18 @@ function HomePageContent() {
       setAdminStatus(null);
       setAdminStatusExpanded(false);
       setLastBootTiming(null);
+      setBootFailReport(null);
       return;
     }
     let cancelled = false;
     const load = async () => {
       setAdminStatusLoading(true);
       try {
-        const boot = await loadLastBootTimingReport();
-        if (!cancelled) setLastBootTiming(boot);
+        const [boot, fail] = await Promise.all([loadLastBootTimingReport(), loadBootFailReport()]);
+        if (!cancelled) {
+          setLastBootTiming(boot);
+          setBootFailReport(fail);
+        }
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.access_token) return;
         const res = await fetch("/api/admin/status", {
@@ -10809,6 +10815,12 @@ function HomePageContent() {
                           ))
                         )}
                       </div>
+                    )}
+                    {bootFailReport && bootFailReport.count > 0 && (
+                      <p style={{ margin: "10px 0 0", fontSize: 12, color: "#8f93a6" }}>
+                        부팅 실패 {bootFailReport.count}회 / 마지막{" "}
+                        {formatAdminHoursAgo(bootFailReport.lastAt)}
+                      </p>
                     )}
                   </button>
                 </div>
