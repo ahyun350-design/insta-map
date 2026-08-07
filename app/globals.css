@@ -4141,9 +4141,21 @@ body {
 }
 
 .onboardingSlideAreaCard {
-  background: #f5f6fb;
   margin: 0 16px;
-  border-radius: 24px;
+  border-radius: 28px;
+  overflow: hidden;
+}
+
+.onboardingTone1 {
+  background: linear-gradient(165deg, #eef3fb 0%, #f7f8fc 48%, #e6ecf8 100%);
+}
+
+.onboardingTone2 {
+  background: linear-gradient(165deg, #f2eef8 0%, #f9f7fc 48%, #ebe6f5 100%);
+}
+
+.onboardingTone3 {
+  background: linear-gradient(165deg, #e9f4f2 0%, #f5faf9 48%, #e6eef8 100%);
 }
 
 .onboardingSlideAreaFinal {
@@ -4153,19 +4165,44 @@ body {
 
 .onboardingIllustrationWrap {
   width: 100%;
-  max-width: 320px;
-  margin-bottom: 28px;
+  max-width: 340px;
+  margin-bottom: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.onboardingIllustrationWrapAnim {
+  animation: onboardingIllustIn 250ms ease-out both;
+}
+
+@keyframes onboardingIllustIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboardingIllustrationWrapAnim {
+    animation: none;
+  }
 }
 
 .onboardingIllustrationStage {
   max-width: 100%;
 }
 
+.onboardingIllustrationPlate {
+  max-width: 100%;
+}
+
 .onboardingTitle {
-  margin: 0 0 10px;
+  margin: 0 0 14px;
   font-size: 18px;
   font-weight: 500;
   color: #1b2a6b;
@@ -4182,7 +4219,7 @@ body {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.55;
-  color: #868dab;
+  color: #6a708c;
   max-width: 280px;
 }
 

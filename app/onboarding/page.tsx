@@ -11,21 +11,25 @@ const SLIDES = [
     title: "릴스 속 그곳, 지도에 저장",
     description: "URL 붙여넣으면 위치까지 자동으로",
     Illustration: Slide1Illustration,
+    toneClass: "onboardingTone1",
   },
   {
     title: "찾기 쉽게 자동 정리",
     description: "맛집·카페·쇼핑 알아서 나눠 담아요",
     Illustration: Slide2Illustration,
+    toneClass: "onboardingTone2",
   },
   {
     title: "내 지도가 곧 여행 코스",
     description: "저장한 곳들을 골라 코스로 만들어요",
     Illustration: Slide3Illustration,
+    toneClass: "onboardingTone3",
   },
   {
     title: "이제 내 지도를 채울 차례",
     description: "첫 릴스를 저장해보세요",
     Illustration: Slide4Illustration,
+    toneClass: "",
   },
 ] as const;
 
@@ -43,13 +47,91 @@ function MapPinIcon({ size = 24, color = "currentColor" }: { size?: number; colo
   );
 }
 
-function PlayIcon() {
+function PlayIcon({ size = 18 }: { size?: number }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff" aria-hidden>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="#fff" aria-hidden>
       <polygon points="8,5 19,12 8,19" />
     </svg>
   );
 }
+
+/** Lucide-style stroke icons (lucide-react 미설치 → 인라인 SVG) */
+function IconUtensils({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"
+        stroke="#fff"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M7 2v20" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"
+        stroke="#fff"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconCoffee({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M10 2v2M14 2v2M17 8H4a1 1 0 0 0-1 1v2a6 6 0 0 0 6 6h2a6 6 0 0 0 6-6V9a1 1 0 0 0-1-1Z"
+        stroke="#fff"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M18 8h1a3 3 0 0 1 0 6h-1" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+      <path d="M6 20h10" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconShoppingBag({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"
+        stroke="#fff"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M3 6h18" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M16 10a4 4 0 0 1-8 0"
+        stroke="#fff"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconCamera({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z"
+        stroke="#fff"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="13" r="3" stroke="#fff" strokeWidth="2" />
+    </svg>
+  );
+}
+
+const PIN_SHADOW = "0 14px 32px rgba(27, 42, 107, 0.18), 0 4px 10px rgba(27, 42, 107, 0.08)";
 
 function PinDrop({
   size,
@@ -74,6 +156,7 @@ function PinDrop({
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
+        boxShadow: PIN_SHADOW,
         ...style,
       }}
     >
@@ -84,16 +167,31 @@ function PinDrop({
   );
 }
 
-function IllustrationPlate({ children }: { children: ReactNode }) {
+function IllustrationPlate({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  tone: "blue" | "lavender" | "mint";
+}) {
+  const bg =
+    tone === "blue"
+      ? "linear-gradient(160deg, rgba(255,255,255,0.55) 0%, rgba(210,222,245,0.35) 100%)"
+      : tone === "lavender"
+        ? "linear-gradient(160deg, rgba(255,255,255,0.55) 0%, rgba(220,214,240,0.4) 100%)"
+        : "linear-gradient(160deg, rgba(255,255,255,0.55) 0%, rgba(200,230,228,0.4) 100%)";
+
   return (
     <div
+      className="onboardingIllustrationPlate"
       style={{
-        width: 150,
-        height: 130,
-        borderRadius: 18,
-        background: "#EEF0FA",
+        width: "min(100%, 280px)",
+        height: 220,
+        borderRadius: 28,
+        background: bg,
         position: "relative",
         margin: "0 auto",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.65)",
       }}
     >
       {children}
@@ -105,21 +203,21 @@ function Slide1Illustration() {
   return (
     <div
       className="onboardingIllustrationStage"
-      style={{ position: "relative", width: "min(100%, 200px)", height: 150, margin: "0 auto" }}
+      style={{ position: "relative", width: "min(100%, 280px)", height: 230, margin: "0 auto" }}
       aria-hidden
     >
       <div
         style={{
           position: "absolute",
-          left: "50%",
-          top: "50%",
+          left: "46%",
+          top: "52%",
           transform: "translate(-58%, -50%)",
-          width: 88,
-          height: 120,
-          borderRadius: 16,
-          border: "1.5px solid #E4E7F2",
+          width: 132,
+          height: 178,
+          borderRadius: 22,
+          border: "1.5px solid rgba(228, 231, 242, 0.95)",
           background: "#fff",
-          boxShadow: "0 10px 28px rgba(27, 42, 107, 0.1)",
+          boxShadow: "0 18px 40px rgba(27, 42, 107, 0.16), 0 4px 12px rgba(27, 42, 107, 0.06)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -127,21 +225,22 @@ function Slide1Illustration() {
       >
         <div
           style={{
-            width: 38,
-            height: 38,
+            width: 56,
+            height: 56,
             borderRadius: "50%",
             background: NAVY,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            boxShadow: "0 10px 24px rgba(27, 42, 107, 0.28)",
           }}
         >
-          <PlayIcon />
+          <PlayIcon size={22} />
         </div>
       </div>
-      <div style={{ position: "absolute", right: "4%", top: "6%" }}>
-        <PinDrop size={48} color={NAVY}>
-          <MapPinIcon size={22} color="#fff" />
+      <div style={{ position: "absolute", right: "2%", top: "2%" }}>
+        <PinDrop size={72} color={NAVY}>
+          <MapPinIcon size={32} color="#fff" />
         </PinDrop>
       </div>
     </div>
@@ -149,18 +248,26 @@ function Slide1Illustration() {
 }
 
 function Slide2Illustration() {
-  const pins = [
-    { color: NAVY, emoji: "🍜", top: "18%", left: "12%" },
-    { color: "#D8543A", emoji: "☕", top: "8%", right: "14%", left: "auto" as const },
-    { color: "#1D9E75", emoji: "🛍️", bottom: "16%", left: "18%", top: "auto" as const },
-    { color: "#BA7517", emoji: "📷", bottom: "10%", right: "10%", left: "auto" as const, top: "auto" as const },
+  const pins: Array<{
+    color: string;
+    Icon: (p: { size?: number }) => ReactNode;
+    top?: string;
+    left?: string;
+    right?: string;
+    bottom?: string;
+    key: string;
+  }> = [
+    { key: "food", color: NAVY, Icon: IconUtensils, top: "16%", left: "10%" },
+    { key: "cafe", color: "#D8543A", Icon: IconCoffee, top: "6%", right: "12%", left: "auto" },
+    { key: "shop", color: "#1D9E75", Icon: IconShoppingBag, bottom: "14%", left: "16%", top: "auto" },
+    { key: "cam", color: "#BA7517", Icon: IconCamera, bottom: "8%", right: "8%", left: "auto", top: "auto" },
   ];
 
   return (
-    <IllustrationPlate>
+    <IllustrationPlate tone="lavender">
       {pins.map((pin) => (
         <div
-          key={pin.emoji}
+          key={pin.key}
           style={{
             position: "absolute",
             top: pin.top,
@@ -169,8 +276,8 @@ function Slide2Illustration() {
             bottom: pin.bottom,
           }}
         >
-          <PinDrop size={40} color={pin.color}>
-            <span style={{ fontSize: 16, lineHeight: 1 }}>{pin.emoji}</span>
+          <PinDrop size={58} color={pin.color}>
+            <pin.Icon size={22} />
           </PinDrop>
         </div>
       ))}
@@ -180,7 +287,7 @@ function Slide2Illustration() {
 
 function Slide3Illustration() {
   return (
-    <IllustrationPlate>
+    <IllustrationPlate tone="mint">
       <div
         style={{
           position: "absolute",
@@ -188,23 +295,24 @@ function Slide3Illustration() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          filter: "drop-shadow(0 12px 20px rgba(27, 42, 107, 0.14))",
         }}
       >
-        <svg width="112" height="88" viewBox="0 0 112 88" fill="none" aria-hidden>
+        <svg width="200" height="150" viewBox="0 0 112 88" fill="none" aria-hidden>
           <path
             d="M16 68 C34 58, 42 28, 56 24 S78 40, 96 20"
             stroke={NAVY}
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeDasharray="5 5"
-            opacity="0.45"
+            opacity="0.5"
           />
-          <circle cx="16" cy="68" r="7" fill={NAVY} />
-          <circle cx="16" cy="68" r="3" fill="#EEF0FA" />
-          <circle cx="56" cy="24" r="7" fill={NAVY} />
-          <circle cx="56" cy="24" r="3" fill="#EEF0FA" />
-          <circle cx="96" cy="20" r="7" fill={NAVY} />
-          <circle cx="96" cy="20" r="3" fill="#EEF0FA" />
+          <circle cx="16" cy="68" r="8" fill={NAVY} />
+          <circle cx="16" cy="68" r="3.2" fill="#F4F9F8" />
+          <circle cx="56" cy="24" r="8" fill={NAVY} />
+          <circle cx="56" cy="24" r="3.2" fill="#F4F9F8" />
+          <circle cx="96" cy="20" r="8" fill={NAVY} />
+          <circle cx="96" cy="20" r="3.2" fill="#F4F9F8" />
           <path
             d="M44 52 L52 44 L60 52 L68 40"
             stroke={NAVY}
@@ -212,8 +320,8 @@ function Slide3Illustration() {
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          <circle cx="44" cy="52" r="4" fill={NAVY} />
-          <circle cx="68" cy="40" r="4" fill={NAVY} />
+          <circle cx="44" cy="52" r="4.5" fill={NAVY} />
+          <circle cx="68" cy="40" r="4.5" fill={NAVY} />
         </svg>
       </div>
     </IllustrationPlate>
@@ -224,21 +332,22 @@ function Slide4Illustration() {
   return (
     <div
       className="onboardingIllustrationStage"
-      style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 180 }}
+      style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 200 }}
       aria-hidden
     >
       <div
         style={{
-          width: 82,
-          height: 82,
+          width: 96,
+          height: 96,
           borderRadius: "50%",
           background: "rgba(255, 255, 255, 0.12)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          boxShadow: "0 16px 40px rgba(0, 0, 0, 0.18)",
         }}
       >
-        <MapPinIcon size={42} color="#fff" />
+        <MapPinIcon size={48} color="#fff" />
       </div>
     </div>
   );
@@ -292,6 +401,10 @@ export default function OnboardingPage() {
     else if (delta > 48) goPrev();
   };
 
+  const slideAreaClass = isLast
+    ? "onboardingSlideArea onboardingSlideAreaFinal"
+    : `onboardingSlideArea onboardingSlideAreaCard ${slide.toneClass}`;
+
   return (
     <main className={isLast ? "onboardingRoot onboardingRootFinal" : "onboardingRoot"}>
       {!isLast && (
@@ -303,12 +416,8 @@ export default function OnboardingPage() {
         </header>
       )}
 
-      <div
-        className={isLast ? "onboardingSlideArea onboardingSlideAreaFinal" : "onboardingSlideArea onboardingSlideAreaCard"}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-      >
-        <div className="onboardingIllustrationWrap">
+      <div className={slideAreaClass} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        <div key={index} className="onboardingIllustrationWrap onboardingIllustrationWrapAnim">
           <slide.Illustration />
         </div>
         <h1 className={isLast ? "onboardingTitle onboardingTitleFinal" : "onboardingTitle"}>{slide.title}</h1>
@@ -341,11 +450,7 @@ export default function OnboardingPage() {
         </div>
         <button
           type="button"
-          className={
-            isLast
-              ? "onboardingPrimary onboardingPrimaryFinal"
-              : "onboardingPrimary"
-          }
+          className={isLast ? "onboardingPrimary onboardingPrimaryFinal" : "onboardingPrimary"}
           onClick={handlePrimaryClick}
         >
           {isLast ? "시작하기" : "다음"}
