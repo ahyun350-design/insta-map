@@ -13,6 +13,28 @@ import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay } from "@/components/ExtractLoadingOverlay";
 import { mapExtractErrorToUserMessage } from "@/lib/extractUserError";
 import { toUserMessage } from "@/lib/userErrorMessage";
+
+const ADMIN_USER_ID = "63772749-e01b-4396-a41c-c17a4d3acfe6";
+
+type AdminStatusPayload = {
+  today: { attempts: number; success: number; failed: number };
+  last7Days: { attempts: number; successRate: number };
+  lastSuccessAt: string | null;
+  stuckJobs: number;
+  recentFailures: Array<{ error_message: string | null; at: string | null }>;
+  signups: { today: number; total: number };
+  activeUsers7d: number;
+};
+
+function formatAdminHoursAgo(iso: string | null): string {
+  if (!iso) return "없음";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "없음";
+  const hours = Math.floor(ms / (60 * 60 * 1000));
+  if (hours < 1) return "방금";
+  if (hours < 48) return `${hours}시간 전`;
+  return `${Math.floor(hours / 24)}일 전`;
+}
 import {
   formatInAppNotificationFromRow,
   formatMessageInAppText,
@@ -1217,6 +1239,9 @@ function HomePageContent() {
   const [showMypageSettingsSheet, setShowMypageSettingsSheet] = useState(false);
   const [mypageFollowerCount, setMypageFollowerCount] = useState(0);
   const [mypageFollowingCount, setMypageFollowingCount] = useState(0);
+  const [adminStatus, setAdminStatus] = useState<AdminStatusPayload | null>(null);
+  const [adminStatusLoading, setAdminStatusLoading] = useState(false);
+  const [adminStatusExpanded, setAdminStatusExpanded] = useState(false);
   const [showFollowList, setShowFollowList] = useState<FollowListType | null>(null);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [showDeleteAccountFinalModal, setShowDeleteAccountFinalModal] = useState(false);
@@ -7713,6 +7738,42 @@ function HomePageContent() {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [feedPosts, user?.id, user?.username]);
 
+
+  useEffect(() => {
+    if (activeTab !== "mypage" || !user?.id || user.id !== ADMIN_USER_ID) {
+      setAdminStatus(null);
+      setAdminStatusExpanded(false);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setAdminStatusLoading(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return;
+        const res = await fetch("/api/admin/status", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          console.error("[PindMap:admin] status fetch failed", res.status);
+          return;
+        }
+        const data = (await res.json()) as AdminStatusPayload;
+        if (!cancelled) setAdminStatus(data);
+      } catch (e) {
+        console.error("[PindMap:admin] status fetch error", e);
+      } finally {
+        if (!cancelled) setAdminStatusLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, user?.id]);
+
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id) return;
     const perfScreen = "tab:mypage:fetch";
@@ -10350,6 +10411,106 @@ function HomePageContent() {
                 boxSizing: "border-box",
               }}
             >
+              {user?.id === ADMIN_USER_ID && (
+                <div style={{ flexShrink: 0, padding: "12px 16px 0", boxSizing: "border-box" }}>
+                  <button
+                    type="button"
+                    onClick={() => setAdminStatusExpanded((v) => !v)}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      border: "0.5px solid #e8e8ee",
+                      borderRadius: 12,
+                      background: "#fafafa",
+                      padding: "12px 14px",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "#8f93a6", letterSpacing: "0.02em" }}>
+                      서비스 상태 {adminStatusLoading ? "· 불러오는 중" : ""}
+                    </p>
+                    {adminStatus ? (
+                      (() => {
+                        const alertNoSuccess = adminStatus.today.attempts > 0 && adminStatus.today.success === 0;
+                        const alertRate = adminStatus.last7Days.successRate < 50;
+                        const lastMs = adminStatus.lastSuccessAt
+                          ? Date.now() - new Date(adminStatus.lastSuccessAt).getTime()
+                          : Number.POSITIVE_INFINITY;
+                        const alertStale = !adminStatus.lastSuccessAt || lastMs >= 24 * 60 * 60 * 1000;
+                        const alertStuck = adminStatus.stuckJobs >= 1;
+                        const row = (label: string, value: string, alert: boolean) => (
+                          <p
+                            key={label}
+                            style={{
+                              margin: "0 0 4px",
+                              fontSize: 13,
+                              color: alert ? "#c62828" : "#8f93a6",
+                              fontWeight: alert ? 700 : 400,
+                            }}
+                          >
+                            {label}: {value}
+                          </p>
+                        );
+                        return (
+                          <>
+                            {row(
+                              "오늘 추출",
+                              `성공 ${adminStatus.today.success} / 실패 ${adminStatus.today.failed}`,
+                              alertNoSuccess,
+                            )}
+                            {row("7일 성공률", `${adminStatus.last7Days.successRate}%`, alertRate)}
+                            {row("마지막 성공", formatAdminHoursAgo(adminStatus.lastSuccessAt), alertStale)}
+                            {row("멈춘 job", `${adminStatus.stuckJobs}건`, alertStuck)}
+                            {row(
+                              "오늘 가입",
+                              `${adminStatus.signups.today}명 (전체 ${adminStatus.signups.total}명)`,
+                              false,
+                            )}
+                            {adminStatusExpanded && (
+                              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "0.5px solid #ebebf0" }}>
+                                <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600, color: "#8f93a6" }}>
+                                  최근 실패 3건
+                                </p>
+                                {adminStatus.recentFailures.length === 0 ? (
+                                  <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>실패 기록 없음</p>
+                                ) : (
+                                  adminStatus.recentFailures.map((f, i) => (
+                                    <pre
+                                      key={i}
+                                      style={{
+                                        margin: "0 0 8px",
+                                        padding: 8,
+                                        borderRadius: 8,
+                                        background: "#fff",
+                                        border: "0.5px solid #eee",
+                                        fontSize: 11,
+                                        color: "#c62828",
+                                        whiteSpace: "pre-wrap",
+                                        wordBreak: "break-word",
+                                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                                      }}
+                                    >
+                                      {f.error_message || "(empty)"}
+                                    </pre>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                            {!adminStatusExpanded && (
+                              <p style={{ margin: "6px 0 0", fontSize: 11, color: "#b0b3c0" }}>탭해서 최근 실패 보기</p>
+                            )}
+                          </>
+                        );
+                      })()
+                    ) : (
+                      !adminStatusLoading && (
+                        <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>상태를 불러오지 못했어요</p>
+                      )
+                    )}
+                  </button>
+                </div>
+              )}
               <div style={{ flexShrink: 0, padding: "12px 16px 0", position: "relative", boxSizing: "border-box" }}>
                 <button
                   type="button"
