@@ -24,6 +24,11 @@ import {
   hydrateGeocodeCache,
   setGeocodeCache,
 } from "@/lib/geocodeAddressCache";
+import {
+  loadLastBootTimingReport,
+  mark,
+  type BootTimingReport,
+} from "@/lib/bootTiming";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay } from "@/components/ExtractLoadingOverlay";
@@ -1286,6 +1291,7 @@ function HomePageContent() {
   const [adminStatus, setAdminStatus] = useState<AdminStatusPayload | null>(null);
   const [adminStatusLoading, setAdminStatusLoading] = useState(false);
   const [adminStatusExpanded, setAdminStatusExpanded] = useState(false);
+  const [lastBootTiming, setLastBootTiming] = useState<BootTimingReport | null>(null);
   const [showFollowList, setShowFollowList] = useState<FollowListType | null>(null);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [showDeleteAccountFinalModal, setShowDeleteAccountFinalModal] = useState(false);
@@ -2901,6 +2907,11 @@ function HomePageContent() {
     const perfScreen = "home:initial";
     dlog.perf.start(perfScreen);
     dlog.perf.fetchStart(perfScreen);
+    try {
+      mark("loaddata_start");
+    } catch {
+      /* ignore */
+    }
     console.log("[PindMap:home] 로딩 시작", { isRetry, warmCache: bootstrapCacheHitRef.current });
     // 캐시로 이미 그린 경우 스켈레톤/스피너를 다시 띄우지 않음
     if (!bootstrapCacheHitRef.current) {
@@ -2993,6 +3004,11 @@ function HomePageContent() {
     } finally {
       loadDataInFlightRef.current = false;
       setLoading(false);
+      try {
+        mark("loaddata_done");
+      } catch {
+        /* ignore */
+      }
     }
   };
 
@@ -3073,6 +3089,11 @@ function HomePageContent() {
     let cancelled = false;
     void (async () => {
       try {
+        try {
+          mark("cache_read_start");
+        } catch {
+          /* ignore */
+        }
         const [placesPayload, mapView] = await Promise.all([readCachedPlaces(), readCachedMapView()]);
         if (cancelled) return;
         if (mapView) {
@@ -3113,6 +3134,11 @@ function HomePageContent() {
         bootstrapCacheHitRef.current = false;
         setBootstrapCacheHit(false);
       } finally {
+        try {
+          mark("cache_read_done");
+        } catch {
+          /* ignore */
+        }
         if (!cancelled) setBootstrapCacheResolved(true);
       }
     })();
@@ -6296,6 +6322,11 @@ function HomePageContent() {
     });
     addMyLocation(mapRef.current, "main");
     setCompactMapReady(true);
+    try {
+      mark("map_first_paint");
+    } catch {
+      /* ignore */
+    }
     attachCompactMapResizeObserver();
     scheduleCompactMapRelayout();
     scheduleCompactMapRectPoll();
@@ -6975,9 +7006,19 @@ function HomePageContent() {
         hasLatLng: isKakaoMapsApiReady(),
         origin: typeof window !== "undefined" ? window.location.origin : "ssr",
       });
+      try {
+        mark("map_sdk_ready");
+      } catch {
+        /* ignore */
+      }
       setIsKakaoMapLoaded(true);
       setKakaoStatus("ready");
     };
+    try {
+      mark("map_sdk_start");
+    } catch {
+      /* ignore */
+    }
     if (window.kakao?.maps) {
       beginKakaoMapsLoad(notifySdkReady);
       return;
@@ -7982,12 +8023,15 @@ function HomePageContent() {
     if (activeTab !== "mypage" || !user?.id || user.id !== ADMIN_USER_ID) {
       setAdminStatus(null);
       setAdminStatusExpanded(false);
+      setLastBootTiming(null);
       return;
     }
     let cancelled = false;
     const load = async () => {
       setAdminStatusLoading(true);
       try {
+        const boot = await loadLastBootTimingReport();
+        if (!cancelled) setLastBootTiming(boot);
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.access_token) return;
         const res = await fetch("/api/admin/status", {
@@ -10746,6 +10790,25 @@ function HomePageContent() {
                       !adminStatusLoading && (
                         <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>상태를 불러오지 못했어요</p>
                       )
+                    )}
+                    {lastBootTiming && (
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "0.5px solid #ebebf0" }}>
+                        <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600, color: "#8f93a6" }}>
+                          마지막 부팅 · 총 {lastBootTiming.totalMs}ms
+                        </p>
+                        {lastBootTiming.segments.length === 0 ? (
+                          <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>구간 기록 없음</p>
+                        ) : (
+                          lastBootTiming.segments.map((seg) => (
+                            <p
+                              key={`${seg.from}-${seg.to}`}
+                              style={{ margin: "0 0 3px", fontSize: 12, color: "#8f93a6" }}
+                            >
+                              {seg.from} → {seg.to}: {seg.ms}ms
+                            </p>
+                          ))
+                        )}
+                      </div>
                     )}
                   </button>
                 </div>

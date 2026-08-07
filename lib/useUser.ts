@@ -6,6 +6,7 @@ import { safeGetSession } from "./authFallback";
 import { supabase } from "./supabase";
 import { debugLog, logPerf, perfNow } from "./debugLog";
 import { runConnectionWarmupWithRetry, runExtraRefreshSession } from "./connectionRecovery";
+import { mark } from "./bootTiming";
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -210,6 +211,11 @@ export function useUser() {
     const loadUser = async () => {
       const loadUserT0 = perfNow();
       console.log("[PindMap:home][auth] loadUser start");
+      try {
+        mark("auth_start");
+      } catch {
+        /* ignore */
+      }
       startAuthWatchdogOnce();
       /** getSession에서 user가 확인되면 리스너 대기 없이 sessionChecked (로딩 단축). null 세션만 리스너+워치독 게이트 유지 (N-1 WK). */
       let loadUserHadAuthUser = false;
@@ -271,6 +277,11 @@ export function useUser() {
         }
         stopAuthWatchdog();
         setLoading(false);
+        try {
+          mark("auth_done");
+        } catch {
+          /* ignore */
+        }
         if (timeoutTriggered) {
           console.warn("[PindMap:home][auth] resumed after timeout fallback");
         }

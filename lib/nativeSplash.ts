@@ -2,6 +2,7 @@
 
 import { Capacitor } from "@capacitor/core";
 import { SplashScreen } from "@capacitor/splash-screen";
+import { mark } from "@/lib/bootTiming";
 
 const SPLASH_MAX_WAIT_MS = 8000;
 
@@ -26,10 +27,22 @@ export async function hideNativeSplash(): Promise<void> {
     clearTimeout(fallbackTimer);
     fallbackTimer = null;
   }
-  if (!Capacitor.isNativePlatform()) return;
+  if (!Capacitor.isNativePlatform()) {
+    try {
+      mark("splash_hidden");
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
   try {
     await SplashScreen.hide({ fadeOutDuration: 250 });
   } catch {
     /* plugin missing / web — ignore */
+  }
+  try {
+    mark("splash_hidden");
+  } catch {
+    /* ignore */
   }
 }
