@@ -155,7 +155,7 @@ import {
   getCourseShareUrl,
   shareViaNavigatorShare,
 } from "@/lib/pindmapLinks";
-import { parseFeedPostFromRow, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
+import { parseFeedPostFromRow, feedCommentCount, FEED_PAGE_SIZE, FEED_POST_LIST_SELECT, FEED_POST_DETAIL_SELECT, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
 import {
   getDisplayPlaceForPhoto,
   getRelatedPostImagesForPlace,
@@ -1311,6 +1311,15 @@ function HomePageContent() {
   const instagramUrlInputRef = useRef<HTMLInputElement | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
+  const [feedHasMore, setFeedHasMore] = useState(true);
+  const [feedLoadingMore, setFeedLoadingMore] = useState(false);
+  const [detailCommentsLoading, setDetailCommentsLoading] = useState(false);
+  const feedNextOffsetRef = useRef(0);
+  const feedLoadMoreInFlightRef = useRef(false);
+  const feedHasMoreRef = useRef(true);
+  const homeFeedScrollRef = useRef<HTMLDivElement | null>(null);
+  const feedLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const myLikedPostIdsRef = useRef<Set<string>>(new Set());
   const [status, setStatus] = useState(""); const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [homeLoadError, setHomeLoadError] = useState<string | null>(null);
@@ -2924,7 +2933,14 @@ function HomePageContent() {
       // critical path: places / feed / follows / likes only (chat·notifications·avatar await는 스플래시 밖)
       const [placesRes, postsRes, followsRes, myLikesRes] = await withTimeout(Promise.all([
         timedLoadQuery("places", supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false })),
-        timedLoadQuery("feed_posts", supabase.from("feed_posts").select("*, comments(*)").order("created_at", { ascending: false })),
+        timedLoadQuery(
+          "feed_posts",
+          supabase
+            .from("feed_posts")
+            .select(FEED_POST_LIST_SELECT)
+            .order("created_at", { ascending: false })
+            .range(0, FEED_PAGE_SIZE - 1),
+        ),
         timedLoadQuery("follows", supabase.from("follows").select("following_id").eq("follower_id", uid)),
         timedLoadQuery(
           "likes",
@@ -2936,6 +2952,7 @@ function HomePageContent() {
       ]), 8000);
 
       const myLikedSet = new Set((myLikesRes.data ?? []).map((l: { post_id: string }) => l.post_id));
+      myLikedPostIdsRef.current = myLikedSet;
 
       setFollowingIds((followsRes.data || []).map((f: any) => f.following_id));
       syncCurrentUserToAvatarCache();
@@ -2957,11 +2974,18 @@ function HomePageContent() {
         const rawPosts: FeedPost[] = postsRes.data.map((p: any) =>
           parseFeedPostFromRow(p, { likedByMe: myLikedSet.has(p.id) }),
         );
+        feedNextOffsetRef.current = rawPosts.length;
+        const hasMore = rawPosts.length >= FEED_PAGE_SIZE;
+        feedHasMoreRef.current = hasMore;
+        setFeedHasMore(hasMore);
         setFeedPosts(hydrateFeedPostsWithAvatars(rawPosts));
         void prefetchAvatarsForFeedPosts(rawPosts).then(() => {
           setFeedPosts((prev) => hydrateFeedPostsWithAvatars(prev));
         });
       } else {
+        feedNextOffsetRef.current = 0;
+        feedHasMoreRef.current = false;
+        setFeedHasMore(false);
         setFeedPosts([]);
       }
 
@@ -3017,6 +3041,46 @@ function HomePageContent() {
   const retryHomeLoad = () => {
     setHomeRetrying(true);
     void loadData(true).finally(() => setHomeRetrying(false));
+  };
+
+  const loadMoreFeedPosts = async () => {
+    if (feedLoadMoreInFlightRef.current || !feedHasMoreRef.current) return;
+    feedLoadMoreInFlightRef.current = true;
+    setFeedLoadingMore(true);
+    try {
+      const from = feedNextOffsetRef.current;
+      const to = from + FEED_PAGE_SIZE - 1;
+      const { data, error } = await supabase
+        .from("feed_posts")
+        .select(FEED_POST_LIST_SELECT)
+        .order("created_at", { ascending: false })
+        .range(from, to);
+      if (error) {
+        console.error("[PindMap:home] feed loadMore failed", error);
+        return;
+      }
+      const rows = data ?? [];
+      const liked = myLikedPostIdsRef.current;
+      const rawPosts: FeedPost[] = rows.map((p: any) =>
+        parseFeedPostFromRow(p, { likedByMe: liked.has(p.id) }),
+      );
+      feedNextOffsetRef.current = from + rawPosts.length;
+      const hasMore = rawPosts.length >= FEED_PAGE_SIZE;
+      feedHasMoreRef.current = hasMore;
+      setFeedHasMore(hasMore);
+      if (rawPosts.length === 0) return;
+      setFeedPosts((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        const appended = rawPosts.filter((p) => !seen.has(p.id));
+        return hydrateFeedPostsWithAvatars([...prev, ...appended]);
+      });
+      void prefetchAvatarsForFeedPosts(rawPosts).then(() => {
+        setFeedPosts((prev) => hydrateFeedPostsWithAvatars(prev));
+      });
+    } finally {
+      feedLoadMoreInFlightRef.current = false;
+      setFeedLoadingMore(false);
+    }
   };
 
   useEffect(() => {
@@ -4377,7 +4441,11 @@ function HomePageContent() {
       text: newComment.trim(),
       createdAt: new Date().toISOString(),
     };
-    setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...p.comments, newC] } : p));
+    setFeedPosts(prev => prev.map(p => p.id === postId ? {
+      ...p,
+      comments: [...p.comments, newC],
+      commentsCount: feedCommentCount(p) + 1,
+    } : p));
 
     const post = feedPosts.find(p => p.id === postId);
     if (post && post.userId && post.userId !== user?.id && user) {
@@ -4400,7 +4468,11 @@ function HomePageContent() {
   };
   const deleteComment = async (postId: string, commentId: string) => {
     await supabase.from("comments").delete().eq("id", commentId);
-    setFeedPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: p.comments.filter(c => c.id !== commentId) } : p));
+    setFeedPosts(prev => prev.map(p => p.id === postId ? {
+      ...p,
+      comments: p.comments.filter(c => c.id !== commentId),
+      commentsCount: Math.max(0, feedCommentCount(p) - 1),
+    } : p));
   };
 
   const resetRealtimeRemountCounters = useCallback(() => {
@@ -6058,6 +6130,7 @@ function HomePageContent() {
       likes_count: 0,
       liked_by_me: false,
       comments: [],
+      commentsCount: 0,
     };
     const { error: postError } = await submitPost(newPost);
     if (postError) {
@@ -7282,37 +7355,14 @@ function HomePageContent() {
       const fetchT0 = perfNow();
       const { data } = await supabase
         .from("feed_posts")
-        .select("*, comments(*)")
+        .select(FEED_POST_DETAIL_SELECT)
         .eq("id", detailPostId)
         .maybeSingle();
       logPerf("detail.fetch", perfNow() - fetchT0);
       if (cancelled || !data) return;
-      const coords = latLngFromRow(data);
       const likedByMe = user?.id ? await fetchIsPostLikedByUser(detailPostId, user.id) : false;
       if (cancelled) return;
-      const raw: FeedPost = {
-        id: data.id,
-        user: data.user_name,
-        userId: data.user_id ?? "",
-        title: data.title,
-        placeName: data.place_name,
-        address: data.address,
-        ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
-        category: data.category as Category,
-        comment: data.comment,
-        images: data.images ?? [],
-        createdAt: data.created_at,
-        archived: data.archived,
-        likes_count: data.likes_count ?? 0,
-        liked_by_me: likedByMe,
-        comments: (data.comments ?? []).map((c: { id: string; user_name: string; user_id?: string; text: string; created_at: string }) => ({
-          id: c.id,
-          user: c.user_name,
-          userId: c.user_id ?? undefined,
-          text: c.text,
-          createdAt: c.created_at,
-        })),
-      };
+      const raw = parseFeedPostFromRow(data as any, { likedByMe });
       await prefetchAvatarsForFeedPosts([raw]);
       if (cancelled) return;
       const [hydrated] = hydrateFeedPostsWithAvatars([raw]);
@@ -7321,7 +7371,57 @@ function HomePageContent() {
     return () => {
       cancelled = true;
     };
-  }, [detailPostId, feedPosts, prefetchAvatarsForFeedPosts, hydrateFeedPostsWithAvatars]);
+  }, [detailPostId, feedPosts, prefetchAvatarsForFeedPosts, hydrateFeedPostsWithAvatars, user?.id]);
+
+  /** 상세 열 때 댓글 목록 지연 로드 (리스트는 count만 가져옴) */
+  useEffect(() => {
+    if (!detailPostId) {
+      setDetailCommentsLoading(false);
+      return;
+    }
+    const post = feedPosts.find((p) => p.id === detailPostId);
+    if (!post) return;
+    if (post.comments.length > 0) return;
+    if (post.commentsCount === 0) return;
+
+    let cancelled = false;
+    setDetailCommentsLoading(true);
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("comments")
+          .select("id, user_name, user_id, text, created_at")
+          .eq("post_id", detailPostId)
+          .order("created_at", { ascending: true });
+        if (cancelled || error) {
+          if (error) console.error("[PindMap:feed] comments fetch failed", error);
+          return;
+        }
+        const comments = (data ?? []).map((c) => ({
+          id: c.id,
+          user: c.user_name,
+          userId: c.user_id ?? undefined,
+          text: c.text,
+          createdAt: c.created_at,
+        }));
+        setFeedPosts((prev) =>
+          prev.map((p) =>
+            p.id === detailPostId
+              ? { ...p, comments, commentsCount: comments.length }
+              : p,
+          ),
+        );
+        void prefetchAvatarsForFeedPosts([
+          { ...post, comments, commentsCount: comments.length },
+        ]);
+      } finally {
+        if (!cancelled) setDetailCommentsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [detailPostId, feedPosts, prefetchAvatarsForFeedPosts]);
 
   // 메시지 탭 진입 시 방 목록 갱신 (TTL 내·이미 로드됐으면 스킵, Realtime은 별도)
   useEffect(() => {
@@ -7985,6 +8085,24 @@ function HomePageContent() {
     }
     return result;
   }, [visibleFeedPosts, selectedCompanionTag, selectedHomeCategory]);
+
+  // 홈 피드 무한 스크롤
+  useEffect(() => {
+    if (activeTab !== "home" || loading || homeLoadError) return;
+    const root = homeFeedScrollRef.current;
+    const target = feedLoadMoreSentinelRef.current;
+    if (!root || !target) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          void loadMoreFeedPosts();
+        }
+      },
+      { root, rootMargin: "240px 0px", threshold: 0 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  }, [activeTab, filteredHomeFeedPosts.length, feedHasMore, loading, homeLoadError]);
 
   const homeSearchResultPosts = useMemo(() => {
     const q = debouncedHomeSearchQuery.trim();
@@ -9414,7 +9532,7 @@ function HomePageContent() {
               </button>
               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="#aaa" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                <span style={{ fontSize: "13px", color: "#aaa" }}>{detailPost.comments.length}</span>
+                <span style={{ fontSize: "13px", color: "#aaa" }}>{feedCommentCount(detailPost)}</span>
               </div>
               <button
                 type="button"
@@ -9429,8 +9547,11 @@ function HomePageContent() {
               </button>
             </div>
             <div style={{ padding: "14px 20px 0" }}>
-              <p style={{ margin: "0 0 10px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>댓글 {detailPost.comments.length}</p>
-              {detailPost.comments.map((c) => (
+              <p style={{ margin: "0 0 10px", fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px" }}>댓글 {feedCommentCount(detailPost)}</p>
+              {detailCommentsLoading && (
+                <p style={{ fontSize: "12px", color: "#ccc", textAlign: "center", padding: "10px 0" }}>댓글 불러오는 중…</p>
+              )}
+              {!detailCommentsLoading && detailPost.comments.map((c) => (
                 <div key={c.id} style={{ display: "flex", gap: "10px", marginBottom: "14px", alignItems: "flex-start" }}>
                   <button
                     type="button"
@@ -9465,7 +9586,7 @@ function HomePageContent() {
                   </div>
                 </div>
               ))}
-              {detailPost.comments.length === 0 && <p style={{ fontSize: "12px", color: "#ccc", textAlign: "center", padding: "10px 0" }}>첫 댓글을 남겨보세요 💬</p>}
+              {!detailCommentsLoading && detailPost.comments.length === 0 && <p style={{ fontSize: "12px", color: "#ccc", textAlign: "center", padding: "10px 0" }}>첫 댓글을 남겨보세요 💬</p>}
             </div>
             <div ref={commentSectionRef} aria-hidden style={{ height: 1, flexShrink: 0 }} />
           </div>
@@ -9632,7 +9753,7 @@ function HomePageContent() {
 
           {activeTab === "home" && (
             <div className="screen homeFeed">
-              <div className="homeFeedScroll">
+              <div className="homeFeedScroll" ref={homeFeedScrollRef}>
               {!loading && !homeLoadError && (
                 <div className="homeFeedStickyBar">
                   <HomeFeedTopBar
@@ -9715,6 +9836,25 @@ function HomePageContent() {
                     );
                   })}
                 </PostGrid>
+              )}
+              {!loading && !homeLoadError && (
+                <div
+                  ref={feedLoadMoreSentinelRef}
+                  style={{ height: 1, width: "100%" }}
+                  aria-hidden
+                />
+              )}
+              {feedLoadingMore && (
+                <p
+                  style={{
+                    margin: "8px 0 16px",
+                    textAlign: "center",
+                    fontSize: 12,
+                    color: "#9aa1bc",
+                  }}
+                >
+                  더 불러오는 중…
+                </p>
               )}
               </div>
             </div>

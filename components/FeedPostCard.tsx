@@ -183,11 +183,25 @@ export function FeedPostMedia({
           }
         }}
       >
-        {images.map((src, i) => (
-          <div key={`${src}-${i}`} className="feedPostMediaSlide">
-            <img src={src} alt="" className="feedPostMediaImg" draggable={false} decoding="async" />
-          </div>
-        ))}
+        {images.map((src, i) => {
+          const shouldLoad = i <= activeIndex + 1;
+          return (
+            <div key={`${src}-${i}`} className="feedPostMediaSlide">
+              {shouldLoad ? (
+                <img
+                  src={src}
+                  alt=""
+                  className="feedPostMediaImg"
+                  draggable={false}
+                  loading="lazy"
+                  decoding="async"
+                />
+              ) : (
+                <div className="feedPostMediaImg" aria-hidden />
+              )}
+            </div>
+          );
+        })}
       </div>
       {overlayPlaceName && (
         <button

@@ -53,7 +53,31 @@ export type FeedPost = {
   archived?: boolean;
   likes_count: number;
   liked_by_me: boolean;
+  /** 상세에서 로드한 댓글 목록 (리스트에서는 비움) */
   comments: FeedPostComment[];
+  /** 리스트용 댓글 수 (comments(count)) */
+  commentsCount: number;
+};
+
+/** 피드 초기·추가 로드 페이지 크기 */
+export const FEED_PAGE_SIZE = 20;
+
+/** feed_posts 리스트/상세 공통 컬럼 — select * 금지 */
+export const FEED_POST_COLUMNS =
+  "id, user_name, user_id, title, place_name, address, lat, lng, category, categories, comment, companion_tag, photo_place_tags, course_id, images, created_at, archived, likes_count";
+
+/** 홈 피드: 댓글 본문 없이 count만 */
+export const FEED_POST_LIST_SELECT = `${FEED_POST_COLUMNS}, comments(count)`;
+
+/** 딥링크 등 단건: 댓글 본문 포함 */
+export const FEED_POST_DETAIL_SELECT = `${FEED_POST_COLUMNS}, comments(id, user_name, user_id, text, created_at)`;
+
+type FeedPostCommentRow = {
+  id: string;
+  user_name: string;
+  user_id?: string | null;
+  text: string;
+  created_at: string;
 };
 
 type FeedPostRow = {
@@ -75,14 +99,37 @@ type FeedPostRow = {
   created_at: string;
   archived?: boolean | null;
   likes_count?: number | null;
-  comments?: Array<{
-    id: string;
-    user_name: string;
-    user_id?: string | null;
-    text: string;
-    created_at: string;
-  }> | null;
+  comments?: Array<FeedPostCommentRow | { count: number }> | null;
 };
+
+function mapCommentRows(rows: FeedPostCommentRow[]): FeedPostComment[] {
+  return rows.map((c) => ({
+    id: c.id,
+    user: c.user_name,
+    userId: c.user_id ?? undefined,
+    text: c.text,
+    createdAt: c.created_at,
+  }));
+}
+
+function parseCommentsField(
+  raw: FeedPostRow["comments"],
+): { comments: FeedPostComment[]; commentsCount: number } {
+  if (!raw || raw.length === 0) {
+    return { comments: [], commentsCount: 0 };
+  }
+  const first = raw[0] as { count?: number; id?: string };
+  if (typeof first.count === "number" && first.id == null) {
+    return { comments: [], commentsCount: first.count };
+  }
+  const comments = mapCommentRows(raw as FeedPostCommentRow[]);
+  return { comments, commentsCount: comments.length };
+}
+
+export function feedCommentCount(post: Pick<FeedPost, "comments" | "commentsCount">): number {
+  if (typeof post.commentsCount === "number") return post.commentsCount;
+  return post.comments.length;
+}
 
 function isFeedPostCategory(value: string): value is FeedPostCategory {
   return (FEED_POST_CATEGORIES as readonly string[]).includes(value);
@@ -166,6 +213,7 @@ export type ParseFeedPostOptions = {
 export function parseFeedPostFromRow(row: FeedPostRow, options: ParseFeedPostOptions = {}): FeedPost {
   const coords = coerceLatLng(row.lat, row.lng);
   const category = isFeedPostCategory(row.category) ? row.category : "카페";
+  const { comments, commentsCount } = parseCommentsField(row.comments);
 
   return {
     id: row.id,
@@ -186,12 +234,7 @@ export function parseFeedPostFromRow(row: FeedPostRow, options: ParseFeedPostOpt
     archived: row.archived ?? false,
     likes_count: row.likes_count ?? 0,
     liked_by_me: options.likedByMe ?? false,
-    comments: (row.comments ?? []).map((c) => ({
-      id: c.id,
-      user: c.user_name,
-      userId: c.user_id ?? undefined,
-      text: c.text,
-      createdAt: c.created_at,
-    })),
+    comments,
+    commentsCount,
   };
 }
