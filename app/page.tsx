@@ -90,6 +90,10 @@ import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import { prepareImageForUpload } from "@/lib/prepareImageForUpload";
 import {
+  DEFAULT_CURATION_ASPECT_RATIO,
+  resolveCurationAspectRatioFromSrc,
+} from "@/lib/curationAspectRatio";
+import {
   addNativeMarkers,
   clearNativeMarkerClickHandlers,
   clearNativeMarkers,
@@ -3859,6 +3863,7 @@ function HomePageContent() {
       companion_tag: post.companionTag,
       photo_place_tags: post.photoPlaceTags ?? null,
       course_id: post.courseId ?? null,
+      aspect_ratio: post.aspectRatio ?? "1:1",
       archived: false,
     });
     if (error) {
@@ -6158,6 +6163,10 @@ function HomePageContent() {
         img.status === "uploaded" && typeof img.publicUrl === "string",
       )
       .map((img) => img.publicUrl);
+    const postAspectRatio =
+      imageUrls.length > 0
+        ? await resolveCurationAspectRatioFromSrc(imageUrls[0])
+        : DEFAULT_CURATION_ASPECT_RATIO;
     const postCoords = repTag
       ? { lat: repTag.lat, lng: repTag.lng }
       : coerceLatLng(postPlaceLat, postPlaceLng);
@@ -6204,6 +6213,7 @@ function HomePageContent() {
       photoPlaceTags: postPhotoPlaceTags.length > 0 ? postPhotoPlaceTags : null,
       courseId: linkedCourseId,
       images: imageUrls,
+      aspectRatio: postAspectRatio,
       createdAt: new Date().toISOString(),
       likes_count: 0,
       liked_by_me: false,
@@ -9577,9 +9587,10 @@ function HomePageContent() {
                 <FeedPostMedia
                   images={detailPost.images}
                   placeSource={detailPost}
+                  aspectRatio={detailPost.aspectRatio}
                   variant="detail"
-                  mediaAriaLabel="사진 확대"
-                  onMediaClick={({ imageUrl }) => setLightboxImg(imageUrl)}
+                  mediaAriaLabel="사진"
+                  onMediaClick={() => {}}
                   onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(detailPost, placeRef)}
                 />
               </div>

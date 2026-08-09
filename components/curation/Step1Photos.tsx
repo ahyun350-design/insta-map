@@ -9,6 +9,12 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { MAX_CURATION_PHOTOS, type PostImageItem } from "@/components/curation/types";
+import {
+  curationAspectRatioCss,
+  DEFAULT_CURATION_ASPECT_RATIO,
+  resolveCurationAspectRatioFromSrc,
+  type CurationAspectRatio,
+} from "@/lib/curationAspectRatio";
 
 type Props = {
   images: PostImageItem[];
@@ -104,6 +110,7 @@ export function Step1Photos({ images, onImagesChange, onImageUpload, onRetryImag
   const stripRef = useRef<HTMLDivElement | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [frameAspect, setFrameAspect] = useState<CurationAspectRatio>(DEFAULT_CURATION_ASPECT_RATIO);
   const prevLenRef = useRef(0);
 
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -134,6 +141,27 @@ export function Step1Photos({ images, onImagesChange, onImageUpload, onRetryImag
       return cur;
     });
   }, [images.length]);
+
+  /** 게시물 프레임 = 첫 번째 사진 비율 */
+  useEffect(() => {
+    const first = images[0];
+    if (!first) {
+      setFrameAspect(DEFAULT_CURATION_ASPECT_RATIO);
+      return;
+    }
+    const src = thumbSrcOf(first);
+    if (!src) {
+      setFrameAspect(DEFAULT_CURATION_ASPECT_RATIO);
+      return;
+    }
+    let cancelled = false;
+    void resolveCurationAspectRatioFromSrc(src).then((ratio) => {
+      if (!cancelled) setFrameAspect(ratio);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [images[0]?.id, images[0]?.previewUrl, images[0]?.publicUrl, images[0]?.status]);
 
   useEffect(() => {
     return () => clearLongPressTimer();
@@ -326,12 +354,12 @@ export function Step1Photos({ images, onImagesChange, onImageUpload, onRetryImag
         사진 추가 (최대 {MAX_CURATION_PHOTOS}장)
       </p>
 
-      {/* 메인 미리보기 */}
+      {/* 메인 미리보기 — 첫 장 기준 게시물 비율 */}
       <div
         style={{
           position: "relative",
           width: "100%",
-          aspectRatio: "1 / 1",
+          aspectRatio: curationAspectRatioCss(frameAspect),
           borderRadius: 8,
           overflow: "hidden",
           background: "#f0f0f0",

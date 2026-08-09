@@ -1,4 +1,11 @@
 import { isCompanionTag, type CompanionTag } from "@/lib/companionTag";
+import {
+  DEFAULT_CURATION_ASPECT_RATIO,
+  parseCurationAspectRatio,
+  type CurationAspectRatio,
+} from "@/lib/curationAspectRatio";
+
+export type { CurationAspectRatio };
 
 export type FeedPostCategory = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -46,6 +53,8 @@ export type FeedPost = {
   categories?: string[] | null;
   comment: string;
   images: string[];
+  /** 게시물 미디어 프레임 비율. 없으면 표시 시 1:1 */
+  aspectRatio?: CurationAspectRatio | null;
   createdAt: string;
   companionTag?: CompanionTag | null;
   photoPlaceTags?: PhotoPlaceTag[] | null;
@@ -64,7 +73,7 @@ export const FEED_PAGE_SIZE = 20;
 
 /** feed_posts 리스트/상세 공통 컬럼 — select * 금지 */
 export const FEED_POST_COLUMNS =
-  "id, user_name, user_id, title, place_name, address, lat, lng, category, categories, comment, companion_tag, photo_place_tags, course_id, images, created_at, archived, likes_count";
+  "id, user_name, user_id, title, place_name, address, lat, lng, category, categories, comment, companion_tag, photo_place_tags, course_id, images, aspect_ratio, created_at, archived, likes_count";
 
 /** 홈 피드: 댓글 본문 없이 count만 */
 export const FEED_POST_LIST_SELECT = `${FEED_POST_COLUMNS}, comments(count)`;
@@ -96,6 +105,7 @@ type FeedPostRow = {
   photo_place_tags?: unknown;
   course_id?: string | null;
   images?: string[] | null;
+  aspect_ratio?: string | null;
   created_at: string;
   archived?: boolean | null;
   likes_count?: number | null;
@@ -230,6 +240,9 @@ export function parseFeedPostFromRow(row: FeedPostRow, options: ParseFeedPostOpt
     photoPlaceTags: parsePhotoPlaceTagsFromRow(row.photo_place_tags),
     courseId: row.course_id ?? null,
     images: row.images ?? [],
+    aspectRatio: row.aspect_ratio == null
+      ? DEFAULT_CURATION_ASPECT_RATIO
+      : parseCurationAspectRatio(row.aspect_ratio),
     createdAt: row.created_at,
     archived: row.archived ?? false,
     likes_count: row.likes_count ?? 0,

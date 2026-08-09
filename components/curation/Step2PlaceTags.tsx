@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import type { PhotoPlaceTag } from "@/lib/feedPost";
 import {
   getPhotoPlaceTag,
@@ -12,6 +12,12 @@ import {
 import { PlaceSearchModal, type KakaoPlaceSearchResult } from "@/components/curation/PlaceSearchModal";
 import { PhotoTagMarker } from "@/components/curation/PhotoTagMarker";
 import type { PostImageItem } from "@/components/curation/types";
+import {
+  curationAspectRatioCss,
+  DEFAULT_CURATION_ASPECT_RATIO,
+  resolveCurationAspectRatioFromSrc,
+  type CurationAspectRatio,
+} from "@/lib/curationAspectRatio";
 
 type PendingPin = {
   photoIndex: number;
@@ -46,6 +52,27 @@ export function Step2PlaceTags({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<KakaoPlaceSearchResult[]>([]);
   const [actionMenuIndex, setActionMenuIndex] = useState<number | null>(null);
+  const [frameAspect, setFrameAspect] = useState<CurationAspectRatio>(DEFAULT_CURATION_ASPECT_RATIO);
+
+  useEffect(() => {
+    const first = images[0];
+    if (!first) {
+      setFrameAspect(DEFAULT_CURATION_ASPECT_RATIO);
+      return;
+    }
+    const src = first.status === "uploaded" && first.publicUrl ? first.publicUrl : first.previewUrl;
+    if (!src) {
+      setFrameAspect(DEFAULT_CURATION_ASPECT_RATIO);
+      return;
+    }
+    let cancelled = false;
+    void resolveCurationAspectRatioFromSrc(src).then((ratio) => {
+      if (!cancelled) setFrameAspect(ratio);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [images[0]?.id, images[0]?.previewUrl, images[0]?.publicUrl, images[0]?.status]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -129,7 +156,10 @@ export function Step2PlaceTags({
           : "사진을 탭해서 장소를 추가하세요 (선택)"}
       </p>
 
-      <div className="curationPhotoCarousel">
+      <div
+        className="curationPhotoCarousel"
+        style={{ ["--curation-draft-aspect" as string]: curationAspectRatioCss(frameAspect) }}
+      >
         <div ref={scrollRef} className="curationPhotoCarouselTrack" onScroll={onScroll}>
           {images.map((img, index) => {
             const thumbSrc = img.status === "uploaded" && img.publicUrl ? img.publicUrl : img.previewUrl;

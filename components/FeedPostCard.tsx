@@ -8,6 +8,11 @@ import { formatDisplayCategoriesForUi } from "@/lib/categoryUtil";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { getDisplayPlaceForPhoto, type PlaceRefForPhotoTagMatch } from "@/lib/photoPlaceTag";
 import type { SavedCourse } from "@/lib/courses";
+import {
+  curationAspectRatioCss,
+  DEFAULT_CURATION_ASPECT_RATIO,
+  type CurationAspectRatio,
+} from "@/lib/curationAspectRatio";
 
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
@@ -26,6 +31,7 @@ export type FeedPostCardData = {
   comment: string;
   photoPlaceTags?: PhotoPlaceTag[] | null;
   images: string[];
+  aspectRatio?: CurationAspectRatio | null;
   createdAt: string;
   companionTag?: CompanionTag | null;
   courseId?: string | null;
@@ -91,6 +97,7 @@ export function FeedPostMedia({
   onPlaceOverlayClick,
   mediaAriaLabel = "게시물 상세 보기",
   variant = "list",
+  aspectRatio = DEFAULT_CURATION_ASPECT_RATIO,
 }: {
   images: string[];
   placeSource: Pick<
@@ -102,6 +109,7 @@ export function FeedPostMedia({
   mediaAriaLabel?: string;
   /** list: 홈/카드 lazy / detail: 상세 eager·프리로드 */
   variant?: FeedPostMediaVariant;
+  aspectRatio?: CurationAspectRatio | null;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -111,6 +119,9 @@ export function FeedPostMedia({
   const multi = images.length > 1;
   const pointerStartRef = useRef<{ x: number; y: number; scrollLeft: number } | null>(null);
   const suppressTapRef = useRef(false);
+  const frameAspect = aspectRatio ?? DEFAULT_CURATION_ASPECT_RATIO;
+  const aspectCss = curationAspectRatioCss(frameAspect);
+  const mediaInteractive = variant !== "detail";
 
   const expandLoadIndices = useCallback(
     (center: number) => {
@@ -207,6 +218,7 @@ export function FeedPostMedia({
 
   const handleMediaClick = useCallback(
     (e: React.MouseEvent) => {
+      if (!mediaInteractive) return;
       if (suppressTapRef.current) {
         suppressTapRef.current = false;
         return;
@@ -215,7 +227,7 @@ export function FeedPostMedia({
       const imageUrl = images[activeIndex] ?? images[0] ?? "";
       onMediaClick({ imageUrl, index: activeIndex });
     },
-    [onMediaClick, images, activeIndex],
+    [mediaInteractive, onMediaClick, images, activeIndex],
   );
 
   const displayPlace = getDisplayPlaceForPhoto(
@@ -233,7 +245,11 @@ export function FeedPostMedia({
 
   if (images.length === 0) {
     return (
-      <div className="feedPostMediaPlaceholder" aria-hidden>
+      <div
+        className="feedPostMediaPlaceholder"
+        aria-hidden
+        style={{ ["--feed-post-aspect" as string]: aspectCss }}
+      >
         <span className="feedPostMediaPlaceholderIcon">📷</span>
         <span className="feedPostMediaPlaceholderText">사진 없음</span>
       </div>
@@ -241,13 +257,16 @@ export function FeedPostMedia({
   }
 
   return (
-    <div className={`feedPostMedia${variant === "detail" ? " feedPostMedia--detail" : ""}`}>
+    <div
+      className={`feedPostMedia${variant === "detail" ? " feedPostMedia--detail" : ""}`}
+      style={{ ["--feed-post-aspect" as string]: aspectCss }}
+    >
       <div
         ref={scrollRef}
         className="feedPostMediaTrack"
-        role="button"
-        tabIndex={0}
-        aria-label={mediaAriaLabel}
+        role={mediaInteractive ? "button" : undefined}
+        tabIndex={mediaInteractive ? 0 : undefined}
+        aria-label={mediaInteractive ? mediaAriaLabel : undefined}
         onScroll={onScroll}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -255,6 +274,7 @@ export function FeedPostMedia({
         onPointerCancel={handlePointerEnd}
         onClick={handleMediaClick}
         onKeyDown={(e) => {
+          if (!mediaInteractive) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             e.stopPropagation();
@@ -415,6 +435,7 @@ export function FeedPostCard({
       <FeedPostMedia
         images={post.images}
         placeSource={post}
+        aspectRatio={post.aspectRatio}
         onMediaClick={() => onCardClick()}
         onPlaceOverlayClick={onPlaceOverlayClick}
       />
