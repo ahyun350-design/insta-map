@@ -440,9 +440,12 @@ private enum NativeMapMarkerStyleHelper {
     }
 
     /// One iconStyle duplicated at zoom levels 0…21 — no per-level scale interpolation (fixed screen px like Kakao Marker).
-    static func allZoomLevelPoiStyles(iconStyle: PoiIconStyle) -> [PerLevelPoiStyle] {
+    static func allZoomLevelPoiStyles(iconStyle: PoiIconStyle, textStyle: PoiTextStyle? = nil) -> [PerLevelPoiStyle] {
         (minMapZoomLevel...maxMapZoomLevel).map { level in
-            PerLevelPoiStyle(iconStyle: iconStyle, padding: 0, level: level)
+            if let textStyle {
+                return PerLevelPoiStyle(iconStyle: iconStyle, textStyle: textStyle, level: level)
+            }
+            return PerLevelPoiStyle(iconStyle: iconStyle, padding: 0, level: level)
         }
     }
 
@@ -457,8 +460,27 @@ private enum NativeMapMarkerStyleHelper {
         )
     }
 
-    static func registerFixedZoomPoiStyle(on manager: LabelManager, styleID: String, iconStyle: PoiIconStyle) {
-        manager.addPoiStyle(PoiStyle(styleID: styleID, styles: allZoomLevelPoiStyles(iconStyle: iconStyle)))
+    /// 코스 가게 이름 — 흰 외곽선으로 가독성 (알약 배경은 TextStyle 미지원)
+    static func courseNameTextStyle(layout: PoiTextLayout = .right) -> PoiTextStyle {
+        let line = PoiTextLineStyle(
+            textStyle: TextStyle(
+                fontSize: 13,
+                fontColor: UIColor(hex: 0x1a1a2e),
+                strokeThickness: 4,
+                strokeColor: .white
+            ),
+            textLayout: layout
+        )
+        return PoiTextStyle(textStyles: [line])
+    }
+
+    static func registerFixedZoomPoiStyle(
+        on manager: LabelManager,
+        styleID: String,
+        iconStyle: PoiIconStyle,
+        textStyle: PoiTextStyle? = nil
+    ) {
+        manager.addPoiStyle(PoiStyle(styleID: styleID, styles: allZoomLevelPoiStyles(iconStyle: iconStyle, textStyle: textStyle)))
     }
 
     static func applyFixedScreenMapSettings(on map: KakaoMap) {
@@ -513,10 +535,19 @@ private enum NativeMapMarkerStyleHelper {
         return "pindmap-marker-\(key)"
     }
 
-    static func makeMarkerIcon(category: String?, order: Int? = nil) -> UIImage {
+    static func makeMarkerIcon(category: String?, order: Int? = nil, courseStopCount: Int? = nil) -> UIImage {
         let style = categoryPinStyle(for: category)
         let isCoursePin = (order ?? 0) > 0
-        let canvasSize = isCoursePin ? coursePinSize : pinSize
+        let emphasize =
+            isCoursePin
+            && (order == 1 || (courseStopCount != nil && order == courseStopCount))
+        var canvasSize = isCoursePin ? coursePinSize : pinSize
+        if emphasize {
+            canvasSize = CGSize(
+                width: floor(canvasSize.width * 1.1),
+                height: floor(canvasSize.height * 1.1)
+            )
+        }
         let renderer = imageRenderer(for: canvasSize)
         return renderer.image { ctx in
             let cg = ctx.cgContext
@@ -531,7 +562,7 @@ private enum NativeMapMarkerStyleHelper {
             style.fillColor.setFill()
             droplet.fill()
             style.strokeColor.setStroke()
-            droplet.lineWidth = 1
+            droplet.lineWidth = emphasize ? 2.2 : 1
             droplet.lineJoinStyle = .round
             droplet.lineCapStyle = .round
             droplet.stroke()
@@ -546,7 +577,8 @@ private enum NativeMapMarkerStyleHelper {
             if let order, order > 0 {
                 let text = "\(order)"
                 let fontScale = canvasSize.width / reactCoursePinSize.width
-                let font = UIFont.systemFont(ofSize: 13 * fontScale, weight: .bold)
+                let fontSize: CGFloat = (emphasize ? 16 : 15) * fontScale
+                let font = UIFont.systemFont(ofSize: fontSize, weight: .heavy)
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: font,
                     .foregroundColor: readableCenterTextColor(for: style.fillColor),
@@ -799,6 +831,7 @@ private final class KakaoMapTestViewController: UIViewController {
     private static let routeID = "pindmap-route-main"
     private static let carRouteStyleSetID = "pindmap-route-car"
     private static let walkRouteStyleSetID = "pindmap-route-walk"
+    private static let courseRouteStyleSetID = "pindmap-route-course"
     private var routeLayer: RouteLayer?
     private var registeredRouteStyleSetIDs = Set<String>()
     private var pendingRoute: (path: [(lat: Double, lng: Double)], mode: String)?
@@ -1385,7 +1418,7 @@ private final class KakaoMapTestViewController: UIViewController {
         }
     }
 
-    private func ensureStyle(for category: String?, order: Int? = nil) -> String {
+    private func ensureStyle(for category: String?, order: Int? = nil, courseStopCount: Int? = nil) -> String {
         guard let map = kakaoMapView() else {
             return NativeMapMarkerStyleHelper.styleID(for: category, order: order)
         }
@@ -1397,10 +1430,20 @@ private final class KakaoMapTestViewController: UIViewController {
         let isCoursePin = (order ?? 0) > 0
         let anchor = isCoursePin ? NativeMapMarkerStyleHelper.coursePinAnchor : NativeMapMarkerStyleHelper.savedPinAnchor
         let iconStyle = NativeMapMarkerStyleHelper.makeFixedZoomPoiIconStyle(
-            symbol: NativeMapMarkerStyleHelper.makeMarkerIcon(category: category, order: order),
+            symbol: NativeMapMarkerStyleHelper.makeMarkerIcon(
+                category: category,
+                order: order,
+                courseStopCount: courseStopCount
+            ),
             anchorPoint: anchor
         )
-        NativeMapMarkerStyleHelper.registerFixedZoomPoiStyle(on: manager, styleID: styleID, iconStyle: iconStyle)
+        let textStyle = isCoursePin ? NativeMapMarkerStyleHelper.courseNameTextStyle(layout: .right) : nil
+        NativeMapMarkerStyleHelper.registerFixedZoomPoiStyle(
+            on: manager,
+            styleID: styleID,
+            iconStyle: iconStyle,
+            textStyle: textStyle
+        )
         registeredStyleIDs.insert(styleID)
         return styleID
     }
@@ -1476,6 +1519,7 @@ private final class KakaoMapTestViewController: UIViewController {
             CAPLog.print("[PindmapNativeMap][Fullscreen] addMarkers skipped — map/layer unavailable")
             return 0
         }
+        let courseStopCount = markers.compactMap(\.order).filter { $0 > 0 }.max()
         var added = 0
         for marker in markers {
             if markerPois[marker.id] != nil {
@@ -1496,9 +1540,28 @@ private final class KakaoMapTestViewController: UIViewController {
             if marker.isSaved {
                 syncColocatedMarkersSavedState(anchorId: marker.id, saved: true)
             }
-            let styleID = ensureStyle(for: marker.category, order: marker.order)
+            let styleID = ensureStyle(
+                for: marker.category,
+                order: marker.order,
+                courseStopCount: courseStopCount
+            )
             let option = PoiOptions(styleID: styleID, poiID: marker.id)
-            option.rank = 0
+            let isCourse = (marker.order ?? 0) > 0
+            if isCourse {
+                let title = (marker.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !title.isEmpty {
+                    let short =
+                        title.count > 16
+                        ? String(title.prefix(15)) + "…"
+                        : title
+                    option.addText(PoiText(text: short, styleIndex: 0))
+                }
+                let order = marker.order ?? 0
+                let emphasize = order == 1 || order == (courseStopCount ?? -1)
+                option.rank = emphasize ? 20 : 10
+            } else {
+                option.rank = 0
+            }
             option.clickable = true
             option.transformType = .default
             let point = MapPoint(longitude: marker.lng, latitude: marker.lat)
@@ -2545,7 +2608,7 @@ private final class KakaoMapTestViewController: UIViewController {
         updateCourseNavUI()
         if segmentFocus {
             let segment = courseNavSegments[index]
-            setRoute(path: segment.path, mode: "walk", fitCamera: true)
+            setRoute(path: segment.path, mode: "course", fitCamera: true)
         }
     }
 
@@ -2556,7 +2619,7 @@ private final class KakaoMapTestViewController: UIViewController {
             courseNavSegmentFocusMode = true
             updateCourseNavUI()
             let segment = courseNavSegments[sender.tag]
-            setRoute(path: segment.path, mode: "walk", fitCamera: true)
+            setRoute(path: segment.path, mode: "course", fitCamera: true)
         }
     }
 
@@ -2574,7 +2637,7 @@ private final class KakaoMapTestViewController: UIViewController {
         courseNavSegmentFocusMode = false
         updateCourseNavUI()
         if courseNavFullPath.count >= 2 {
-            setRoute(path: courseNavFullPath, mode: "walk", fitCamera: true)
+            setRoute(path: courseNavFullPath, mode: "course", fitCamera: true)
         }
     }
 
@@ -2592,7 +2655,15 @@ private final class KakaoMapTestViewController: UIViewController {
             return
         }
 
-        let routeMode = mode == "walk" ? "walk" : "car"
+        let routeMode: String
+        switch mode {
+        case "walk":
+            routeMode = "walk"
+        case "course":
+            routeMode = "course"
+        default:
+            routeMode = "car"
+        }
         let manager = map.getRouteManager()
         ensureRouteStyleSet(mode: routeMode, manager: manager)
         // TEMP crs-debug
@@ -2609,7 +2680,15 @@ private final class KakaoMapTestViewController: UIViewController {
         layer.removeRoute(routeID: Self.routeID)
 
         let points = path.map { MapPoint(longitude: $0.lng, latitude: $0.lat) }
-        let styleSetID = routeMode == "walk" ? Self.walkRouteStyleSetID : Self.carRouteStyleSetID
+        let styleSetID: String
+        switch routeMode {
+        case "walk":
+            styleSetID = Self.walkRouteStyleSetID
+        case "course":
+            styleSetID = Self.courseRouteStyleSetID
+        default:
+            styleSetID = Self.carRouteStyleSetID
+        }
         var option = RouteOptions(routeID: Self.routeID, styleID: styleSetID, zOrder: 0)
         option.segments = [RouteSegment(points: points, styleIndex: 0)]
         // TEMP crs-debug
@@ -2642,8 +2721,41 @@ private final class KakaoMapTestViewController: UIViewController {
     }
 
     private func ensureRouteStyleSet(mode: String, manager: RouteManager) {
-        let styleSetID = mode == "walk" ? Self.walkRouteStyleSetID : Self.carRouteStyleSetID
+        let styleSetID: String
+        switch mode {
+        case "walk":
+            styleSetID = Self.walkRouteStyleSetID
+        case "course":
+            styleSetID = Self.courseRouteStyleSetID
+        default:
+            styleSetID = Self.carRouteStyleSetID
+        }
         guard !registeredRouteStyleSetIDs.contains(styleSetID) else { return }
+
+        if mode == "course" {
+            let styleSet = RouteStyleSet(styleID: styleSetID)
+            styleSet.addPattern(
+                RoutePattern(
+                    pattern: Self.makeCourseDashPatternImage(),
+                    distance: 16,
+                    symbol: nil,
+                    pinStart: false,
+                    pinEnd: false
+                )
+            )
+            let perLevelStyle = PerLevelRouteStyle(
+                width: 3,
+                color: UIColor(hex: 0x1a2a7a).withAlphaComponent(0.7),
+                strokeWidth: 0,
+                strokeColor: .clear,
+                level: 0,
+                patternIndex: 0
+            )
+            styleSet.addStyle(RouteStyle(styles: [perLevelStyle]))
+            manager.addRouteStyleSet(styleSet)
+            registeredRouteStyleSetIDs.insert(styleSetID)
+            return
+        }
 
         let color = mode == "walk" ? UIColor(hex: 0x16a34a) : UIColor(hex: 0x1a2a7a)
         let perLevelStyle = PerLevelRouteStyle(
@@ -2658,6 +2770,17 @@ private final class KakaoMapTestViewController: UIViewController {
         let styleSet = RouteStyleSet(styleID: styleSetID, styles: [routeStyle])
         manager.addRouteStyleSet(styleSet)
         registeredRouteStyleSetIDs.insert(styleSetID)
+    }
+
+    private static func makeCourseDashPatternImage() -> UIImage {
+        let size = CGSize(width: 14, height: 4)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            UIColor.clear.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            UIColor(hex: 0x1a2a7a).withAlphaComponent(0.85).setFill()
+            UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: 7, height: 4), cornerRadius: 1).fill()
+        }
     }
 
     private func fitCameraToRoute(points: [MapPoint], map: KakaoMap) {

@@ -134,7 +134,7 @@ export interface LatLngInput {
   lng: number;
 }
 
-export type FullscreenRouteMode = 'car' | 'walk';
+export type FullscreenRouteMode = 'car' | 'walk' | 'course';
 
 export interface SetFullscreenRouteOptions {
   path: LatLngInput[];

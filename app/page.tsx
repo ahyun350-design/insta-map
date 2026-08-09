@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -39,46 +39,6 @@ import { toUserMessage } from "@/lib/userErrorMessage";
 const ADMIN_USER_ID = "63772749-e01b-4396-a41c-c17a4d3acfe6";
 const ADMIN_STATUS_CARD_OPEN_KEY = "pindmap_admin_status_card_open";
 
-/**
- * EXPERIMENT — 코스 전체화면(웹 카카오맵) 어두운 오버레이.
- * 끄려면 false. 관련 state/UI/마커색 분기만 비활성 (쉬운 롤백).
- */
-const COURSE_MAP_DIM_EXPERIMENT = true;
-const COURSE_MAP_DIM_LABELS = ["끔", "A", "B", "C"] as const;
-type CourseMapDimMode = 0 | 1 | 2 | 3;
-
-function courseMapDimOverlayStyle(mode: CourseMapDimMode): CSSProperties | null {
-  if (mode === 0) return null;
-  const base: CSSProperties = {
-    position: "absolute",
-    inset: 0,
-    pointerEvents: "none",
-    // 지도 div 형제 레이어. 카카오 Marker는 map 컨테이너 안쪽에 그려져 이 오버레이보다 아래에 깔림.
-    zIndex: 1,
-  };
-  if (mode === 1) {
-    return { ...base, background: "rgba(0,0,0,0.45)" };
-  }
-  if (mode === 2) {
-    return {
-      ...base,
-      backdropFilter: "grayscale(0.7) brightness(0.6)",
-      WebkitBackdropFilter: "grayscale(0.7) brightness(0.6)",
-    };
-  }
-  return {
-    ...base,
-    background: "rgba(30,30,35,0.5)",
-    backdropFilter: "saturate(0.3)",
-    WebkitBackdropFilter: "saturate(0.3)",
-  };
-}
-
-function courseNumberMarkerSvg(order: number, brightPin: boolean): string {
-  const fill = brightPin ? "#FF6B6B" : "#1a2a7a";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40"><path d="M16 0C7.16 0 0 7.16 0 16c0 12 16 24 16 24S32 28 32 16C32 7.16 24.84 0 16 0z" fill="${fill}" stroke="#fff" stroke-width="1.5"/><circle cx="16" cy="16" r="11" fill="#fff"/><text x="16" y="20" text-anchor="middle" font-size="13" font-weight="700" fill="${fill}">${order}</text></svg>`;
-}
-
 function readAdminStatusCardOpen(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -97,6 +57,23 @@ function writeAdminStatusCardOpen(open: boolean): void {
   } catch {
     /* ignore */
   }
+}
+
+/** 웹 코스 지도 순번 핀 SVG */
+function buildWebCoursePinSvg(order: number, total: number): { svg: string; width: number; height: number } {
+  const emphasize = order === 1 || order === total;
+  const width = emphasize ? 35 : 32;
+  const height = emphasize ? 44 : 40;
+  const stroke = emphasize ? 2.5 : 1.5;
+  const fontSize = emphasize ? 16 : 15;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 32 40"><path d="M16 0C7.16 0 0 7.16 0 16c0 12 16 24 16 24S32 28 32 16C32 7.16 24.84 0 16 0z" fill="#1a2a7a" stroke="#fff" stroke-width="${stroke}"/><circle cx="16" cy="16" r="11" fill="#fff"/><text x="16" y="21" text-anchor="middle" font-size="${fontSize}" font-weight="800" fill="#1a2a7a">${order}</text></svg>`;
+  return { svg, width, height };
+}
+
+function truncateCourseLabelName(name: string, max = 16): string {
+  const t = name.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
 }
 
 type AdminStatusPayload = {
@@ -1537,11 +1514,6 @@ function HomePageContent() {
   const [courseLoading, setCourseLoading] = useState(false);
   const [courseResult, setCourseResult] = useState<CoursePlace[] | null>(null);
   const [showCourseRoute, setShowCourseRoute] = useState(false);
-  /** EXPERIMENT: 코스 맵 딤 오버레이 0=끔 → A→B→C */
-  const [courseMapDimMode, setCourseMapDimMode] = useState<CourseMapDimMode>(0);
-  const [courseMapBrightPins, setCourseMapBrightPins] = useState(false);
-  const courseMapBrightPinsRef = useRef(false);
-  courseMapBrightPinsRef.current = courseMapBrightPins;
   const [courseNavigation, setCourseNavigation] = useState<CourseWalkNavigation | null>(null);
   const [courseNavSegmentIndex, setCourseNavSegmentIndex] = useState<number | null>(null);
   const [courseNavFocusMode, setCourseNavFocusMode] = useState(false);
@@ -1630,6 +1602,8 @@ function HomePageContent() {
     Map<string, { marker: any; category: Category; lat: number; lng: number; address: string }>
   >(new Map());
   const searchMarkersRef = useRef<any[]>([]);
+  /** 코스 이름 CustomOverlay (웹) */
+  const courseLabelOverlaysRef = useRef<any[]>([]);
   /** 확장 지도 키워드 검색 결과 핀 전용 — 코스 마커(searchMarkersRef)와 분리 */
   const mapSearchResultPinsRef = useRef<any[]>([]);
   /** Native 검색 핀 id → place (markerClick 복원용) */
@@ -2247,8 +2221,8 @@ function HomePageContent() {
         return false;
       }
       // TEMP crs-debug
-      devLog("[crs] setRoute call path", path.length, "mode walk", label);
-      await setFullscreenNativeRoute({ path, mode: "walk" }, { silent: false });
+      devLog("[crs] setRoute call path", path.length, "mode course", label);
+      await setFullscreenNativeRoute({ path, mode: "course" }, { silent: false });
       if (!isSessionStillValid()) {
         // TEMP crs-debug
         devLog("[crs] skip marker refresh — session invalid after setRoute", label);
@@ -5886,29 +5860,42 @@ function HomePageContent() {
       return;
     }
     drawCourseRouteRetryRef.current = 0;
-    // 기존 경로 지우기
+    // 기존 경로·마커·라벨 지우기
     clearRoute();
     searchMarkersRef.current.forEach((m) => m.setMap(null));
     searchMarkersRef.current = [];
+    courseLabelOverlaysRef.current.forEach((o) => o.setMap(null));
+    courseLabelOverlaysRef.current = [];
 
     const stops: LatLng[] = [];
     const stopNames: string[] = [];
     const bounds = new window.kakao.maps.LatLngBounds();
+    const total = courseResult.length;
+    const mapNode = expandedMapRef.current.getNode?.() as HTMLElement | undefined;
+    const mapWidth = mapNode?.clientWidth || window.innerWidth || 375;
+    type LabelPlan = {
+      place: CoursePlace;
+      pos: any;
+      idx: number;
+      side: "left" | "right";
+      yNudge: number;
+      screenX: number;
+      screenY: number;
+    };
+    const labelPlans: LabelPlan[] = [];
+
     courseResult.forEach((place, idx) => {
       const pos = new window.kakao.maps.LatLng(place.lat, place.lng);
       stops.push({ lat: place.lat, lng: place.lng });
       stopNames.push(place.name);
       bounds.extend(pos);
-      // 순번 마커 (EXPERIMENT: courseMapBrightPins → 코랄)
-      const numberSvg = courseNumberMarkerSvg(
-        idx + 1,
-        COURSE_MAP_DIM_EXPERIMENT && courseMapBrightPinsRef.current,
-      );
+      const order = idx + 1;
+      const { svg: numberSvg, width: pinW, height: pinH } = buildWebCoursePinSvg(order, total);
       const markerImg = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(numberSvg)}`;
       const marker = new window.kakao.maps.Marker({
         map: expandedMapRef.current,
         position: pos,
-        image: new window.kakao.maps.MarkerImage(markerImg, new window.kakao.maps.Size(32, 40)),
+        image: new window.kakao.maps.MarkerImage(markerImg, new window.kakao.maps.Size(pinW, pinH)),
       });
       window.kakao.maps.event.addListener(marker, "click", () => {
         const coursePlaceRef = placeRefFromPlace(
@@ -5929,6 +5916,64 @@ function HomePageContent() {
         });
       });
       searchMarkersRef.current.push(marker);
+
+      let screenX = mapWidth / 2;
+      let screenY = 0;
+      try {
+        const proj = expandedMapRef.current.getProjection?.();
+        const pt = proj?.containerPointFromCoords?.(pos);
+        if (pt) {
+          screenX = pt.x;
+          screenY = pt.y;
+        }
+      } catch {
+        /* ignore */
+      }
+      const side: "left" | "right" = screenX > mapWidth * 0.62 ? "left" : "right";
+      let yNudge = 0;
+      const approxW = Math.min(140, truncateCourseLabelName(place.name).length * 8 + 20);
+      for (const prev of labelPlans) {
+        if (prev.side !== side) continue;
+        const dx = Math.abs(screenX - prev.screenX);
+        const dy = Math.abs(screenY + yNudge - (prev.screenY + prev.yNudge));
+        if (dx < approxW * 0.85 && dy < 22) {
+          yNudge = prev.yNudge + (screenY >= prev.screenY ? 20 : -20);
+        }
+      }
+      labelPlans.push({ place, pos, idx, side, yNudge, screenX, screenY });
+    });
+
+    labelPlans.forEach(({ place, pos, side, yNudge }) => {
+      const label = truncateCourseLabelName(place.name);
+      const el = document.createElement("div");
+      el.textContent = label;
+      el.style.cssText = [
+        "background:#fff",
+        "color:#1a1a2e",
+        "font-size:13px",
+        "font-weight:600",
+        "line-height:1.2",
+        "padding:4px 8px",
+        "border-radius:6px",
+        "box-shadow:0 1px 3px rgba(0,0,0,0.14)",
+        "white-space:nowrap",
+        "max-width:140px",
+        "overflow:hidden",
+        "text-overflow:ellipsis",
+        "pointer-events:none",
+        "user-select:none",
+        `transform:translateY(${yNudge}px)`,
+        side === "right" ? "margin-left:8px" : "margin-right:8px",
+      ].join(";");
+      const overlay = new window.kakao.maps.CustomOverlay({
+        map: expandedMapRef.current,
+        position: pos,
+        content: el,
+        xAnchor: side === "right" ? 0 : 1,
+        yAnchor: 0.55,
+        zIndex: 4,
+      });
+      courseLabelOverlaysRef.current.push(overlay);
     });
 
     expandedMapRef.current.setBounds(bounds);
@@ -5953,44 +5998,6 @@ function HomePageContent() {
     } finally {
       setDirectionsLoading(false);
     }
-  };
-
-  /** EXPERIMENT: 핀 색만 다시 그림 (경로 재계산 없음) */
-  const redrawWebCourseNumberMarkersForExperiment = () => {
-    if (!COURSE_MAP_DIM_EXPERIMENT) return;
-    if (!showCourseRoute || !courseResult || !expandedMapRef.current || !window.kakao?.maps) return;
-    searchMarkersRef.current.forEach((m) => m.setMap(null));
-    searchMarkersRef.current = [];
-    const bright = courseMapBrightPinsRef.current;
-    courseResult.forEach((place, idx) => {
-      const pos = new window.kakao.maps.LatLng(place.lat, place.lng);
-      const numberSvg = courseNumberMarkerSvg(idx + 1, bright);
-      const markerImg = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(numberSvg)}`;
-      const marker = new window.kakao.maps.Marker({
-        map: expandedMapRef.current,
-        position: pos,
-        image: new window.kakao.maps.MarkerImage(markerImg, new window.kakao.maps.Size(32, 40)),
-      });
-      window.kakao.maps.event.addListener(marker, "click", () => {
-        const coursePlaceRef = placeRefFromPlace(
-          { id: place.id, name: place.name, address: place.address, category: place.category },
-          place.lat,
-          place.lng,
-        );
-        setSelectedPlace({
-          place_name: place.name,
-          category_name: place.category,
-          road_address_name: place.address,
-          phone: "",
-          place_url: "",
-          y: place.lat,
-          x: place.lng,
-          _feedPosts: getRelatedPostsForPlaceSheet(feedPosts, coursePlaceRef),
-          _placeRef: coursePlaceRef,
-        });
-      });
-      searchMarkersRef.current.push(marker);
-    });
   };
 
   const handleAddFromInstagram = async (urlOverride?: string) => {
@@ -6957,6 +6964,14 @@ function HomePageContent() {
 
   const clearRoute = () => {
     if (routePolylineRef.current) { routePolylineRef.current.setMap(null); routePolylineRef.current = null; }
+    courseLabelOverlaysRef.current.forEach((o) => {
+      try {
+        o.setMap(null);
+      } catch {
+        /* noop */
+      }
+    });
+    courseLabelOverlaysRef.current = [];
     setDirectionsInfo(null);
   };
 
@@ -6968,10 +6983,10 @@ function HomePageContent() {
     );
     routePolylineRef.current = new window.kakao.maps.Polyline({
       path: kakaoPath,
-      strokeWeight: 4,
+      strokeWeight: 3,
       strokeColor: "#1a2a7a",
-      strokeOpacity: 0.85,
-      strokeStyle: "solid",
+      strokeOpacity: 0.7,
+      strokeStyle: "shortdash",
     });
     routePolylineRef.current.setMap(expandedMapRef.current);
     if (fitBounds) {
@@ -10784,81 +10799,6 @@ function HomePageContent() {
                     </div>
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
-                      {/* EXPERIMENT: 코스 경로 보기일 때만 딤 오버레이 (형제 레이어 → 마커는 아래에 깔림) */}
-                      {COURSE_MAP_DIM_EXPERIMENT &&
-                        showCourseRoute &&
-                        (() => {
-                          const dimStyle = courseMapDimOverlayStyle(courseMapDimMode);
-                          return dimStyle ? (
-                            <div aria-hidden style={dimStyle} data-experiment="course-map-dim" />
-                          ) : null;
-                        })()}
-                      {COURSE_MAP_DIM_EXPERIMENT &&
-                        showCourseRoute &&
-                        user?.id === ADMIN_USER_ID && (
-                          <div
-                            data-experiment="course-map-dim-controls"
-                            style={{
-                              position: "absolute",
-                              top: 10,
-                              right: 10,
-                              zIndex: 30,
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "flex-end",
-                              gap: 6,
-                              pointerEvents: "auto",
-                            }}
-                          >
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setCourseMapDimMode((m) => ((m + 1) % 4) as CourseMapDimMode)
-                              }
-                              style={{
-                                border: "none",
-                                borderRadius: 8,
-                                padding: "6px 10px",
-                                background: "rgba(0,0,0,0.72)",
-                                color: "#fff",
-                                fontSize: 11,
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                fontFamily: "inherit",
-                                boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-                              }}
-                            >
-                              딤 {COURSE_MAP_DIM_LABELS[courseMapDimMode]}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCourseMapBrightPins((v) => {
-                                  const next = !v;
-                                  courseMapBrightPinsRef.current = next;
-                                  window.setTimeout(() => redrawWebCourseNumberMarkersForExperiment(), 0);
-                                  return next;
-                                });
-                              }}
-                              style={{
-                                border: "none",
-                                borderRadius: 8,
-                                padding: "6px 10px",
-                                background: courseMapBrightPins
-                                  ? "rgba(255,107,107,0.92)"
-                                  : "rgba(0,0,0,0.72)",
-                                color: "#fff",
-                                fontSize: 11,
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                fontFamily: "inherit",
-                                boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-                              }}
-                            >
-                              핀 {courseMapBrightPins ? "코랄" : "네이비"}
-                            </button>
-                          </div>
-                        )}
                       {expandedNativeMapEnabled && isNativeMapAvailable() && (
                         <>
                           <div id="extended-map-slot" className="extendedNativeMapSlot" aria-hidden />
