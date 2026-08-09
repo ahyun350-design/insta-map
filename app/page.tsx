@@ -249,13 +249,13 @@ function beginKakaoMapsLoad(onReady: () => void): void {
   }
   const origin = window.location.origin;
   const readyState = (window.kakao.maps as { readyState?: number }).readyState;
-  console.log("[PindMap:kakao] calling maps.load()", { origin, readyState });
+  devLog("[PindMap:kakao] calling maps.load()", { origin, readyState });
 
   let polls = 0;
   const pollId = window.setInterval(() => {
     polls += 1;
     const rs = (window.kakao?.maps as { readyState?: number })?.readyState;
-    console.log("[PindMap:kakao] maps.load poll", {
+    devLog("[PindMap:kakao] maps.load poll", {
       polls,
       readyState: rs,
       hasLatLng: isKakaoMapsApiReady(),
@@ -275,7 +275,7 @@ function beginKakaoMapsLoad(onReady: () => void): void {
   try {
     window.kakao.maps.load(() => {
       window.clearInterval(pollId);
-      console.log("[PindMap:kakao] maps.load callback fired", {
+      devLog("[PindMap:kakao] maps.load callback fired", {
         hasLatLng: isKakaoMapsApiReady(),
         readyState: (window.kakao?.maps as { readyState?: number })?.readyState,
       });
@@ -322,6 +322,15 @@ const REALTIME_REMOUNT_BACKOFFS_MS = [1000, 3000, 10000] as const;
 const LOAD_DATA_DEDUP_MS = 2000;
 /** 메시지 탭 방 목록 재조회 TTL — Realtime은 별도로 즉시 반영 */
 const CHAT_ROOMS_LIST_TTL_MS = 30_000;
+/** 마이페이지 탭(코스·좋아요·팔로우 수) 재조회 TTL */
+const MYPAGE_TAB_TTL_MS = 30_000;
+/** 프로덕션 핫패스 console.log 노이즈 방지 — error/warn은 유지 */
+const __pageConsoleLog = console.log.bind(console);
+function devLog(...args: Parameters<typeof console.log>) {
+  if (process.env.NODE_ENV === "development") {
+    __pageConsoleLog(...args);
+  }
+}
 const REALTIME_REMOUNT_MAX_RETRIES = 5;
 const REALTIME_ERROR_STATUSES = new Set(["CHANNEL_ERROR", "CLOSED", "TIMED_OUT"]);
 
@@ -1572,6 +1581,8 @@ function HomePageContent() {
   /** 채팅방 목록 배치 조회 성공 시각 — 메시지 탭 TTL 스킵용 */
   const chatRoomsListFetchedAtRef = useRef(0);
   const chatRoomsListFetchInFlightRef = useRef<Promise<ChatRoom[]> | null>(null);
+  /** 마이페이지 탭 묶음 조회 성공 시각 — 30s TTL */
+  const mypageTabFetchedAtRef = useRef(0);
   /** Preferences places 캐시 히트 — loadData silent refresh / 스플래시 조기 hide */
   const bootstrapCacheHitRef = useRef(false);
   const bootstrapCacheUserIdRef = useRef<string | null>(null);
@@ -2148,7 +2159,7 @@ function HomePageContent() {
   ) => {
     if (courseRoutePath.length < 2) {
       // TEMP crs-debug
-      console.log("[crs] drawCourseRoute skip path too short", courseRoutePath.length);
+      devLog("[crs] drawCourseRoute skip path too short", courseRoutePath.length);
       return;
     }
 
@@ -2160,15 +2171,15 @@ function HomePageContent() {
     const applyRouteAndRefreshMarkers = async (path: LatLng[], label: string) => {
       if (!isSessionStillValid()) {
         // TEMP crs-debug
-        console.log("[crs] skip route draw — session invalid", label, "session", sessionId);
+        devLog("[crs] skip route draw — session invalid", label, "session", sessionId);
         return false;
       }
       // TEMP crs-debug
-      console.log("[crs] setRoute call path", path.length, "mode walk", label);
+      devLog("[crs] setRoute call path", path.length, "mode walk", label);
       await setFullscreenNativeRoute({ path, mode: "walk" }, { silent: false });
       if (!isSessionStillValid()) {
         // TEMP crs-debug
-        console.log("[crs] skip marker refresh — session invalid after setRoute", label);
+        devLog("[crs] skip marker refresh — session invalid after setRoute", label);
         return false;
       }
       await updateFullscreenNativeMarkers(
@@ -2176,7 +2187,7 @@ function HomePageContent() {
         { silent: false },
       );
       // TEMP crs-debug
-      console.log("[crs] setRoute resolved path", path.length, label, "markers", courseMarkers.length);
+      devLog("[crs] setRoute resolved path", path.length, label, "markers", courseMarkers.length);
       return true;
     };
 
@@ -2203,7 +2214,7 @@ function HomePageContent() {
       const navigation = await buildCourseWalkNavigationFromTmap(courseRoutePath, stopNames);
       if (!isSessionStillValid()) {
         // TEMP crs-debug
-        console.log("[crs] skip after tmap — session invalid", sessionId);
+        devLog("[crs] skip after tmap — session invalid", sessionId);
         return;
       }
       fullscreenCourseNavigationRef.current = navigation;
@@ -2221,12 +2232,12 @@ function HomePageContent() {
       console.error("[course] failed", err);
       if (!isSessionStillValid()) {
         // TEMP crs-debug
-        console.log("[crs] skip fallback — session invalid", sessionId);
+        devLog("[crs] skip fallback — session invalid", sessionId);
         return;
       }
       try {
         // TEMP crs-debug
-        console.log("[crs] setRoute fallback call path", courseRoutePath.length);
+        devLog("[crs] setRoute fallback call path", courseRoutePath.length);
         await applyRouteAndRefreshMarkers(courseRoutePath, "fallback-straight");
       } catch (setRouteErr) {
         console.error("[course] setRoute failed", setRouteErr);
@@ -2869,7 +2880,7 @@ function HomePageContent() {
       const rooms = await fetchChatRoomList({
         uid,
         onMissingFriend: (roomId, friendId) => {
-          console.log("[PindMap:chat] 유령 방 제외 roomId=%s friendId=%s", roomId, friendId);
+          devLog("[PindMap:chat] 유령 방 제외 roomId=%s friendId=%s", roomId, friendId);
         },
         onFriendRow: (row) => {
           userAvatarCacheRef.current.setFromRow({
@@ -2898,7 +2909,7 @@ function HomePageContent() {
     const uid = user?.id ?? "";
     if (!isRetry) {
       if (loadDataInFlightRef.current) {
-        console.log("[PindMap:home] loadData skipped (in-flight)");
+        devLog("[PindMap:home] loadData skipped (in-flight)");
         return;
       }
       const now = perfNow();
@@ -2908,7 +2919,7 @@ function HomePageContent() {
         lastLoadDataSuccessAtRef.current > 0 &&
         now - lastLoadDataSuccessAtRef.current < LOAD_DATA_DEDUP_MS
       ) {
-        console.log("[PindMap:home] loadData skipped (recent success, dedup)");
+        devLog("[PindMap:home] loadData skipped (recent success, dedup)");
         return;
       }
     }
@@ -2923,7 +2934,7 @@ function HomePageContent() {
     } catch {
       /* ignore */
     }
-    console.log("[PindMap:home] 로딩 시작", { isRetry, warmCache: bootstrapCacheHitRef.current });
+    devLog("[PindMap:home] 로딩 시작", { isRetry, warmCache: bootstrapCacheHitRef.current });
     // 캐시로 이미 그린 경우 스켈레톤/스피너를 다시 띄우지 않음
     if (!bootstrapCacheHitRef.current) {
       setLoading(true);
@@ -3012,7 +3023,7 @@ function HomePageContent() {
       lastLoadDataUserIdRef.current = uid;
       dlog.perf.fetchEnd(perfScreen);
       logPerf("loadData", perfNow() - loadDataT0);
-      console.log("[PindMap:home] 로딩 완료");
+      devLog("[PindMap:home] 로딩 완료");
     } catch (err) {
       dlog.perf.fetchEnd(perfScreen);
       logPerf("loadData.failed", perfNow() - loadDataT0);
@@ -3021,7 +3032,7 @@ function HomePageContent() {
       setHomeLoadError(friendlyMessage);
       if (!isRetry && homeAutoRetryCountRef.current < 1) {
         homeAutoRetryCountRef.current += 1;
-        console.log("[PindMap:home] 자동 재시도 시작 (1회)");
+        devLog("[PindMap:home] 자동 재시도 시작 (1회)");
         setHomeRetrying(true);
         window.setTimeout(() => {
           void loadData(true).finally(() => setHomeRetrying(false));
@@ -3311,7 +3322,7 @@ function HomePageContent() {
       if (document.visibilityState !== "visible") return;
       if (!user || userLoading || !sessionChecked) return;
       if (!homeLoadError) return;
-      console.log("[PindMap:home] 포그라운드 복귀 - 자동 재시도");
+      devLog("[PindMap:home] 포그라운드 복귀 - 자동 재시도");
       void loadData(true);
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -3504,7 +3515,7 @@ function HomePageContent() {
       const valid = new Set(savedPlaces.map((p) => p.id));
       const next = [...prev].filter((id) => valid.has(id));
       if (next.length !== prev.size) {
-        console.log("[PindMap:pin] pruned stale hidden ids", { before: prev.size, after: next.length });
+        devLog("[PindMap:pin] pruned stale hidden ids", { before: prev.size, after: next.length });
       }
       return new Set(next);
     });
@@ -3606,7 +3617,7 @@ function HomePageContent() {
           },
         );
         const data = await res.json() as ExtractStatusResponse;
-        console.log("[poll]", jobId.slice(0, 8), {
+        devLog("[poll]", jobId.slice(0, 8), {
           status: data.status,
           step: data.progress_step,
           placesCount: data.result_places?.length ?? "no_array",
@@ -3646,7 +3657,7 @@ function HomePageContent() {
               setExtractOverlayComplete(false);
             }
             setStatus("");
-            console.log("[PindMap:url] extraction message hidden (empty result_places)");
+            devLog("[PindMap:url] extraction message hidden (empty result_places)");
             return;
           }
 
@@ -3687,7 +3698,7 @@ function HomePageContent() {
           setStatus("");
           setExtractOverlayError(null);
           setExtractOverlayComplete(true);
-          console.log("[PindMap:url] extraction message hidden (success)", {
+          devLog("[PindMap:url] extraction message hidden (success)", {
             resultPlaces: places.length,
             newlyAddedCount,
           });
@@ -3705,7 +3716,7 @@ function HomePageContent() {
           setExtractOverlayError(userMsg);
           setExtractRetryUrl(failedUrl);
           setExtractOverlayComplete(false);
-          console.log("[PindMap:url] extraction message hidden (failed)");
+          devLog("[PindMap:url] extraction message hidden (failed)");
           removeJob(jobId);
         }
       } catch (err) {
@@ -3720,7 +3731,7 @@ function HomePageContent() {
         setExtractOverlayError(userMsg);
         setExtractRetryUrl(failedUrl);
         setExtractOverlayComplete(false);
-        console.log("[PindMap:url] extraction message hidden (failed)");
+        devLog("[PindMap:url] extraction message hidden (failed)");
         removeJob(jobId);
       } finally {
         pollInFlightRef.current.delete(jobId);
@@ -3844,7 +3855,7 @@ function HomePageContent() {
     const webUrl = hasCoord
       ? `https://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(label)}`
       : `https://maps.apple.com/?q=${encodeURIComponent(label)}`;
-    console.log("[PindMap:apple-maps] open place", { label, lat, lng, hasCoord, isIOSLike });
+    devLog("[PindMap:apple-maps] open place", { label, lat, lng, hasCoord, isIOSLike });
     if (isIOSLike) {
       window.location.href = mapsSchemeUrl;
       window.setTimeout(() => {
@@ -3864,7 +3875,7 @@ function HomePageContent() {
     const daddr = coordChain.join("+to:");
     const mapsSchemeUrl = `maps://?daddr=${encodeURIComponent(daddr)}&dirflg=d`;
     const webUrl = `https://maps.apple.com/?daddr=${encodeURIComponent(daddr)}&dirflg=d`;
-    console.log("[PindMap:apple-maps] open course route", { stops: coordChain.length, isIOSLike });
+    devLog("[PindMap:apple-maps] open course route", { stops: coordChain.length, isIOSLike });
     if (isIOSLike) {
       window.location.href = mapsSchemeUrl;
       window.setTimeout(() => {
@@ -3891,7 +3902,7 @@ function HomePageContent() {
   };
 
   const openProfileEdit = () => {
-    console.log("[PindMap:mypage] profile edit button clicked", { uid: user?.id, username: user?.username });
+    devLog("[PindMap:mypage] profile edit button clicked", { uid: user?.id, username: user?.username });
     revokeProfileEditAvatarBlob();
     setProfileEditName(user?.username ?? "");
     setProfileEditBio(user?.bio ?? "");
@@ -3916,7 +3927,7 @@ function HomePageContent() {
   };
 
   const openDeleteAccountModal = () => {
-    console.log("[PindMap:account] 계정 삭제 버튼 클릭");
+    devLog("[PindMap:account] 계정 삭제 버튼 클릭");
     setShowDeleteAccountModal(true);
   };
 
@@ -3928,7 +3939,7 @@ function HomePageContent() {
   };
 
   const goToFinalDeleteConfirmation = () => {
-    console.log("[PindMap:account] 1차 확인 — 삭제 진행");
+    devLog("[PindMap:account] 1차 확인 — 삭제 진행");
     setShowDeleteAccountModal(false);
     setDeleteAccountPhraseInput("");
     setShowDeleteAccountFinalModal(true);
@@ -3936,10 +3947,10 @@ function HomePageContent() {
 
   const executePermanentAccountDeletion = async () => {
     if (deleteAccountPhraseInput.trim() !== "삭제") {
-      console.log("[PindMap:account] 확인 문구 불일치", deleteAccountPhraseInput);
+      devLog("[PindMap:account] 확인 문구 불일치", deleteAccountPhraseInput);
       return;
     }
-    console.log("[PindMap:account] 영구 삭제 API 호출");
+    devLog("[PindMap:account] 영구 삭제 API 호출");
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
       showToast("세션이 만료되었어요. 다시 로그인해 주세요", "error");
@@ -3991,7 +4002,7 @@ function HomePageContent() {
       closeProfileEditModal();
       return;
     }
-    console.log("[PindMap:mypage] saving profile", { uid: user.id, nextName, avatarChanged, bioChanged });
+    devLog("[PindMap:mypage] saving profile", { uid: user.id, nextName, avatarChanged, bioChanged });
     setProfileEditSaving(true);
     try {
       let nextAvatarUrl = user.avatar_url ?? null;
@@ -4117,13 +4128,53 @@ function HomePageContent() {
     setCoursesLoading(true);
     try {
       const { data, error } = await fetchMyCourses(user.id);
-      if (!error) setMyCourses(data);
+      if (!error) {
+        setMyCourses(data);
+        mypageTabFetchedAtRef.current = Date.now();
+      }
     } catch {
       /* keep existing list */
     } finally {
       setCoursesLoading(false);
     }
   }, [user?.id]);
+
+  const refreshMypageFollowCounts = useCallback(async () => {
+    if (!user?.id) return;
+    const uid = user.id;
+    const [followersRes, followingsRes] = await Promise.all([
+      supabase.from("follows").select("id", { count: "exact", head: true }).eq("following_id", uid),
+      supabase.from("follows").select("id", { count: "exact", head: true }).eq("follower_id", uid),
+    ]);
+    setMypageFollowerCount(followersRes.count ?? 0);
+    setMypageFollowingCount(followingsRes.count ?? 0);
+  }, [user?.id]);
+
+  /** 마이페이지 탭 묶음 조회 — 30s TTL (코스 CRUD·팔로우는 별도 즉시 갱신) */
+  const runMypageTabFetchIfStale = useCallback(async () => {
+    if (!user?.id) return;
+    const now = Date.now();
+    if (
+      mypageTabFetchedAtRef.current > 0 &&
+      now - mypageTabFetchedAtRef.current < MYPAGE_TAB_TTL_MS
+    ) {
+      return;
+    }
+    mypageTabFetchedAtRef.current = now;
+    const perfScreen = "tab:mypage:fetch";
+    dlog.perf.start(perfScreen);
+    dlog.perf.fetchStart(perfScreen);
+    try {
+      await Promise.all([
+        refreshMyTotalLikes(),
+        refreshMyCourses(),
+        refreshMypageFollowCounts(),
+      ]);
+    } finally {
+      dlog.perf.fetchEnd(perfScreen);
+      dlog.perf.markRender(perfScreen);
+    }
+  }, [user?.id, refreshMyTotalLikes, refreshMyCourses, refreshMypageFollowCounts]);
 
   const closeCourseModal = () => {
     setShowCourseModal(false);
@@ -4508,7 +4559,7 @@ function HomePageContent() {
       const backoffTimer = window.setTimeout(() => {
         realtimeRemountBackoffRef.current.delete(channelKey);
         realtimeRemountRetryCountRef.current.set(channelKey, retryCount + 1);
-        console.log("[PindMap:realtime] remount attempt", { channelKey, attempt: retryCount + 1 });
+        devLog("[PindMap:realtime] remount attempt", { channelKey, attempt: retryCount + 1 });
         remountFn();
       }, backoffMs);
       realtimeRemountBackoffRef.current.set(channelKey, backoffTimer);
@@ -4533,7 +4584,7 @@ function HomePageContent() {
   const unmountRoomSubscription = useCallback((reason: string) => {
     activeChatRoomIdRef.current = null;
     if (!roomChannelRef.current) return;
-    console.log("[PindMap:message] subscription unmounted", reason);
+    devLog("[PindMap:message] subscription unmounted", reason);
     supabase.removeChannel(roomChannelRef.current);
     roomChannelRef.current = null;
   }, []);
@@ -4701,7 +4752,7 @@ function HomePageContent() {
       });
     roomChannelRef.current = channel;
     activeChatRoomIdRef.current = roomId;
-    console.log("[PindMap:message] subscription mounted", roomId);
+    devLog("[PindMap:message] subscription mounted", roomId);
   }, [unmountRoomSubscription, handleRealtimeChannelStatus]);
 
   const clearMessageUserSearch = useCallback(() => {
@@ -4740,7 +4791,7 @@ function HomePageContent() {
     dlog.perf.start(perfScreen);
     const fromId = activeChatRoom?.id ?? null;
     const reqId = ++openChatRequestRef.current;
-    console.log("[PindMap:message] chatroom switched", { from: fromId, to: room.id });
+    devLog("[PindMap:message] chatroom switched", { from: fromId, to: room.id });
     setChatRoomLoading(true);
     try {
       unmountRoomSubscription("openChat");
@@ -5007,7 +5058,7 @@ function HomePageContent() {
     if (sendingIdsRef.current.has(id)) return;
     sendingIdsRef.current.add(id);
     const createdAt = new Date().toISOString();
-    console.log("[PindMap:message] send start", { id, roomId });
+    devLog("[PindMap:message] send start", { id, roomId });
     chatStickToBottomRef.current = true;
     setMessages((prev) => [...prev, { id, senderId, text, createdAt, read: false, status: "pending" }]);
     setNewMessage("");
@@ -5051,7 +5102,7 @@ function HomePageContent() {
         /* ignore */
       }
       setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status: "sent" as const } : m)));
-      console.log("[PindMap:message] send success", { id, roomId });
+      devLog("[PindMap:message] send success", { id, roomId });
       if (friendId && friendId !== senderId) {
         void supabase
           .from("notifications")
@@ -5102,7 +5153,7 @@ function HomePageContent() {
       showToast("잠시 후 다시 시도해 주세요", "error");
       return;
     }
-    console.log("[PindMap:message] resend start", { id, roomId });
+    devLog("[PindMap:message] resend start", { id, roomId });
     sendingIdsRef.current.add(id);
     setMessages((prev) => prev.map((m) => (m.id === failedMessage.id ? { ...m, status: "pending" as const } : m)));
     try {
@@ -5124,7 +5175,7 @@ function HomePageContent() {
         }),
       );
       setMessages((prev) => prev.map((m) => (m.id === failedMessage.id ? { ...m, status: "sent" as const } : m)));
-      console.log("[PindMap:message] resend success", { id, roomId });
+      devLog("[PindMap:message] resend success", { id, roomId });
     } catch (err: unknown) {
       console.error("[PindMap:message] resend failed", { id, roomId, err });
       setMessages((prev) => prev.map((m) => (m.id === failedMessage.id ? { ...m, status: "failed" as const } : m)));
@@ -5281,6 +5332,8 @@ function HomePageContent() {
     });
     if (error) { showToast("팔로우 실패", "error"); return; }
     setFollowingIds(prev => [...prev, targetUser.id]);
+    setMypageFollowingCount((prev) => prev + 1);
+    mypageTabFetchedAtRef.current = Date.now();
 
     if (user) {
       try {
@@ -5310,6 +5363,8 @@ function HomePageContent() {
       .eq("follower_id", user.id)
       .eq("following_id", targetUser.id);
     setFollowingIds(prev => prev.filter(id => id !== targetUser.id));
+    setMypageFollowingCount((prev) => Math.max(0, prev - 1));
+    mypageTabFetchedAtRef.current = Date.now();
     showToast("언팔로우 완료", "success");
   };
 
@@ -5411,11 +5466,11 @@ function HomePageContent() {
 
   const openCourseShareModal = async (course: SavedCourse) => {
     if (!user) {
-      console.log("[PindMap:course-share] open modal blocked: no user");
+      devLog("[PindMap:course-share] open modal blocked: no user");
       showToast("로그인 후 코스를 공유할 수 있어요", "info");
       return;
     }
-    console.log("[PindMap:course-share] open modal", course.id);
+    devLog("[PindMap:course-share] open modal", course.id);
     setSharingCourse(course);
     setShowCourseShareModal(true);
     setCourseShareSearchQuery("");
@@ -5448,7 +5503,7 @@ function HomePageContent() {
       }),
     );
     setCourseShareFriendRooms(rooms);
-    console.log("[PindMap:course-share] friend rooms", rooms.length);
+    devLog("[PindMap:course-share] friend rooms", rooms.length);
   };
 
   const sendCourseToFriend = async (room: FriendRoom) => {
@@ -5507,7 +5562,7 @@ function HomePageContent() {
   const openCourseShareFromSheet = () => {
     const courseId = activeViewedCourseId;
     if (!courseId) {
-      console.log("[PindMap:course-share] blocked: no course id", {
+      devLog("[PindMap:course-share] blocked: no course id", {
         savedCourseId,
         refId: viewingSavedCourseIdRef.current,
       });
@@ -5515,12 +5570,12 @@ function HomePageContent() {
       return;
     }
     if (!user?.id) {
-      console.log("[PindMap:course-share] blocked: no user", courseId);
+      devLog("[PindMap:course-share] blocked: no user", courseId);
       showToast("로그인 후 코스를 공유할 수 있어요", "info");
       return;
     }
     if (!courseResult?.length) {
-      console.log("[PindMap:course-share] blocked: empty places", courseId);
+      devLog("[PindMap:course-share] blocked: empty places", courseId);
       showToast("공유할 장소가 없어요", "info");
       return;
     }
@@ -5535,7 +5590,7 @@ function HomePageContent() {
       created_at: "",
       updated_at: "",
     };
-    console.log("[PindMap:course-share] open from sheet", courseId, courseResult.length);
+    devLog("[PindMap:course-share] open from sheet", courseId, courseResult.length);
     void openCourseShareModal(tempCourse);
   };
 
@@ -5838,7 +5893,7 @@ function HomePageContent() {
     const extractStartT0 = perfNow();
     dlog.perf.start(perfScreen);
     const controller = new AbortController();
-    console.log("[PindMap:url] extraction start", { url: trimmedUrl });
+    devLog("[PindMap:url] extraction start", { url: trimmedUrl });
     setIsSubmitting(true); setStatus(""); setError("");
     setExtractOverlayError(null);
     setExtractRetryUrl(null);
@@ -5848,7 +5903,7 @@ function HomePageContent() {
     let timeout: number | undefined;
     try {
       timeout = window.setTimeout(() => controller.abort(), 10000);
-      console.log("[PindMap:url] /api/extract/start request", { url: trimmedUrl, userId: user.id });
+      devLog("[PindMap:url] /api/extract/start request", { url: trimmedUrl, userId: user.id });
       dlog.perf.fetchStart(perfScreen);
       const response = await fetch("/api/extract/start", {
         method: "POST",
@@ -5861,9 +5916,9 @@ function HomePageContent() {
       const data = await response.json() as { jobId?: string; error?: string };
       dlog.perf.fetchEnd(perfScreen);
       logPerf("extract.start", perfNow() - extractStartT0);
-      console.log("[PindMap:url] /api/extract/start response status:", response.status, "body:", data);
+      devLog("[PindMap:url] /api/extract/start response status:", response.status, "body:", data);
       if (!response.ok || !data.jobId) {
-        console.log("[PindMap:url] /api/extract/start failed - status:", response.status, "error:", data?.error ?? "missing_job_id");
+        devLog("[PindMap:url] /api/extract/start failed - status:", response.status, "error:", data?.error ?? "missing_job_id");
       }
       if (!response.ok || !data.jobId) throw new Error(`[status:${response.status}] ${data.error ?? "분석 작업 시작에 실패했습니다."}`);
       const newJob: ActiveExtractJob = {
@@ -5881,14 +5936,14 @@ function HomePageContent() {
       setInstagramUrl("");
       setReelInputExpanded(false);
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
-      console.log("[PindMap:url] extraction message shown");
+      devLog("[PindMap:url] extraction message shown");
       showToast("분석 작업을 백그라운드에서 시작했어요", "success");
-      console.log("[PindMap:url] extraction success", { jobId: data.jobId });
+      devLog("[PindMap:url] extraction success", { jobId: data.jobId });
       dlog.perf.markRender(perfScreen);
     } catch (e) {
       dlog.perf.fetchEnd(perfScreen);
       const isTimeout = e instanceof Error && e.name === "AbortError";
-      console.log(`[PindMap:url] extraction ${isTimeout ? "timeout" : "failed"}`, { error: e });
+      devLog(`[PindMap:url] extraction ${isTimeout ? "timeout" : "failed"}`, { error: e });
       dlog.perf.markRender(perfScreen);
       const rawMessage = e instanceof Error && e.name === "AbortError"
         ? "요청이 지연되고 있어요. 잠시 후 다시 시도해주세요."
@@ -5897,7 +5952,7 @@ function HomePageContent() {
           : "요청 처리 중 오류가 발생했습니다.";
       const message = isTimeout ? rawMessage : mapExtractErrorToUserMessage(rawMessage);
       setStatus("");
-      console.log(`[PindMap:url] extraction message hidden (${isTimeout ? "timeout" : "failed"})`);
+      devLog(`[PindMap:url] extraction message hidden (${isTimeout ? "timeout" : "failed"})`);
       setError(message);
       setExtractOverlayError(message);
       setExtractRetryUrl(trimmedUrl);
@@ -5907,7 +5962,7 @@ function HomePageContent() {
     finally {
       if (typeof timeout === "number") window.clearTimeout(timeout);
       setIsSubmitting(false);
-      console.log("[PindMap:url] state reset (finally)", { isSubmitting: false });
+      devLog("[PindMap:url] state reset (finally)", { isSubmitting: false });
     }
     } finally {
       handleAddSubmittingRef.current = false;
@@ -5915,14 +5970,14 @@ function HomePageContent() {
   };
 
   const uploadPostImageToServer = async (file: File, accessToken: string): Promise<string> => {
-    console.log("[handleImageUpload] 원본", {
+    devLog("[handleImageUpload] 원본", {
       name: file.name,
       type: file.type,
       size: file.size,
     });
     const prepared = await prepareImageForUpload(file);
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}-${Math.random().toString(36).substring(2, 11)}.jpg`;
-    console.log("[handleImageUpload] 압축 완료, 업로드 시작", { fileName, size: prepared.size });
+    devLog("[handleImageUpload] 압축 완료, 업로드 시작", { fileName, size: prepared.size });
 
     const formData = new FormData();
     formData.append("file", prepared, fileName);
@@ -5944,21 +5999,21 @@ function HomePageContent() {
     const data = (await res.json().catch(() => ({}))) as { publicUrl?: string; error?: string };
     const publicUrlRaw: string | undefined = data?.publicUrl;
     const uploadFailed = !res.ok || !publicUrlRaw || typeof publicUrlRaw !== "string";
-    console.log("[handleImageUpload] Storage upload 응답", { ok: res.ok, status: res.status, hasError: uploadFailed });
+    devLog("[handleImageUpload] Storage upload 응답", { ok: res.ok, status: res.status, hasError: uploadFailed });
 
     if (!res.ok) {
       console.error("[handleImageUpload] API 업로드 실패", data);
       throw new Error(data.error || `사진 업로드 실패 (${res.status})`);
     }
 
-    console.log("[handleImageUpload] publicUrl 생성", publicUrlRaw);
+    devLog("[handleImageUpload] publicUrl 생성", publicUrlRaw);
     if (!publicUrlRaw || typeof publicUrlRaw !== "string") {
       console.error("[handleImageUpload] publicUrl 누락", data);
       throw new Error("사진 업로드 응답이 올바르지 않아요. 다시 시도해주세요.");
     }
 
     const publicUrl = publicUrlRaw;
-    console.log("[handleImageUpload] 완료", publicUrl);
+    devLog("[handleImageUpload] 완료", publicUrl);
     return publicUrl;
   };
 
@@ -5982,7 +6037,7 @@ function HomePageContent() {
             if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
             return { id: img.id, previewUrl: "", publicUrl, status: "uploaded" as const };
           });
-          console.log("[handleImageUpload] state 추가 완료, 총 이미지:", next.length);
+          devLog("[handleImageUpload] state 추가 완료, 총 이미지:", next.length);
           return next;
         });
       } catch (err) {
@@ -6024,7 +6079,7 @@ function HomePageContent() {
               if (img.previewUrl) URL.revokeObjectURL(img.previewUrl);
               return { id: img.id, previewUrl: "", publicUrl, status: "uploaded" as const };
             });
-            console.log("[handleImageUpload] state 추가 완료, 총 이미지:", next.length);
+            devLog("[handleImageUpload] state 추가 완료, 총 이미지:", next.length);
             return next;
           });
         } catch (err) {
@@ -6212,14 +6267,14 @@ function HomePageContent() {
         const { latitude, longitude } = await getCurrentPositionForMapStage1();
         const currentMap = scope === "main" ? mapRef.current : expandedMapRef.current;
         if (currentMap !== map || token !== locationRenderTokenRef.current[scope]) {
-          console.log("[PindMap:location] map identity changed, retry on new map", { scope });
+          devLog("[PindMap:location] map identity changed, retry on new map", { scope });
           return;
         }
         applyMyLocationOnMap(map, scope, latitude, longitude, true);
         stage1Ok = true;
-        console.log("[PindMap:location] stage1 (fast) coords", latitude, longitude, { scope });
+        devLog("[PindMap:location] stage1 (fast) coords", latitude, longitude, { scope });
       } catch (err) {
-        console.log("[PindMap:location] stage1 failed", { scope, err });
+        devLog("[PindMap:location] stage1 failed", { scope, err });
         if (isGeolocationPermissionDenied(err)) {
           showToast("위치 권한이 필요해요. 설정에서 위치를 허용해 주세요.", "info");
           return;
@@ -6230,13 +6285,13 @@ function HomePageContent() {
         const { latitude, longitude } = await getCurrentPositionForMapStage2();
         const currentMap = scope === "main" ? mapRef.current : expandedMapRef.current;
         if (currentMap !== map || token !== locationRenderTokenRef.current[scope]) {
-          console.log("[PindMap:location] map identity changed before stage2", { scope });
+          devLog("[PindMap:location] map identity changed before stage2", { scope });
           return;
         }
         applyMyLocationOnMap(map, scope, latitude, longitude, false);
-        console.log("[PindMap:location] stage2 (refined) coords", latitude, longitude, { scope });
+        devLog("[PindMap:location] stage2 (refined) coords", latitude, longitude, { scope });
       } catch (err) {
-        console.log("[PindMap:location] stage2 failed", { scope, err });
+        devLog("[PindMap:location] stage2 failed", { scope, err });
         if (!stage1Ok) {
           const denied = isGeolocationPermissionDenied(err);
           showToast(
@@ -6896,11 +6951,11 @@ function HomePageContent() {
     const key = `${String(place.place_name ?? "")}:${place.y}:${place.x}`;
     const now = Date.now();
     if (expandedSearchOpenDedupeRef.current.key === key && now - expandedSearchOpenDedupeRef.current.t < 450) {
-      console.log("[PindMap:expandedMap] dedupe skip same place", source, key);
+      devLog("[PindMap:expandedMap] dedupe skip same place", source, key);
       return;
     }
     expandedSearchOpenDedupeRef.current = { t: now, key };
-    console.log("[PindMap:expandedMap] open place card", source, place.place_name, { y: place.y, x: place.x });
+    devLog("[PindMap:expandedMap] open place card", source, place.place_name, { y: place.y, x: place.x });
     const expandedRef = placeRefFromKakaoPlace(place);
     setSelectedPlace({
       ...place,
@@ -6938,17 +6993,17 @@ function HomePageContent() {
   const runExpandedMapSearch = useCallback(
     (keyword: string) => {
       const trimmed = keyword.trim();
-      console.log("[PindMap:search] search invoked", { query: trimmed });
+      devLog("[PindMap:search] search invoked", { query: trimmed });
       if (!trimmed) {
-        console.log("[PindMap:search] search blocked - reason: empty_query");
+        devLog("[PindMap:search] search blocked - reason: empty_query");
         return;
       }
       if (!expandedMapRef.current) {
-        console.log("[PindMap:search] search blocked - reason: expanded_map_not_ready");
+        devLog("[PindMap:search] search blocked - reason: expanded_map_not_ready");
         return;
       }
       if (!window.kakao?.maps) {
-        console.log("[PindMap:search] search blocked - reason: kakao_not_ready");
+        devLog("[PindMap:search] search blocked - reason: kakao_not_ready");
         return;
       }
 
@@ -6996,7 +7051,7 @@ function HomePageContent() {
           pendingSearchCenterSyncRef.current = false;
           return;
         }
-        console.log("[PindMap:expandedMap] keywordSearch ok count=", data?.length ?? 0);
+        devLog("[PindMap:expandedMap] keywordSearch ok count=", data?.length ?? 0);
         clearSearchResultPins();
         addSearchResultPins(data, (place) => openExpandedSearchPlaceCard(place, "marker-keyword-click"));
         setMapSearchResults(data);
@@ -7035,7 +7090,7 @@ function HomePageContent() {
           if (Number.isFinite(addrLat) && Number.isFinite(addrLng)) {
             lastSearchCenterRef.current = { lat: addrLat, lng: addrLng };
           }
-          console.log("[PindMap:expandedMap] addressSearch marker", placeObj.place_name);
+          devLog("[PindMap:expandedMap] addressSearch marker", placeObj.place_name);
           addSearchResultPins([placeObj], (place) => openExpandedSearchPlaceCard(place, "marker-address-click"));
           setMapSearchResults([placeObj]);
           setMapSearchLabel(trimmed);
@@ -7045,7 +7100,7 @@ function HomePageContent() {
           pendingSearchCenterSyncRef.current = true;
           setSearchQuery("");
         } else {
-          console.log("[PindMap:expandedMap] addressSearch fallback to keyword:", trimmed);
+          devLog("[PindMap:expandedMap] addressSearch fallback to keyword:", trimmed);
           runKeywordSearchAtMapCenter();
         }
       });
@@ -7077,7 +7132,7 @@ function HomePageContent() {
       return;
     }
     const notifySdkReady = () => {
-      console.log("[PindMap:kakao] maps.load ready", {
+      devLog("[PindMap:kakao] maps.load ready", {
         hasLatLng: isKakaoMapsApiReady(),
         origin: typeof window !== "undefined" ? window.location.origin : "ssr",
       });
@@ -7121,7 +7176,7 @@ function HomePageContent() {
     script.setAttribute("data-pindmap-kakao", "1");
     script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${mapKey}&autoload=false&libraries=services`;
     script.async = true;
-    console.log("[PindMap:kakao] injecting sdk.js", {
+    devLog("[PindMap:kakao] injecting sdk.js", {
       origin: window.location.origin,
       hasKey: Boolean(mapKey),
     });
@@ -7139,7 +7194,7 @@ function HomePageContent() {
     script.onload = () => {
       window.clearTimeout(failTimer);
       script.setAttribute("data-loaded", "1");
-      console.log("[PindMap:kakao] script onload", {
+      devLog("[PindMap:kakao] script onload", {
         hasMaps: Boolean(window.kakao?.maps),
         hasLatLng: isKakaoMapsApiReady(),
       });
@@ -7248,11 +7303,11 @@ function HomePageContent() {
     if (!compactMapReady || !mapRef.current) return;
     if (relayoutTriggeredRef.current) return;
     relayoutTriggeredRef.current = true;
-    console.log("[PindMap:pin] relayout trigger (initial)");
+    devLog("[PindMap:pin] relayout trigger (initial)");
 
     const runRelayoutAndRepaint = () => {
       relayoutCompactMap();
-      console.log("[PindMap:pin] relayout completed");
+      devLog("[PindMap:pin] relayout completed");
     };
 
     const timers = [200, 500].map((delay) => window.setTimeout(runRelayoutAndRepaint, delay));
@@ -7741,7 +7796,7 @@ function HomePageContent() {
         level: mapRef.current?.getLevel() ?? 9,
       });
       const map = expandedMapRef.current;
-      console.log("[PindMap:expandedMap] Map instance ready, wiring kakao click + DOM touch fallback");
+      devLog("[PindMap:expandedMap] Map instance ready, wiring kakao click + DOM touch fallback");
 
       addMyLocation(map, "expanded");
       setExpandedMapPinsTick((n) => n + 1);
@@ -7749,12 +7804,12 @@ function HomePageContent() {
       const hitFromLatLng = (lat: number, lng: number, source: string): boolean => {
         const candidates = lastExpandedSearchPlacesRef.current;
         if (!candidates.length) {
-          console.log("[PindMap:expandedMap] geo tap skipped (no keyword/address pins in memory)", source);
+          devLog("[PindMap:expandedMap] geo tap skipped (no keyword/address pins in memory)", source);
           return false;
         }
         const picked = pickNearestExpandedSearchPlaceByPixel(map, lat, lng, candidates, 56);
         if (!picked) {
-          console.log("[PindMap:expandedMap] geo tap no marker within px threshold", source, { lat, lng, nearCount: candidates.length });
+          devLog("[PindMap:expandedMap] geo tap no marker within px threshold", source, { lat, lng, nearCount: candidates.length });
           return false;
         }
         openExpandedSearchPlaceCard(picked, source);
@@ -7764,12 +7819,12 @@ function HomePageContent() {
       const listenerClick = window.kakao.maps.event.addListener(map, "click", (me: any) => {
         const ll = me?.latLng;
         if (!ll) {
-          console.log("[PindMap:expandedMap] kakao map click without latLng");
+          devLog("[PindMap:expandedMap] kakao map click without latLng");
           return;
         }
         const lat = ll.getLat();
         const lng = ll.getLng();
-        console.log("[PindMap:expandedMap] kakao maps map.click", lat, lng);
+        devLog("[PindMap:expandedMap] kakao maps map.click", lat, lng);
         hitFromLatLng(lat, lng, "kakao-map-click+pixels");
       });
 
@@ -7780,7 +7835,7 @@ function HomePageContent() {
         const tc = e.touches[0];
         fingerStartRef.x = tc.clientX;
         fingerStartRef.y = tc.clientY;
-        console.log("[PindMap:expandedMap] DOM touchstart", tc.clientX, tc.clientY);
+        devLog("[PindMap:expandedMap] DOM touchstart", tc.clientX, tc.clientY);
       };
 
       const onTouchEnd = (e: TouchEvent) => {
@@ -7789,7 +7844,7 @@ function HomePageContent() {
         const dx = tc.clientX - fingerStartRef.x;
         const dy = tc.clientY - fingerStartRef.y;
         if (Math.hypot(dx, dy) > 22) {
-          console.log("[PindMap:expandedMap] DOM touchend ignored (drag-like)", dx, dy);
+          devLog("[PindMap:expandedMap] DOM touchend ignored (drag-like)", dx, dy);
           return;
         }
         const proj = map.getProjection?.();
@@ -7800,10 +7855,10 @@ function HomePageContent() {
         const rect = mapContainerEl.getBoundingClientRect();
         const px = tc.clientX - rect.left;
         const pyTouch = tc.clientY - rect.top;
-        console.log("[PindMap:expandedMap] DOM touchend → container px", px, pyTouch);
+        devLog("[PindMap:expandedMap] DOM touchend → container px", px, pyTouch);
         const latlng = proj.coordsFromContainerPoint(new window.kakao.maps.Point(px, pyTouch));
         if (!latlng) {
-          console.log("[PindMap:expandedMap] touchend coordsFromContainerPoint returned null");
+          devLog("[PindMap:expandedMap] touchend coordsFromContainerPoint returned null");
           return;
         }
         const latTap = latlng.getLat();
@@ -7821,13 +7876,13 @@ function HomePageContent() {
         if (!pickedSaved) return;
         const curId = String(selectedPlaceRef.current?._savedPlaceId || "").trim();
         if (curId === pickedSaved.id) {
-          console.log("[PindMap:expandedMap] saved-pin touch assist skip (card already open)", pickedSaved.id);
+          devLog("[PindMap:expandedMap] saved-pin touch assist skip (card already open)", pickedSaved.id);
           return;
         }
         const now = Date.now();
         const d = expandedSavedTouchAssistDedupeRef.current;
         if (d.id === pickedSaved.id && now - d.t < 280) {
-          console.log("[PindMap:expandedMap] saved-pin touch assist deduped", pickedSaved.id);
+          devLog("[PindMap:expandedMap] saved-pin touch assist deduped", pickedSaved.id);
           return;
         }
         expandedSavedTouchAssistDedupeRef.current = { t: now, id: pickedSaved.id };
@@ -7837,7 +7892,7 @@ function HomePageContent() {
           feedPosts,
           placeRefFromPlace(pickedSaved, c.lat, c.lng),
         );
-        console.log("[PindMap:expandedMap] saved-pin touch assist", pickedSaved.name);
+        devLog("[PindMap:expandedMap] saved-pin touch assist", pickedSaved.name);
         setSelectedPlace(toSelectedFromSavedPlace(pickedSaved, relatedPosts, c.lat, c.lng));
       };
 
@@ -7885,12 +7940,12 @@ function HomePageContent() {
           window.kakao.maps.event.removeListener(listenerClick);
           window.kakao.maps.event.removeListener(listenerIdle);
         } catch (err) {
-          console.log("[PindMap:expandedMap] removeListener error", err);
+          devLog("[PindMap:expandedMap] removeListener error", err);
         }
         mapContainerEl.removeEventListener("touchstart", onTouchStart);
         mapContainerEl.removeEventListener("touchend", onTouchEnd);
         expandedMapInteractionCleanupRef.current = null;
-        console.log("[PindMap:expandedMap] teardown map click + touch listeners");
+        devLog("[PindMap:expandedMap] teardown map click + touch listeners");
       };
     }, 100);
 
@@ -8183,40 +8238,25 @@ function HomePageContent() {
 
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id) return;
-    const perfScreen = "tab:mypage:fetch";
-    dlog.perf.start(perfScreen);
-    dlog.perf.fetchStart(perfScreen);
-    void refreshMyTotalLikes();
-    void refreshMyCourses();
     let cancelled = false;
     void (async () => {
-      const uid = user.id;
-      const [followersRes, followingsRes] = await Promise.all([
-        supabase.from("follows").select("*", { count: "exact", head: true }).eq("following_id", uid),
-        supabase.from("follows").select("*", { count: "exact", head: true }).eq("follower_id", uid),
-      ]);
       if (cancelled) return;
-      setMypageFollowerCount(followersRes.count ?? 0);
-      setMypageFollowingCount(followingsRes.count ?? 0);
-      dlog.perf.fetchEnd(perfScreen);
-      dlog.perf.markRender(perfScreen);
+      await runMypageTabFetchIfStale();
     })();
     return () => {
       cancelled = true;
-      dlog.perf.cancel(perfScreen);
     };
-  }, [activeTab, user?.id, refreshMyTotalLikes, refreshMyCourses]);
+  }, [activeTab, user?.id, runMypageTabFetchIfStale]);
 
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       if (activeTab !== "mypage" || !user?.id) return;
-      void refreshMyTotalLikes();
-      void refreshMyCourses();
+      void runMypageTabFetchIfStale();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [activeTab, user?.id, refreshMyTotalLikes, refreshMyCourses]);
+  }, [activeTab, user?.id, runMypageTabFetchIfStale]);
 
   const togglePlaceSheetSave = useCallback(async (placeData: PlaceSheetData, onAfterSave?: () => void): Promise<boolean | undefined> => {
     const uid = userIdRef.current;

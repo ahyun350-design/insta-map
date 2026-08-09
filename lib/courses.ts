@@ -64,7 +64,7 @@ export async function fetchMyCourses(
 ): Promise<{ data: SavedCourse[]; error: string | null }> {
   const { data, error } = await supabase
     .from("courses")
-    .select("*")
+    .select("id, user_id, title, items, place_count, created_at, updated_at, cloned_from_id, source")
     .eq("user_id", userId)
     .neq("source", "curation")
     .order("created_at", { ascending: false });
@@ -73,7 +73,7 @@ export async function fetchMyCourses(
     return { data: [], error: mapDbError(error, "코스 목록을 불러오지 못했어요.") };
   }
 
-  return { data: (data ?? []) as SavedCourse[], error: null };
+  return { data: (data ?? []).map((row) => mapCourseRow(row as Record<string, unknown>)), error: null };
 }
 
 function validateCourseTitle(trimmed: string): string | null {
