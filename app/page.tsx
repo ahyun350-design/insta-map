@@ -37,6 +37,27 @@ import { mapExtractErrorToUserMessage } from "@/lib/extractUserError";
 import { toUserMessage } from "@/lib/userErrorMessage";
 
 const ADMIN_USER_ID = "63772749-e01b-4396-a41c-c17a4d3acfe6";
+const ADMIN_STATUS_CARD_OPEN_KEY = "pindmap_admin_status_card_open";
+
+function readAdminStatusCardOpen(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const v = window.localStorage.getItem(ADMIN_STATUS_CARD_OPEN_KEY);
+    if (v === null) return false; // 기본: 접힘
+    return v === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeAdminStatusCardOpen(open: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ADMIN_STATUS_CARD_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
 
 type AdminStatusPayload = {
   today: { attempts: number; success: number; failed: number };
@@ -1300,7 +1321,9 @@ function HomePageContent() {
   const [mypageFollowingCount, setMypageFollowingCount] = useState(0);
   const [adminStatus, setAdminStatus] = useState<AdminStatusPayload | null>(null);
   const [adminStatusLoading, setAdminStatusLoading] = useState(false);
-  const [adminStatusExpanded, setAdminStatusExpanded] = useState(false);
+  /** 관리자 상태 카드 접이 — localStorage 기본 접힘 */
+  const [adminCardOpen, setAdminCardOpen] = useState(false);
+  const adminAlertAutoOpenedRef = useRef(false);
   const [lastBootTiming, setLastBootTiming] = useState<BootTimingReport | null>(null);
   const [bootFailReport, setBootFailReport] = useState<BootFailReport | null>(null);
   const [showFollowList, setShowFollowList] = useState<FollowListType | null>(null);
@@ -8197,11 +8220,12 @@ function HomePageContent() {
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id || user.id !== ADMIN_USER_ID) {
       setAdminStatus(null);
-      setAdminStatusExpanded(false);
       setLastBootTiming(null);
       setBootFailReport(null);
+      adminAlertAutoOpenedRef.current = false;
       return;
     }
+    setAdminCardOpen(readAdminStatusCardOpen());
     let cancelled = false;
     const load = async () => {
       setAdminStatusLoading(true);
@@ -8235,6 +8259,25 @@ function HomePageContent() {
       cancelled = true;
     };
   }, [activeTab, user?.id]);
+
+  /** 이상 신호 시 카드 자동 펼침 (한 번) */
+  useEffect(() => {
+    if (activeTab !== "mypage" || user?.id !== ADMIN_USER_ID) return;
+    if (adminStatusLoading) return;
+    const alertNoSuccess = !!adminStatus && adminStatus.today.attempts > 0 && adminStatus.today.success === 0;
+    const alertRate = !!adminStatus && adminStatus.last7Days.successRate < 50;
+    const lastMs = adminStatus?.lastSuccessAt
+      ? Date.now() - new Date(adminStatus.lastSuccessAt).getTime()
+      : Number.POSITIVE_INFINITY;
+    const alertStale = !!adminStatus && (!adminStatus.lastSuccessAt || lastMs >= 24 * 60 * 60 * 1000);
+    const alertStuck = !!adminStatus && adminStatus.stuckJobs >= 1;
+    const alertBootFail = !!bootFailReport && bootFailReport.count > 0;
+    const hasAlert = alertNoSuccess || alertRate || alertStale || alertStuck || alertBootFail;
+    if (!hasAlert || adminAlertAutoOpenedRef.current) return;
+    adminAlertAutoOpenedRef.current = true;
+    setAdminCardOpen(true);
+    writeAdminStatusCardOpen(true);
+  }, [activeTab, user?.id, adminStatus, adminStatusLoading, bootFailReport]);
 
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id) return;
@@ -10883,127 +10926,263 @@ function HomePageContent() {
             >
               {user?.id === ADMIN_USER_ID && (
                 <div style={{ flexShrink: 0, padding: "12px 16px 0", boxSizing: "border-box" }}>
-                  <button
-                    type="button"
-                    onClick={() => setAdminStatusExpanded((v) => !v)}
-                    style={{
-                      width: "100%",
-                      textAlign: "left",
-                      border: "0.5px solid #e8e8ee",
-                      borderRadius: 12,
-                      background: "#fafafa",
-                      padding: "12px 14px",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    <p style={{ margin: "0 0 8px", fontSize: 12, fontWeight: 700, color: "#8f93a6", letterSpacing: "0.02em" }}>
-                      서비스 상태 {adminStatusLoading ? "· 불러오는 중" : ""}
-                    </p>
-                    {adminStatus ? (
-                      (() => {
-                        const alertNoSuccess = adminStatus.today.attempts > 0 && adminStatus.today.success === 0;
-                        const alertRate = adminStatus.last7Days.successRate < 50;
-                        const lastMs = adminStatus.lastSuccessAt
-                          ? Date.now() - new Date(adminStatus.lastSuccessAt).getTime()
-                          : Number.POSITIVE_INFINITY;
-                        const alertStale = !adminStatus.lastSuccessAt || lastMs >= 24 * 60 * 60 * 1000;
-                        const alertStuck = adminStatus.stuckJobs >= 1;
-                        const row = (label: string, value: string, alert: boolean) => (
-                          <p
-                            key={label}
+                  {(() => {
+                    const alertNoSuccess =
+                      !!adminStatus && adminStatus.today.attempts > 0 && adminStatus.today.success === 0;
+                    const alertRate = !!adminStatus && adminStatus.last7Days.successRate < 50;
+                    const lastMs = adminStatus?.lastSuccessAt
+                      ? Date.now() - new Date(adminStatus.lastSuccessAt).getTime()
+                      : Number.POSITIVE_INFINITY;
+                    const alertStale =
+                      !!adminStatus && (!adminStatus.lastSuccessAt || lastMs >= 24 * 60 * 60 * 1000);
+                    const alertStuck = !!adminStatus && adminStatus.stuckJobs >= 1;
+                    const alertBootFail = !!bootFailReport && bootFailReport.count > 0;
+                    const hasAlert =
+                      alertNoSuccess || alertRate || alertStale || alertStuck || alertBootFail;
+                    const todaySummary = adminStatus
+                      ? `${adminStatus.today.success}/${adminStatus.today.failed}`
+                      : "–/–";
+                    const bootMs =
+                      lastBootTiming != null ? `${lastBootTiming.totalMs}ms` : "–";
+                    const summaryLabel = adminStatusLoading
+                      ? "불러오는 중"
+                      : !adminStatus
+                        ? "상태 없음"
+                        : hasAlert
+                          ? "주의"
+                          : "정상";
+                    const summaryText = `${summaryLabel} · 오늘 ${todaySummary} · 부팅 ${bootMs}`;
+                    const dotColor = hasAlert ? "#c62828" : "#b0b3c0";
+                    const summaryColor = hasAlert ? "#c62828" : "#8f93a6";
+                    const row = (label: string, value: string, alert: boolean) => (
+                      <p
+                        key={label}
+                        style={{
+                          margin: "0 0 4px",
+                          fontSize: 13,
+                          color: alert ? "#c62828" : "#8f93a6",
+                          fontWeight: alert ? 700 : 400,
+                        }}
+                      >
+                        {label}: {value}
+                      </p>
+                    );
+                    return (
+                      <div
+                        style={{
+                          width: "100%",
+                          border: hasAlert ? "0.5px solid #f5c2c2" : "0.5px solid #e8e8ee",
+                          borderRadius: 12,
+                          background: hasAlert ? "#fff8f8" : "#fafafa",
+                          overflow: "hidden",
+                          boxSizing: "border-box",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          aria-expanded={adminCardOpen}
+                          onClick={() => {
+                            setAdminCardOpen((v) => {
+                              const next = !v;
+                              writeAdminStatusCardOpen(next);
+                              return next;
+                            });
+                          }}
+                          style={{
+                            width: "100%",
+                            height: 40,
+                            maxHeight: 40,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "0 14px",
+                            margin: 0,
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            boxSizing: "border-box",
+                            textAlign: "left",
+                          }}
+                        >
+                          <span
+                            aria-hidden
                             style={{
-                              margin: "0 0 4px",
+                              width: 7,
+                              height: 7,
+                              borderRadius: "50%",
+                              flexShrink: 0,
+                              background: dotColor,
+                            }}
+                          />
+                          <span
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
                               fontSize: 13,
-                              color: alert ? "#c62828" : "#8f93a6",
-                              fontWeight: alert ? 700 : 400,
+                              fontWeight: hasAlert ? 700 : 600,
+                              color: summaryColor,
                             }}
                           >
-                            {label}: {value}
-                          </p>
-                        );
-                        return (
-                          <>
-                            {row(
-                              "오늘 추출",
-                              `성공 ${adminStatus.today.success} / 실패 ${adminStatus.today.failed}`,
-                              alertNoSuccess,
-                            )}
-                            {row("7일 성공률", `${adminStatus.last7Days.successRate}%`, alertRate)}
-                            {row("마지막 성공", formatAdminHoursAgo(adminStatus.lastSuccessAt), alertStale)}
-                            {row("멈춘 job", `${adminStatus.stuckJobs}건`, alertStuck)}
-                            {row(
-                              "오늘 가입",
-                              `${adminStatus.signups.today}명 (전체 ${adminStatus.signups.total}명)`,
-                              false,
-                            )}
-                            {adminStatusExpanded && (
-                              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "0.5px solid #ebebf0" }}>
-                                <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600, color: "#8f93a6" }}>
-                                  최근 실패 3건
-                                </p>
-                                {adminStatus.recentFailures.length === 0 ? (
-                                  <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>실패 기록 없음</p>
-                                ) : (
-                                  adminStatus.recentFailures.map((f, i) => (
-                                    <pre
-                                      key={i}
+                            {summaryText}
+                          </span>
+                          <span
+                            aria-hidden
+                            style={{
+                              flexShrink: 0,
+                              fontSize: 11,
+                              color: "#b0b3c0",
+                              transform: adminCardOpen ? "rotate(180deg)" : "rotate(0deg)",
+                              transition: "transform 0.2s ease",
+                            }}
+                          >
+                            ▾
+                          </span>
+                        </button>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateRows: adminCardOpen ? "1fr" : "0fr",
+                            transition: "grid-template-rows 0.28s ease",
+                          }}
+                        >
+                          <div style={{ overflow: "hidden", minHeight: 0 }}>
+                            <div style={{ padding: "0 14px 12px" }}>
+                              <p
+                                style={{
+                                  margin: "0 0 8px",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  color: "#8f93a6",
+                                  letterSpacing: "0.02em",
+                                }}
+                              >
+                                서비스 상태 {adminStatusLoading ? "· 불러오는 중" : ""}
+                              </p>
+                              {adminStatus ? (
+                                <>
+                                  {row(
+                                    "오늘 추출",
+                                    `성공 ${adminStatus.today.success} / 실패 ${adminStatus.today.failed}`,
+                                    alertNoSuccess,
+                                  )}
+                                  {row("7일 성공률", `${adminStatus.last7Days.successRate}%`, alertRate)}
+                                  {row(
+                                    "마지막 성공",
+                                    formatAdminHoursAgo(adminStatus.lastSuccessAt),
+                                    alertStale,
+                                  )}
+                                  {row("멈춘 job", `${adminStatus.stuckJobs}건`, alertStuck)}
+                                  {row(
+                                    "오늘 가입",
+                                    `${adminStatus.signups.today}명 (전체 ${adminStatus.signups.total}명)`,
+                                    false,
+                                  )}
+                                  <div
+                                    style={{
+                                      marginTop: 10,
+                                      paddingTop: 10,
+                                      borderTop: "0.5px solid #ebebf0",
+                                    }}
+                                  >
+                                    <p
                                       style={{
-                                        margin: "0 0 8px",
-                                        padding: 8,
-                                        borderRadius: 8,
-                                        background: "#fff",
-                                        border: "0.5px solid #eee",
-                                        fontSize: 11,
-                                        color: "#c62828",
-                                        whiteSpace: "pre-wrap",
-                                        wordBreak: "break-word",
-                                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                                        margin: "0 0 6px",
+                                        fontSize: 12,
+                                        fontWeight: 600,
+                                        color: "#8f93a6",
                                       }}
                                     >
-                                      {f.error_message || "(empty)"}
-                                    </pre>
-                                  ))
-                                )}
-                              </div>
-                            )}
-                            {!adminStatusExpanded && (
-                              <p style={{ margin: "6px 0 0", fontSize: 11, color: "#b0b3c0" }}>탭해서 최근 실패 보기</p>
-                            )}
-                          </>
-                        );
-                      })()
-                    ) : (
-                      !adminStatusLoading && (
-                        <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>상태를 불러오지 못했어요</p>
-                      )
-                    )}
-                    {lastBootTiming && (
-                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "0.5px solid #ebebf0" }}>
-                        <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 600, color: "#8f93a6" }}>
-                          마지막 부팅 · 총 {lastBootTiming.totalMs}ms
-                        </p>
-                        {lastBootTiming.segments.length === 0 ? (
-                          <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>구간 기록 없음</p>
-                        ) : (
-                          lastBootTiming.segments.map((seg) => (
-                            <p
-                              key={`${seg.from}-${seg.to}`}
-                              style={{ margin: "0 0 3px", fontSize: 12, color: "#8f93a6" }}
-                            >
-                              {seg.from} → {seg.to}: {seg.ms}ms
-                            </p>
-                          ))
-                        )}
+                                      최근 실패 3건
+                                    </p>
+                                    {adminStatus.recentFailures.length === 0 ? (
+                                      <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>
+                                        실패 기록 없음
+                                      </p>
+                                    ) : (
+                                      adminStatus.recentFailures.map((f, i) => (
+                                        <pre
+                                          key={i}
+                                          style={{
+                                            margin: "0 0 8px",
+                                            padding: 8,
+                                            borderRadius: 8,
+                                            background: "#fff",
+                                            border: "0.5px solid #eee",
+                                            fontSize: 11,
+                                            color: "#c62828",
+                                            whiteSpace: "pre-wrap",
+                                            wordBreak: "break-word",
+                                            fontFamily:
+                                              "ui-monospace, SFMono-Regular, Menlo, monospace",
+                                          }}
+                                        >
+                                          {f.error_message || "(empty)"}
+                                        </pre>
+                                      ))
+                                    )}
+                                  </div>
+                                </>
+                              ) : (
+                                !adminStatusLoading && (
+                                  <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>
+                                    상태를 불러오지 못했어요
+                                  </p>
+                                )
+                              )}
+                              {lastBootTiming && (
+                                <div
+                                  style={{
+                                    marginTop: 10,
+                                    paddingTop: 10,
+                                    borderTop: "0.5px solid #ebebf0",
+                                  }}
+                                >
+                                  <p
+                                    style={{
+                                      margin: "0 0 6px",
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      color: "#8f93a6",
+                                    }}
+                                  >
+                                    마지막 부팅 · 총 {lastBootTiming.totalMs}ms
+                                  </p>
+                                  {lastBootTiming.segments.length === 0 ? (
+                                    <p style={{ margin: 0, fontSize: 12, color: "#8f93a6" }}>
+                                      구간 기록 없음
+                                    </p>
+                                  ) : (
+                                    lastBootTiming.segments.map((seg) => (
+                                      <p
+                                        key={`${seg.from}-${seg.to}`}
+                                        style={{
+                                          margin: "0 0 3px",
+                                          fontSize: 12,
+                                          color: "#8f93a6",
+                                        }}
+                                      >
+                                        {seg.from} → {seg.to}: {seg.ms}ms
+                                      </p>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                              {bootFailReport && bootFailReport.count > 0 && (
+                                <p style={{ margin: "10px 0 0", fontSize: 12, color: "#c62828", fontWeight: 600 }}>
+                                  부팅 실패 {bootFailReport.count}회 / 마지막{" "}
+                                  {formatAdminHoursAgo(bootFailReport.lastAt)}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    )}
-                    {bootFailReport && bootFailReport.count > 0 && (
-                      <p style={{ margin: "10px 0 0", fontSize: 12, color: "#8f93a6" }}>
-                        부팅 실패 {bootFailReport.count}회 / 마지막{" "}
-                        {formatAdminHoursAgo(bootFailReport.lastAt)}
-                      </p>
-                    )}
-                  </button>
+                    );
+                  })()}
                 </div>
               )}
               <div style={{ flexShrink: 0, padding: "12px 16px 0", position: "relative", boxSizing: "border-box" }}>
