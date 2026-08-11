@@ -158,6 +158,10 @@ import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
 import { FeedPostMedia } from "@/components/FeedPostCard";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
+import {
+  PlacePostsListScreen,
+  type PlacePostsListData,
+} from "@/components/PlacePostsListScreen";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
 import { MapResearchAreaButton } from "@/components/MapResearchAreaButton";
 import { Coachmark } from "@/components/Coachmark";
@@ -1448,6 +1452,8 @@ function HomePageContent() {
   const [debouncedHomeSearchQuery, setDebouncedHomeSearchQuery] = useState("");
   const [isHomeSearchOpen, setIsHomeSearchOpen] = useState(false);
   const [homePlaceSheet, setHomePlaceSheet] = useState<PlaceSheetData | null>(null);
+  const [placePostsList, setPlacePostsList] = useState<PlacePostsListData | null>(null);
+  const placePostsListReturnFullscreenRef = useRef(false);
   const [postTitle, setPostTitle] = useState(""); const [postPlaceName, setPostPlaceName] = useState("");
   const [postAddress, setPostAddress] = useState("");
   const [postCategory, setPostCategory] = useState<Category>("카페");
@@ -2741,6 +2747,57 @@ function HomePageContent() {
 
   const detailPost = detailPostId ? feedPosts.find(p => p.id === detailPostId) ?? null : null;
 
+  /** 장소 시트 _feedPosts(관련 큐레이션) → 목록/단건. 1개면 상세, 2개+면 목록 */
+  const openPlaceCurationFromSheet = useCallback(
+    (place: PlaceSheetData, clickedPostId: string) => {
+      const sheetPosts = place._feedPosts ?? [];
+      const feedSnapshot = feedPostsRef.current;
+      const resolved: FeedPost[] = [];
+      const seen = new Set<string>();
+      for (const sp of sheetPosts) {
+        const id = String(sp.id ?? "").trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const full = feedSnapshot.find((p) => p.id === id);
+        if (full) {
+          resolved.push(full);
+        } else {
+          // 시트에만 있는 경우 — FeedPost 최소 필드로 그리드 표시
+          resolved.push(sp as FeedPost);
+        }
+      }
+      if (resolved.length === 0 && clickedPostId) {
+        const one = feedSnapshot.find((p) => p.id === clickedPostId);
+        if (one) resolved.push(one);
+      }
+
+      if (resolved.length <= 1) {
+        const id = resolved[0]?.id || clickedPostId;
+        if (id) setDetailPostId(id);
+        return;
+      }
+
+      setPlacePostsList({
+        placeName: place.place_name ?? "",
+        address: place.road_address_name || place.address_name || "",
+        posts: resolved,
+      });
+    },
+    [],
+  );
+
+  const closePlacePostsList = useCallback(() => {
+    if (placePostsListReturnFullscreenRef.current) {
+      placePostsListReturnFullscreenRef.current = false;
+      fullscreenRestorePendingRef.current = true;
+      setPlacePostsList(null);
+      setActiveTab("map");
+      setMapExpanded(true);
+      return;
+    }
+    setPlacePostsList(null);
+  }, []);
+
   const closeDetailPost = useCallback(() => {
     if (returnToFullscreenMapAfterDetailRef.current) {
       returnToFullscreenMapAfterDetailRef.current = false;
@@ -3490,6 +3547,7 @@ function HomePageContent() {
       showNotifications ||
       showJobsModal ||
       !!detailPostId ||
+      !!placePostsList ||
       !!sharePost ||
       !!editingPost ||
       isHomeSearchOpen ||
@@ -3529,6 +3587,7 @@ function HomePageContent() {
     showNotifications,
     showJobsModal,
     detailPostId,
+    placePostsList,
     sharePost,
     editingPost,
     isHomeSearchOpen,
@@ -8583,13 +8642,59 @@ function HomePageContent() {
     const id = String(postId ?? "").trim();
     if (!id) return;
     fullscreenReturnStateRef.current = captureFullscreenReturnSnapshot(markerId);
-    returnToFullscreenMapAfterDetailRef.current = true;
     await dismissFullscreenNativeMap({ silent: false });
     setMapExpanded(false);
     setSelectedPlace(null);
     setSelectedMapPlace(null);
-    setDetailPostId(id);
-  }, [captureFullscreenReturnSnapshot]);
+
+    let placeData: PlaceSheetData | null = null;
+    if (markerId) {
+      placeData = resolveFullscreenMarkerPlaceSheet(markerId);
+    }
+    if (!placeData) {
+      const post = feedPostsRef.current.find((p) => p.id === id);
+      if (post) {
+        const ref = placeRefFromFeedPost(post);
+        const relatedPosts = getRelatedPostsForPlaceSheet(feedPostsRef.current, ref);
+        const matchedSaved = savedPlacesRef.current.find(
+          (p) =>
+            p.name.trim() === (ref.placeName?.trim() || post.placeName.trim()) &&
+            p.address.trim() === (ref.address?.trim() || post.address.trim()),
+        );
+        placeData = feedPostToPlaceSheet(
+          {
+            id: post.id,
+            placeName: ref.placeName?.trim() || post.placeName,
+            address: ref.address?.trim() || post.address,
+            category: post.category,
+            lat: ref.lat ?? post.lat,
+            lng: ref.lng ?? post.lng,
+          },
+          relatedPosts,
+          matchedSaved?.id,
+          ref,
+        );
+      }
+    }
+
+    const relatedCount = placeData?._feedPosts?.length ?? 0;
+    if (relatedCount <= 1) {
+      returnToFullscreenMapAfterDetailRef.current = true;
+      placePostsListReturnFullscreenRef.current = false;
+      setDetailPostId(id);
+      return;
+    }
+
+    returnToFullscreenMapAfterDetailRef.current = false;
+    placePostsListReturnFullscreenRef.current = true;
+    if (placeData) {
+      openPlaceCurationFromSheet(placeData, id);
+    } else {
+      returnToFullscreenMapAfterDetailRef.current = true;
+      placePostsListReturnFullscreenRef.current = false;
+      setDetailPostId(id);
+    }
+  }, [captureFullscreenReturnSnapshot, resolveFullscreenMarkerPlaceSheet, openPlaceCurationFromSheet]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
@@ -8684,7 +8789,7 @@ function HomePageContent() {
           });
         }}
         onCurationClick={(postId) => {
-          setDetailPostId(postId);
+          openPlaceCurationFromSheet(placeData, postId);
           setSelectedPlace(null);
           setMapExpanded(false);
         }}
@@ -11579,7 +11684,7 @@ function HomePageContent() {
               }}
               onToggleSave={() => { void togglePlaceSheetSave(selectedPlace as PlaceSheetData); }}
               onCurationClick={(postId) => {
-                setDetailPostId(postId);
+                openPlaceCurationFromSheet(selectedPlace as PlaceSheetData, postId);
                 setSelectedPlace(null);
               }}
               onImageLightbox={setLightboxImg}
@@ -11622,7 +11727,7 @@ function HomePageContent() {
                 onToggleSave={() => { void togglePlaceSheetSave(homePlaceSheet); }}
                 onCurationClick={(postId) => {
                   setHomePlaceSheet(null);
-                  setDetailPostId(postId);
+                  openPlaceCurationFromSheet(homePlaceSheet, postId);
                 }}
                 onImageLightbox={setLightboxImg}
                 timeAgoLabel={timeAgo}
@@ -12160,6 +12265,13 @@ function HomePageContent() {
         />,
         document.body,
       )}
+    {placePostsList && (
+      <PlacePostsListScreen
+        data={placePostsList}
+        onClose={closePlacePostsList}
+        onPostClick={(postId) => setDetailPostId(postId)}
+      />
+    )}
     {curationDetailOverlayEl}
     </>
   );
