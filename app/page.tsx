@@ -158,6 +158,7 @@ import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
 import { FeedPostMedia } from "@/components/FeedPostCard";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
+import { CourseMapDesignOverlay } from "@/components/CourseMapDesignOverlay";
 import {
   PlacePostsListScreen,
   type PlacePostsListData,
@@ -1520,6 +1521,11 @@ function HomePageContent() {
   const [courseLoading, setCourseLoading] = useState(false);
   const [courseResult, setCourseResult] = useState<CoursePlace[] | null>(null);
   const [showCourseRoute, setShowCourseRoute] = useState(false);
+  /** 관리자 코스맵 실험 — 카카오 마커 대신 HTML 오버레이에 그릴 경로 */
+  const [courseDesignPath, setCourseDesignPath] = useState<LatLng[] | null>(null);
+  const courseMapDesignActiveRef = useRef(false);
+  courseMapDesignActiveRef.current =
+    showCourseRoute && userIdRef.current === ADMIN_USER_ID;
   const [courseNavigation, setCourseNavigation] = useState<CourseWalkNavigation | null>(null);
   const [courseNavSegmentIndex, setCourseNavSegmentIndex] = useState<number | null>(null);
   const [courseNavFocusMode, setCourseNavFocusMode] = useState(false);
@@ -2659,6 +2665,7 @@ function HomePageContent() {
         setMapExpanded(false);
         clearRoute();
         setShowCourseRoute(false);
+        setCourseDesignPath(null);
         setShowCourseModal(true);
         return;
       }
@@ -5894,8 +5901,11 @@ function HomePageContent() {
     setCourseNavSegmentIndex(null);
     setCourseNavFocusMode(false);
     fullscreenCourseNavigationRef.current = null;
+    setCourseDesignPath(null);
     setActiveTab("map");
-    if (isNativeMapAvailable()) {
+    // 관리자 실험: iOS도 네이티브 대신 웹 전체화면 지도
+    const useAdminCourseMapDesign = userIdRef.current === ADMIN_USER_ID;
+    if (isNativeMapAvailable() && !useAdminCourseMapDesign) {
       fullscreenCourseRef.current = [...courseResult];
       setMapExpanded(true);
       return;
@@ -5926,10 +5936,41 @@ function HomePageContent() {
     courseLabelOverlaysRef.current.forEach((o) => o.setMap(null));
     courseLabelOverlaysRef.current = [];
 
+    const useAdminCourseMapDesign = userIdRef.current === ADMIN_USER_ID;
     const stops: LatLng[] = [];
     const stopNames: string[] = [];
     const bounds = new window.kakao.maps.LatLngBounds();
-    const total = courseResult.length;
+
+    if (useAdminCourseMapDesign) {
+      courseResult.forEach((place) => {
+        const pos = new window.kakao.maps.LatLng(place.lat, place.lng);
+        stops.push({ lat: place.lat, lng: place.lng });
+        stopNames.push(place.name);
+        bounds.extend(pos);
+      });
+      setCourseDesignPath(stops.length >= 2 ? stops : []);
+      expandedMapRef.current.setBounds(bounds);
+      if (stops.length < 2) return;
+
+      setDirectionsLoading(true);
+      try {
+        const navigation = await buildCourseWalkNavigationFromTmap(stops, stopNames);
+        if (!expandedMapRef.current || !courseResult) return;
+        fullscreenCourseNavigationRef.current = navigation;
+        setCourseNavigation(navigation);
+        setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
+        setCourseNavFocusMode(false);
+        setCourseDesignPath(navigation.mergedPath);
+      } catch (err) {
+        console.error("[course] web route failed", err);
+        setCourseDesignPath(stops);
+      } finally {
+        setDirectionsLoading(false);
+      }
+      return;
+    }
+
+    setCourseDesignPath(null);
     const mapNode = expandedMapRef.current.getNode?.() as HTMLElement | undefined;
     const mapWidth = mapNode?.clientWidth || window.innerWidth || 375;
     type LabelPlan = {
@@ -5942,6 +5983,7 @@ function HomePageContent() {
       screenY: number;
     };
     const labelPlans: LabelPlan[] = [];
+    const total = courseResult.length;
 
     courseResult.forEach((place, idx) => {
       const pos = new window.kakao.maps.LatLng(place.lat, place.lng);
@@ -7036,6 +7078,19 @@ function HomePageContent() {
 
   const applyWebCourseRoutePath = useCallback((path: LatLng[], fitBounds = true) => {
     if (!expandedMapRef.current || !window.kakao?.maps || path.length < 2) return;
+    // 관리자 실험: 카카오 Polyline 대신 HTML 오버레이 경로 갱신
+    if (courseMapDesignActiveRef.current) {
+      if (routePolylineRef.current) {
+        routePolylineRef.current.setMap(null);
+        routePolylineRef.current = null;
+      }
+      setCourseDesignPath(path);
+      if (fitBounds) {
+        const bounds = latLngBoundsFromPath(path);
+        if (bounds) expandedMapRef.current.setBounds(bounds);
+      }
+      return;
+    }
     if (routePolylineRef.current) routePolylineRef.current.setMap(null);
     const kakaoPath = path.map(
       (point) => new window.kakao.maps.LatLng(point.lat, point.lng),
@@ -10796,6 +10851,7 @@ function HomePageContent() {
                             setMapExpanded(false);
                             clearRoute();
                             setShowCourseRoute(false);
+                            setCourseDesignPath(null);
                             setCourseNavigation(null);
                             setCourseNavSegmentIndex(null);
                             setCourseNavFocusMode(false);
@@ -10806,6 +10862,7 @@ function HomePageContent() {
                           setMapExpanded(false);
                           setSelectedPlace(null);
                           setShowCourseRoute(false);
+                          setCourseDesignPath(null);
                           setCourseNavigation(null);
                           setCourseNavSegmentIndex(null);
                           setCourseNavFocusMode(false);
@@ -10904,6 +10961,42 @@ function HomePageContent() {
                     </div>
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
+                      {showCourseRoute &&
+                        user?.id === ADMIN_USER_ID &&
+                        courseResult &&
+                        courseResult.length > 0 &&
+                        expandedMapRef.current && (
+                          <CourseMapDesignOverlay
+                            map={expandedMapRef.current}
+                            places={courseResult}
+                            path={courseDesignPath ?? courseResult.map((p) => ({ lat: p.lat, lng: p.lng }))}
+                            onPinClick={(place) => {
+                              const full = courseResult.find((p) => p.id === place.id) ?? null;
+                              if (!full) return;
+                              const coursePlaceRef = placeRefFromPlace(
+                                {
+                                  id: full.id,
+                                  name: full.name,
+                                  address: full.address,
+                                  category: full.category,
+                                },
+                                full.lat,
+                                full.lng,
+                              );
+                              setSelectedPlace({
+                                place_name: full.name,
+                                category_name: full.category,
+                                road_address_name: full.address,
+                                phone: "",
+                                place_url: "",
+                                y: full.lat,
+                                x: full.lng,
+                                _feedPosts: getRelatedPostsForPlaceSheet(feedPosts, coursePlaceRef),
+                                _placeRef: coursePlaceRef,
+                              });
+                            }}
+                          />
+                        )}
                       {expandedNativeMapEnabled && isNativeMapAvailable() && (
                         <>
                           <div id="extended-map-slot" className="extendedNativeMapSlot" aria-hidden />
