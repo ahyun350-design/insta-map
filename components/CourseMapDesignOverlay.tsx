@@ -29,6 +29,8 @@ type Props = {
   places: CourseMapDesignPlace[];
   path: CourseMapDesignPathPoint[];
   onPinClick?: (place: CourseMapDesignPlace, index: number) => void;
+  /** 관리자 임시 진단 로그 */
+  debugAdmin?: boolean;
 };
 
 function truncateLabel(name: string, max = 16): string {
@@ -41,28 +43,65 @@ function formatOrder(order: number): string {
   return String(order).padStart(2, "0");
 }
 
+function readKakaoPoint(pt: unknown): { x: number; y: number } | null {
+  if (!pt || typeof pt !== "object") return null;
+  const p = pt as { x?: unknown; y?: unknown; getX?: () => number; getY?: () => number };
+  const x =
+    typeof p.x === "number"
+      ? p.x
+      : typeof p.getX === "function"
+        ? p.getX()
+        : NaN;
+  const y =
+    typeof p.y === "number"
+      ? p.y
+      : typeof p.getY === "function"
+        ? p.getY()
+        : NaN;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
 /**
  * 코스 지도 실험 UI — 딤 위에 핀·라벨·점선 경로를 HTML/SVG로 직접 그림.
  * 카카오 Marker/Polyline과 분리되어 딤에 가려지지 않음.
  */
-export function CourseMapDesignOverlay({ map, places, path, onPinClick }: Props) {
+export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdmin = false }: Props) {
   const [pins, setPins] = useState<ScreenPin[]>([]);
   const [polyPoints, setPolyPoints] = useState("");
   const [size, setSize] = useState({ w: 0, h: 0 });
   const rafRef = useRef(0);
   const placesRef = useRef(places);
   const pathRef = useRef(path);
+  const debugOnceRef = useRef(false);
   placesRef.current = places;
   pathRef.current = path;
+
+  useEffect(() => {
+    if (!debugAdmin) return;
+    console.log("[crs][admin-map] CourseMapDesignOverlay MOUNT", {
+      places: places.length,
+      pathPts: path.length,
+      hasMap: !!map,
+    });
+    return () => {
+      console.log("[crs][admin-map] CourseMapDesignOverlay UNMOUNT");
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/unmount only
+  }, []);
 
   const project = useCallback(() => {
     const m = map as {
       getProjection?: () => {
-        containerPointFromCoords?: (latlng: unknown) => { x: number; y: number } | null;
+        containerPointFromCoords?: (latlng: unknown) => unknown;
+        pointFromCoords?: (latlng: unknown) => unknown;
       } | null;
       getNode?: () => HTMLElement | undefined;
     } | null;
-    if (!m || !window.kakao?.maps) return;
+    if (!m || !window.kakao?.maps) {
+      if (debugAdmin) console.log("[crs][admin-map] project abort: no map/kakao");
+      return;
+    }
 
     const node = m.getNode?.();
     const w = node?.clientWidth || 0;
@@ -70,14 +109,37 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick }: Props)
     setSize({ w, h });
 
     const proj = m.getProjection?.();
-    const toPoint = proj?.containerPointFromCoords;
-    if (!toPoint) return;
+    const toContainer = proj?.containerPointFromCoords;
+    const toPoint = proj?.pointFromCoords;
+    if (!toContainer && !toPoint) {
+      if (debugAdmin) {
+        console.log("[crs][admin-map] project abort: no projection methods", {
+          hasProj: !!proj,
+          keys: proj ? Object.keys(proj as object).slice(0, 20) : [],
+        });
+      }
+      return;
+    }
+
+    const projectOne = (lat: number, lng: number): { x: number; y: number; via: string } | null => {
+      const latlng = new window.kakao.maps.LatLng(lat, lng);
+      if (toContainer) {
+        const raw = toContainer.call(proj, latlng);
+        const pt = readKakaoPoint(raw);
+        if (pt) return { ...pt, via: "containerPointFromCoords" };
+      }
+      if (toPoint) {
+        const raw = toPoint.call(proj, latlng);
+        const pt = readKakaoPoint(raw);
+        if (pt) return { ...pt, via: "pointFromCoords" };
+      }
+      return null;
+    };
 
     const nextPins: ScreenPin[] = [];
     placesRef.current.forEach((place, idx) => {
       try {
-        const latlng = new window.kakao.maps.LatLng(place.lat, place.lng);
-        const pt = toPoint.call(proj, latlng);
+        const pt = projectOne(place.lat, place.lng);
         if (!pt) return;
         const side: "left" | "right" = w > 0 && pt.x > w * 0.62 ? "left" : "right";
         nextPins.push({
@@ -88,8 +150,8 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick }: Props)
           y: pt.y,
           side,
         });
-      } catch {
-        /* ignore bad coords */
+      } catch (err) {
+        if (debugAdmin) console.log("[crs][admin-map] pin project error", place.name, err);
       }
     });
     setPins(nextPins);
@@ -97,8 +159,7 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick }: Props)
     const pts: string[] = [];
     pathRef.current.forEach((p) => {
       try {
-        const latlng = new window.kakao.maps.LatLng(p.lat, p.lng);
-        const pt = toPoint.call(proj, latlng);
+        const pt = projectOne(p.lat, p.lng);
         if (!pt) return;
         pts.push(`${pt.x},${pt.y}`);
       } catch {
@@ -106,7 +167,25 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick }: Props)
       }
     });
     setPolyPoints(pts.join(" "));
-  }, [map]);
+
+    if (debugAdmin && !debugOnceRef.current) {
+      debugOnceRef.current = true;
+      const sample = nextPins[0];
+      console.log("[crs][admin-map] project first result", {
+        size: { w, h },
+        pinCount: nextPins.length,
+        polyCount: pts.length,
+        samplePin: sample
+          ? { name: sample.name, x: sample.x, y: sample.y, side: sample.side }
+          : null,
+        hasContainerFn: !!toContainer,
+        hasPointFn: !!toPoint,
+        sampleVia: placesRef.current[0]
+          ? projectOne(placesRef.current[0].lat, placesRef.current[0].lng)?.via
+          : null,
+      });
+    }
+  }, [map, debugAdmin]);
 
   const scheduleProject = useCallback(() => {
     if (rafRef.current) return;
@@ -117,12 +196,16 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick }: Props)
   }, [project]);
 
   useEffect(() => {
+    debugOnceRef.current = false;
     scheduleProject();
   }, [places, path, scheduleProject]);
 
   useEffect(() => {
     const m = map as { constructor?: unknown } | null;
-    if (!m || !window.kakao?.maps?.event) return;
+    if (!m || !window.kakao?.maps?.event) {
+      if (debugAdmin) console.log("[crs][admin-map] listeners skip: no map/event");
+      return;
+    }
 
     const events = ["center_changed", "zoom_changed", "bounds_changed", "idle"] as const;
     events.forEach((ev) => {
@@ -152,7 +235,7 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick }: Props)
       });
       ro?.disconnect();
     };
-  }, [map, scheduleProject]);
+  }, [map, scheduleProject, debugAdmin]);
 
   return (
     <div
@@ -161,7 +244,7 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick }: Props)
       style={{
         position: "absolute",
         inset: 0,
-        zIndex: 2,
+        zIndex: 25,
         pointerEvents: "none",
         overflow: "hidden",
       }}

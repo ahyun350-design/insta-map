@@ -39,6 +39,12 @@ import { toUserMessage } from "@/lib/userErrorMessage";
 const ADMIN_USER_ID = "63772749-e01b-4396-a41c-c17a4d3acfe6";
 const ADMIN_STATUS_CARD_OPEN_KEY = "pindmap_admin_status_card_open";
 
+/** 관리자 코스맵 실험 임시 진단 로그 — ADMIN_USER_ID일 때만 */
+function logAdminCourseMap(userId: string | null | undefined, ...args: unknown[]) {
+  if (userId !== ADMIN_USER_ID) return;
+  console.log("[crs][admin-map]", ...args);
+}
+
 function readAdminStatusCardOpen(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -2627,8 +2633,19 @@ function HomePageContent() {
     if (!isNativeMapAvailable()) return;
 
     if (mapExpanded) {
+      // 관리자 코스 실험: 웹 딤 오버레이를 써야 하므로 네이티브 자동 present 금지
+      // (showCourseOnMap에서 네이티브를 스킵해도, 여기 effect가 다시 네이티브를 띄우고 있었음)
+      if (showCourseRoute && userIdRef.current === ADMIN_USER_ID) {
+        logAdminCourseMap(
+          userIdRef.current,
+          "mapExpanded effect: SKIP native auto-open (admin course design)",
+          { showCourseRoute, mapExpanded },
+        );
+        return;
+      }
       if (fullscreenAutoOpenedRef.current) return;
       fullscreenAutoOpenedRef.current = true;
+      logAdminCourseMap(userIdRef.current, "mapExpanded effect: opening native fullscreen");
       void handleOpenFullscreenNativeMapRef.current();
       return;
     }
@@ -2644,7 +2661,7 @@ function HomePageContent() {
     void clearFullscreenNativeRoute({ silent: true });
     void clearFullscreenNativeCourseNavigation({ silent: true });
     void dismissFullscreenNativeMap({ silent: true });
-  }, [mapExpanded]);
+  }, [mapExpanded, showCourseRoute]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
@@ -5894,6 +5911,19 @@ function HomePageContent() {
   // 코스를 전체화면 지도에 경로로 표시
   const showCourseOnMap = async () => {
     if (!courseResult || courseResult.length === 0) return;
+    const uid = userIdRef.current;
+    const nativeAvail = isNativeMapAvailable();
+    const useAdminCourseMapDesign = uid === ADMIN_USER_ID;
+    logAdminCourseMap(uid, "showCourseOnMap", {
+      uid,
+      uidLen: uid.length,
+      adminId: ADMIN_USER_ID,
+      uidMatch: uid === ADMIN_USER_ID,
+      nativeAvail,
+      useAdminCourseMapDesign,
+      courseCount: courseResult.length,
+      willUseWebMap: !nativeAvail || useAdminCourseMapDesign,
+    });
     returnToCourseSheetRef.current = true;
     setShowCourseModal(false);
     setShowCourseRoute(true);
@@ -5904,12 +5934,13 @@ function HomePageContent() {
     setCourseDesignPath(null);
     setActiveTab("map");
     // 관리자 실험: iOS도 네이티브 대신 웹 전체화면 지도
-    const useAdminCourseMapDesign = userIdRef.current === ADMIN_USER_ID;
-    if (isNativeMapAvailable() && !useAdminCourseMapDesign) {
+    if (nativeAvail && !useAdminCourseMapDesign) {
+      logAdminCourseMap(uid, "showCourseOnMap → native branch (non-admin)");
       fullscreenCourseRef.current = [...courseResult];
       setMapExpanded(true);
       return;
     }
+    logAdminCourseMap(uid, "showCourseOnMap → web branch, schedule drawCourseRoute@800ms");
     setMapExpanded(true);
     // 지도가 그려진 후에 마커와 폴리라인 그리기 (살짝 딜레이)
     setTimeout(() => void drawCourseRoute(), 800);
@@ -5918,7 +5949,13 @@ function HomePageContent() {
   // 전체화면 지도에 코스 경로 그리기
   const drawCourseRoute = async () => {
     if (!courseResult) return;
+    const uid = userIdRef.current;
     if (!expandedMapRef.current || !window.kakao?.maps) {
+      logAdminCourseMap(uid, "drawCourseRoute wait map", {
+        hasMap: !!expandedMapRef.current,
+        hasKakao: !!window.kakao?.maps,
+        retry: drawCourseRouteRetryRef.current,
+      });
       if (drawCourseRouteRetryRef.current < 2) {
         drawCourseRouteRetryRef.current += 1;
         window.setTimeout(
@@ -5936,7 +5973,12 @@ function HomePageContent() {
     courseLabelOverlaysRef.current.forEach((o) => o.setMap(null));
     courseLabelOverlaysRef.current = [];
 
-    const useAdminCourseMapDesign = userIdRef.current === ADMIN_USER_ID;
+    const useAdminCourseMapDesign = uid === ADMIN_USER_ID;
+    logAdminCourseMap(uid, "drawCourseRoute start", {
+      useAdminCourseMapDesign,
+      courseCount: courseResult.length,
+      mapNode: !!expandedMapRef.current.getNode?.(),
+    });
     const stops: LatLng[] = [];
     const stopNames: string[] = [];
     const bounds = new window.kakao.maps.LatLngBounds();
@@ -5948,7 +5990,13 @@ function HomePageContent() {
         stopNames.push(place.name);
         bounds.extend(pos);
       });
-      setCourseDesignPath(stops.length >= 2 ? stops : []);
+      const initialPath = stops.length >= 2 ? stops : [];
+      setCourseDesignPath(initialPath);
+      logAdminCourseMap(uid, "drawCourseRoute admin: setCourseDesignPath (stops)", {
+        stops: stops.length,
+        pathPts: initialPath.length,
+        sample: stops[0],
+      });
       expandedMapRef.current.setBounds(bounds);
       if (stops.length < 2) return;
 
@@ -5961,9 +6009,14 @@ function HomePageContent() {
         setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
         setCourseNavFocusMode(false);
         setCourseDesignPath(navigation.mergedPath);
+        logAdminCourseMap(uid, "drawCourseRoute admin: tmap path applied", {
+          merged: navigation.mergedPath.length,
+          segments: navigation.segments.length,
+        });
       } catch (err) {
         console.error("[course] web route failed", err);
         setCourseDesignPath(stops);
+        logAdminCourseMap(uid, "drawCourseRoute admin: tmap failed, fallback stops", err);
       } finally {
         setDirectionsLoading(false);
       }
@@ -8045,6 +8098,10 @@ function HomePageContent() {
         level: mapRef.current?.getLevel() ?? 9,
       });
       const map = expandedMapRef.current;
+      logAdminCourseMap(userIdRef.current, "expanded web Map instance ready", {
+        showCourseRoute,
+        pinsTickNext: "will +1",
+      });
       devLog("[PindMap:expandedMap] Map instance ready, wiring kakao click + DOM touch fallback");
 
       addMyLocation(map, "expanded");
@@ -10961,15 +11018,35 @@ function HomePageContent() {
                     </div>
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
-                      {showCourseRoute &&
-                        user?.id === ADMIN_USER_ID &&
-                        courseResult &&
-                        courseResult.length > 0 &&
-                        expandedMapRef.current && (
+                      {(() => {
+                        const canMountAdminOverlay =
+                          !!showCourseRoute &&
+                          user?.id === ADMIN_USER_ID &&
+                          !!courseResult &&
+                          courseResult.length > 0 &&
+                          mapExpanded &&
+                          expandedMapPinsTick > 0 &&
+                          !!expandedMapRef.current;
+                        if (user?.id === ADMIN_USER_ID && showCourseRoute) {
+                          logAdminCourseMap(user.id, "render gate", {
+                            showCourseRoute,
+                            userId: user?.id,
+                            userMatch: user?.id === ADMIN_USER_ID,
+                            courseCount: courseResult?.length ?? 0,
+                            mapExpanded,
+                            expandedMapPinsTick,
+                            hasExpandedMap: !!expandedMapRef.current,
+                            courseDesignPathPts: courseDesignPath?.length ?? null,
+                            canMountAdminOverlay,
+                          });
+                        }
+                        if (!canMountAdminOverlay || !courseResult) return null;
+                        return (
                           <CourseMapDesignOverlay
                             map={expandedMapRef.current}
                             places={courseResult}
                             path={courseDesignPath ?? courseResult.map((p) => ({ lat: p.lat, lng: p.lng }))}
+                            debugAdmin
                             onPinClick={(place) => {
                               const full = courseResult.find((p) => p.id === place.id) ?? null;
                               if (!full) return;
@@ -10996,7 +11073,8 @@ function HomePageContent() {
                               });
                             }}
                           />
-                        )}
+                        );
+                      })()}
                       {expandedNativeMapEnabled && isNativeMapAvailable() && (
                         <>
                           <div id="extended-map-slot" className="extendedNativeMapSlot" aria-hidden />
