@@ -8085,21 +8085,48 @@ function HomePageContent() {
   }, [mapExpanded]);
 
   useEffect(() => {
-    if (!mapExpanded || !mapExpandedRef.current || kakaoStatus !== "ready" || !isKakaoMapsApiReady()) {
+    const uid = userIdRef.current;
+    const adminCourse = showCourseRoute && uid === ADMIN_USER_ID;
+    const shouldCreateWebMap = mapExpanded && (!isNativeMapAvailable() || adminCourse);
+
+    if (!shouldCreateWebMap || !mapExpandedRef.current || kakaoStatus !== "ready" || !isKakaoMapsApiReady()) {
+      logAdminCourseMap(uid, "map create effect skip", {
+        mapExpanded,
+        showCourseRoute,
+        adminCourse,
+        shouldCreateWebMap,
+        hasContainer: !!mapExpandedRef.current,
+        containerW: mapExpandedRef.current?.clientWidth ?? null,
+        containerH: mapExpandedRef.current?.clientHeight ?? null,
+        kakaoStatus,
+        kakaoReady: isKakaoMapsApiReady(),
+      });
       return undefined;
     }
 
     let cancelled = false;
     const tid = window.setTimeout(() => {
-      if (cancelled || !mapExpandedRef.current || !isKakaoMapsApiReady()) return;
+      if (cancelled || !mapExpandedRef.current || !isKakaoMapsApiReady()) {
+        logAdminCourseMap(uid, "map create timeout abort", {
+          cancelled,
+          hasContainer: !!mapExpandedRef.current,
+          kakaoReady: isKakaoMapsApiReady(),
+        });
+        return;
+      }
       const mapContainerEl = mapExpandedRef.current;
+      logAdminCourseMap(uid, "map create: building Kakao Map", {
+        containerW: mapContainerEl.clientWidth,
+        containerH: mapContainerEl.clientHeight,
+      });
       expandedMapRef.current = new window.kakao.maps.Map(mapContainerEl, {
         center: mapRef.current?.getCenter() ?? new window.kakao.maps.LatLng(37.5665, 126.978),
         level: mapRef.current?.getLevel() ?? 9,
       });
       const map = expandedMapRef.current;
-      logAdminCourseMap(userIdRef.current, "expanded web Map instance ready", {
+      logAdminCourseMap(uid, "expanded web Map instance ready", {
         showCourseRoute,
+        hasMap: !!map,
         pinsTickNext: "will +1",
       });
       devLog("[PindMap:expandedMap] Map instance ready, wiring kakao click + DOM touch fallback");
@@ -8270,7 +8297,7 @@ function HomePageContent() {
       mapSearchResultPinsRef.current = [];
       myLocationMarkerRef.current.expanded = null;
     };
-  }, [mapExpanded, kakaoStatus, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace]);
+  }, [mapExpanded, showCourseRoute, kakaoStatus, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace]);
 
   useEffect(() => {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
@@ -10864,10 +10891,26 @@ function HomePageContent() {
               {error && <p className="emptyText">{error}</p>}
               {kakaoStatus === "loading" && <p className="hintText">카카오맵 SDK를 불러오는 중입니다</p>}
               {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}
-              {mapExpanded &&
-                !isNativeMapAvailable() &&
-                typeof document !== "undefined" &&
-                createPortal(
+              {(() => {
+                const nativeAvail = isNativeMapAvailable();
+                const adminCourseWebPortal =
+                  showCourseRoute &&
+                  (user?.id === ADMIN_USER_ID || userIdRef.current === ADMIN_USER_ID);
+                const showWebExpandedPortal =
+                  mapExpanded &&
+                  (!nativeAvail || adminCourseWebPortal) &&
+                  typeof document !== "undefined";
+                logAdminCourseMap(user?.id ?? userIdRef.current, "web expanded portal gate", {
+                  mapExpanded,
+                  nativeAvail,
+                  showCourseRoute,
+                  adminCourseWebPortal,
+                  showWebExpandedPortal,
+                  hasContainerRef: !!mapExpandedRef.current,
+                  kakaoStatus,
+                });
+                if (!showWebExpandedPortal) return null;
+                return createPortal(
                   <div
                     role="dialog"
                     aria-modal="true"
@@ -11117,7 +11160,8 @@ function HomePageContent() {
                     </div>
                   </div>,
                   document.body,
-                )}
+                );
+              })()}
               <div className="mapPlacesPanel">
                 {savedPlaces.length > 0 && (
                   <>
