@@ -22,6 +22,10 @@ type Props = {
   results: KakaoPlaceSearchResult[];
   onSelect: (place: KakaoPlaceSearchResult) => void;
   keyboardHeight?: number;
+  searching?: boolean;
+  hasSearched?: boolean;
+  lastSearchedQuery?: string;
+  searchNotice?: string | null;
 };
 
 export function PlaceSearchModal({
@@ -33,6 +37,10 @@ export function PlaceSearchModal({
   results,
   onSelect,
   keyboardHeight = 0,
+  searching = false,
+  hasSearched = false,
+  lastSearchedQuery = "",
+  searchNotice = null,
 }: Props) {
   const modalPaddingBottom =
     keyboardHeight > 0
@@ -129,9 +137,15 @@ export function PlaceSearchModal({
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 8px 8px" }}>
-          {results.length === 0 ? (
+          {searching ? (
+            <p style={{ margin: "24px 0", textAlign: "center", fontSize: 13, color: "#999" }}>검색 중…</p>
+          ) : searchNotice ? (
+            <p style={{ margin: "24px 0", textAlign: "center", fontSize: 13, color: "#999" }}>{searchNotice}</p>
+          ) : results.length === 0 ? (
             <p style={{ margin: "24px 0", textAlign: "center", fontSize: 13, color: "#999" }}>
-              검색어를 입력하고 검색해주세요
+              {hasSearched
+                ? `'${lastSearchedQuery}' 검색 결과가 없어요. 다른 이름으로 시도해 보세요`
+                : "검색어를 입력하고 검색해주세요"}
             </p>
           ) : (
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>

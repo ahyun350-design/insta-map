@@ -461,17 +461,29 @@ private enum NativeMapMarkerStyleHelper {
     }
 
     /// 코스 가게 이름 — 흰 외곽선으로 가독성 (알약 배경은 TextStyle 미지원)
+    /// SDK: PoiTextStyle(textLineStyles:), PoiTextLineStyle(textStyle:), layout은 textLayouts
     static func courseNameTextStyle(layout: PoiTextLayout = .right) -> PoiTextStyle {
+        let fontSize: UInt = 13
+        let fontColor = UIColor(hex: 0x1a1a2e)
+        let strokeThickness: UInt = 4
+        let strokeColor = UIColor.white
         let line = PoiTextLineStyle(
             textStyle: TextStyle(
-                fontSize: 13,
-                fontColor: UIColor(hex: 0x1a1a2e),
-                strokeThickness: 4,
-                strokeColor: .white
-            ),
-            textLayout: layout
+                fontSize: fontSize,
+                fontColor: fontColor,
+                strokeThickness: strokeThickness,
+                strokeColor: strokeColor
+            )
         )
-        return PoiTextStyle(textStyles: [line])
+        let style = PoiTextStyle(
+            transition: PoiTransition(entrance: .none, exit: .none),
+            enableEntranceTransition: false,
+            enableExitTransition: false,
+            textLineStyles: [line]
+        )
+        style.textLayouts = [layout]
+        CAPLog.print("[crs][marker] courseNameTextStyle created layout=\(String(describing: layout)) fontSize=\(fontSize) fontColor=#1a1a2e strokeThickness=\(strokeThickness) strokeColor=white lineStyles=\(style.textLineStyles.count)")
+        return style
     }
 
     static func registerFixedZoomPoiStyle(
@@ -1547,8 +1559,11 @@ private final class KakaoMapTestViewController: UIViewController {
             )
             let option = PoiOptions(styleID: styleID, poiID: marker.id)
             let isCourse = (marker.order ?? 0) > 0
+            let title = (marker.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let order = marker.order ?? 0
+            let emphasize = order == 1 || order == (courseStopCount ?? -1)
+            CAPLog.print("[crs][marker] id=\(marker.id) order=\(String(describing: marker.order)) title=\(marker.title ?? "nil") courseStopCount=\(String(describing: courseStopCount)) styleID=\(styleID) isCourse=\(isCourse) emphasize=\(emphasize) willAddText=\(!title.isEmpty)")
             if isCourse {
-                let title = (marker.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !title.isEmpty {
                     let short =
                         title.count > 16
@@ -1556,8 +1571,6 @@ private final class KakaoMapTestViewController: UIViewController {
                         : title
                     option.addText(PoiText(text: short, styleIndex: 0))
                 }
-                let order = marker.order ?? 0
-                let emphasize = order == 1 || order == (courseStopCount ?? -1)
                 option.rank = emphasize ? 20 : 10
             } else {
                 option.rank = 0

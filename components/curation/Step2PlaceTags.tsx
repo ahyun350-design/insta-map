@@ -39,6 +39,45 @@ function kakaoYXToLatLng(y?: unknown, x?: unknown): { lat: number; lng: number }
   return { lat, lng };
 }
 
+/** "○○ 성수점" → "○○" (추출 stripKakaoBranchSuffix와 동일) */
+function stripKakaoBranchSuffix(name: string): string {
+  return name.replace(/\s+[^\s]+점$/u, "").trim();
+}
+
+function buildPlaceSearchQueries(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const noSpace = trimmed.replace(/\s+/g, "");
+  const withoutBranch = stripKakaoBranchSuffix(trimmed);
+  const withoutBranchNoSpace = withoutBranch.replace(/\s+/g, "");
+  const queries: string[] = [];
+  const pushUnique = (q: string) => {
+    const t = q.trim();
+    if (!t || queries.includes(t)) return;
+    queries.push(t);
+  };
+  pushUnique(trimmed);
+  pushUnique(noSpace);
+  pushUnique(withoutBranch);
+  pushUnique(withoutBranchNoSpace);
+  return queries;
+}
+
+function keywordSearchOnce(query: string): Promise<KakaoPlaceSearchResult[]> {
+  return new Promise((resolve) => {
+    new window.kakao.maps.services.Places().keywordSearch(
+      query,
+      (data: KakaoPlaceSearchResult[], st: string) => {
+        if (st === window.kakao.maps.services.Status.OK && Array.isArray(data) && data.length > 0) {
+          resolve(data.slice(0, 15));
+        } else {
+          resolve([]);
+        }
+      },
+    );
+  });
+}
+
 export function Step2PlaceTags({
   images,
   photoPlaceTags,
@@ -51,8 +90,13 @@ export function Step2PlaceTags({
   const [pendingPin, setPendingPin] = useState<PendingPin | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<KakaoPlaceSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [lastSearchedQuery, setLastSearchedQuery] = useState("");
+  const [searchNotice, setSearchNotice] = useState<string | null>(null);
   const [actionMenuIndex, setActionMenuIndex] = useState<number | null>(null);
   const [frameAspect, setFrameAspect] = useState<CurationAspectRatio>(DEFAULT_CURATION_ASPECT_RATIO);
+  const searchGenRef = useRef(0);
 
   useEffect(() => {
     const first = images[0];
@@ -81,10 +125,19 @@ export function Step2PlaceTags({
     setActionMenuIndex(null);
   }, []);
 
-  const openSearchModal = (pin: PendingPin) => {
-    setPendingPin(pin);
+  const resetSearchUi = () => {
+    searchGenRef.current += 1;
     setSearchQuery("");
     setSearchResults([]);
+    setSearching(false);
+    setHasSearched(false);
+    setLastSearchedQuery("");
+    setSearchNotice(null);
+  };
+
+  const openSearchModal = (pin: PendingPin) => {
+    setPendingPin(pin);
+    resetSearchUi();
     setModalOpen(true);
     setActionMenuIndex(null);
   };
@@ -92,19 +145,44 @@ export function Step2PlaceTags({
   const closeSearchModal = () => {
     setModalOpen(false);
     setPendingPin(null);
-    setSearchQuery("");
-    setSearchResults([]);
+    resetSearchUi();
   };
 
-  const runSearch = () => {
-    if (!searchQuery.trim() || !window.kakao?.maps?.services) return;
-    new window.kakao.maps.services.Places().keywordSearch(searchQuery.trim(), (data: KakaoPlaceSearchResult[], st: string) => {
-      if (st === window.kakao.maps.services.Status.OK) {
-        setSearchResults(data.slice(0, 10));
-      } else {
-        setSearchResults([]);
+  const runSearch = async () => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return;
+
+    if (!window.kakao?.maps?.services) {
+      setSearchResults([]);
+      setHasSearched(false);
+      setSearching(false);
+      setSearchNotice("잠시 후 다시 시도해 주세요");
+      return;
+    }
+
+    const gen = ++searchGenRef.current;
+    setSearchNotice(null);
+    setSearching(true);
+    setHasSearched(false);
+    setSearchResults([]);
+
+    try {
+      const queries = buildPlaceSearchQueries(trimmed);
+      let found: KakaoPlaceSearchResult[] = [];
+      for (let i = 0; i < queries.length; i++) {
+        if (gen !== searchGenRef.current) return;
+        if (i > 0) await new Promise((r) => setTimeout(r, 150));
+        if (gen !== searchGenRef.current) return;
+        found = await keywordSearchOnce(queries[i]!);
+        if (found.length > 0) break;
       }
-    });
+      if (gen !== searchGenRef.current) return;
+      setSearchResults(found);
+      setHasSearched(true);
+      setLastSearchedQuery(trimmed);
+    } finally {
+      if (gen === searchGenRef.current) setSearching(false);
+    }
   };
 
   const handleSelectPlace = (place: KakaoPlaceSearchResult) => {
@@ -211,10 +289,16 @@ export function Step2PlaceTags({
         onClose={closeSearchModal}
         searchQuery={searchQuery}
         onSearchQueryChange={setSearchQuery}
-        onSearch={runSearch}
+        onSearch={() => {
+          void runSearch();
+        }}
         results={searchResults}
         onSelect={handleSelectPlace}
         keyboardHeight={keyboardHeight}
+        searching={searching}
+        hasSearched={hasSearched}
+        lastSearchedQuery={lastSearchedQuery}
+        searchNotice={searchNotice}
       />
     </div>
   );
