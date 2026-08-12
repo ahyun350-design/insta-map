@@ -236,50 +236,94 @@ const DOMESTIC_REGION_HINTS = [
   "북한강",
 ] as const;
 
-const KR_TRAVEL_CONTEXT = "여행|관광|출장|에서|갔다|다녀|맛집|휴가|비행|공항";
+/** 느슨한 "에서/맛집" 제외 — 상호·일상 문장 오탐 방지 */
+const KR_TRAVEL_CONTEXT = "여행|관광|출장|휴가|비행|공항|다녀왔|다녀온|다녀감";
 const EN_TRAVEL_CONTEXT = "trip|travel|tour|vacation|visited|visiting|airport|flight";
-
-function hasKana(text: string): boolean {
-  return /[\u3040-\u309F\u30A0-\u30FF]/.test(text);
-}
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** 캡션에 국내 지역 신호가 있으면 true — 있으면 해외로 보지 않음 */
-function hasDomesticRegionInCaption(caption: string): boolean {
-  const t = caption.trim();
-  if (!t) return false;
-  for (const a of DOMESTIC_REGION_HINTS) {
-    if (t.includes(a)) return true;
+/** 상호명을 캡션에서 제거 — 가게 이름에 섞인 지명(롱비치커피, 도쿄카페)이 해외 신호가 되지 않게 */
+function maskPlaceNamesInCaption(caption: string, placeNames: string[]): string {
+  let t = caption;
+  const sorted = [...placeNames]
+    .map((n) => n.trim())
+    .filter((n) => n.length >= 2)
+    .sort((a, b) => b.length - a.length);
+  for (const name of sorted) {
+    t = t.split(name).join(" ");
+    const compact = name.replace(/\s+/g, "");
+    if (compact.length >= 2 && compact !== name) {
+      t = t.split(compact).join(" ");
+    }
   }
-  if (/[가-힣]{1,12}(?:특별시|광역시|특별자치시|특별자치도)/.test(t)) return true;
-  if (/[가-힣]{2,12}(?:시|군|구|동|읍|면)/.test(t)) return true;
-  return false;
+  return t;
+}
+
+/** 장소 목록에 국내 확정 신호(지점명 ○○점, 구/동/산/천 등) */
+function collectDomesticSignalsFromPlaceNames(placeNames: string[]): string[] {
+  const matched: string[] = [];
+  for (const raw of placeNames) {
+    const name = raw.trim();
+    if (!name) continue;
+    // "이태원점", "도림천점", "작은 따옴표 도림천점"
+    if (/[^\s]+점$/u.test(name)) {
+      matched.push(`branch:${name}`);
+    }
+    for (const h of DOMESTIC_REGION_HINTS) {
+      if (name.includes(h)) matched.push(`place_region:${h}`);
+    }
+    // 용왕산, 도림천, ○○동/구/역 (로/길은 상호 오탐이 많아 제외)
+    const topo = name.match(/[가-힣]{1,8}(?:산|천|강|동|구|역)/u);
+    if (topo) matched.push(`topo:${topo[0]}`);
+  }
+  return [...new Set(matched)];
+}
+
+/** 캡션에 국내 지역 신호 */
+function collectDomesticSignalsFromCaption(caption: string): string[] {
+  const t = caption.trim();
+  if (!t) return [];
+  const matched: string[] = [];
+  for (const a of DOMESTIC_REGION_HINTS) {
+    if (t.includes(a)) matched.push(`caption_region:${a}`);
+  }
+  if (/[가-힣]{1,12}(?:특별시|광역시|특별자치시|특별자치도)/.test(t)) {
+    matched.push("caption:admin_area");
+  }
+  if (/[가-힣]{2,12}(?:시|군|구|동|읍|면)/.test(t)) {
+    matched.push("caption:si_gu_dong");
+  }
+  return [...new Set(matched)];
 }
 
 /**
- * 캡션만 본다(상호명 목록 제외).
- * 해시태그·여행 문맥·가나/일본 주소형만 신호. 확 아니면 신호 없음.
- * 북한·단독 USA/LA 등 오탐 유발 패턴 제외.
+ * 마스킹된 캡션만 본다.
+ * 해시태그·여행 문맥만 신호. 가나 단독은 애매 → 신호로 쓰지 않음.
  */
-function collectOverseasCaptionSignals(caption: string): string[] {
-  const t = caption.trim();
+function collectOverseasCaptionSignals(scrubbedCaption: string): string[] {
+  const t = scrubbedCaption.trim();
   if (!t) return [];
   const found: string[] = [];
 
   for (const m of t.matchAll(/#([^\s#]+)/g)) {
     const tag = m[1] ?? "";
     for (const city of OVERSEAS_KR_PLACES) {
-      if (tag.includes(city)) {
-        found.push(`hashtag:${tag}`);
+      // #도쿄 단독, 또는 #도쿄여행 처럼 도시+여행 맥락
+      if (tag === city || (tag.includes(city) && /여행|관광|출장|휴가|투어/.test(tag))) {
+        found.push(`hashtag:${city}`);
         break;
       }
     }
     for (const city of OVERSEAS_EN_PLACES) {
-      if (new RegExp(escapeRegExp(city).replace(/ /g, "\\s*"), "i").test(tag)) {
-        found.push(`hashtag:${tag}`);
+      const reCity = new RegExp(escapeRegExp(city).replace(/ /g, "\\s*"), "i");
+      if (!reCity.test(tag)) continue;
+      if (
+        new RegExp(`^${escapeRegExp(city).replace(/ /g, "\\s*")}$`, "i").test(tag) ||
+        /trip|travel|tour|vacation|여행|관광|출장|휴가/i.test(tag)
+      ) {
+        found.push(`hashtag:${city}`);
         break;
       }
     }
@@ -296,13 +340,16 @@ function collectOverseasCaptionSignals(caption: string): string[] {
     const c = escapeRegExp(city).replace(/ /g, "\\s+");
     const word = new RegExp(`\\b${c}\\b`, "i");
     if (!word.test(t)) continue;
-    const forward = new RegExp(`\\b${c}\\b.{0,16}(?:${EN_TRAVEL_CONTEXT}|여행|관광|출장)`, "i");
-    const backward = new RegExp(`(?:${EN_TRAVEL_CONTEXT}|in|at|to|from|여행|관광|출장).{0,16}\\b${c}\\b`, "i");
+    const forward = new RegExp(`\\b${c}\\b.{0,16}(?:${EN_TRAVEL_CONTEXT}|여행|관광|출장|휴가)`, "i");
+    const backward = new RegExp(
+      `(?:${EN_TRAVEL_CONTEXT}|in|at|to|from|여행|관광|출장|휴가).{0,16}\\b${c}\\b`,
+      "i",
+    );
     if (forward.test(t) || backward.test(t)) found.push(`en_ctx:${city}`);
   }
 
-  if (hasKana(t)) found.push("kana");
-  if (/(東京都|大阪府|京都府|北海道|\bPrefecture\b|\bChome\b)/i.test(t)) {
+  // 일본 행정주소형이 캡션에 명확히 있을 때만 (가나 단독 제외)
+  if (/(東京都|大阪府|京都府|北海道)/.test(t) || /\bPrefecture\b|\bChome\b/i.test(t)) {
     found.push("jp_addr");
   }
 
@@ -311,22 +358,49 @@ function collectOverseasCaptionSignals(caption: string): string[] {
 
 /**
  * 카카오 전부 실패 후에만 호출.
- * 해외 = 캡션 해외 신호 있음 ∧ 국내 지역 없음 ∧ (호출부에서) 카카오 0건.
+ * 해외 = 국내 신호 0 ∧ 캡션(상호 마스킹 후)에 확실한 해외 여행 신호.
+ * 애매하면 overseas=false → kakao_unresolved.
  */
-function shouldClassifyAsOverseasAfterKakaoMiss(caption: string): {
+function shouldClassifyAsOverseasAfterKakaoMiss(
+  caption: string,
+  placeNames: string[],
+): {
   overseas: boolean;
   signals: string[];
-  hasDomestic: boolean;
+  domesticSignals: string[];
+  scrubbedPreview: string;
 } {
-  const hasDomestic = hasDomesticRegionInCaption(caption);
-  const signals = collectOverseasCaptionSignals(caption);
-  if (hasDomestic) {
-    return { overseas: false, signals, hasDomestic };
+  const domesticFromPlaces = collectDomesticSignalsFromPlaceNames(placeNames);
+  const domesticFromCaption = collectDomesticSignalsFromCaption(caption);
+  const domesticSignals = [...new Set([...domesticFromPlaces, ...domesticFromCaption])];
+
+  if (domesticSignals.length > 0) {
+    return {
+      overseas: false,
+      signals: [],
+      domesticSignals,
+      scrubbedPreview: "",
+    };
   }
+
+  const scrubbed = maskPlaceNamesInCaption(caption, placeNames);
+  const signals = collectOverseasCaptionSignals(scrubbed);
+
   if (signals.length === 0) {
-    return { overseas: false, signals, hasDomestic };
+    return {
+      overseas: false,
+      signals,
+      domesticSignals,
+      scrubbedPreview: scrubbed.slice(0, 80),
+    };
   }
-  return { overseas: true, signals, hasDomestic };
+
+  return {
+    overseas: true,
+    signals,
+    domesticSignals,
+    scrubbedPreview: scrubbed.slice(0, 80),
+  };
 }
 
 function formatExtractFailCode(code: string, names: string[]): string {
@@ -334,20 +408,24 @@ function formatExtractFailCode(code: string, names: string[]): string {
   return joined ? `${code}|${joined}` : code;
 }
 
-/** resolved === 0 원인 코드 (+ 카카오 미스 장소명, 분석용) */
+/** resolved === 0 원인 코드 (+ matched 키워드 / 카카오 미스 장소명) */
 function buildZeroResolvedErrorMessage(caption: string, candidateNames: string[]): string {
   if (candidateNames.length === 0) {
     return "no_places_in_caption";
   }
-  const verdict = shouldClassifyAsOverseasAfterKakaoMiss(caption);
+  const verdict = shouldClassifyAsOverseasAfterKakaoMiss(caption, candidateNames);
   console.log("[extract] zero-resolved overseas check", {
     overseas: verdict.overseas,
-    hasDomestic: verdict.hasDomestic,
     signals: verdict.signals.slice(0, 8),
+    domesticSignals: verdict.domesticSignals.slice(0, 8),
     names: candidateNames.slice(0, 8),
+    scrubbedPreview: verdict.scrubbedPreview,
   });
   if (verdict.overseas) {
-    return formatExtractFailCode("overseas_unsupported", candidateNames);
+    const matched =
+      verdict.signals.length > 0 ? verdict.signals.slice(0, 6).join(",") : "unknown";
+    const names = candidateNames.slice(0, 8).join(",");
+    return `overseas_unsupported|matched:${matched}|${names}`;
   }
   return formatExtractFailCode("kakao_unresolved", candidateNames);
 }
