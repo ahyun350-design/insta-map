@@ -94,37 +94,239 @@ type ResolvedPlace = {
 };
 
 
-const OVERSEAS_CITY_PATTERN =
-  /도쿄|오사카|교토|후쿠오카|삿포로|나고야|요코하마|오키나와|일본|방콕|치앙마이|태국|다낭|하노이|호치민|베트남|싱가포르|타이베이|대만|상하이|베이징|홍콩|마카오|중국|파리|프랑스|런던|영국|뉴욕|미국|로마|이탈리아|바르셀로나|스페인|로스앤젤레스|\bLA\b|Tokyo|Osaka|Kyoto|Fukuoka|Sapporo|Nagoya|Yokohama|Okinawa|Japan|Bangkok|Chiang\s*Mai|Thailand|Danang|Da\s*Nang|Hanoi|Ho\s*Chi\s*Minh|Vietnam|Singapore|Taipei|Taiwan|Shanghai|Beijing|Hong\s*Kong|Macau|China|Paris|France|London|UK|England|New\s*York|USA|America|Rome|Italy|Barcelona|Spain/i;
+const OVERSEAS_KR_PLACES = [
+  "도쿄",
+  "오사카",
+  "교토",
+  "후쿠오카",
+  "삿포로",
+  "나고야",
+  "요코하마",
+  "오키나와",
+  "일본",
+  "방콕",
+  "치앙마이",
+  "태국",
+  "다낭",
+  "하노이",
+  "호치민",
+  "베트남",
+  "싱가포르",
+  "타이베이",
+  "대만",
+  "상하이",
+  "베이징",
+  "홍콩",
+  "마카오",
+  "중국",
+  "파리",
+  "프랑스",
+  "런던",
+  "영국",
+  "뉴욕",
+  "미국",
+  "로마",
+  "이탈리아",
+  "바르셀로나",
+  "스페인",
+  "로스앤젤레스",
+] as const;
+
+/** 영문 지명 — 단독 매칭 금지(상호 USA 등 오탐). 해시태그·여행 문맥만 */
+const OVERSEAS_EN_PLACES = [
+  "Tokyo",
+  "Osaka",
+  "Kyoto",
+  "Fukuoka",
+  "Sapporo",
+  "Nagoya",
+  "Yokohama",
+  "Okinawa",
+  "Japan",
+  "Bangkok",
+  "Chiang Mai",
+  "Thailand",
+  "Danang",
+  "Da Nang",
+  "Hanoi",
+  "Ho Chi Minh",
+  "Vietnam",
+  "Singapore",
+  "Taipei",
+  "Taiwan",
+  "Shanghai",
+  "Beijing",
+  "Hong Kong",
+  "Macau",
+  "China",
+  "Paris",
+  "France",
+  "London",
+  "England",
+  "New York",
+  "USA",
+  "America",
+  "Rome",
+  "Italy",
+  "Barcelona",
+  "Spain",
+  "Los Angeles",
+] as const;
+
+/** 국내 시·구·동·핫플 — 하나라도 있으면 해외 판정 금지 */
+const DOMESTIC_REGION_HINTS = [
+  "서울",
+  "부산",
+  "대구",
+  "인천",
+  "광주",
+  "대전",
+  "울산",
+  "세종",
+  "제주",
+  "경기",
+  "강원",
+  "충북",
+  "충남",
+  "전북",
+  "전남",
+  "경북",
+  "경남",
+  "성수",
+  "성수동",
+  "홍대",
+  "연남",
+  "합정",
+  "망원",
+  "이태원",
+  "한남",
+  "잠실",
+  "여의도",
+  "판교",
+  "해운대",
+  "광안리",
+  "서면",
+  "강남",
+  "역삼",
+  "선릉",
+  "삼성",
+  "청담",
+  "압구정",
+  "신사",
+  "명동",
+  "을지로",
+  "종로",
+  "인사동",
+  "삼청",
+  "북촌",
+  "서촌",
+  "건대",
+  "신촌",
+  "마포",
+  "영등포",
+  "노량진",
+  "혜화",
+  "속초",
+  "강릉",
+  "여수",
+  "경주",
+  "전주",
+  "수원",
+  "북한산",
+  "북한강",
+] as const;
+
+const KR_TRAVEL_CONTEXT = "여행|관광|출장|에서|갔다|다녀|맛집|휴가|비행|공항";
+const EN_TRAVEL_CONTEXT = "trip|travel|tour|vacation|visited|visiting|airport|flight";
 
 function hasKana(text: string): boolean {
   return /[\u3040-\u309F\u30A0-\u30FF]/.test(text);
 }
 
-function hasOverseasScriptName(name: string): boolean {
-  const t = name.trim();
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 캡션에 국내 지역 신호가 있으면 true — 있으면 해외로 보지 않음 */
+function hasDomesticRegionInCaption(caption: string): boolean {
+  const t = caption.trim();
   if (!t) return false;
-  if (hasKana(t)) return true;
-  // 한자만(한글 없음) 상호
-  if (/[\u4E00-\u9FFF]/.test(t) && !/[가-힣]/.test(t)) return true;
+  for (const a of DOMESTIC_REGION_HINTS) {
+    if (t.includes(a)) return true;
+  }
+  if (/[가-힣]{1,12}(?:특별시|광역시|특별자치시|특별자치도)/.test(t)) return true;
+  if (/[가-힣]{2,12}(?:시|군|구|동|읍|면)/.test(t)) return true;
   return false;
 }
 
-/** 로마자만으로 된 상호 (한글 상호 아님) */
-function isRomanOnlyPlaceName(name: string): boolean {
-  const t = name.trim();
-  if (!t || /[가-힣]/.test(t)) return false;
-  if (hasKana(t) || /[\u4E00-\u9FFF]/.test(t)) return false;
-  return /^[A-Za-z0-9][A-Za-z0-9\s\-'&.,]*$/.test(t) && /[A-Za-z]{3,}/.test(t);
+/**
+ * 캡션만 본다(상호명 목록 제외).
+ * 해시태그·여행 문맥·가나/일본 주소형만 신호. 확 아니면 신호 없음.
+ * 북한·단독 USA/LA 등 오탐 유발 패턴 제외.
+ */
+function collectOverseasCaptionSignals(caption: string): string[] {
+  const t = caption.trim();
+  if (!t) return [];
+  const found: string[] = [];
+
+  for (const m of t.matchAll(/#([^\s#]+)/g)) {
+    const tag = m[1] ?? "";
+    for (const city of OVERSEAS_KR_PLACES) {
+      if (tag.includes(city)) {
+        found.push(`hashtag:${tag}`);
+        break;
+      }
+    }
+    for (const city of OVERSEAS_EN_PLACES) {
+      if (new RegExp(escapeRegExp(city).replace(/ /g, "\\s*"), "i").test(tag)) {
+        found.push(`hashtag:${tag}`);
+        break;
+      }
+    }
+  }
+
+  for (const city of OVERSEAS_KR_PLACES) {
+    const c = escapeRegExp(city);
+    const forward = new RegExp(`${c}.{0,14}(?:${KR_TRAVEL_CONTEXT})`);
+    const backward = new RegExp(`(?:${KR_TRAVEL_CONTEXT}).{0,14}${c}`);
+    if (forward.test(t) || backward.test(t)) found.push(`kr_ctx:${city}`);
+  }
+
+  for (const city of OVERSEAS_EN_PLACES) {
+    const c = escapeRegExp(city).replace(/ /g, "\\s+");
+    const word = new RegExp(`\\b${c}\\b`, "i");
+    if (!word.test(t)) continue;
+    const forward = new RegExp(`\\b${c}\\b.{0,16}(?:${EN_TRAVEL_CONTEXT}|여행|관광|출장)`, "i");
+    const backward = new RegExp(`(?:${EN_TRAVEL_CONTEXT}|in|at|to|from|여행|관광|출장).{0,16}\\b${c}\\b`, "i");
+    if (forward.test(t) || backward.test(t)) found.push(`en_ctx:${city}`);
+  }
+
+  if (hasKana(t)) found.push("kana");
+  if (/(東京都|大阪府|京都府|北海道|\bPrefecture\b|\bChome\b)/i.test(t)) {
+    found.push("jp_addr");
+  }
+
+  return [...new Set(found)];
 }
 
-function hasOverseasSignal(caption: string, placeNames: string[]): boolean {
-  const blob = `${caption}\n${placeNames.join("\n")}`;
-  if (OVERSEAS_CITY_PATTERN.test(blob)) return true;
-  if (hasKana(caption)) return true;
-  if (/(東京都|大阪府|京都府|北海道|City,|Chome|\bPrefecture\b)/i.test(blob)) return true;
-  if (placeNames.some((n) => hasOverseasScriptName(n) || isRomanOnlyPlaceName(n))) return true;
-  return false;
+/**
+ * 카카오 전부 실패 후에만 호출.
+ * 해외 = 캡션 해외 신호 있음 ∧ 국내 지역 없음 ∧ (호출부에서) 카카오 0건.
+ */
+function shouldClassifyAsOverseasAfterKakaoMiss(caption: string): {
+  overseas: boolean;
+  signals: string[];
+  hasDomestic: boolean;
+} {
+  const hasDomestic = hasDomesticRegionInCaption(caption);
+  const signals = collectOverseasCaptionSignals(caption);
+  if (hasDomestic) {
+    return { overseas: false, signals, hasDomestic };
+  }
+  if (signals.length === 0) {
+    return { overseas: false, signals, hasDomestic };
+  }
+  return { overseas: true, signals, hasDomestic };
 }
 
 function formatExtractFailCode(code: string, names: string[]): string {
@@ -137,7 +339,16 @@ function buildZeroResolvedErrorMessage(caption: string, candidateNames: string[]
   if (candidateNames.length === 0) {
     return "no_places_in_caption";
   }
-  // 카카오 이전에 해외는 이미 걸러지므로 여기선 미해결로 분류
+  const verdict = shouldClassifyAsOverseasAfterKakaoMiss(caption);
+  console.log("[extract] zero-resolved overseas check", {
+    overseas: verdict.overseas,
+    hasDomestic: verdict.hasDomestic,
+    signals: verdict.signals.slice(0, 8),
+    names: candidateNames.slice(0, 8),
+  });
+  if (verdict.overseas) {
+    return formatExtractFailCode("overseas_unsupported", candidateNames);
+  }
   return formatExtractFailCode("kakao_unresolved", candidateNames);
 }
 
@@ -204,17 +415,7 @@ export async function POST(req: Request) {
       throw new Error("no_places_in_caption");
     }
 
-    // 해외 신호면 카카오 검색 전에 종료 (국내 동명 오매칭 방지)
-    if (hasOverseasSignal(caption, candidateNames)) {
-      console.log("[extract] overseas detected before kakao", {
-        jobId,
-        names: candidateNames.slice(0, 8),
-      });
-      diagKakaoMisses = [];
-      await saveJobDiagnostics(jobId, { kakao_misses: diagKakaoMisses });
-      throw new Error(formatExtractFailCode("overseas_unsupported", candidateNames));
-    }
-
+    // 해외 판정은 카카오 전부 실패 후에만 (오탐으로 국내 상호를 막지 않음)
     await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
     const kakaoT0 = Date.now();
     const resolved: ResolvedPlace[] = [];
