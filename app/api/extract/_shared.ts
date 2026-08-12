@@ -140,9 +140,14 @@ function addressMatchesExpectedRegions(address: string, regions: string[]): bool
   return regions.some((r) => compact.includes(r.replace(/\s+/g, "")));
 }
 
+export type SearchKakaoPlaceOptions = {
+  /** epoch ms — 넘기면 남은 폴백 쿼리 중단 */
+  deadlineMs?: number;
+};
+
 /**
- * 카카오 키워드 검색 — 단발 실패를 줄이기 위해 쿼리 폴백을 순차 시도.
- * 결과는 이름 완전일치(+지역 정합) 검증을 통과해야만 반환한다.
+ * 카카오 키워드 검색 — 쿼리 폴백은 순차(1차 히트 시 즉시 종료).
+ * size=5로 후보를 보고 이름+지역 정합을 통과한 첫 문서를 채택.
  * @param hint 기존 호출 호환용(Claude hint). region 미지정 시 지역명 후보로 사용.
  * @param region 알고 있는 지역명(선택). 있으면 5차 폴백에 우선 사용.
  * @param caption 캡션(선택). 지역 정합 검증에 사용.
@@ -152,6 +157,7 @@ export async function searchKakaoPlace(
   hint: string = "",
   region?: string,
   caption: string = "",
+  options?: SearchKakaoPlaceOptions,
 ): Promise<KakaoPlaceLookup | null> {
   const kakaoKey = process.env.KAKAO_REST_API_KEY;
   if (!kakaoKey) return null;
@@ -159,12 +165,14 @@ export async function searchKakaoPlace(
   const trimmed = name.trim();
   if (!trimmed) return null;
 
+  const deadlineMs = options?.deadlineMs;
   const noSpace = trimmed.replace(/\s+/g, "");
   const withoutBranch = stripKakaoBranchSuffix(trimmed);
   const withoutBranchNoSpace = withoutBranch.replace(/\s+/g, "");
   const regionName = (region?.trim() || regionFromKakaoHint(hint)).trim();
   const expectedRegions = collectExpectedRegions(caption, hint, trimmed);
   if (regionName) expectedRegions.push(regionName);
+  const regionsUnique = [...new Set(expectedRegions)];
 
   const queries: string[] = [];
   const pushUnique = (q: string) => {
@@ -190,13 +198,71 @@ export async function searchKakaoPlace(
     y: string;
   };
 
+  const pickFromDocs = (
+    docs: Doc[],
+    query: string,
+    queryIndex: number,
+  ): KakaoPlaceLookup | null => {
+    let sawNameMatch = false;
+    for (const doc of docs) {
+      const placeName = (doc.place_name || "").trim();
+      const address = doc.road_address_name || doc.address_name || "";
+      const lat = parseFloat(doc.y);
+      const lng = parseFloat(doc.x);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      if (!isExactKakaoNameMatch(trimmed, placeName)) continue;
+      sawNameMatch = true;
+
+      const regionOk = addressMatchesExpectedRegions(address, regionsUnique);
+      // 폴백(2차~)은 지역 힌트가 있을 때만 채택. 지역 힌트 없으면 1차만 허용.
+      if (queryIndex >= 1) {
+        if (regionsUnique.length === 0 || !regionOk) continue;
+      } else if (regionsUnique.length > 0 && !regionOk) {
+        continue;
+      }
+
+      console.log("[extract] kakao search", { query, queryIndex, hit: true, placeName, address });
+      return {
+        address: doc.address_name,
+        roadAddress: doc.road_address_name || doc.address_name,
+        lat,
+        lng,
+        placeName,
+        queryIndex,
+      };
+    }
+
+    if (docs.length === 0) {
+      console.log("[extract] kakao search", { query, queryIndex, hit: false });
+    } else if (!sawNameMatch) {
+      console.log("[extract] kakao search", {
+        query,
+        queryIndex,
+        hit: false,
+        reason: "name_mismatch",
+        placeName: (docs[0]?.place_name || "").trim(),
+      });
+    } else {
+      console.log("[extract] kakao search", {
+        query,
+        queryIndex,
+        hit: false,
+        reason: queryIndex >= 1 ? "fallback_region_strict" : "region_mismatch",
+        placeName: (docs[0]?.place_name || "").trim(),
+        address: docs[0]?.road_address_name || docs[0]?.address_name,
+        regions: regionsUnique,
+      });
+    }
+    return null;
+  };
+
   const lookupOnce = async (
     query: string,
     queryIndex: number,
   ): Promise<KakaoPlaceLookup | null> => {
     try {
       const res = await fetch(
-        `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=1`,
+        `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=5`,
         { headers: { Authorization: `KakaoAK ${kakaoKey}` } },
       );
       if (!res.ok) {
@@ -204,70 +270,7 @@ export async function searchKakaoPlace(
         return null;
       }
       const data = (await res.json()) as { documents?: Doc[] };
-      const first = data.documents?.[0];
-      if (!first) {
-        console.log("[extract] kakao search", { query, queryIndex, hit: false });
-        return null;
-      }
-      const placeName = (first.place_name || "").trim();
-      const address = first.road_address_name || first.address_name || "";
-      const lat = parseFloat(first.y);
-      const lng = parseFloat(first.x);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        console.log("[extract] kakao search", { query, queryIndex, hit: false, reason: "invalid_coords" });
-        return null;
-      }
-
-      const nameOk = isExactKakaoNameMatch(trimmed, placeName);
-      if (!nameOk) {
-        console.log("[extract] kakao search", {
-          query,
-          queryIndex,
-          hit: false,
-          reason: "name_mismatch",
-          placeName,
-        });
-        return null;
-      }
-
-      const regionsUnique = [...new Set(expectedRegions)];
-      const regionOk = addressMatchesExpectedRegions(address, regionsUnique);
-      // 폴백(2차~)은 지역 힌트가 있을 때만 채택. 지역 힌트 없으면 1차만 허용.
-      if (queryIndex >= 1) {
-        if (regionsUnique.length === 0 || !regionOk) {
-          console.log("[extract] kakao search", {
-            query,
-            queryIndex,
-            hit: false,
-            reason: "fallback_region_strict",
-            placeName,
-            address,
-            regions: regionsUnique,
-          });
-          return null;
-        }
-      } else if (regionsUnique.length > 0 && !regionOk) {
-        console.log("[extract] kakao search", {
-          query,
-          queryIndex,
-          hit: false,
-          reason: "region_mismatch",
-          placeName,
-          address,
-          regions: regionsUnique,
-        });
-        return null;
-      }
-
-      console.log("[extract] kakao search", { query, queryIndex, hit: true, placeName });
-      return {
-        address: first.address_name,
-        roadAddress: first.road_address_name || first.address_name,
-        lat,
-        lng,
-        placeName,
-        queryIndex,
-      };
+      return pickFromDocs(data.documents ?? [], query, queryIndex);
     } catch {
       console.log("[extract] kakao search", { query, queryIndex, hit: false, reason: "exception" });
       return null;
@@ -275,11 +278,17 @@ export async function searchKakaoPlace(
   };
 
   for (let i = 0; i < queries.length; i++) {
-    if (i > 0) {
-      await new Promise((r) => setTimeout(r, 150));
+    if (deadlineMs != null && Date.now() >= deadlineMs) {
+      console.log("[extract] kakao search", {
+        query: queries[i],
+        queryIndex: i,
+        hit: false,
+        reason: "deadline",
+      });
+      return null;
     }
     const result = await lookupOnce(queries[i]!, i);
-    if (result) return result;
+    if (result) return result; // 1차(또는 n차) 히트 시 나머지 폴백 건너뜀
   }
   return null;
 }

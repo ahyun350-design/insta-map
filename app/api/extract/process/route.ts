@@ -414,21 +414,28 @@ function buildZeroResolvedErrorMessage(caption: string, candidateNames: string[]
     return "no_places_in_caption";
   }
   const verdict = shouldClassifyAsOverseasAfterKakaoMiss(caption, candidateNames);
+  const matchedKeywords =
+    verdict.signals.length > 0 ? verdict.signals.slice(0, 6).join(",") : "none";
   console.log("[extract] zero-resolved overseas check", {
     overseas: verdict.overseas,
+    matched: matchedKeywords,
     signals: verdict.signals.slice(0, 8),
     domesticSignals: verdict.domesticSignals.slice(0, 8),
     names: candidateNames.slice(0, 8),
     scrubbedPreview: verdict.scrubbedPreview,
   });
   if (verdict.overseas) {
-    const matched =
-      verdict.signals.length > 0 ? verdict.signals.slice(0, 6).join(",") : "unknown";
+    // overseas_unsupported 판정 시 matched: 키워드 필수 (없으면 unknown)
+    const matched = matchedKeywords === "none" ? "unknown" : matchedKeywords;
     const names = candidateNames.slice(0, 8).join(",");
-    return `overseas_unsupported|matched:${matched}|${names}`;
+    const msg = `overseas_unsupported|matched:${matched}|${names}`;
+    console.log("[extract] overseas_unsupported", { matched, names: candidateNames.slice(0, 8) });
+    return msg;
   }
   return formatExtractFailCode("kakao_unresolved", candidateNames);
 }
+
+const KAKAO_PHASE_TIMEOUT_MS = 15_000;
 
 function buildPlaces(resolved: ResolvedPlace[]): Place[] {
   return resolved.map((p) => ({ name: p.name, category: p.category, address: p.address }));
@@ -496,26 +503,53 @@ export async function POST(req: Request) {
     // 해외 판정은 카카오 전부 실패 후에만 (오탐으로 국내 상호를 막지 않음)
     await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
     const kakaoT0 = Date.now();
+    const kakaoDeadline = kakaoT0 + KAKAO_PHASE_TIMEOUT_MS;
     const resolved: ResolvedPlace[] = [];
-    for (const item of candidates) {
-      const kakaoResult = await searchKakaoPlace(item.name, item.hint, undefined, caption);
-      if (kakaoResult) {
-        resolved.push({
-          name: item.name,
-          category: item.category,
-          address: kakaoResult.roadAddress || kakaoResult.address,
-          lat: kakaoResult.lat,
-          lng: kakaoResult.lng,
-        });
-      }
-    }
-    console.log(`[PindMap:perf] extract.process.kakao ${Date.now() - kakaoT0}ms`);
 
-    const resolvedNames = new Set(resolved.map((r) => r.name));
+    // 장소별 병렬 검색. 장소 내부 폴백은 순차+1차 히트 시 종료(딜레이 없음).
+    const kakaoTasks = candidates.map(async (item) => {
+      if (Date.now() >= kakaoDeadline) return;
+      const kakaoResult = await searchKakaoPlace(item.name, item.hint, undefined, caption, {
+        deadlineMs: kakaoDeadline,
+      });
+      if (!kakaoResult) return;
+      resolved.push({
+        name: item.name,
+        category: item.category,
+        address: kakaoResult.roadAddress || kakaoResult.address,
+        lat: kakaoResult.lat,
+        lng: kakaoResult.lng,
+      });
+    });
+
+    await Promise.race([
+      Promise.all(kakaoTasks),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, Math.max(0, kakaoDeadline - Date.now()));
+      }),
+    ]);
+
+    // 타임아웃 이후 in-flight push는 무시 — 스냅샷만 사용
+    const resolvedFinal = [...resolved];
+    const kakaoTimedOut = Date.now() >= kakaoDeadline;
+    if (kakaoTimedOut) {
+      console.log("[extract] kakao phase timeout — saving partial", {
+        timeoutMs: KAKAO_PHASE_TIMEOUT_MS,
+        resolved: resolvedFinal.length,
+        candidates: candidates.length,
+      });
+    }
+    console.log(`[PindMap:perf] extract.process.kakao ${Date.now() - kakaoT0}ms`, {
+      candidates: candidates.length,
+      resolved: resolvedFinal.length,
+      timedOut: kakaoTimedOut,
+    });
+
+    const resolvedNames = new Set(resolvedFinal.map((r) => r.name));
     diagKakaoMisses = candidateNames.filter((n) => !resolvedNames.has(n));
     await saveJobDiagnostics(jobId, { kakao_misses: diagKakaoMisses });
 
-    if (resolved.length === 0) {
+    if (resolvedFinal.length === 0) {
       throw new Error(buildZeroResolvedErrorMessage(caption, candidateNames));
     }
 
@@ -530,7 +564,7 @@ export async function POST(req: Request) {
         `${String(r.name).trim()}::${String(r.address).trim()}`,
       ),
     );
-    const uniqueResolved = resolved.filter((p) => {
+    const uniqueResolved = resolvedFinal.filter((p) => {
       const key = `${p.name.trim()}::${p.address.trim()}`;
       if (existingSet.has(key)) return false;
       existingSet.add(key);
@@ -539,7 +573,7 @@ export async function POST(req: Request) {
 
     const places = buildPlaces(uniqueResolved);
 
-    if (places.length === 0 && resolved.length > 0) {
+    if (places.length === 0 && resolvedFinal.length > 0) {
       const { error: dupDoneError } = await supabase
         .from("extract_jobs")
         .update({
