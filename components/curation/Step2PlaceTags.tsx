@@ -9,7 +9,7 @@ import {
   removePhotoPlaceTag,
   upsertPhotoPlaceTag,
 } from "@/lib/photoPlaceTag";
-import { PlaceSearchModal, type KakaoPlaceSearchResult } from "@/components/curation/PlaceSearchModal";
+import { PlaceSearchModal, type KakaoPlaceSearchResult, type ManualPlaceResult } from "@/components/curation/PlaceSearchModal";
 import { PhotoTagMarker } from "@/components/curation/PhotoTagMarker";
 import type { PostImageItem } from "@/components/curation/types";
 import {
@@ -168,18 +168,32 @@ export function Step2PlaceTags({
 
     try {
       const queries = buildPlaceSearchQueries(trimmed);
+      console.log("[crs][place-search] fallback queries", queries);
       let found: KakaoPlaceSearchResult[] = [];
       for (let i = 0; i < queries.length; i++) {
         if (gen !== searchGenRef.current) return;
         if (i > 0) await new Promise((r) => setTimeout(r, 150));
         if (gen !== searchGenRef.current) return;
-        found = await keywordSearchOnce(queries[i]!);
+        const q = queries[i]!;
+        found = await keywordSearchOnce(q);
+        console.log("[crs][place-search] try", {
+          step: i + 1,
+          of: queries.length,
+          query: q,
+          hits: found.length,
+          top: found[0]?.place_name ?? null,
+        });
         if (found.length > 0) break;
       }
       if (gen !== searchGenRef.current) return;
       setSearchResults(found);
       setHasSearched(true);
       setLastSearchedQuery(trimmed);
+      console.log("[crs][place-search] done", {
+        query: trimmed,
+        finalHits: found.length,
+        exhausted: found.length === 0,
+      });
     } finally {
       if (gen === searchGenRef.current) setSearching(false);
     }
@@ -202,6 +216,24 @@ export function Step2PlaceTags({
       y: pendingPin.y,
     };
 
+    onPhotoPlaceTagsChange(upsertPhotoPlaceTag(photoPlaceTags, tag));
+    closeSearchModal();
+  };
+
+  const handleManualPlace = (place: ManualPlaceResult) => {
+    if (!pendingPin) return;
+    const tag: PhotoPlaceTag = {
+      photoIndex: pendingPin.photoIndex,
+      placeId: place.id,
+      placeName: place.place_name,
+      address: place.address,
+      category: place.category,
+      lat: place.lat,
+      lng: place.lng,
+      x: pendingPin.x,
+      y: pendingPin.y,
+      isManual: true,
+    };
     onPhotoPlaceTagsChange(upsertPhotoPlaceTag(photoPlaceTags, tag));
     closeSearchModal();
   };
@@ -294,6 +326,7 @@ export function Step2PlaceTags({
         }}
         results={searchResults}
         onSelect={handleSelectPlace}
+        onManualSelect={handleManualPlace}
         keyboardHeight={keyboardHeight}
         searching={searching}
         hasSearched={hasSearched}

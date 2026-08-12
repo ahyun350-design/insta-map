@@ -28,6 +28,8 @@ export type PhotoPlaceTag = {
   lng: number;
   x: number;
   y: number;
+  /** 카카오 미등록 장소 — 사용자가 직접 입력 */
+  isManual?: boolean;
 };
 
 export type FeedPostComment = {
@@ -190,6 +192,8 @@ function parsePhotoPlaceTagItem(raw: unknown): PhotoPlaceTag | null {
         ? item.placeId.trim()
         : null;
 
+  const isManual = item.isManual === true;
+
   return {
     photoIndex,
     placeId,
@@ -200,6 +204,7 @@ function parsePhotoPlaceTagItem(raw: unknown): PhotoPlaceTag | null {
     lng: latLng.lng,
     x: clamp01(x),
     y: clamp01(y),
+    ...(isManual ? { isManual: true } : {}),
   };
 }
 
