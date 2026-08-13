@@ -192,7 +192,9 @@ import {
   formatCourseDate,
   saveCourse,
   updateCourseItems,
+  updateCourseInviteImage,
   updateCourseTitle,
+  resolveCourseInviteImage,
   type SavedCourse,
   type SavedCourseItem,
 } from "@/lib/courses";
@@ -1339,6 +1341,8 @@ function HomePageContent() {
   const [courseShareSendingRoomId, setCourseShareSendingRoomId] = useState<string | null>(null);
   const [courseShareSearchQuery, setCourseShareSearchQuery] = useState("");
   const [courseShareSentRoomIds, setCourseShareSentRoomIds] = useState<string[]>([]);
+  const [courseInviteImageBusy, setCourseInviteImageBusy] = useState(false);
+  const courseInviteImageInputRef = useRef<HTMLInputElement>(null);
   const [activeCoach, setActiveCoach] = useState<string | null>(null);
   const [coachTick, setCoachTick] = useState(0);
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
@@ -5572,13 +5576,101 @@ function HomePageContent() {
   };
 
   const closeCourseShareModal = () => {
-    if (courseShareLoading) return;
+    if (courseShareLoading || courseInviteImageBusy) return;
     setShowCourseShareModal(false);
     setSharingCourse(null);
     setCourseShareFriendRooms([]);
     setCourseShareSendingRoomId(null);
     setCourseShareSearchQuery("");
     setCourseShareSentRoomIds([]);
+    setCourseInviteImageBusy(false);
+  };
+
+  const applyCourseInviteImageLocal = (courseId: string, inviteImage: string | null) => {
+    setSharingCourse((prev) => (prev && prev.id === courseId ? { ...prev, invite_image: inviteImage } : prev));
+    setMyCourses((prev) =>
+      prev.map((c) => (c.id === courseId ? { ...c, invite_image: inviteImage } : c)),
+    );
+    setCourseCache((prev) => {
+      const hit = prev[courseId];
+      if (!hit) return prev;
+      return { ...prev, [courseId]: { ...hit, invite_image: inviteImage } };
+    });
+  };
+
+  const handleCourseInviteImageFile = async (file: File | null) => {
+    if (!file || !sharingCourse || !user?.id) return;
+    if (sharingCourse.user_id !== user.id) {
+      showToast("내 코스의 초대장만 바꿀 수 있어요", "info");
+      return;
+    }
+    if (courseInviteImageBusy || courseShareLoading) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("이미지 파일만 올릴 수 있어요", "error");
+      return;
+    }
+    setCourseInviteImageBusy(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        showToast("로그인이 필요합니다.", "error");
+        return;
+      }
+      const prepared = await prepareImageForUpload(file);
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}-invite.jpg`;
+      const formData = new FormData();
+      formData.append("file", prepared, fileName);
+      formData.append("fileName", fileName);
+      const res = await fetch("/api/upload/image", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: formData,
+        credentials: "include",
+      });
+      const uploadData = (await res.json().catch(() => ({}))) as {
+        publicUrl?: string;
+        error?: string;
+      };
+      if (!res.ok || !uploadData.publicUrl) {
+        throw new Error(uploadData.error || `사진 업로드 실패 (${res.status})`);
+      }
+      const publicUrl = uploadData.publicUrl;
+      const { data, error } = await updateCourseInviteImage(sharingCourse.id, publicUrl);
+      if (error || !data) {
+        showToast(error || "초대장 이미지를 저장하지 못했어요", "error");
+        return;
+      }
+      applyCourseInviteImageLocal(sharingCourse.id, data.invite_image ?? publicUrl);
+      showToast("초대장 이미지를 바꿨어요", "success");
+    } catch (err) {
+      console.error("[course-invite-image] upload failed", err);
+      showToast(err instanceof Error ? err.message : "이미지 업로드에 실패했어요", "error");
+    } finally {
+      setCourseInviteImageBusy(false);
+      if (courseInviteImageInputRef.current) courseInviteImageInputRef.current.value = "";
+    }
+  };
+
+  const handleResetCourseInviteImage = async () => {
+    if (!sharingCourse || !user?.id) return;
+    if (sharingCourse.user_id !== user.id) return;
+    if (courseInviteImageBusy || courseShareLoading) return;
+    if (!sharingCourse.invite_image) {
+      showToast("이미 기본 이미지예요", "info");
+      return;
+    }
+    setCourseInviteImageBusy(true);
+    try {
+      const { data, error } = await updateCourseInviteImage(sharingCourse.id, null);
+      if (error || !data) {
+        showToast(error || "기본 이미지로 바꾸지 못했어요", "error");
+        return;
+      }
+      applyCourseInviteImageLocal(sharingCourse.id, null);
+      showToast("기본 이미지로 바꿨어요", "success");
+    } finally {
+      setCourseInviteImageBusy(false);
+    }
   };
 
   const handleCopyCourseShareLink = async () => {
@@ -5619,7 +5711,14 @@ function HomePageContent() {
       return;
     }
     devLog("[PindMap:course-share] open modal", course.id);
-    setSharingCourse(course);
+    setSharingCourse({
+      ...course,
+      invite_image:
+        course.invite_image ??
+        myCourses.find((c) => c.id === course.id)?.invite_image ??
+        courseCache[course.id]?.invite_image ??
+        null,
+    });
     setShowCourseShareModal(true);
     setCourseShareSearchQuery("");
     setCourseShareSentRoomIds([]);
@@ -5729,6 +5828,10 @@ function HomePageContent() {
     }
     const ownerId =
       viewedCourseUserId ?? courseCache[courseId]?.user_id ?? user.id;
+    const inviteFromCache =
+      myCourses.find((c) => c.id === courseId)?.invite_image ??
+      courseCache[courseId]?.invite_image ??
+      null;
     const tempCourse: SavedCourse = {
       id: courseId,
       user_id: ownerId,
@@ -5737,6 +5840,7 @@ function HomePageContent() {
       place_count: courseResult.length,
       created_at: "",
       updated_at: "",
+      invite_image: inviteFromCache,
     };
     devLog("[PindMap:course-share] open from sheet", courseId, courseResult.length);
     void openCourseShareModal(tempCourse);
@@ -9104,7 +9208,7 @@ function HomePageContent() {
           <div
             className="courseShareModalBackdrop"
             onClick={() => {
-              if (!courseShareLoading) closeCourseShareModal();
+              if (!courseShareLoading && !courseInviteImageBusy) closeCourseShareModal();
             }}
           >
             <div className="courseShareModalSheet" onClick={(e) => e.stopPropagation()}>
@@ -9114,7 +9218,7 @@ function HomePageContent() {
                   type="button"
                   className="courseShareModalClose"
                   onClick={closeCourseShareModal}
-                  disabled={courseShareLoading}
+                  disabled={courseShareLoading || courseInviteImageBusy}
                   aria-label="닫기"
                 >
                   ×
@@ -9125,13 +9229,63 @@ function HomePageContent() {
                   📍 {sharingCourse.title} · {sharingCourse.place_count ?? sharingCourse.items.length}곳
                 </p>
               </div>
+              {user?.id && sharingCourse.user_id === user.id && (
+                <div className="courseShareModalInviteRow">
+                  <img
+                    src={resolveCourseInviteImage(sharingCourse)}
+                    alt=""
+                    className="courseShareModalInvitePreview"
+                    width={72}
+                    height={108}
+                    decoding="async"
+                  />
+                  <div className="courseShareModalInviteActions">
+                    <p className="courseShareModalInviteLabel">초대장 이미지</p>
+                    <div className="courseShareModalInviteBtns">
+                      <button
+                        type="button"
+                        className="courseShareModalInviteBtn"
+                        disabled={courseShareLoading || courseInviteImageBusy}
+                        onClick={() => courseInviteImageInputRef.current?.click()}
+                      >
+                        {courseInviteImageBusy ? "올리는 중…" : "이미지 바꾸기"}
+                      </button>
+                      <button
+                        type="button"
+                        className="courseShareModalInviteBtn courseShareModalInviteBtnGhost"
+                        disabled={
+                          courseShareLoading ||
+                          courseInviteImageBusy ||
+                          !sharingCourse.invite_image
+                        }
+                        onClick={() => void handleResetCourseInviteImage()}
+                      >
+                        기본 이미지로
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    ref={courseInviteImageInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="courseShareModalInviteFileInput"
+                    aria-hidden
+                    tabIndex={-1}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      void handleCourseInviteImageFile(file);
+                    }}
+                  />
+                </div>
+              )}
               <input
                 type="search"
                 className="courseShareModalSearch"
                 placeholder="친구 검색"
                 value={courseShareSearchQuery}
                 onChange={(e) => setCourseShareSearchQuery(e.target.value)}
-                disabled={courseShareLoading}
+                disabled={courseShareLoading || courseInviteImageBusy}
                 aria-label="친구 검색"
               />
               <div className="courseShareModalGridScroll">

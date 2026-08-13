@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { SavedCourse } from "@/lib/courses";
+import { resolveCourseInviteImage, type SavedCourse } from "@/lib/courses";
 import { getAppStoreUrl } from "@/lib/pindmapLinks";
 
 const PLACE_CATEGORY_EMOJI: Record<string, string> = {
@@ -27,7 +27,7 @@ type Props = {
 
 export function CourseShareView({ course, isIOS }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
-  const [monkeyFailed, setMonkeyFailed] = useState(false);
+  const [inviteFailed, setInviteFailed] = useState(false);
   const [nahPos, setNahPos] = useState({ x: 0, y: 12 });
   const nahPosRef = useRef({ x: 0, y: 12 });
   const nahPlayfieldRef = useRef<HTMLDivElement>(null);
@@ -37,6 +37,7 @@ export function CourseShareView({ course, isIOS }: Props) {
   const placeCount = course.place_count ?? course.items.length;
   const appStoreUrl = getAppStoreUrl();
   const showAppStoreCta = isIOS && !!appStoreUrl;
+  const inviteImageSrc = resolveCourseInviteImage(course);
 
   const getNahBounds = useCallback((playW: number, playH: number) => {
     const btnW = Math.min(NAH_BTN_MAX_W, playW - NAH_PAD * 2);
@@ -181,19 +182,20 @@ export function CourseShareView({ course, isIOS }: Props) {
     return (
       <div className="courseSharePage courseSharePageInvite">
         <div className="courseShareInviteInner">
-          {monkeyFailed ? (
+          {inviteFailed ? (
             <div className="courseShareMonkeyFallback" aria-hidden>
               🐵
             </div>
           ) : (
             <img
-              src="/date-monkey.png"
+              key={inviteImageSrc}
+              src={inviteImageSrc}
               alt=""
               className="courseShareMonkeyImg"
               width={120}
               height={180}
               decoding="async"
-              onError={() => setMonkeyFailed(true)}
+              onError={() => setInviteFailed(true)}
             />
           )}
           <p className="courseShareInviteLine">나랑 데이트 할래…??</p>

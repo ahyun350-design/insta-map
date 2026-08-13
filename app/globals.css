@@ -3379,6 +3379,76 @@ body {
   font-weight: 500;
 }
 
+.courseShareModalInviteRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.courseShareModalInvitePreview {
+  width: 72px;
+  height: 108px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: #f0f0f0;
+  flex-shrink: 0;
+  display: block;
+}
+
+.courseShareModalInviteActions {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.courseShareModalInviteLabel {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+}
+
+.courseShareModalInviteBtns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.courseShareModalInviteBtn {
+  border: 0.5px solid #d8d8e0;
+  background: #fff;
+  color: #1a2a7a;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.courseShareModalInviteBtn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.courseShareModalInviteBtnGhost {
+  color: #777;
+  font-weight: 500;
+  background: #f7f7f7;
+}
+
+.courseShareModalInviteFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .courseShareModalSearch {
   width: 100%;
   box-sizing: border-box;

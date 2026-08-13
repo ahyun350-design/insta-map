@@ -22,7 +22,18 @@ export type SavedCourse = {
   updated_at: string;
   cloned_from_id?: string | null;
   source?: CourseSource;
+  /** 공유 초대장 이미지 URL. null/빈값이면 기본 원숭이 */
+  invite_image?: string | null;
 };
+
+export const DEFAULT_COURSE_INVITE_IMAGE = "/date-monkey.png";
+
+export function resolveCourseInviteImage(
+  course: Pick<SavedCourse, "invite_image"> | null | undefined,
+): string {
+  const url = course?.invite_image?.trim();
+  return url || DEFAULT_COURSE_INVITE_IMAGE;
+}
 
 function mapDbError(error: { code?: string; message?: string }, fallback: string): string {
   return toUserMessage(error, fallback);
@@ -45,6 +56,10 @@ function mapCourseRow(row: Record<string, unknown>): SavedCourse {
     updated_at: String(row.updated_at ?? ""),
     cloned_from_id: (row.cloned_from_id as string | null | undefined) ?? null,
     source: (row.source === "curation" ? "curation" : "manual") as CourseSource,
+    invite_image:
+      typeof row.invite_image === "string" && row.invite_image.trim()
+        ? row.invite_image.trim()
+        : null,
   };
 }
 
@@ -64,7 +79,7 @@ export async function fetchMyCourses(
 ): Promise<{ data: SavedCourse[]; error: string | null }> {
   const { data, error } = await supabase
     .from("courses")
-    .select("id, user_id, title, items, place_count, created_at, updated_at, cloned_from_id, source")
+    .select("id, user_id, title, items, place_count, created_at, updated_at, cloned_from_id, source, invite_image")
     .eq("user_id", userId)
     .neq("source", "curation")
     .order("created_at", { ascending: false });
@@ -131,7 +146,29 @@ export async function updateCourseTitle(
     return { data: null, error: mapDbError(error, "제목을 변경하지 못했어요.") };
   }
 
-  return { data: data as SavedCourse, error: null };
+  return { data: mapCourseRow(data as Record<string, unknown>), error: null };
+}
+
+/** 공유 초대장 이미지 URL 저장. null이면 기본 이미지로 */
+export async function updateCourseInviteImage(
+  courseId: string,
+  inviteImage: string | null,
+): Promise<{ data: SavedCourse | null; error: string | null }> {
+  const value =
+    typeof inviteImage === "string" && inviteImage.trim() ? inviteImage.trim() : null;
+
+  const { data, error } = await supabase
+    .from("courses")
+    .update({ invite_image: value })
+    .eq("id", courseId)
+    .select("*")
+    .single();
+
+  if (error) {
+    return { data: null, error: mapDbError(error, "초대장 이미지를 저장하지 못했어요.") };
+  }
+
+  return { data: mapCourseRow(data as Record<string, unknown>), error: null };
 }
 
 export async function deleteCourse(courseId: string): Promise<{ error: string | null }> {
