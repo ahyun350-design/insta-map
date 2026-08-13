@@ -4098,6 +4098,57 @@ body {
   justify-content: flex-end;
 }
 
+/* 관리자 코스 딤 지도 — 어두운 톤 */
+.courseNavOverlayDark {
+  z-index: 30;
+  background: linear-gradient(
+    180deg,
+    rgba(18, 18, 20, 0) 0%,
+    rgba(18, 18, 20, 0.55) 22%,
+    rgba(18, 18, 20, 0.88) 100%
+  );
+}
+
+.courseNavOverlayDark .courseNavSummary {
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.courseNavOverlayDark .courseNavSegmentChip {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+
+.courseNavOverlayDark .courseNavSegmentChipActive {
+  background: rgba(255, 143, 163, 0.92);
+  border-color: rgba(255, 143, 163, 0.95);
+  color: #fff;
+}
+
+.courseNavOverlayDark .courseNavFocusBar {
+  background: rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.courseNavOverlayDark .courseNavFocusLabel {
+  color: #fff;
+}
+
+.courseNavOverlayDark .courseNavFocusBtn {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+
+.courseNavOverlayDark .courseNavFocusBtnPrimary {
+  background: rgba(255, 143, 163, 0.92);
+  border-color: rgba(255, 143, 163, 0.95);
+  color: #fff;
+}
+
 /* ── 온보딩 ── */
 .onboardingRoot {
   min-height: 100vh;

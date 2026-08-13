@@ -98,6 +98,7 @@ export function FeedPostMedia({
   mediaAriaLabel = "게시물 상세 보기",
   variant = "list",
   aspectRatio = DEFAULT_CURATION_ASPECT_RATIO,
+  initialIndex = 0,
 }: {
   images: string[];
   placeSource: Pick<
@@ -110,9 +111,19 @@ export function FeedPostMedia({
   /** list: 홈/카드 lazy / detail: 상세 eager·프리로드 */
   variant?: FeedPostMediaVariant;
   aspectRatio?: CurationAspectRatio | null;
+  /** 상세 등에서 특정 사진부터 보이기 (범위 밖이면 0) */
+  initialIndex?: number;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const clampIndex = useCallback(
+    (raw: number) => {
+      if (!Number.isFinite(raw) || raw < 0) return 0;
+      const max = Math.max(0, images.length - 1);
+      return Math.min(Math.floor(raw), max);
+    },
+    [images.length],
+  );
+  const [activeIndex, setActiveIndex] = useState(() => clampIndex(initialIndex));
   const [loadIndices, setLoadIndices] = useState<Set<number>>(() =>
     initialLoadIndices(variant, images.length),
   );
@@ -148,11 +159,30 @@ export function FeedPostMedia({
     [images.length, variant],
   );
 
+  const scrollToIndex = useCallback((idx: number) => {
+    const apply = () => {
+      const el = scrollRef.current;
+      if (!el || el.clientWidth <= 0) return false;
+      el.scrollLeft = idx * el.clientWidth;
+      return true;
+    };
+    if (apply()) return;
+    requestAnimationFrame(() => {
+      if (apply()) return;
+      requestAnimationFrame(() => {
+        apply();
+      });
+    });
+  }, []);
+
   useEffect(() => {
+    const idx = clampIndex(initialIndex);
     setLoadIndices(initialLoadIndices(variant, images.length));
-    setActiveIndex(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 이미지 URL 집합이 바뀔 때만 리셋
-  }, [variant, images.join("\0")]);
+    setActiveIndex(idx);
+    expandLoadIndices(idx);
+    scrollToIndex(idx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 이미지 URL·초기 인덱스 변경 시만
+  }, [variant, images.join("\0"), initialIndex, clampIndex, scrollToIndex]);
 
   useEffect(() => {
     expandLoadIndices(activeIndex);

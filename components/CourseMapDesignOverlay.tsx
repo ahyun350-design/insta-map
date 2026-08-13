@@ -21,6 +21,8 @@ type ScreenPin = {
   x: number;
   y: number;
   side: "left" | "right";
+  labelOffsetY: number;
+  showLabel: boolean;
 };
 
 type Props = {
@@ -60,6 +62,49 @@ function readKakaoPoint(pt: unknown): { x: number; y: number } | null {
         : NaN;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   return { x, y };
+}
+
+/** 가까운 핀 라벨을 위·아래로 밀고, 그래도 겹치면 앞번호만 표시 */
+function resolveLabelCollisions(pins: ScreenPin[]): ScreenPin[] {
+  const result = pins.map((p) => ({ ...p, labelOffsetY: 0, showLabel: true }));
+  const STAGGER_PX = 52;
+  const HIDE_PX = 34;
+
+  for (let i = 0; i < result.length; i++) {
+    for (let j = i + 1; j < result.length; j++) {
+      const a = result[i]!;
+      const b = result[j]!;
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d >= STAGGER_PX) continue;
+      a.labelOffsetY = -20;
+      b.labelOffsetY = 20;
+      if (a.side === b.side) {
+        b.side = a.side === "right" ? "left" : "right";
+      }
+    }
+  }
+
+  const labelAnchor = (p: ScreenPin) => ({
+    x: p.x + (p.side === "right" ? 48 : -48),
+    y: p.y + p.labelOffsetY,
+  });
+
+  for (let i = 0; i < result.length; i++) {
+    const a = result[i]!;
+    if (!a.showLabel) continue;
+    for (let j = i + 1; j < result.length; j++) {
+      const b = result[j]!;
+      if (!b.showLabel) continue;
+      const la = labelAnchor(a);
+      const lb = labelAnchor(b);
+      if (Math.hypot(la.x - lb.x, la.y - lb.y) < HIDE_PX) {
+        if (a.order <= b.order) b.showLabel = false;
+        else a.showLabel = false;
+      }
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -149,12 +194,14 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdm
           x: pt.x,
           y: pt.y,
           side,
+          labelOffsetY: 0,
+          showLabel: true,
         });
       } catch (err) {
         if (debugAdmin) console.log("[crs][admin-map] pin project error", place.name, err);
       }
     });
-    setPins(nextPins);
+    setPins(resolveLabelCollisions(nextPins));
 
     const pts: string[] = [];
     pathRef.current.forEach((p) => {
@@ -253,7 +300,7 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdm
         style={{
           position: "absolute",
           inset: 0,
-          background: "rgba(20,20,22,0.55)",
+          background: "rgba(18,18,20,0.78)",
           pointerEvents: "none",
         }}
       />
@@ -267,18 +314,19 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdm
           <polyline
             points={polyPoints}
             fill="none"
-            stroke="rgba(255,255,255,0.8)"
+            stroke="rgba(255,255,255,0.85)"
             strokeWidth={2}
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeDasharray="7 8"
-            opacity={0.8}
+            opacity={0.9}
           />
         </svg>
       )}
 
-      {pins.map((pin, index) => {
-        const place = places[index];
+      {pins.map((pin) => {
+        const place = places.find((p) => p.id === pin.id);
+        const placeIndex = places.findIndex((p) => p.id === pin.id);
         const label = truncateLabel(pin.name);
         return (
           <div
@@ -293,6 +341,7 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdm
               flexDirection: pin.side === "left" ? "row-reverse" : "row",
               gap: 8,
               pointerEvents: "none",
+              zIndex: 2,
             }}
           >
             <button
@@ -300,7 +349,7 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdm
               aria-label={`${formatOrder(pin.order)} ${pin.name}`}
               onClick={(e) => {
                 e.stopPropagation();
-                if (place) onPinClick?.(place, index);
+                if (place && placeIndex >= 0) onPinClick?.(place, placeIndex);
               }}
               style={{
                 width: 26,
@@ -316,29 +365,32 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdm
                 pointerEvents: "auto",
                 flexShrink: 0,
                 fontFamily: "inherit",
-                boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.45)",
                 padding: 0,
               }}
             >
               {formatOrder(pin.order)}
             </button>
-            <span
-              style={{
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 600,
-                lineHeight: 1.2,
-                whiteSpace: "nowrap",
-                maxWidth: 140,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                textShadow: "0 1px 3px rgba(0,0,0,0.75), 0 0 8px rgba(0,0,0,0.35)",
-                pointerEvents: "none",
-                userSelect: "none",
-              }}
-            >
-              {label}
-            </span>
+            {pin.showLabel && (
+              <span
+                style={{
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  lineHeight: 1.2,
+                  whiteSpace: "nowrap",
+                  maxWidth: 140,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  textShadow: "0 1px 3px rgba(0,0,0,0.85), 0 0 10px rgba(0,0,0,0.45)",
+                  pointerEvents: "none",
+                  userSelect: "none",
+                  transform: pin.labelOffsetY ? `translateY(${pin.labelOffsetY}px)` : undefined,
+                }}
+              >
+                {label}
+              </span>
+            )}
           </div>
         );
       })}

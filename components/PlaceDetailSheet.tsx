@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
-import { getRelatedPostImagesForPlace } from "@/lib/photoPlaceTag";
+import { getFirstMatchingPhotoIndex, getRelatedPostImagesForPlace } from "@/lib/photoPlaceTag";
 import { placeRefFromPlaceSheet, type PlaceSheetData, type PlaceSheetFeedPost } from "@/lib/placeSheet";
 
 type DirectionsMode = "car" | "walk";
@@ -17,7 +17,7 @@ type Props = {
   directionsInfo?: { duration: number; distance: number } | null;
   onClose: () => void;
   onToggleSave: () => void;
-  onCurationClick: (postId: string) => void;
+  onCurationClick: (postId: string, photoIndex?: number) => void;
   onImageLightbox: (url: string) => void;
   timeAgoLabel: (createdAt: string) => string;
   onOpenAppleMaps?: () => void;
@@ -221,7 +221,7 @@ export function PlaceDetailSheet({
                 key={post.id}
                 type="button"
                 className="placeDetailSheetCurationItem"
-                onClick={() => onCurationClick(post.id)}
+                onClick={() => onCurationClick(post.id, getFirstMatchingPhotoIndex(post, placeRef))}
               >
                 <div className="placeDetailSheetCurationTop">
                   <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={26} fontSize={11} />

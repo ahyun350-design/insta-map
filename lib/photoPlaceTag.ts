@@ -198,6 +198,22 @@ export function getMatchingPhotoIndices(
     .map((tag) => tag.photoIndex);
 }
 
+/**
+ * 장소와 매칭되는 첫 사진 인덱스(가장 앞 번호).
+ * 태그 없음·매칭 없음 → 0 (레거시: 첫 사진부터).
+ */
+export function getFirstMatchingPhotoIndex(
+  post: Pick<FeedPost, "photoPlaceTags" | "images">,
+  placeRef: PlaceRefForPhotoTagMatch,
+): number {
+  const indices = getMatchingPhotoIndices(post, placeRef);
+  if (indices.length === 0) return 0;
+  const first = Math.min(...indices.filter((i) => Number.isInteger(i) && i >= 0));
+  if (!Number.isFinite(first) || first < 0) return 0;
+  const max = Array.isArray(post.images) && post.images.length > 0 ? post.images.length - 1 : first;
+  return Math.min(first, max);
+}
+
 /** PlaceDetailSheet 관련 큐레이션 카드용 — 태그 매칭 사진만, legacy는 전체 */
 export function getRelatedPostImagesForPlace(
   post: Pick<FeedPost, "images" | "photoPlaceTags">,

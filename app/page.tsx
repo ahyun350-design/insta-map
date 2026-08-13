@@ -178,7 +178,7 @@ import {
   parseTmapWalkGeoJsonToPath,
   type CourseWalkNavigation,
 } from "@/lib/courseWalkNavigation";
-import { feedPostToPlaceSheet, type PlaceSheetData } from "@/lib/placeSheet";
+import { feedPostToPlaceSheet, placeRefFromPlaceSheet, type PlaceSheetData } from "@/lib/placeSheet";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
 import { UserAvatarCache, collectFeedPostAvatarKeys, normalizeAvatarUrl } from "@/lib/userAvatarCache";
@@ -211,6 +211,7 @@ import {
 import { parseFeedPostFromRow, feedCommentCount, FEED_PAGE_SIZE, FEED_POST_LIST_SELECT, FEED_POST_DETAIL_SELECT, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
 import {
   getDisplayPlaceForPhoto,
+  getFirstMatchingPhotoIndex,
   getRelatedPostImagesForPlace,
   getRepresentativePhotoPlaceTag,
   getRepresentativePlaceForPost,
@@ -1445,6 +1446,8 @@ function HomePageContent() {
   );
   const detailPostIdRef = useRef<string | null>(null);
   detailPostIdRef.current = detailPostId;
+  /** 장소→상세 진입 시 FeedPostMedia 시작 사진 인덱스 (그 외 오픈은 0) */
+  const [detailEntryPhotoIndex, setDetailEntryPhotoIndex] = useState(0);
   const [detailReturnTo, setDetailReturnTo] = useState<
     { type: "mypage" } | { type: "profile"; username: string } | null
   >(() => parseDetailReturnTo(searchParams));
@@ -2773,7 +2776,7 @@ function HomePageContent() {
 
   /** 장소 시트 _feedPosts(관련 큐레이션) → 목록/단건. 1개면 상세, 2개+면 목록 */
   const openPlaceCurationFromSheet = useCallback(
-    (place: PlaceSheetData, clickedPostId: string) => {
+    (place: PlaceSheetData, clickedPostId: string, photoIndex?: number) => {
       const sheetPosts = place._feedPosts ?? [];
       const feedSnapshot = feedPostsRef.current;
       const resolved: FeedPost[] = [];
@@ -2797,7 +2800,18 @@ function HomePageContent() {
 
       if (resolved.length <= 1) {
         const id = resolved[0]?.id || clickedPostId;
-        if (id) setDetailPostId(id);
+        if (id) {
+          const post = resolved[0] ?? feedSnapshot.find((p) => p.id === id);
+          const placeRef = place._placeRef ?? placeRefFromPlaceSheet(place);
+          const idx =
+            typeof photoIndex === "number" && Number.isFinite(photoIndex)
+              ? Math.max(0, Math.floor(photoIndex))
+              : post
+                ? getFirstMatchingPhotoIndex(post, placeRef)
+                : 0;
+          setDetailEntryPhotoIndex(idx);
+          setDetailPostId(id);
+        }
         return;
       }
 
@@ -3486,6 +3500,10 @@ function HomePageContent() {
     return () => {
       document.body.style.overflow = prevOverflow;
     };
+  }, [detailPostId]);
+
+  useEffect(() => {
+    if (!detailPostId) setDetailEntryPhotoIndex(0);
   }, [detailPostId]);
 
   useEffect(() => {
@@ -8298,9 +8316,23 @@ function HomePageContent() {
 
   useEffect(() => {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
+    // 관리자 코스 디자인 오버레이: 저장 장소 카테고리 핀 전부 숨김 (코랄 핀만)
+    const hideSavedPinsForAdminCourse =
+      showCourseRoute && userIdRef.current === ADMIN_USER_ID;
+    if (hideSavedPinsForAdminCourse) {
+      expandedMarkersRef.current.forEach((m) => {
+        try {
+          m.setMap(null);
+        } catch {
+          /* noop */
+        }
+      });
+      expandedMarkersRef.current = [];
+      return;
+    }
     addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts, savedPlaces, "expanded");
     // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
-  }, [feedPosts, mapExpanded, savedPlaces, expandedMapPinsTick]);
+  }, [feedPosts, mapExpanded, savedPlaces, expandedMapPinsTick, showCourseRoute]);
 
   useEffect(() => {
     if (activeTab !== "map") {
@@ -8817,6 +8849,13 @@ function HomePageContent() {
     if (relatedCount <= 1) {
       returnToFullscreenMapAfterDetailRef.current = true;
       placePostsListReturnFullscreenRef.current = false;
+      const post =
+        feedPostsRef.current.find((p) => p.id === id) ??
+        (placeData?._feedPosts?.[0] as FeedPost | undefined);
+      const placeRef = placeData?._placeRef;
+      setDetailEntryPhotoIndex(
+        post && placeRef ? getFirstMatchingPhotoIndex(post, placeRef) : 0,
+      );
       setDetailPostId(id);
       return;
     }
@@ -8828,6 +8867,7 @@ function HomePageContent() {
     } else {
       returnToFullscreenMapAfterDetailRef.current = true;
       placePostsListReturnFullscreenRef.current = false;
+      setDetailEntryPhotoIndex(0);
       setDetailPostId(id);
     }
   }, [captureFullscreenReturnSnapshot, resolveFullscreenMarkerPlaceSheet, openPlaceCurationFromSheet]);
@@ -8924,8 +8964,8 @@ function HomePageContent() {
             }
           });
         }}
-        onCurationClick={(postId) => {
-          openPlaceCurationFromSheet(placeData, postId);
+        onCurationClick={(postId, photoIndex) => {
+          openPlaceCurationFromSheet(placeData, postId, photoIndex);
           setSelectedPlace(null);
           setMapExpanded(false);
         }}
@@ -9932,6 +9972,7 @@ function HomePageContent() {
                   placeSource={detailPost}
                   aspectRatio={detailPost.aspectRatio}
                   variant="detail"
+                  initialIndex={detailEntryPhotoIndex}
                   mediaAriaLabel="사진"
                   onMediaClick={() => {}}
                   onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(detailPost, placeRef)}
@@ -11104,12 +11145,14 @@ function HomePageContent() {
                                 place_name: full.name,
                                 category_name: full.category,
                                 road_address_name: full.address,
+                                address_name: full.address,
                                 phone: "",
                                 place_url: "",
-                                y: full.lat,
-                                x: full.lng,
+                                y: String(full.lat),
+                                x: String(full.lng),
                                 _feedPosts: getRelatedPostsForPlaceSheet(feedPosts, coursePlaceRef),
                                 _placeRef: coursePlaceRef,
+                                _savedPlaceId: full.id,
                               });
                             }}
                           />
@@ -11133,6 +11176,9 @@ function HomePageContent() {
                           onNextSegment={handleCourseNavNextSegment}
                           onToggleFocusMode={handleCourseNavToggleFocusMode}
                           onShowFullRoute={handleCourseNavShowFullRoute}
+                          darkTone={
+                            user?.id === ADMIN_USER_ID || userIdRef.current === ADMIN_USER_ID
+                          }
                         />
                       )}
                       {selectedPlace && renderPlaceCard()}
@@ -11895,8 +11941,8 @@ function HomePageContent() {
                 setSelectedMapPlace(null);
               }}
               onToggleSave={() => { void togglePlaceSheetSave(selectedPlace as PlaceSheetData); }}
-              onCurationClick={(postId) => {
-                openPlaceCurationFromSheet(selectedPlace as PlaceSheetData, postId);
+              onCurationClick={(postId, photoIndex) => {
+                openPlaceCurationFromSheet(selectedPlace as PlaceSheetData, postId, photoIndex);
                 setSelectedPlace(null);
               }}
               onImageLightbox={setLightboxImg}
@@ -11937,9 +11983,9 @@ function HomePageContent() {
                 layout="overlay"
                 onClose={() => setHomePlaceSheet(null)}
                 onToggleSave={() => { void togglePlaceSheetSave(homePlaceSheet); }}
-                onCurationClick={(postId) => {
+                onCurationClick={(postId, photoIndex) => {
                   setHomePlaceSheet(null);
-                  openPlaceCurationFromSheet(homePlaceSheet, postId);
+                  openPlaceCurationFromSheet(homePlaceSheet, postId, photoIndex);
                 }}
                 onImageLightbox={setLightboxImg}
                 timeAgoLabel={timeAgo}
@@ -12481,7 +12527,18 @@ function HomePageContent() {
       <PlacePostsListScreen
         data={placePostsList}
         onClose={closePlacePostsList}
-        onPostClick={(postId) => setDetailPostId(postId)}
+        onPostClick={(postId) => {
+          const post = placePostsList.posts.find((p) => p.id === postId);
+          setDetailEntryPhotoIndex(
+            post
+              ? getFirstMatchingPhotoIndex(post, {
+                  placeName: placePostsList.placeName,
+                  address: placePostsList.address,
+                })
+              : 0,
+          );
+          setDetailPostId(postId);
+        }}
       />
     )}
     {curationDetailOverlayEl}

@@ -16,6 +16,8 @@ type Props = {
   onNextSegment: () => void;
   onToggleFocusMode: () => void;
   onShowFullRoute: () => void;
+  /** 관리자 코스 딤 지도용 — 반투명 검정 + 흰 글씨 */
+  darkTone?: boolean;
 };
 
 export function CourseNavigationOverlay({
@@ -27,15 +29,17 @@ export function CourseNavigationOverlay({
   onNextSegment,
   onToggleFocusMode,
   onShowFullRoute,
+  darkTone = false,
 }: Props) {
   const activeSegment =
     selectedSegmentIndex != null
       ? navigation.segments[selectedSegmentIndex] ?? null
       : null;
   const segmentCount = navigation.segments.length;
+  const rootClass = darkTone ? "courseNavOverlay courseNavOverlayDark" : "courseNavOverlay";
 
   return (
-    <div className="courseNavOverlay" role="region" aria-label="코스 내비게이션">
+    <div className={rootClass} role="region" aria-label="코스 내비게이션">
       <div className="courseNavSummary">
         전체 도보 {formatWalkDuration(navigation.totalTimeSec)} ·{" "}
         {formatWalkDistance(navigation.totalDistanceM)} · 장소 {navigation.placeCount}곳
