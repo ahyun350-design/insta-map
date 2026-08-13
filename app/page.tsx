@@ -831,7 +831,7 @@ function pickNearestSavedPlaceByPixel(
   tapLng: number,
   places: Place[],
   coordsById: Record<string, LatLng>,
-  hiddenPlaceIds: Set<string>,
+  _hiddenPlaceIds: Set<string>,
   maxPx: number,
 ): Place | null {
   const k = typeof window !== "undefined" ? window.kakao : undefined;
@@ -845,8 +845,8 @@ function pickNearestSavedPlaceByPixel(
   }
   let bestPlace: Place | null = null;
   let bestPx = Infinity;
+  // 지도 핀은 hiddenIds와 무관하게 전부 표시되므로 탭 히트도 전체 장소 대상
   for (const p of places) {
-    if (hiddenPlaceIds.has(p.id)) continue;
     const c = coordsById[p.id];
     if (!c || typeof c.lat !== "number" || typeof c.lng !== "number") continue;
     let pt: { x: number; y: number };
@@ -6902,10 +6902,10 @@ function HomePageContent() {
     }
 
     // —— 미니맵(mapRef): id 기준 Map diff ——
+    // hiddenIds는 목록(miniList) 전용. 지도 핀은 savedPlaces 전체를 유지.
     const byId = mainPlaceMarkersByIdRef.current;
     const liveMap = mapRef.current ?? map;
-    const hidden = hiddenIdsRef.current;
-    const desiredPlaces = places.filter((p) => !hidden.has(p.id));
+    const desiredPlaces = places;
     const desiredIds = new Set(desiredPlaces.map((p) => p.id));
 
     for (const [id, entry] of [...byId.entries()]) {
@@ -7028,9 +7028,7 @@ function HomePageContent() {
     const mapNow = mapRef.current;
     if (!mapNow || !geocoderRef.current) return;
     const places = savedPlacesRef.current;
-    const hidden = hiddenIdsRef.current;
-    const visibleCount = places.filter((p) => !hidden.has(p.id)).length;
-    if (visibleCount === 0) return;
+    if (places.length === 0) return;
     if (markersRef.current.length > 0 || mainPlaceMarkersByIdRef.current.size > 0) return;
     mapNow.relayout?.();
     addPlacePins(mapNow, markersRef.current, feedPostsRef.current, places, "main");
@@ -7985,9 +7983,8 @@ function HomePageContent() {
     if (!map) return;
     if (!compactMapReady) return;
 
-    // 보이는 장소의 id/카테고리/주소/좌표 스냅샷 — 변화 없으면 재핀 스킵
-    const visible = savedPlaces.filter((p) => !hiddenIds.has(p.id));
-    const savedPlacesKey = visible
+    // 지도 핀은 hiddenIds와 무관 — savedPlaces 전체 스냅샷으로 재핀 여부 판단
+    const savedPlacesKey = savedPlaces
       .map((p) => `${p.id}:${p.category}:${p.address}:${p.lat ?? ""}:${p.lng ?? ""}`)
       .sort()
       .join("|");
@@ -8015,7 +8012,7 @@ function HomePageContent() {
       }
     };
 
-    const visiblePlacesCount = visible.length;
+    const visiblePlacesCount = savedPlaces.length;
     const runAttempt = (attempt: 1 | 2 | 3) => {
       if (cancelled) return;
       clearMarkerPoll();
@@ -8063,7 +8060,7 @@ function HomePageContent() {
       if (pendingTimer !== null) window.clearTimeout(pendingTimer);
       clearMarkerPoll();
     };
-  }, [activeTab, kakaoStatus, compactMapReady, savedPlaces, feedPosts, hiddenIds]);
+  }, [activeTab, kakaoStatus, compactMapReady, savedPlaces, feedPosts]);
 
   /** M-1: 전체 지도 닫힘(true→false) 시 지연 핀 재시도 예약, 확장 중에는 취소 */
   useEffect(() => {
