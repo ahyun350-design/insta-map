@@ -1544,6 +1544,12 @@ function HomePageContent() {
   const [courseNavFocusMode, setCourseNavFocusMode] = useState(false);
   /** 관리자 턴바이턴 — 현재 강조 step (GPS 자동 갱신 예정) */
   const [courseNavStepIndex, setCourseNavStepIndex] = useState<number | null>(null);
+  /** 전체 경로 보기면 true — 세그먼트 선택 시 false (핀 필터용) */
+  const [courseNavFullRouteView, setCourseNavFullRouteView] = useState(true);
+  /** 턴 패널 하단 패딩(px) — setBounds bottom에 사용 */
+  const courseNavBottomPadRef = useRef(280);
+  const courseDesignPathRef = useRef<LatLng[] | null>(null);
+  courseDesignPathRef.current = courseDesignPath;
   const [courseCurrentLocation, setCourseCurrentLocation] = useState<LatLng | null>(null);
   const [courseLocationLoading, setCourseLocationLoading] = useState(false);
   const [coursePlaceCoords, setCoursePlaceCoords] = useState<Record<string, LatLng>>({});
@@ -5603,6 +5609,20 @@ function HomePageContent() {
     });
   };
 
+  const openCourseInviteImagePicker = () => {
+    try {
+      const input = courseInviteImageInputRef.current;
+      if (!input) {
+        showToast("사진 선택을 열 수 없어요. 다시 시도해 주세요", "error");
+        return;
+      }
+      input.click();
+    } catch (err) {
+      console.error("[course-invite-image] open picker failed", err);
+      showToast("사진 선택을 열 수 없어요", "error");
+    }
+  };
+
   const handleCourseInviteImageFile = async (file: File | null) => {
     if (!file || !sharingCourse || !user?.id) return;
     if (sharingCourse.user_id !== user.id) {
@@ -7270,7 +7290,11 @@ function HomePageContent() {
       setCourseDesignPath(path);
       if (fitBounds) {
         const bounds = latLngBoundsFromPath(path);
-        if (bounds) expandedMapRef.current.setBounds(bounds);
+        if (bounds) {
+          const bottomPad = Math.max(96, courseNavBottomPadRef.current);
+          // setBounds(bounds, paddingTop, paddingRight, paddingBottom, paddingLeft)
+          expandedMapRef.current.setBounds(bounds, 48, 40, bottomPad, 40);
+        }
       }
       return;
     }
@@ -7292,11 +7316,27 @@ function HomePageContent() {
     }
   }, []);
 
+  const handleCourseNavPanelMetrics = useCallback(
+    (metrics: { heightPx: number; collapsed: boolean }) => {
+      const nextPad = Math.max(96, Math.round(metrics.heightPx + 16));
+      const prevPad = courseNavBottomPadRef.current;
+      courseNavBottomPadRef.current = nextPad;
+      // 접기/펼치기로 높이가 크게 바뀌면 현재 경로를 다시 맞춤
+      if (Math.abs(nextPad - prevPad) < 28) return;
+      const path = courseDesignPathRef.current;
+      if (!path || path.length < 2) return;
+      if (!courseMapDesignActiveRef.current) return;
+      applyWebCourseRoutePath(path, true);
+    },
+    [applyWebCourseRoutePath],
+  );
+
   const handleCourseNavSelectSegment = useCallback((index: number) => {
     const nav = courseNavigation ?? fullscreenCourseNavigationRef.current;
     const segment = nav?.segments[index];
     if (!segment) return;
     setCourseNavSegmentIndex(index);
+    setCourseNavFullRouteView(false);
     setCourseNavStepIndex(segment.steps.length > 0 ? 0 : null);
     applyWebCourseRoutePath(segment.path);
   }, [applyWebCourseRoutePath, courseNavigation]);
@@ -7331,6 +7371,7 @@ function HomePageContent() {
     const nav = courseNavigation;
     if (!nav || courseNavSegmentIndex == null) return;
     setCourseNavFocusMode(true);
+    setCourseNavFullRouteView(false);
     const segment = nav.segments[courseNavSegmentIndex];
     if (segment) applyWebCourseRoutePath(segment.path);
   }, [applyWebCourseRoutePath, courseNavigation, courseNavSegmentIndex]);
@@ -7339,6 +7380,7 @@ function HomePageContent() {
     const nav = courseNavigation;
     if (!nav) return;
     setCourseNavFocusMode(false);
+    setCourseNavFullRouteView(true);
     setCourseNavStepIndex(null);
     applyWebCourseRoutePath(nav.mergedPath);
   }, [applyWebCourseRoutePath, courseNavigation]);
@@ -9270,7 +9312,7 @@ function HomePageContent() {
                         type="button"
                         className="courseShareModalInviteBtn"
                         disabled={courseShareLoading || courseInviteImageBusy}
-                        onClick={() => courseInviteImageInputRef.current?.click()}
+                        onClick={openCourseInviteImagePicker}
                       >
                         {courseInviteImageBusy ? "올리는 중…" : "이미지 바꾸기"}
                       </button>
@@ -9288,19 +9330,6 @@ function HomePageContent() {
                       </button>
                     </div>
                   </div>
-                  <input
-                    ref={courseInviteImageInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="courseShareModalInviteFileInput"
-                    aria-hidden
-                    tabIndex={-1}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] ?? null;
-                      void handleCourseInviteImageFile(file);
-                    }}
-                  />
                 </div>
               )}
               <input
@@ -11302,13 +11331,36 @@ function HomePageContent() {
                           });
                         }
                         if (!canMountAdminOverlay || !courseResult) return null;
+                        const showSegmentPinsOnly =
+                          !courseNavFullRouteView &&
+                          courseNavSegmentIndex != null &&
+                          (courseNavFocusMode ||
+                            user?.id === ADMIN_USER_ID ||
+                            userIdRef.current === ADMIN_USER_ID);
+                        const adminCourseMapPlaces = showSegmentPinsOnly
+                          ? courseResult
+                              .slice(courseNavSegmentIndex, courseNavSegmentIndex + 2)
+                              .map((p, i) => ({
+                                id: p.id,
+                                name: p.name,
+                                lat: p.lat,
+                                lng: p.lng,
+                                order: courseNavSegmentIndex + i + 1,
+                              }))
+                          : courseResult.map((p, i) => ({
+                              id: p.id,
+                              name: p.name,
+                              lat: p.lat,
+                              lng: p.lng,
+                              order: i + 1,
+                            }));
                         return (
                           <CourseMapDesignOverlay
                             map={expandedMapRef.current}
-                            places={courseResult}
+                            places={adminCourseMapPlaces}
                             path={courseDesignPath ?? courseResult.map((p) => ({ lat: p.lat, lng: p.lng }))}
                             guideSteps={
-                              courseNavSegmentIndex != null
+                              !courseNavFullRouteView && courseNavSegmentIndex != null
                                 ? (
                                     courseNavigation?.segments[courseNavSegmentIndex]?.steps ?? []
                                   ).map((step, i) => ({
@@ -11376,6 +11428,7 @@ function HomePageContent() {
                           }
                           activeStepIndex={courseNavStepIndex}
                           onSelectStep={handleCourseNavSelectStep}
+                          onPanelMetrics={handleCourseNavPanelMetrics}
                         />
                       )}
                       {selectedPlace && renderPlaceCard()}
@@ -12199,6 +12252,26 @@ function HomePageContent() {
             document.body,
           )}
         {courseShareModalEl}
+        {/* Stable file input outside portal — matches Step1Photos / profile avatar (no capture) */}
+        <input
+          ref={courseInviteImageInputRef}
+          type="file"
+          accept="image/*"
+          className="courseShareModalInviteFileInput"
+          style={{ display: "none" }}
+          aria-hidden
+          tabIndex={-1}
+          onChange={(e) => {
+            try {
+              const file = e.target.files?.[0] ?? null;
+              void handleCourseInviteImageFile(file);
+            } catch (err) {
+              console.error("[course-invite-image] select failed", err);
+              showToast("사진을 불러오지 못했어요", "error");
+              if (courseInviteImageInputRef.current) courseInviteImageInputRef.current.value = "";
+            }
+          }}
+        />
         {sharePostModalEl}
         {notificationModalEl}
         {user?.id && showFollowList && (

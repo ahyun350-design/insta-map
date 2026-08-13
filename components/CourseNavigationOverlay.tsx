@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   formatSegmentWalkSummary,
   formatWalkDistance,
@@ -12,6 +12,11 @@ import {
   type CourseWalkStep,
   type WalkTurnKind,
 } from "@/lib/courseWalkNavigation";
+
+export type CourseNavPanelMetrics = {
+  heightPx: number;
+  collapsed: boolean;
+};
 
 type Props = {
   navigation: CourseWalkNavigation;
@@ -29,6 +34,8 @@ type Props = {
   /** 현재 강조 안내 인덱스 (GPS 단계에서 자동 갱신 예정) */
   activeStepIndex?: number | null;
   onSelectStep?: (stepIndex: number) => void;
+  /** 하단 패널 높이·접힘 (지도 setBounds bottom padding용) */
+  onPanelMetrics?: (metrics: CourseNavPanelMetrics) => void;
 };
 
 function TurnKindIcon({ kind }: { kind: WalkTurnKind }) {
@@ -102,6 +109,7 @@ export function CourseNavigationOverlay({
   showTurnByTurn = false,
   activeStepIndex = null,
   onSelectStep,
+  onPanelMetrics,
 }: Props) {
   const activeSegment =
     selectedSegmentIndex != null
@@ -110,18 +118,53 @@ export function CourseNavigationOverlay({
   const segmentCount = navigation.segments.length;
   const rootClass = darkTone ? "courseNavOverlay courseNavOverlayDark" : "courseNavOverlay";
   const stepsListRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
   const showSteps = Boolean(showTurnByTurn && activeSegment && activeSegment.steps.length > 0);
 
   useEffect(() => {
-    if (!showSteps || activeStepIndex == null) return;
+    if (!showSteps || activeStepIndex == null || panelCollapsed) return;
     const root = stepsListRef.current;
     if (!root) return;
     const el = root.querySelector<HTMLElement>(`[data-step-index="${activeStepIndex}"]`);
     el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [showSteps, activeStepIndex, activeSegment?.index]);
+  }, [showSteps, activeStepIndex, activeSegment?.index, panelCollapsed]);
+
+  useEffect(() => {
+    // 구간이 바뀌면 패널을 다시 펼침
+    setPanelCollapsed(false);
+  }, [selectedSegmentIndex]);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || !onPanelMetrics) return;
+    const report = () => {
+      onPanelMetrics({
+        heightPx: el.offsetHeight,
+        collapsed: panelCollapsed,
+      });
+    };
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [
+    onPanelMetrics,
+    panelCollapsed,
+    showSteps,
+    segmentFocusMode,
+    selectedSegmentIndex,
+    activeSegment?.index,
+  ]);
 
   return (
-    <div className={rootClass} role="region" aria-label="코스 내비게이션">
+    <div
+      ref={rootRef}
+      className={rootClass}
+      role="region"
+      aria-label="코스 내비게이션"
+      data-panel-collapsed={panelCollapsed ? "true" : "false"}
+    >
       <div className="courseNavSummary">
         전체 도보 {formatWalkDuration(navigation.totalTimeSec)} ·{" "}
         {formatWalkDistance(navigation.totalDistanceM)} · 장소 {navigation.placeCount}곳
@@ -175,24 +218,41 @@ export function CourseNavigationOverlay({
       )}
 
       {showSteps && activeSegment && (
-        <div className="courseNavTurnPanel" data-gps-ready="true">
-          <div className="courseNavSegmentSummary">{formatSegmentWalkSummary(activeSegment)}</div>
-          <div
-            ref={stepsListRef}
-            className="courseNavStepsList"
-            role="list"
-            aria-label="구간 턴바이턴 안내"
+        <div
+          className={
+            panelCollapsed
+              ? "courseNavTurnPanel courseNavTurnPanelCollapsed"
+              : "courseNavTurnPanel"
+          }
+        >
+          <button
+            type="button"
+            className="courseNavPanelHandle"
+            aria-expanded={!panelCollapsed}
+            aria-label={panelCollapsed ? "안내 패널 펼치기" : "안내 패널 접기"}
+            onClick={() => setPanelCollapsed((v) => !v)}
           >
-            {activeSegment.steps.map((step, i) => (
-              <StepRow
-                key={`${activeSegment.index}-${i}-${step.lat}-${step.lng}`}
-                step={step}
-                index={i}
-                active={activeStepIndex === i}
-                onSelect={onSelectStep}
-              />
-            ))}
-          </div>
+            <span className="courseNavPanelHandleBar" aria-hidden />
+          </button>
+          <div className="courseNavSegmentSummary">{formatSegmentWalkSummary(activeSegment)}</div>
+          {!panelCollapsed && (
+            <div
+              ref={stepsListRef}
+              className="courseNavStepsList"
+              role="list"
+              aria-label="구간 턴바이턴 안내"
+            >
+              {activeSegment.steps.map((step, i) => (
+                <StepRow
+                  key={`${activeSegment.index}-${i}-${step.lat}-${step.lng}`}
+                  step={step}
+                  index={i}
+                  active={activeStepIndex === i}
+                  onSelect={onSelectStep}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

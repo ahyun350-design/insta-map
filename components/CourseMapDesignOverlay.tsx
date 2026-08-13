@@ -7,6 +7,8 @@ export type CourseMapDesignPlace = {
   name: string;
   lat: number;
   lng: number;
+  /** 표시 번호 (미지정 시 배열 순번) */
+  order?: number;
 };
 
 export type CourseMapDesignPathPoint = {
@@ -217,7 +219,7 @@ export function CourseMapDesignOverlay({
         nextPins.push({
           id: place.id,
           name: place.name,
-          order: idx + 1,
+          order: place.order ?? idx + 1,
           x: pt.x,
           y: pt.y,
           side,
@@ -400,8 +402,8 @@ export function CourseMapDesignOverlay({
                 height: 26,
                 borderRadius: "50%",
                 border: "none",
-                background: "#FF8FA3",
-                color: "#fff",
+                background: "#F0E4C3",
+                color: "#2A2418",
                 fontSize: 11,
                 fontWeight: 800,
                 lineHeight: 1,

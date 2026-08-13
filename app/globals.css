@@ -4197,9 +4197,9 @@ body {
 }
 
 .courseNavOverlayDark .courseNavSegmentChipActive {
-  background: rgba(255, 143, 163, 0.92);
-  border-color: rgba(255, 143, 163, 0.95);
-  color: #fff;
+  background: #f0e4c3;
+  border-color: #f0e4c3;
+  color: #2a2418;
 }
 
 .courseNavOverlayDark .courseNavFocusBar {
@@ -4218,9 +4218,9 @@ body {
 }
 
 .courseNavOverlayDark .courseNavFocusBtnPrimary {
-  background: rgba(255, 143, 163, 0.92);
-  border-color: rgba(255, 143, 163, 0.95);
-  color: #fff;
+  background: #f0e4c3;
+  border-color: #f0e4c3;
+  color: #2a2418;
 }
 
 .courseNavTurnPanel {
@@ -4231,6 +4231,37 @@ body {
   min-height: 0;
 }
 
+.courseNavTurnPanelCollapsed {
+  max-height: none;
+}
+
+.courseNavPanelHandle {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 22px;
+  margin: -2px 0 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.courseNavPanelHandleBar {
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.courseNavPanelHandle:active .courseNavPanelHandleBar {
+  background: rgba(240, 228, 195, 0.85);
+}
+
 .courseNavSegmentSummary {
   align-self: flex-start;
   padding: 6px 12px;
@@ -4238,8 +4269,8 @@ body {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.2px;
-  background: rgba(255, 143, 163, 0.92);
-  color: #fff;
+  background: #f0e4c3;
+  color: #2a2418;
 }
 
 .courseNavStepsList {
@@ -4248,7 +4279,7 @@ body {
   gap: 4px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  max-height: calc(40vh - 36px);
+  max-height: calc(40vh - 56px);
   padding: 6px;
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.55);
@@ -4274,8 +4305,8 @@ body {
 }
 
 .courseNavStepRowActive {
-  background: rgba(255, 143, 163, 0.22);
-  box-shadow: inset 0 0 0 1px rgba(255, 143, 163, 0.85);
+  background: rgba(240, 228, 195, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(240, 228, 195, 0.9);
   color: #fff;
 }
 
@@ -4294,8 +4325,8 @@ body {
 }
 
 .courseNavStepRowActive .courseNavStepIcon {
-  background: rgba(255, 143, 163, 0.95);
-  color: #fff;
+  background: #f0e4c3;
+  color: #2a2418;
 }
 
 .courseNavStepText {
@@ -4309,7 +4340,7 @@ body {
   height: 10px;
   border-radius: 50%;
   border: 1.5px solid rgba(255, 255, 255, 0.95);
-  background: rgba(255, 143, 163, 0.9);
+  background: #f0e4c3;
   padding: 0;
   cursor: pointer;
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25);
@@ -4318,9 +4349,9 @@ body {
 .courseMapGuideDotActive {
   width: 16px;
   height: 16px;
-  background: #ff5a3d;
+  background: #f5e6c8;
   border-color: #fff;
-  box-shadow: 0 0 0 3px rgba(255, 90, 61, 0.35);
+  box-shadow: 0 0 0 3px rgba(240, 228, 195, 0.45);
 }
 
 /* ── 온보딩 ── */
