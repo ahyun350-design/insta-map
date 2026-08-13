@@ -122,16 +122,13 @@ export function parseTmapWalkGeoJsonToSegment(
     );
   }
 
-  const topDistance = Number(data.properties?.totalDistance);
-  const topTime = Number(data.properties?.totalTime);
+  const totals = readTmapWalkTotals(data);
   const distanceM =
-    Number.isFinite(topDistance) && topDistance > 0
-      ? Math.round(topDistance)
+    totals.distanceM != null
+      ? totals.distanceM
       : Math.round(haversineMeters(origin, destination));
   const timeSec =
-    Number.isFinite(topTime) && topTime > 0
-      ? Math.round(topTime)
-      : estimateWalkTimeSec(distanceM);
+    totals.timeSec != null ? totals.timeSec : estimateWalkTimeSec(distanceM);
 
   return {
     index,
@@ -146,6 +143,117 @@ export function parseTmapWalkGeoJsonToSegment(
     path: fallbackPath,
     steps,
   };
+}
+
+/**
+ * T맵 보행 응답 총거리/총시간.
+ * totalDistance·totalTime은 보통 features[0](Point) properties에 있음.
+ */
+export function readTmapWalkTotals(data: TmapWalkGeoJson): {
+  distanceM: number | null;
+  timeSec: number | null;
+} {
+  const features = data.features ?? [];
+  for (const feature of features) {
+    if (feature.geometry?.type !== "Point") continue;
+    const d = Number(feature.properties?.totalDistance);
+    const t = Number(feature.properties?.totalTime);
+    const distanceM = Number.isFinite(d) && d > 0 ? Math.round(d) : null;
+    const timeSec = Number.isFinite(t) && t > 0 ? Math.round(t) : null;
+    if (distanceM != null || timeSec != null) {
+      return { distanceM, timeSec };
+    }
+  }
+
+  const topD = Number(data.properties?.totalDistance);
+  const topT = Number(data.properties?.totalTime);
+  const distanceM = Number.isFinite(topD) && topD > 0 ? Math.round(topD) : null;
+  const timeSec = Number.isFinite(topT) && topT > 0 ? Math.round(topT) : null;
+  if (distanceM != null || timeSec != null) {
+    return { distanceM, timeSec };
+  }
+
+  let sumD = 0;
+  let sumT = 0;
+  let hasD = false;
+  let hasT = false;
+  for (const feature of features) {
+    if (feature.geometry?.type !== "LineString") continue;
+    const d = Number(feature.properties?.distance);
+    const t = Number(feature.properties?.time);
+    if (Number.isFinite(d) && d > 0) {
+      sumD += d;
+      hasD = true;
+    }
+    if (Number.isFinite(t) && t > 0) {
+      sumT += t;
+      hasT = true;
+    }
+  }
+  return {
+    distanceM: hasD ? Math.round(sumD) : null,
+    timeSec: hasT ? Math.round(sumT) : null,
+  };
+}
+
+export type WalkTurnKind =
+  | "start"
+  | "straight"
+  | "left"
+  | "right"
+  | "crosswalk"
+  | "arrive"
+  | "other";
+
+/** turnType·pointType·description → UI 아이콘 종류 (GPS 단계에서도 재사용) */
+export function resolveWalkTurnKind(step: CourseWalkStep): WalkTurnKind {
+  const pointType = String(step.pointType ?? "").toUpperCase();
+  if (pointType === "SP" || pointType === "S") return "start";
+  if (pointType === "EP" || pointType === "E") return "arrive";
+
+  const turnType = step.turnType;
+  if (turnType === 200) return "start";
+  if (turnType === 201) return "arrive";
+  // 보행 응답 관례: 12 좌·13 우, 211 횡단 등
+  if (turnType === 211 || turnType === 212 || turnType === 213 || turnType === 214) {
+    return "crosswalk";
+  }
+  if (turnType === 12 || turnType === 16 || turnType === 17 || turnType === 125) return "left";
+  if (turnType === 13 || turnType === 18 || turnType === 19 || turnType === 126) return "right";
+  if (turnType === 11 || turnType === 1 || turnType === 2) return "straight";
+
+  const description = step.description;
+  if (/횡단/.test(description)) return "crosswalk";
+  if (/좌회전|좌측/.test(description)) return "left";
+  if (/우회전|우측/.test(description)) return "right";
+  if (/도착/.test(description)) return "arrive";
+  if (/출발/.test(description)) return "start";
+  if (/직진/.test(description)) return "straight";
+  return "straight";
+}
+
+export function walkTurnKindLabel(kind: WalkTurnKind): string {
+  switch (kind) {
+    case "start":
+      return "출발";
+    case "straight":
+      return "직진";
+    case "left":
+      return "좌회전";
+    case "right":
+      return "우회전";
+    case "crosswalk":
+      return "횡단보도";
+    case "arrive":
+      return "도착";
+    default:
+      return "안내";
+  }
+}
+
+/** 구간 요약: "도보 3분 · 210m" */
+export function formatSegmentWalkSummary(segment: CourseWalkSegment): string {
+  return `도보 ${formatWalkDuration(segment.timeSec)} · ${formatWalkDistance(segment.distanceM)}`;
 }
 
 async function fetchWalkDirectionsSegment(

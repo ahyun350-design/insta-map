@@ -1542,6 +1542,8 @@ function HomePageContent() {
   const [courseNavigation, setCourseNavigation] = useState<CourseWalkNavigation | null>(null);
   const [courseNavSegmentIndex, setCourseNavSegmentIndex] = useState<number | null>(null);
   const [courseNavFocusMode, setCourseNavFocusMode] = useState(false);
+  /** 관리자 턴바이턴 — 현재 강조 step (GPS 자동 갱신 예정) */
+  const [courseNavStepIndex, setCourseNavStepIndex] = useState<number | null>(null);
   const [courseCurrentLocation, setCourseCurrentLocation] = useState<LatLng | null>(null);
   const [courseLocationLoading, setCourseLocationLoading] = useState(false);
   const [coursePlaceCoords, setCoursePlaceCoords] = useState<Record<string, LatLng>>({});
@@ -2292,6 +2294,7 @@ function HomePageContent() {
       setCourseNavigation(navigation);
       setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
       setCourseNavFocusMode(false);
+      setCourseNavStepIndex(navigation.segments[0]?.steps.length ? 0 : null);
       const routePath =
         navigation.mergedPath.length >= 2 ? navigation.mergedPath : courseRoutePath;
       await applyRouteAndRefreshMarkers(routePath, "walk-final");
@@ -2665,6 +2668,7 @@ function HomePageContent() {
     setCourseNavigation(null);
     setCourseNavSegmentIndex(null);
     setCourseNavFocusMode(false);
+    setCourseNavStepIndex(null);
     void clearFullscreenNativeRoute({ silent: true });
     void clearFullscreenNativeCourseNavigation({ silent: true });
     void dismissFullscreenNativeMap({ silent: true });
@@ -2682,6 +2686,7 @@ function HomePageContent() {
       setCourseNavigation(null);
       setCourseNavSegmentIndex(null);
       setCourseNavFocusMode(false);
+      setCourseNavStepIndex(null);
       void clearFullscreenNativeRoute({ silent: true });
       void clearFullscreenNativeCourseNavigation({ silent: true });
       if (returnToCourseSheetRef.current) {
@@ -6052,6 +6057,7 @@ function HomePageContent() {
     setCourseNavigation(null);
     setCourseNavSegmentIndex(null);
     setCourseNavFocusMode(false);
+    setCourseNavStepIndex(null);
     fullscreenCourseNavigationRef.current = null;
     setCourseDesignPath(null);
     setActiveTab("map");
@@ -6130,6 +6136,9 @@ function HomePageContent() {
         setCourseNavigation(navigation);
         setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
         setCourseNavFocusMode(false);
+        setCourseNavStepIndex(
+          navigation.segments[0]?.steps.length ? 0 : null,
+        );
         setCourseDesignPath(navigation.mergedPath);
         logAdminCourseMap(uid, "drawCourseRoute admin: tmap path applied", {
           merged: navigation.mergedPath.length,
@@ -6267,6 +6276,7 @@ function HomePageContent() {
       setCourseNavigation(navigation);
       setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
       setCourseNavFocusMode(false);
+      setCourseNavStepIndex(navigation.segments[0]?.steps.length ? 0 : null);
       applyWebCourseRoutePath(navigation.mergedPath);
     } catch (err) {
       console.error("[course] web route failed", err);
@@ -7287,8 +7297,21 @@ function HomePageContent() {
     const segment = nav?.segments[index];
     if (!segment) return;
     setCourseNavSegmentIndex(index);
+    setCourseNavStepIndex(segment.steps.length > 0 ? 0 : null);
     applyWebCourseRoutePath(segment.path);
   }, [applyWebCourseRoutePath, courseNavigation]);
+
+  const handleCourseNavSelectStep = useCallback((stepIndex: number) => {
+    const nav = courseNavigation ?? fullscreenCourseNavigationRef.current;
+    if (!nav || courseNavSegmentIndex == null) return;
+    const segment = nav.segments[courseNavSegmentIndex];
+    const step = segment?.steps[stepIndex];
+    if (!step) return;
+    setCourseNavStepIndex(stepIndex);
+    if (Number.isFinite(step.lat) && Number.isFinite(step.lng)) {
+      applyExpandedMapCameraLatLng(step.lat, step.lng, 3);
+    }
+  }, [applyExpandedMapCameraLatLng, courseNavSegmentIndex, courseNavigation]);
 
   const handleCourseNavPrevSegment = useCallback(() => {
     if (courseNavSegmentIndex == null || courseNavSegmentIndex <= 0) return;
@@ -7316,6 +7339,7 @@ function HomePageContent() {
     const nav = courseNavigation;
     if (!nav) return;
     setCourseNavFocusMode(false);
+    setCourseNavStepIndex(null);
     applyWebCourseRoutePath(nav.mergedPath);
   }, [applyWebCourseRoutePath, courseNavigation]);
 
@@ -11147,6 +11171,7 @@ function HomePageContent() {
                             setCourseNavigation(null);
                             setCourseNavSegmentIndex(null);
                             setCourseNavFocusMode(false);
+                            setCourseNavStepIndex(null);
                             fullscreenCourseNavigationRef.current = null;
                             setShowCourseModal(true);
                             return;
@@ -11158,6 +11183,7 @@ function HomePageContent() {
                           setCourseNavigation(null);
                           setCourseNavSegmentIndex(null);
                           setCourseNavFocusMode(false);
+                          setCourseNavStepIndex(null);
                           fullscreenCourseNavigationRef.current = null;
                         }}
                         style={{
@@ -11281,6 +11307,18 @@ function HomePageContent() {
                             map={expandedMapRef.current}
                             places={courseResult}
                             path={courseDesignPath ?? courseResult.map((p) => ({ lat: p.lat, lng: p.lng }))}
+                            guideSteps={
+                              courseNavSegmentIndex != null
+                                ? (
+                                    courseNavigation?.segments[courseNavSegmentIndex]?.steps ?? []
+                                  ).map((step, i) => ({
+                                    lat: step.lat,
+                                    lng: step.lng,
+                                    active: courseNavStepIndex === i,
+                                  }))
+                                : []
+                            }
+                            onGuideStepClick={handleCourseNavSelectStep}
                             debugAdmin
                             onPinClick={(place) => {
                               const full = courseResult.find((p) => p.id === place.id) ?? null;
@@ -11333,6 +11371,11 @@ function HomePageContent() {
                           darkTone={
                             user?.id === ADMIN_USER_ID || userIdRef.current === ADMIN_USER_ID
                           }
+                          showTurnByTurn={
+                            user?.id === ADMIN_USER_ID || userIdRef.current === ADMIN_USER_ID
+                          }
+                          activeStepIndex={courseNavStepIndex}
+                          onSelectStep={handleCourseNavSelectStep}
                         />
                       )}
                       {selectedPlace && renderPlaceCard()}

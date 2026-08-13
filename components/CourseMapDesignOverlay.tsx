@@ -14,6 +14,12 @@ export type CourseMapDesignPathPoint = {
   lng: number;
 };
 
+export type CourseMapDesignGuideStep = {
+  lat: number;
+  lng: number;
+  active?: boolean;
+};
+
 type ScreenPin = {
   id: string;
   name: string;
@@ -25,11 +31,21 @@ type ScreenPin = {
   showLabel: boolean;
 };
 
+type ScreenGuide = {
+  index: number;
+  x: number;
+  y: number;
+  active: boolean;
+};
+
 type Props = {
   /** kakao.maps.Map instance */
   map: unknown;
   places: CourseMapDesignPlace[];
   path: CourseMapDesignPathPoint[];
+  /** 턴바이턴 안내 지점 (관리자) */
+  guideSteps?: CourseMapDesignGuideStep[];
+  onGuideStepClick?: (index: number) => void;
   onPinClick?: (place: CourseMapDesignPlace, index: number) => void;
   /** 관리자 임시 진단 로그 */
   debugAdmin?: boolean;
@@ -111,16 +127,27 @@ function resolveLabelCollisions(pins: ScreenPin[]): ScreenPin[] {
  * 코스 지도 실험 UI — 딤 위에 핀·라벨·점선 경로를 HTML/SVG로 직접 그림.
  * 카카오 Marker/Polyline과 분리되어 딤에 가려지지 않음.
  */
-export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdmin = false }: Props) {
+export function CourseMapDesignOverlay({
+  map,
+  places,
+  path,
+  guideSteps = [],
+  onGuideStepClick,
+  onPinClick,
+  debugAdmin = false,
+}: Props) {
   const [pins, setPins] = useState<ScreenPin[]>([]);
+  const [guides, setGuides] = useState<ScreenGuide[]>([]);
   const [polyPoints, setPolyPoints] = useState("");
   const [size, setSize] = useState({ w: 0, h: 0 });
   const rafRef = useRef(0);
   const placesRef = useRef(places);
   const pathRef = useRef(path);
+  const guideStepsRef = useRef(guideSteps);
   const debugOnceRef = useRef(false);
   placesRef.current = places;
   pathRef.current = path;
+  guideStepsRef.current = guideSteps;
 
   useEffect(() => {
     if (!debugAdmin) return;
@@ -215,6 +242,23 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdm
     });
     setPolyPoints(pts.join(" "));
 
+    const nextGuides: ScreenGuide[] = [];
+    guideStepsRef.current.forEach((step, idx) => {
+      try {
+        const pt = projectOne(step.lat, step.lng);
+        if (!pt) return;
+        nextGuides.push({
+          index: idx,
+          x: pt.x,
+          y: pt.y,
+          active: Boolean(step.active),
+        });
+      } catch {
+        /* ignore */
+      }
+    });
+    setGuides(nextGuides);
+
     if (debugAdmin && !debugOnceRef.current) {
       debugOnceRef.current = true;
       const sample = nextPins[0];
@@ -245,7 +289,7 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdm
   useEffect(() => {
     debugOnceRef.current = false;
     scheduleProject();
-  }, [places, path, scheduleProject]);
+  }, [places, path, guideSteps, scheduleProject]);
 
   useEffect(() => {
     const m = map as { constructor?: unknown } | null;
@@ -394,6 +438,31 @@ export function CourseMapDesignOverlay({ map, places, path, onPinClick, debugAdm
           </div>
         );
       })}
+
+      {guides.map((g) => (
+        <button
+          key={`guide-${g.index}`}
+          type="button"
+          aria-label={`안내 ${g.index + 1}`}
+          className={
+            g.active
+              ? "courseMapGuideDot courseMapGuideDotActive"
+              : "courseMapGuideDot"
+          }
+          onClick={(e) => {
+            e.stopPropagation();
+            onGuideStepClick?.(g.index);
+          }}
+          style={{
+            position: "absolute",
+            left: g.x,
+            top: g.y,
+            transform: "translate(-50%, -50%)",
+            zIndex: g.active ? 3 : 1,
+            pointerEvents: "auto",
+          }}
+        />
+      ))}
     </div>
   );
 }

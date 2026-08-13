@@ -1361,8 +1361,8 @@ body {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: #e1f5ee;
-  color: #0f6e56;
+  background: #0a0a0a;
+  color: #fff;
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   box-sizing: border-box;
 }
@@ -1370,45 +1370,47 @@ body {
 .courseSharePageInvite {
   align-items: center;
   justify-content: center;
-  padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
+  padding: calc(40px + env(safe-area-inset-top, 0px)) 28px calc(40px + env(safe-area-inset-bottom, 0px));
 }
 
 .courseShareInviteInner {
   width: 100%;
-  max-width: 340px;
+  max-width: 320px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
+  gap: 0;
 }
 
 .courseShareMonkeyImg {
   width: 120px;
   height: auto;
   min-height: 80px;
-  border-radius: 14px;
-  margin-bottom: 20px;
+  border-radius: 6px;
+  margin-bottom: 28px;
   object-fit: cover;
   display: block;
+  box-shadow: none;
 }
 
 .courseShareMonkeyFallback {
   width: 120px;
   height: 120px;
-  border-radius: 14px;
-  margin-bottom: 20px;
+  border-radius: 6px;
+  margin-bottom: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 56px;
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .courseShareInviteLine {
-  margin: 0 0 28px;
+  margin: 0 0 36px;
   font-size: 18px;
   font-weight: 500;
-  color: #0f6e56;
+  color: #fff;
   line-height: 1.45;
 }
 
@@ -1418,7 +1420,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .courseShareBtnYes {
@@ -1427,12 +1429,12 @@ body {
   width: 100%;
   max-width: 260px;
   border: none;
-  border-radius: 18px;
+  border-radius: 14px;
   padding: 14px 20px;
-  background: #1d9e75;
-  color: #fff;
+  background: #fff;
+  color: #0a0a0a;
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   flex-shrink: 0;
@@ -1453,11 +1455,11 @@ body {
   top: 0;
   width: 100%;
   max-width: 260px;
-  border: none;
-  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 14px;
   padding: 14px 20px;
-  background: #c5e8dc;
-  color: #0f6e56;
+  background: transparent;
+  color: #fff;
   font-size: 15px;
   font-weight: 500;
   font-family: inherit;
@@ -1471,7 +1473,7 @@ body {
 }
 
 .courseSharePageReveal {
-  padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(24px + env(safe-area-inset-bottom, 0px));
+  padding: calc(28px + env(safe-area-inset-top, 0px)) 20px calc(28px + env(safe-area-inset-bottom, 0px));
 }
 
 .courseShareRevealMain {
@@ -1487,16 +1489,16 @@ body {
   text-align: center;
   font-size: 14px;
   font-weight: 500;
-  color: #0f6e56;
+  color: #fff;
   line-height: 1.45;
 }
 
 .courseShareRevealTitle {
-  margin: 10px 0 20px;
+  margin: 10px 0 24px;
   text-align: center;
   font-size: 13px;
   font-weight: 500;
-  color: #0f6e56;
+  color: rgba(255, 255, 255, 0.88);
   line-height: 1.4;
 }
 
@@ -1522,15 +1524,15 @@ body {
   font-family: "Playfair Display", Georgia, serif;
   font-size: 26px;
   font-weight: 500;
-  color: #1b2a6b;
+  color: #fff;
   line-height: 1.3;
 }
 
 .courseShareSubtitle {
   margin: 8px 0 0;
   font-size: 14px;
-  color: #0f6e56;
-  opacity: 0.75;
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 1;
 }
 
 .courseShareList {
@@ -1550,7 +1552,7 @@ body {
   margin-bottom: 16px;
   padding: 14px 16px;
   border-radius: 12px;
-  background: #d6efe6;
+  background: #1c1c1e;
   text-align: center;
 }
 
@@ -1558,14 +1560,14 @@ body {
   margin: 0;
   font-size: 11px;
   font-weight: 500;
-  color: #0f6e56;
+  color: #fff;
   line-height: 1.45;
 }
 
 .courseShareAppBannerLine2 {
   margin: 4px 0 0;
   font-size: 9.5px;
-  color: #4a9c82;
+  color: rgba(255, 255, 255, 0.65);
   line-height: 1.45;
 }
 
@@ -1587,7 +1589,7 @@ body {
   padding: 12px 14px;
   background: #fff;
   border-radius: 11px;
-  box-shadow: 0 2px 8px rgba(27, 42, 107, 0.06);
+  box-shadow: none;
 }
 
 .courseShareListItemReveal {
@@ -1607,6 +1609,7 @@ body {
   font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
 }
 
 .courseShareListBody {
@@ -1645,8 +1648,8 @@ body {
   width: 100%;
   padding: 13px 20px;
   border-radius: 14px;
-  background: #1b2a6b;
-  color: #fff;
+  background: #fff;
+  color: #0a0a0a;
   text-align: center;
   text-decoration: none;
   box-sizing: border-box;
@@ -1654,13 +1657,14 @@ body {
 
 .courseShareAppCtaMain {
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.35;
+  color: #0a0a0a;
 }
 
 .courseShareAppCtaSub {
   font-size: 9.5px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(10, 10, 10, 0.55);
   line-height: 1.35;
 }
 
@@ -1669,10 +1673,10 @@ body {
   width: 100%;
   padding: 14px 20px;
   border-radius: 13px;
-  background: #1b2a6b;
-  color: #fff;
+  background: #fff;
+  color: #0a0a0a;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   text-align: center;
   text-decoration: none;
   box-sizing: border-box;
@@ -1685,8 +1689,8 @@ body {
   margin: 0 auto;
   padding: 14px 20px;
   border-radius: 12px;
-  background: #1b2a6b;
-  color: #fff;
+  background: #fff;
+  color: #0a0a0a;
   font-size: 15px;
   font-weight: 600;
   text-align: center;
@@ -1704,8 +1708,8 @@ body {
   margin: 0 auto;
   max-width: 480px;
   font-size: 13px;
-  color: #0f6e56;
-  opacity: 0.85;
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 1;
   text-align: center;
   line-height: 1.5;
 }
@@ -4217,6 +4221,106 @@ body {
   background: rgba(255, 143, 163, 0.92);
   border-color: rgba(255, 143, 163, 0.95);
   color: #fff;
+}
+
+.courseNavTurnPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 40vh;
+  min-height: 0;
+}
+
+.courseNavSegmentSummary {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  background: rgba(255, 143, 163, 0.92);
+  color: #fff;
+}
+
+.courseNavStepsList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  max-height: calc(40vh - 36px);
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 0.5px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(10px);
+}
+
+.courseNavStepRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 10px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.88);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.courseNavStepRowActive {
+  background: rgba(255, 143, 163, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 143, 163, 0.85);
+  color: #fff;
+}
+
+.courseNavStepIcon {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.courseNavStepRowActive .courseNavStepIcon {
+  background: rgba(255, 143, 163, 0.95);
+  color: #fff;
+}
+
+.courseNavStepText {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.courseMapGuideDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  background: rgba(255, 143, 163, 0.9);
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25);
+}
+
+.courseMapGuideDotActive {
+  width: 16px;
+  height: 16px;
+  background: #ff5a3d;
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 90, 61, 0.35);
 }
 
 /* ── 온보딩 ── */

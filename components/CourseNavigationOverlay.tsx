@@ -1,10 +1,16 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import {
+  formatSegmentWalkSummary,
   formatWalkDistance,
   formatWalkDuration,
+  resolveWalkTurnKind,
+  walkTurnKindLabel,
   type CourseWalkNavigation,
   type CourseWalkSegment,
+  type CourseWalkStep,
+  type WalkTurnKind,
 } from "@/lib/courseWalkNavigation";
 
 type Props = {
@@ -18,7 +24,70 @@ type Props = {
   onShowFullRoute: () => void;
   /** 관리자 코스 딤 지도용 — 반투명 검정 + 흰 글씨 */
   darkTone?: boolean;
+  /** 관리자 전용 턴바이턴 패널 */
+  showTurnByTurn?: boolean;
+  /** 현재 강조 안내 인덱스 (GPS 단계에서 자동 갱신 예정) */
+  activeStepIndex?: number | null;
+  onSelectStep?: (stepIndex: number) => void;
 };
+
+function TurnKindIcon({ kind }: { kind: WalkTurnKind }) {
+  const label = walkTurnKindLabel(kind);
+  let glyph = "·";
+  switch (kind) {
+    case "start":
+      glyph = "▶";
+      break;
+    case "straight":
+      glyph = "↑";
+      break;
+    case "left":
+      glyph = "↰";
+      break;
+    case "right":
+      glyph = "↱";
+      break;
+    case "crosswalk":
+      glyph = "▥";
+      break;
+    case "arrive":
+      glyph = "●";
+      break;
+    default:
+      glyph = "·";
+  }
+  return (
+    <span className="courseNavStepIcon" data-kind={kind} aria-label={label} title={label}>
+      {glyph}
+    </span>
+  );
+}
+
+function StepRow({
+  step,
+  index,
+  active,
+  onSelect,
+}: {
+  step: CourseWalkStep;
+  index: number;
+  active: boolean;
+  onSelect?: (index: number) => void;
+}) {
+  const kind = resolveWalkTurnKind(step);
+  return (
+    <button
+      type="button"
+      className={active ? "courseNavStepRow courseNavStepRowActive" : "courseNavStepRow"}
+      data-step-index={index}
+      data-active={active ? "true" : "false"}
+      onClick={() => onSelect?.(index)}
+    >
+      <TurnKindIcon kind={kind} />
+      <span className="courseNavStepText">{step.description}</span>
+    </button>
+  );
+}
 
 export function CourseNavigationOverlay({
   navigation,
@@ -30,6 +99,9 @@ export function CourseNavigationOverlay({
   onToggleFocusMode,
   onShowFullRoute,
   darkTone = false,
+  showTurnByTurn = false,
+  activeStepIndex = null,
+  onSelectStep,
 }: Props) {
   const activeSegment =
     selectedSegmentIndex != null
@@ -37,6 +109,16 @@ export function CourseNavigationOverlay({
       : null;
   const segmentCount = navigation.segments.length;
   const rootClass = darkTone ? "courseNavOverlay courseNavOverlayDark" : "courseNavOverlay";
+  const stepsListRef = useRef<HTMLDivElement>(null);
+  const showSteps = Boolean(showTurnByTurn && activeSegment && activeSegment.steps.length > 0);
+
+  useEffect(() => {
+    if (!showSteps || activeStepIndex == null) return;
+    const root = stepsListRef.current;
+    if (!root) return;
+    const el = root.querySelector<HTMLElement>(`[data-step-index="${activeStepIndex}"]`);
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [showSteps, activeStepIndex, activeSegment?.index]);
 
   return (
     <div className={rootClass} role="region" aria-label="코스 내비게이션">
@@ -91,8 +173,30 @@ export function CourseNavigationOverlay({
           </button>
         </div>
       )}
+
+      {showSteps && activeSegment && (
+        <div className="courseNavTurnPanel" data-gps-ready="true">
+          <div className="courseNavSegmentSummary">{formatSegmentWalkSummary(activeSegment)}</div>
+          <div
+            ref={stepsListRef}
+            className="courseNavStepsList"
+            role="list"
+            aria-label="구간 턴바이턴 안내"
+          >
+            {activeSegment.steps.map((step, i) => (
+              <StepRow
+                key={`${activeSegment.index}-${i}-${step.lat}-${step.lng}`}
+                step={step}
+                index={i}
+                active={activeStepIndex === i}
+                onSelect={onSelectStep}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-export type { CourseWalkNavigation, CourseWalkSegment };
+export type { CourseWalkNavigation, CourseWalkSegment, CourseWalkStep, WalkTurnKind };
