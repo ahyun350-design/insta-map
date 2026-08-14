@@ -11238,6 +11238,7 @@ function HomePageContent() {
                       </button>
                       <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
                     </div>
+                    {!showCourseRoute && (
                     <div
                       style={{
                         padding: "12px 20px",
@@ -11306,6 +11307,7 @@ function HomePageContent() {
                         </button>
                       )}
                     </div>
+                    )}
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
                       {(() => {

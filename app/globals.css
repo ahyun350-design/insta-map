@@ -1375,7 +1375,7 @@ body {
 
 .courseShareInviteInner {
   width: 100%;
-  max-width: 320px;
+  max-width: 360px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1384,9 +1384,10 @@ body {
 }
 
 .courseShareMonkeyImg {
-  width: 120px;
+  width: 72vw;
+  max-width: 300px;
   height: auto;
-  min-height: 80px;
+  aspect-ratio: 2 / 3;
   border-radius: 6px;
   margin-bottom: 28px;
   object-fit: cover;
@@ -1395,14 +1396,15 @@ body {
 }
 
 .courseShareMonkeyFallback {
-  width: 120px;
-  height: 120px;
+  width: 72vw;
+  max-width: 300px;
+  aspect-ratio: 2 / 3;
   border-radius: 6px;
   margin-bottom: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 56px;
+  font-size: 72px;
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -4250,16 +4252,40 @@ body {
   font-family: inherit;
 }
 
-.courseNavPanelHandleBar {
-  display: block;
-  width: 36px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.38);
+.courseNavPanelDragZone {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  padding: 2px 0 2px;
 }
 
-.courseNavPanelHandle:active .courseNavPanelHandleBar {
-  background: rgba(240, 228, 195, 0.85);
+.courseNavPanelDragZone:active {
+  cursor: grabbing;
+}
+
+.courseNavPanelHandleBar {
+  display: block;
+  align-self: center;
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.42);
+  flex-shrink: 0;
+}
+
+.courseNavPanelHandle:active .courseNavPanelHandleBar,
+.courseNavPanelDragZone:active .courseNavPanelHandleBar {
+  background: rgba(240, 228, 195, 0.9);
+}
+
+.courseNavOverlay[data-panel-dragging="true"] .courseNavPanelHandleBar {
+  background: rgba(240, 228, 195, 0.95);
 }
 
 .courseNavSegmentSummary {

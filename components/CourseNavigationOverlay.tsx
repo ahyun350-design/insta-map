@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   formatSegmentWalkSummary,
   formatWalkDistance,
@@ -37,6 +37,9 @@ type Props = {
   /** 하단 패널 높이·접힘 (지도 setBounds bottom padding용) */
   onPanelMetrics?: (metrics: CourseNavPanelMetrics) => void;
 };
+
+const DRAG_TOGGLE_PX = 56;
+const DRAG_START_PX = 8;
 
 function TurnKindIcon({ kind }: { kind: WalkTurnKind }) {
   const label = walkTurnKindLabel(kind);
@@ -119,8 +122,19 @@ export function CourseNavigationOverlay({
   const rootClass = darkTone ? "courseNavOverlay courseNavOverlayDark" : "courseNavOverlay";
   const stepsListRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const expandedStepsHeightRef = useRef(0);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [dragOffsetY, setDragOffsetY] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStartYRef = useRef(0);
+  const dragStartCollapsedRef = useRef(false);
+  const didDragRef = useRef(false);
   const showSteps = Boolean(showTurnByTurn && activeSegment && activeSegment.steps.length > 0);
+
+  const expandedStepsMaxPx =
+    typeof window !== "undefined"
+      ? Math.round(window.innerHeight * 0.4 - 56)
+      : 220;
 
   useEffect(() => {
     if (!showSteps || activeStepIndex == null || panelCollapsed) return;
@@ -133,6 +147,8 @@ export function CourseNavigationOverlay({
   useEffect(() => {
     // 구간이 바뀌면 패널을 다시 펼침
     setPanelCollapsed(false);
+    setDragOffsetY(0);
+    setDragging(false);
   }, [selectedSegmentIndex]);
 
   useEffect(() => {
@@ -141,7 +157,7 @@ export function CourseNavigationOverlay({
     const report = () => {
       onPanelMetrics({
         heightPx: el.offsetHeight,
-        collapsed: panelCollapsed,
+        collapsed: panelCollapsed && !dragging,
       });
     };
     report();
@@ -151,11 +167,83 @@ export function CourseNavigationOverlay({
   }, [
     onPanelMetrics,
     panelCollapsed,
+    dragging,
+    dragOffsetY,
     showSteps,
     segmentFocusMode,
     selectedSegmentIndex,
     activeSegment?.index,
   ]);
+
+  useEffect(() => {
+    if (!panelCollapsed && stepsListRef.current) {
+      const h = stepsListRef.current.scrollHeight;
+      if (h > 40) expandedStepsHeightRef.current = Math.min(h, expandedStepsMaxPx);
+    }
+  }, [panelCollapsed, activeSegment?.index, activeSegment?.steps.length, expandedStepsMaxPx]);
+
+  const stepsVisibleHeight = (() => {
+    const base = expandedStepsHeightRef.current || expandedStepsMaxPx;
+    if (panelCollapsed) {
+      // 접힌 상태에서 위로 드래그하면 목록이 따라 열림
+      const openBy = dragging ? Math.max(0, -dragOffsetY) : 0;
+      return Math.min(base, openBy);
+    }
+    // 펼친 상태에서 아래로 드래그하면 목록이 줄어듦
+    const shrink = dragging ? Math.max(0, dragOffsetY) : 0;
+    return Math.max(0, base - shrink);
+  })();
+
+  const finishPanelDrag = useCallback(() => {
+    if (!dragging) return;
+    const dy = dragOffsetY;
+    const startedCollapsed = dragStartCollapsedRef.current;
+    setDragging(false);
+    setDragOffsetY(0);
+    if (!didDragRef.current) {
+      setPanelCollapsed((v) => !v);
+      return;
+    }
+    if (!startedCollapsed && dy > DRAG_TOGGLE_PX) {
+      setPanelCollapsed(true);
+      return;
+    }
+    if (startedCollapsed && dy < -DRAG_TOGGLE_PX) {
+      setPanelCollapsed(false);
+    }
+  }, [dragging, dragOffsetY]);
+
+  const onPanelPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 0) return;
+    dragStartYRef.current = e.clientY;
+    dragStartCollapsedRef.current = panelCollapsed;
+    didDragRef.current = false;
+    setDragging(true);
+    setDragOffsetY(0);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPanelPointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    if (!dragging) return;
+    const dy = e.clientY - dragStartYRef.current;
+    if (Math.abs(dy) > DRAG_START_PX) didDragRef.current = true;
+    setDragOffsetY(dy);
+  };
+
+  const onPanelPointerUp = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    finishPanelDrag();
+  };
+
+  const onPanelPointerCancel = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    setDragging(false);
+    setDragOffsetY(0);
+  };
 
   return (
     <div
@@ -164,6 +252,7 @@ export function CourseNavigationOverlay({
       role="region"
       aria-label="코스 내비게이션"
       data-panel-collapsed={panelCollapsed ? "true" : "false"}
+      data-panel-dragging={dragging ? "true" : "false"}
     >
       <div className="courseNavSummary">
         전체 도보 {formatWalkDuration(navigation.totalTimeSec)} ·{" "}
@@ -225,22 +314,39 @@ export function CourseNavigationOverlay({
               : "courseNavTurnPanel"
           }
         >
-          <button
-            type="button"
-            className="courseNavPanelHandle"
+          <div
+            className="courseNavPanelDragZone"
+            onPointerDown={onPanelPointerDown}
+            onPointerMove={onPanelPointerMove}
+            onPointerUp={onPanelPointerUp}
+            onPointerCancel={onPanelPointerCancel}
+            role="button"
+            tabIndex={0}
             aria-expanded={!panelCollapsed}
             aria-label={panelCollapsed ? "안내 패널 펼치기" : "안내 패널 접기"}
-            onClick={() => setPanelCollapsed((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setPanelCollapsed((v) => !v);
+              }
+            }}
           >
             <span className="courseNavPanelHandleBar" aria-hidden />
-          </button>
-          <div className="courseNavSegmentSummary">{formatSegmentWalkSummary(activeSegment)}</div>
-          {!panelCollapsed && (
+            <div className="courseNavSegmentSummary">{formatSegmentWalkSummary(activeSegment)}</div>
+          </div>
+          {(stepsVisibleHeight > 2 || (!panelCollapsed && !dragging)) && (
             <div
               ref={stepsListRef}
               className="courseNavStepsList"
               role="list"
               aria-label="구간 턴바이턴 안내"
+              style={{
+                maxHeight: dragging || panelCollapsed ? stepsVisibleHeight : undefined,
+                height: dragging || panelCollapsed ? stepsVisibleHeight : undefined,
+                overflow: stepsVisibleHeight < 8 ? "hidden" : "auto",
+                opacity: stepsVisibleHeight < 12 ? Math.max(0, stepsVisibleHeight / 12) : 1,
+                transition: dragging ? "none" : "max-height 0.22s ease, height 0.22s ease, opacity 0.18s ease",
+              }}
             >
               {activeSegment.steps.map((step, i) => (
                 <StepRow
