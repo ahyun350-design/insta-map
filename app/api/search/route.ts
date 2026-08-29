@@ -1,22 +1,8 @@
 import { NextResponse } from "next/server";
+import { mapKakaoCategoryGroupCode } from "@/lib/kakaoCategory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
-
-/** 카카오 로컬 `category_group_code` → 앱 카테고리 */
-function mapCategoryCode(code: string): Category {
-  if (code === "CE7") return "카페";
-  if (code === "FD6") return "맛집";
-  if (code === "MT1" || code === "CS2") return "쇼핑";
-  if (code === "AD5") return "숙소";
-  // AT4 관광명소, CT1 문화시설(박물관·미술관 등)
-  if (code === "AT4" || code === "CT1") return "여행지";
-  // PK6 놀이테마파크, LN3 레저스포츠 등 오락·액티비티 성격
-  if (code === "PK6" || code === "LN3") return "놀거리";
-  return "맛집";
-}
 
 async function getNaverImage(query: string): Promise<string | null> {
   const clientId = process.env.NAVER_CLIENT_ID;
@@ -79,7 +65,7 @@ export async function GET(req: Request) {
       return {
         name: doc.place_name,
         address: doc.road_address_name || doc.address_name,
-        category: mapCategoryCode(doc.category_group_code),
+        category: mapKakaoCategoryGroupCode(doc.category_group_code),
         image,
       };
     })

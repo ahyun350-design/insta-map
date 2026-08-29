@@ -8,6 +8,7 @@ import {
   scrapeInstagramCaption,
   searchKakaoPlace,
 } from "@/app/api/extract/_shared";
+import { resolvePlaceCategoryFromKakao } from "@/lib/kakaoCategory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -180,7 +181,11 @@ export async function POST(req: Request) {
         if (!kakaoResult) return;
         resolved.push({
           name: item.name,
-          category: item.category,
+          category: resolvePlaceCategoryFromKakao(
+            kakaoResult.category_group_code,
+            kakaoResult.category_name,
+            item.category,
+          ),
           address: kakaoResult.roadAddress || kakaoResult.address,
           lat: kakaoResult.lat,
           lng: kakaoResult.lng,

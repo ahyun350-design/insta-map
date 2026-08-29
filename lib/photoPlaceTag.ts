@@ -6,17 +6,7 @@ import {
 } from "@/lib/feedPost";
 import type { SavedCourseItem } from "@/lib/courses";
 
-/** 카카오 `category_name` → PindMap 카테고리 */
-export function mapKakaoCategoryToPindMap(categoryName: string | undefined): FeedPostCategory {
-  const n = categoryName ?? "";
-  if (n.includes("카페")) return "카페";
-  if (n.includes("음식점") || n.includes("음식")) return "맛집";
-  if (n.includes("쇼핑") || n.includes("마트")) return "쇼핑";
-  if (n.includes("숙박")) return "숙소";
-  if (n.includes("관광") || n.includes("명소")) return "여행지";
-  if (n.includes("스포츠") || n.includes("여가")) return "놀거리";
-  return "맛집";
-}
+export { mapKakaoCategoryToPindMap } from "@/lib/kakaoCategory";
 
 export function clampPhotoTagCoord(value: number): number {
   return Math.min(1, Math.max(0, value));

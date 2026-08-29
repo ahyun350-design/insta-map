@@ -68,6 +68,8 @@ export type KakaoPlaceLookup = {
   lat: number;
   lng: number;
   placeName: string;
+  category_group_code: string;
+  category_name: string;
   /** 0=1차 원본 쿼리, 1+=폴백 */
   queryIndex: number;
 };
@@ -135,6 +137,8 @@ export async function searchKakaoPlace(
     road_address_name: string;
     x: string;
     y: string;
+    category_group_code?: string;
+    category_name?: string;
   };
 
   const lookupOnce = async (
@@ -181,6 +185,8 @@ export async function searchKakaoPlace(
         lat,
         lng,
         placeName,
+        category_group_code: (first.category_group_code ?? "").trim(),
+        category_name: (first.category_name ?? "").trim(),
         queryIndex,
       };
     } catch {
