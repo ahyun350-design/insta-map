@@ -10363,25 +10363,6 @@ function HomePageContent() {
 
   return (
     <>
-    {clipboardSuggestedUrl && (
-      <div className="clipboardInstagramBanner" role="status">
-        <button
-          type="button"
-          className="clipboardInstagramBannerAction"
-          onClick={handleClipboardBannerAccept}
-        >
-          복사한 릴스가 있어요 · 바로 저장하기
-        </button>
-        <button
-          type="button"
-          className="clipboardInstagramBannerClose"
-          aria-label="닫기"
-          onClick={dismissClipboardSuggest}
-        >
-          ×
-        </button>
-      </div>
-    )}
     {showPlaceExtractionToast && (
       <div
         style={{
@@ -11149,6 +11130,26 @@ function HomePageContent() {
                         닫기
                       </button>
                     </>
+                  )}
+                  {clipboardSuggestedUrl && (
+                    <div className="clipboardInstagramBanner" role="status">
+                      <p className="clipboardInstagramBannerText">인스타 링크를 복사하셨네요</p>
+                      <button
+                        type="button"
+                        className="clipboardInstagramBannerSave"
+                        onClick={handleClipboardBannerAccept}
+                      >
+                        저장하기
+                      </button>
+                      <button
+                        type="button"
+                        className="clipboardInstagramBannerClose"
+                        aria-label="닫기"
+                        onClick={dismissClipboardSuggest}
+                      >
+                        ×
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

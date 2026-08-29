@@ -4889,57 +4889,81 @@ body {
   opacity: 0.9;
 }
 
-/* 클립보드 Instagram 링크 제안 배너 */
-.clipboardInstagramBanner {
-  position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 10px);
-  left: 16px;
-  right: 16px;
-  z-index: 100002;
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  max-width: 560px;
-  margin: 0 auto;
-  background: #1a1a1a;
-  color: #fff;
-  border-radius: 14px;
-  box-shadow: 0 10px 28px rgba(17, 24, 39, 0.28);
-  overflow: hidden;
+/* 클립보드 Instagram 링크 제안 배너 — 릴스 추가 버튼 아래 */
+@keyframes clipboardInstagramBannerIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.clipboardInstagramBannerAction {
+.clipboardInstagramBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 10px 10px 14px;
+  box-sizing: border-box;
+  background: #f4f5f8;
+  border: 1px solid #e4e7ef;
+  border-radius: 14px;
+  color: #1a1a1a;
+  animation: clipboardInstagramBannerIn 0.28s ease-out;
+}
+
+.clipboardInstagramBannerText {
   flex: 1;
-  border: none;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  padding: 14px 16px;
+  margin: 0;
+  min-width: 0;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: -0.2px;
+  color: #1a1a1a;
+}
+
+.clipboardInstagramBannerSave {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  min-height: 40px;
+  background: #1a2a7a;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
   font-family: inherit;
   letter-spacing: -0.2px;
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(26, 42, 122, 0.28);
 }
 
-.clipboardInstagramBannerAction:active {
-  opacity: 0.85;
+.clipboardInstagramBannerSave:active {
+  opacity: 0.9;
+  transform: scale(0.98);
 }
 
 .clipboardInstagramBannerClose {
   flex-shrink: 0;
-  width: 44px;
+  width: 36px;
+  height: 36px;
   border: none;
+  border-radius: 50%;
   background: transparent;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 22px;
+  color: #8b93aa;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
   font-family: inherit;
 }
 
 .clipboardInstagramBannerClose:active {
-  color: #fff;
+  color: #1a1a1a;
+  background: rgba(0, 0, 0, 0.05);
 }
 
 
