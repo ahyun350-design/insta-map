@@ -1,12 +1,10 @@
+export { isValidInstagramPostUrl } from "@/lib/instagramUrl";
+
 export const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_APIFY_ACTOR_ID = "apify~instagram-post-scraper";
 export type ClaudeCategory = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 export type Place = { name: string; address: string; category: ClaudeCategory };
 export type RawPlace = { name?: unknown; address?: unknown; category?: unknown; hint?: unknown };
-
-export function isValidInstagramPostUrl(url: string): boolean {
-  return /^https?:\/\/(www\.)?instagram\.com\/(p|reel|tv)\//i.test(url);
-}
 
 function sanitizeJsonLikeText(input: string): string {
   return input.replace(/```json|```/gi, "").replace(/[""]/g, '"').replace(/['']/g, "'").replace(/,\s*([}\]])/g, "$1").trim();

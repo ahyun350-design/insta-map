@@ -109,6 +109,8 @@ import {
 import { useInAppNotifications } from "@/lib/useInAppNotifications";
 import { resolveUnauthenticatedPath } from "@/lib/onboarding";
 import { track } from "@/lib/track";
+import { cleanInstagramUrl } from "@/lib/instagramUrl";
+import { useClipboardInstagramSuggest } from "@/lib/useClipboardInstagramSuggest";
 import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
@@ -933,14 +935,6 @@ function extractRegion(address: string): string {
   return parts[0] || "기타";
 }
 
-function cleanInstagramUrl(url: string): string {
-  const match = url.match(/(https?:\/\/(?:www\.)?instagram\.com\/(?:p|reel|tv)\/[^/?#]+)/);
-  if (match) {
-    return `${match[1]}/`;
-  }
-  return url;
-}
-
 // 두 좌표 사이의 직선거리 (km) - Haversine 공식
 function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // 지구 반지름 (km)
@@ -1426,6 +1420,18 @@ function HomePageContent() {
   const [expandedMapPinsTick, setExpandedMapPinsTick] = useState(0);
   const [showJobsModal, setShowJobsModal] = useState(false);
   const [activeJobs, setActiveJobs] = useState<ActiveExtractJob[]>([]);
+  const clipboardActiveUrls = useMemo(
+    () => activeJobs.map((j) => j.instagramUrl),
+    [activeJobs],
+  );
+  const {
+    suggestedUrl: clipboardSuggestedUrl,
+    dismiss: dismissClipboardSuggest,
+    accept: acceptClipboardSuggest,
+  } = useClipboardInstagramSuggest({
+    userId: user?.id,
+    activeInstagramUrls: clipboardActiveUrls,
+  });
   const [showExtractOverlay, setShowExtractOverlay] = useState(false);
   const [extractOverlayComplete, setExtractOverlayComplete] = useState(false);
   const [extractOverlayError, setExtractOverlayError] = useState<string | null>(null);
@@ -6419,6 +6425,11 @@ function HomePageContent() {
     }
   };
 
+  const handleClipboardBannerAccept = () => {
+    const url = acceptClipboardSuggest();
+    if (url) void handleAddFromInstagram(url);
+  };
+
   const uploadPostImageToServer = async (file: File, accessToken: string): Promise<string> => {
     devLog("[handleImageUpload] 원본", {
       name: file.name,
@@ -10352,6 +10363,25 @@ function HomePageContent() {
 
   return (
     <>
+    {clipboardSuggestedUrl && (
+      <div className="clipboardInstagramBanner" role="status">
+        <button
+          type="button"
+          className="clipboardInstagramBannerAction"
+          onClick={handleClipboardBannerAccept}
+        >
+          복사한 릴스가 있어요 · 바로 저장하기
+        </button>
+        <button
+          type="button"
+          className="clipboardInstagramBannerClose"
+          aria-label="닫기"
+          onClick={dismissClipboardSuggest}
+        >
+          ×
+        </button>
+      </div>
+    )}
     {showPlaceExtractionToast && (
       <div
         style={{
