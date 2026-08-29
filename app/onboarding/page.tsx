@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { setOnboardingSeen } from "@/lib/onboarding";
+import { track } from "@/lib/track";
 
 const NAVY = "#1B2A6B";
 
@@ -434,6 +435,7 @@ export default function OnboardingPage() {
 
   const finish = useCallback(async () => {
     await setOnboardingSeen();
+    track("onboarding_done");
     router.push("/login");
   }, [router]);
 

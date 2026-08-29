@@ -108,6 +108,7 @@ import {
 } from "@/lib/inAppNotification";
 import { useInAppNotifications } from "@/lib/useInAppNotifications";
 import { resolveUnauthenticatedPath } from "@/lib/onboarding";
+import { track } from "@/lib/track";
 import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
@@ -3004,6 +3005,7 @@ function HomePageContent() {
         return;
       }
       closeCourseSaveModal();
+      track("course_create_done");
       showToast("코스를 저장했어요", "success");
       if (data?.id) {
         viewingSavedCourseIdRef.current = data.id;
@@ -3311,10 +3313,12 @@ function HomePageContent() {
     if (!bootstrapCacheResolved) return;
     if (bootstrapCacheHit) {
       void hideNativeSplash();
+      track("app_open");
       return;
     }
     if (loading) return;
     void hideNativeSplash();
+    track("app_open");
   }, [sessionChecked, userLoading, user, loading, bootstrapCacheResolved, bootstrapCacheHit]);
 
   /** 인증과 병렬: Preferences 캐시로 places/mapview 즉시 반영 */
@@ -3522,10 +3526,19 @@ function HomePageContent() {
   }, [detailPostId]);
 
   useEffect(() => {
+    if (selectedPlace) track("place_sheet_open");
+  }, [selectedPlace]);
+
+  useEffect(() => {
+    if (homePlaceSheet) track("place_sheet_open");
+  }, [homePlaceSheet]);
+
+  useEffect(() => {
     if (!detailPostId) {
       detailOpenLoggedRef.current = null;
       return;
     }
+    track("curation_view");
     detailOpenPerfRef.current = { postId: detailPostId, t: perfNow() };
     detailOpenLoggedRef.current = null;
   }, [detailPostId]);
@@ -4387,6 +4400,7 @@ function HomePageContent() {
     setSavedCourseId(course.id);
     setEditingCourseTitle(course.title);
     setIsEditingCourseTitleInline(false);
+    track("course_view");
     setShowCourseModal(true);
     dlog.perf.markRender("course:modal");
   };
@@ -4952,6 +4966,7 @@ function HomePageContent() {
   const openChat = async (room: ChatRoom) => {
     const perfScreen = `chat:${room.id}`;
     dlog.perf.start(perfScreen);
+    track("message_room_open");
     const fromId = activeChatRoom?.id ?? null;
     const reqId = ++openChatRequestRef.current;
     devLog("[PindMap:message] chatroom switched", { from: fromId, to: room.id });
@@ -5266,6 +5281,7 @@ function HomePageContent() {
       }
       setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, status: "sent" as const } : m)));
       devLog("[PindMap:message] send success", { id, roomId });
+      track("message_send");
       if (friendId && friendId !== senderId) {
         void supabase
           .from("notifications")
@@ -5451,10 +5467,12 @@ function HomePageContent() {
   };
 
   const openMapFullscreen = useCallback(() => {
+    track("map_fullscreen_open");
     setMapExpanded(true);
   }, []);
 
   const expandReelInput = useCallback(() => {
+    track("reels_input_open");
     setReelInputExpanded(true);
   }, []);
 
@@ -5494,6 +5512,7 @@ function HomePageContent() {
       following_id: targetUser.id,
     });
     if (error) { showToast("팔로우 실패", "error"); return; }
+    track("follow");
     setFollowingIds(prev => [...prev, targetUser.id]);
     setMypageFollowingCount((prev) => prev + 1);
     mypageTabFetchedAtRef.current = Date.now();
@@ -5736,6 +5755,7 @@ function HomePageContent() {
       return;
     }
     devLog("[PindMap:course-share] open modal", course.id);
+    track("course_share_open");
     setSharingCourse({
       ...course,
       invite_image:
@@ -6058,6 +6078,7 @@ function HomePageContent() {
   // 코스를 전체화면 지도에 경로로 표시
   const showCourseOnMap = async () => {
     if (!courseResult || courseResult.length === 0) return;
+    track("course_map_view");
     const uid = userIdRef.current;
     const nativeAvail = isNativeMapAvailable();
     const useAdminCourseMapDesign = uid === ADMIN_USER_ID;
@@ -6315,6 +6336,7 @@ function HomePageContent() {
     }
     if (handleAddSubmittingRef.current) return;
     handleAddSubmittingRef.current = true;
+    track("reels_submit");
     try {
     const trimmedUrl = cleanInstagramUrl(sourceUrl);
     const perfScreen = "extract:start";
@@ -6627,6 +6649,7 @@ function HomePageContent() {
       return;
     }
 
+    track("curation_publish");
     showToast(
       linkedCourseId ? "큐레이션과 코스가 등록됐어요 ✨" : "큐레이션이 등록됐어요 ✨",
       "success",
@@ -7387,6 +7410,7 @@ function HomePageContent() {
 
   const drawRoute = async (destLat: number, destLng: number, mode: "car" | "walk" = "car") => {
     if (!expandedMapRef.current || !window.kakao?.maps) return;
+    track("course_directions");
     setDirectionsLoading(true);
     clearRoute();
     navigator.geolocation.getCurrentPosition(async (pos) => {
@@ -7603,6 +7627,7 @@ function HomePageContent() {
   );
 
   const handleSearch = () => {
+    track("map_search");
     runExpandedMapSearch(searchQuery);
   };
 
@@ -8125,6 +8150,7 @@ function HomePageContent() {
     const timer = window.setTimeout(() => {
       void (async () => {
         setMessageUserSearchLoading(true);
+        track("user_search");
         const { data, error } = await searchUsersByUsername(q, user.id, followingIds);
         if (cancelled) return;
         if (error) showToast(toUserMessage(error, "검색에 실패했어요"), "error");
@@ -8839,6 +8865,7 @@ function HomePageContent() {
     } catch (err) {
       throw err;
     }
+    track("place_save");
     showToast("저장됐어요", "success");
     onAfterSave?.();
     return true;
@@ -10448,7 +10475,10 @@ function HomePageContent() {
                     onOpenSearch={openHomeSearch}
                     unreadNotificationCount={unreadNotificationCount}
                     onNotificationsClick={() => setShowNotifications(true)}
-                    onAddClick={() => setShowPostModal(true)}
+                    onAddClick={() => {
+                      track("curation_write_open");
+                      setShowPostModal(true);
+                    }}
                   />
                   <div className="homeFeedChipsBar">
                     <CompanionTagFilterChips
@@ -10482,7 +10512,13 @@ function HomePageContent() {
                   icon="✍️"
                   title="아직 큐레이션이 없어요"
                   description="상단 + 버튼을 눌러 첫 번째 장소를 추가해보세요"
-                  action={{ label: "큐레이션 작성하기", onClick: () => setShowPostModal(true) }}
+                  action={{
+                    label: "큐레이션 작성하기",
+                    onClick: () => {
+                      track("curation_write_open");
+                      setShowPostModal(true);
+                    },
+                  }}
                 />
               )}
               {!loading && !homeLoadError && visibleFeedPosts.length > 0 && filteredHomeFeedPosts.length === 0 && (
@@ -11532,6 +11568,7 @@ function HomePageContent() {
         type="button"
         data-coach="course_create"
         onClick={() => {
+          track("course_create_open");
           setShowCourseModal(true);
           setCourseResult(null);
           viewingSavedCourseIdRef.current = null;
@@ -12166,7 +12203,17 @@ function HomePageContent() {
         </section>
         <BottomTabBar
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={(id) => {
+            const tabEvent: Record<TabId, string> = {
+              home: "tab_home",
+              messages: "tab_message",
+              map: "tab_map",
+              saved: "tab_saved",
+              mypage: "tab_mypage",
+            };
+            track(tabEvent[id]);
+            setActiveTab(id);
+          }}
           hidden={activeTab === "messages" && !!activeChatRoom}
           keyboardHidden={tabBarHiddenByKeyboard}
           messageUnreadCount={messageUnreadTotal}
