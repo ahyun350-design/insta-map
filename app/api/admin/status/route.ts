@@ -105,6 +105,7 @@ export async function GET(req: Request) {
       todayUsersRes,
       totalUsersRes,
       activeUsers7d,
+      userEventsCountRes,
     ] = await Promise.all([
       admin.from("extract_jobs").select("id, status").gte("created_at", todayStart),
       admin.from("extract_jobs").select("id, status").gte("created_at", weekAgo),
@@ -128,6 +129,7 @@ export async function GET(req: Request) {
       admin.from("users").select("id", { count: "exact", head: true }).gte("created_at", todayStart),
       admin.from("users").select("id", { count: "exact", head: true }),
       collectDistinctUserIds(admin, weekAgo),
+      admin.from("user_events").select("id", { count: "exact", head: true }),
     ]);
 
     if (todayJobsRes.error) throw todayJobsRes.error;
@@ -137,6 +139,7 @@ export async function GET(req: Request) {
     if (recentFailRes.error) throw recentFailRes.error;
     if (todayUsersRes.error) throw todayUsersRes.error;
     if (totalUsersRes.error) throw totalUsersRes.error;
+    if (userEventsCountRes.error) throw userEventsCountRes.error;
 
     const todayRows = todayJobsRes.data ?? [];
     const todayAttempts = todayRows.length;
@@ -180,6 +183,7 @@ export async function GET(req: Request) {
         total: totalUsersRes.count ?? 0,
       },
       activeUsers7d,
+      userEventsTotal: userEventsCountRes.count ?? 0,
     });
   } catch (error) {
     console.error("[admin/status]", error);

@@ -90,6 +90,7 @@ type AdminStatusPayload = {
   recentFailures: Array<{ error_message: string | null; at: string | null }>;
   signups: { today: number; total: number };
   activeUsers7d: number;
+  userEventsTotal: number;
 };
 
 function formatAdminHoursAgo(iso: string | null): string {
@@ -111,6 +112,7 @@ import { resolveUnauthenticatedPath } from "@/lib/onboarding";
 import { track } from "@/lib/track";
 import { cleanInstagramUrl } from "@/lib/instagramUrl";
 import { useClipboardInstagramSuggest } from "@/lib/useClipboardInstagramSuggest";
+import { maybeRunAdminCleanup, readAdminLastCleanupAt } from "@/lib/adminCleanup";
 import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
@@ -1353,6 +1355,7 @@ function HomePageContent() {
   const [mypageFollowingCount, setMypageFollowingCount] = useState(0);
   const [adminStatus, setAdminStatus] = useState<AdminStatusPayload | null>(null);
   const [adminStatusLoading, setAdminStatusLoading] = useState(false);
+  const [adminLastCleanupAt, setAdminLastCleanupAt] = useState<string | null>(null);
   /** 관리자 상태 카드 접이 — localStorage 기본 접힘 */
   const [adminCardOpen, setAdminCardOpen] = useState(false);
   const adminAlertAutoOpenedRef = useRef(false);
@@ -8766,6 +8769,7 @@ function HomePageContent() {
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id || user.id !== ADMIN_USER_ID) {
       setAdminStatus(null);
+      setAdminLastCleanupAt(null);
       setLastBootTiming(null);
       setBootFailReport(null);
       adminAlertAutoOpenedRef.current = false;
@@ -8776,10 +8780,15 @@ function HomePageContent() {
     const load = async () => {
       setAdminStatusLoading(true);
       try {
-        const [boot, fail] = await Promise.all([loadLastBootTimingReport(), loadBootFailReport()]);
+        const [boot, fail, lastCleanup] = await Promise.all([
+          loadLastBootTimingReport(),
+          loadBootFailReport(),
+          readAdminLastCleanupAt(),
+        ]);
         if (!cancelled) {
           setLastBootTiming(boot);
           setBootFailReport(fail);
+          setAdminLastCleanupAt(lastCleanup);
         }
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.access_token) return;
@@ -8805,6 +8814,30 @@ function HomePageContent() {
       cancelled = true;
     };
   }, [activeTab, user?.id]);
+
+  /** 관리자: 앱 오픈 시 7일 간격 DB cleanup (백그라운드, 실패 무시) */
+  useEffect(() => {
+    if (!sessionChecked || userLoading || !user?.id || user.id !== ADMIN_USER_ID) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (cancelled || !session?.access_token) return;
+        await maybeRunAdminCleanup(session.access_token);
+        if (!cancelled) {
+          const last = await readAdminLastCleanupAt();
+          setAdminLastCleanupAt(last);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionChecked, userLoading, user?.id]);
 
   /** 이상 신호 시 카드 자동 펼침 (한 번) */
   useEffect(() => {
@@ -11875,6 +11908,16 @@ function HomePageContent() {
                                   {row(
                                     "오늘 가입",
                                     `${adminStatus.signups.today}명 (전체 ${adminStatus.signups.total}명)`,
+                                    false,
+                                  )}
+                                  {row(
+                                    "이벤트 로그",
+                                    `${adminStatus.userEventsTotal.toLocaleString("ko-KR")}건`,
+                                    false,
+                                  )}
+                                  {row(
+                                    "마지막 정리",
+                                    formatAdminHoursAgo(adminLastCleanupAt),
                                     false,
                                   )}
                                   <div
