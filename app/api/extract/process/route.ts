@@ -14,8 +14,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const CAPTION_MAX_CHARS = 2000;
-/** Apify free 동시 5한도 — 여유 1 두고 서버 측 soft limit */
-const APIFY_SOFT_CONCURRENCY = 4;
+/** Apify Starter 동시 32한도 — 여유 두고 soft limit (env로 조정 가능) */
+const APIFY_MAX_CONCURRENT = (() => {
+  const raw = process.env.APIFY_MAX_CONCURRENT?.trim();
+  const n = raw ? Number.parseInt(raw, 10) : 28;
+  return Number.isFinite(n) && n > 0 ? n : 28;
+})();
 const APIFY_QUEUE_WAIT_MS = 5000;
 const APIFY_QUEUE_MAX_ATTEMPTS = 6;
 
@@ -101,14 +105,14 @@ async function countProcessingExtractJobs(
   return count ?? 0;
 }
 
-/** processing < 4 될 때까지 pending으로 대기. 최대 30초. */
+/** processing < APIFY_MAX_CONCURRENT 될 때까지 pending으로 대기. 최대 30초. */
 async function waitForApifyConcurrencySlot(
   supabase: ReturnType<typeof createServiceSupabase>,
   jobId: string,
 ): Promise<void> {
   for (let attempt = 0; attempt < APIFY_QUEUE_MAX_ATTEMPTS; attempt++) {
     const processingCount = await countProcessingExtractJobs(supabase);
-    if (processingCount < APIFY_SOFT_CONCURRENCY) return;
+    if (processingCount < APIFY_MAX_CONCURRENT) return;
 
     const { error } = await supabase
       .from("extract_jobs")
