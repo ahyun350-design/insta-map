@@ -3,9 +3,55 @@
 import { useEffect, useRef, useState, type CompositionEvent, type CSSProperties } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { track } from "@/lib/track";
 
-/** 'idle' = 아직 검사 안 함 / 입력 변경됨 — 제출 전 반드시 재검사 */
+/** 'idle' = 아직 검사 안 함 / 입력 변경됨 — 제출 전 재검사 (API 실패는 가입 허용) */
 type UsernameGate = "idle" | "checking" | "available" | "taken" | "error";
+
+const USERNAME_CHECK_TIMEOUT_MS = 5_000;
+
+/** AuthError.code / status 기준 — 메시지 문자열에 의존하지 않음 */
+function mapSignupAuthError(err: {
+  code?: string;
+  status?: number;
+}): { message: string; reason: string } {
+  const code = err.code ?? "";
+  const status = err.status;
+
+  if (code === "user_already_exists" || code === "email_exists") {
+    return {
+      message: "이미 가입된 이메일이에요. 로그인해 주세요",
+      reason: code,
+    };
+  }
+  if (code === "email_address_invalid") {
+    return {
+      message: "이메일 주소를 다시 확인해 주세요",
+      reason: code,
+    };
+  }
+  if (code === "weak_password") {
+    return {
+      message: "비밀번호는 6자 이상이어야 해요",
+      reason: code,
+    };
+  }
+  if (
+    code === "over_email_send_rate_limit" ||
+    code === "over_request_rate_limit" ||
+    status === 429
+  ) {
+    return {
+      message: "잠시 후 다시 시도해 주세요",
+      reason: code || "rate_limit",
+    };
+  }
+
+  return {
+    message: "회원가입에 실패했어요. 다시 시도해주세요",
+    reason: code || (status != null ? `status_${status}` : "unknown"),
+  };
+}
 
 const inputStyle: CSSProperties = {
   border: "0.5px solid #e0e0e0",
@@ -71,16 +117,20 @@ export default function SignupPage() {
   const checkUsernameAvailable = async (raw: string): Promise<boolean | null> => {
     const trimmed = raw.trim();
     if (trimmed.length < 2) return null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), USERNAME_CHECK_TIMEOUT_MS);
     try {
       const res = await fetch(
         `/api/username-available?username=${encodeURIComponent(trimmed)}`,
-        { cache: "no-store" },
+        { cache: "no-store", signal: controller.signal },
       );
       const body = (await res.json()) as { available?: boolean; error?: string };
       if (!res.ok || typeof body.available !== "boolean") return null;
       return body.available;
     } catch {
       return null;
+    } finally {
+      clearTimeout(timer);
     }
   };
 
@@ -116,9 +166,15 @@ export default function SignupPage() {
       setError((e) => (e === "이미 사용 중인 닉네임이에요" ? "" : e));
       return true;
     }
-    lastCheckedRef.current = { value: trimmed, gate: "error" };
-    setUsernameGate("error");
-    setError("닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    // API 실패·타임아웃 → fail-open (DB unique가 최종 방어). 버튼은 잠그지 않음.
+    lastCheckedRef.current = null;
+    setUsernameGate("idle");
+    setError((e) =>
+      e === "이미 사용 중인 닉네임이에요" ||
+      e === "닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요."
+        ? ""
+        : e,
+    );
     return null;
   };
 
@@ -160,15 +216,11 @@ export default function SignupPage() {
 
     setLoading(true);
 
-    // 제출 직전 강제 재확인 — available===true 만 통과 (fail-closed)
+    // 제출 직전 재확인 — 중복(false)만 차단. API 실패(null)는 가입 허용 (DB unique 방어)
     const available = await runUsernameCheck(trimmedUsername);
-    if (available !== true) {
+    if (available === false) {
       setLoading(false);
-      if (available === false) {
-        setError("이미 사용 중인 닉네임이에요");
-      } else if (!error) {
-        setError("닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요.");
-      }
+      setError("이미 사용 중인 닉네임이에요");
       return;
     }
 
@@ -193,11 +245,12 @@ export default function SignupPage() {
 
     if (signupError) {
       console.error("SIGNUP ERROR DETAIL:", JSON.stringify(signupError, null, 2));
-      if (signupError.message.includes("already registered")) {
-        setError("이미 가입된 이메일이에요.");
-      } else {
-        setError("회원가입에 실패했어요. 다시 시도해주세요.");
-      }
+      const mapped = mapSignupAuthError({
+        code: signupError.code,
+        status: signupError.status,
+      });
+      track("signup_failed", { reason: mapped.reason });
+      setError(mapped.message);
       return;
     }
 
@@ -205,8 +258,8 @@ export default function SignupPage() {
   };
 
   const consentReady = agreeAge && agreeTerms && agreePrivacy;
-  const usernameBlocked =
-    usernameGate === "taken" || usernameGate === "checking" || usernameGate === "error";
+  // taken / checking만 잠금 — API error(fail-open)는 잠그지 않음
+  const usernameBlocked = usernameGate === "taken" || usernameGate === "checking";
   const submitDisabled = loading || !consentReady || usernameBlocked;
 
   // 성공 화면
