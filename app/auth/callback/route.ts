@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { upsertUserRowWithUniqueUsername } from "@/lib/ensureUserProfile";
+
+function safeNextPath(raw: string | null): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
+  return raw;
+}
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
+  const next = safeNextPath(searchParams.get("next"));
 
   if (code) {
     const cookieStore = await cookies();
@@ -19,32 +26,39 @@ export async function GET(request: Request) {
           setAll(cookiesToSet) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options)
+                cookieStore.set(name, value, options),
               );
             } catch {
               // Server Component에서 호출시 무시
             }
           },
         },
-      }
+      },
     );
 
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error && data.user) {
-      // 카카오로 처음 가입한 경우 users 테이블에 자동 등록
-      const username =
-        data.user.user_metadata?.preferred_username ||
-        data.user.user_metadata?.name ||
-        data.user.user_metadata?.username ||
-        `user_${data.user.id.slice(0, 8)}`;
+      const meta = data.user.user_metadata;
+      const preferred =
+        (typeof meta?.username === "string" && meta.username) ||
+        (typeof meta?.preferred_username === "string" && meta.preferred_username) ||
+        (typeof meta?.name === "string" && meta.name) ||
+        undefined;
 
-      await supabase.from("users").upsert({
-        id: data.user.id,
-        username,
-      });
+      const ensured = await upsertUserRowWithUniqueUsername(
+        supabase,
+        data.user.id,
+        data.user.email,
+        preferred || undefined,
+      );
+      if ("error" in ensured) {
+        console.error("[auth/callback] users upsert failed:", ensured.error, {
+          userId: data.user.id,
+        });
+      }
 
-      return NextResponse.redirect(`${origin}/`);
+      return NextResponse.redirect(`${origin}${next}`);
     }
   }
 

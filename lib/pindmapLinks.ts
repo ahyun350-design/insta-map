@@ -11,6 +11,36 @@ export function getSiteOrigin(): string {
   return process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://pindmap.com";
 }
 
+/** iOS 커스텀 스킴 — Info.plist CFBundleURLSchemes 와 일치 */
+export const PIND_MAP_APP_SCHEME = "pindmap";
+
+/**
+ * 앱이 있으면 스킴으로 열고, 없으면 앱스토어(또는 로그인)로.
+ * Universal Link 미설정 환경용 베스트에포트.
+ */
+export function openPindMapAppOrStore(path = "welcome"): void {
+  if (typeof window === "undefined") return;
+  const storeUrl = getAppStoreUrl();
+  const deepLink = `${PIND_MAP_APP_SCHEME}://${path.replace(/^\//, "")}`;
+  const fallback = storeUrl || `${getSiteOrigin().replace(/\/$/, "")}/login`;
+
+  const started = Date.now();
+  const timer = window.setTimeout(() => {
+    // 앱이 열리면 보통 blur/hidden 이 됨 — 그대로면 스토어로
+    if (document.visibilityState === "visible" && Date.now() - started < 2800) {
+      window.location.href = fallback;
+    }
+  }, 1200);
+
+  const onHide = () => {
+    window.clearTimeout(timer);
+    document.removeEventListener("visibilitychange", onHide);
+  };
+  document.addEventListener("visibilitychange", onHide);
+
+  window.location.href = deepLink;
+}
+
 /** F-1a 웹 코스 공유 페이지 URL */
 export function getCourseShareUrl(courseId: string): string {
   const origin = getSiteOrigin().replace(/\/$/, "");

@@ -8,6 +8,10 @@ import { debugLog, logPerf, perfNow } from "./debugLog";
 import { runConnectionWarmupWithRetry, runExtraRefreshSession } from "./connectionRecovery";
 import { mark } from "./bootTiming";
 import { notifyToast } from "@/components/Toast";
+import {
+  resolveUsernameForEnsure,
+  upsertUserRowWithUniqueUsername,
+} from "./ensureUserProfile";
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -63,19 +67,6 @@ function usernameFromSessionAndRow(
     sessionUser.email?.split("@")[0] ||
     "user"
   );
-}
-
-function resolveUsernameForEnsure(
-  userId: string,
-  email?: string,
-  preferredUsername?: string,
-): string {
-  const preferred =
-    typeof preferredUsername === "string" ? preferredUsername.trim() : "";
-  if (preferred) return preferred;
-  const emailLocal = email?.split("@")[0]?.trim();
-  if (emailLocal) return emailLocal;
-  return `user_${userId.slice(0, 8)}`;
 }
 
 /** ensure+프로필 통합 select — select * 금지 */
@@ -269,7 +260,7 @@ async function fetchUserProfileRow(userId: string): Promise<UserProfileRow | nul
 async function loadUserProfileOrEnsure(
   userId: string,
   email?: string,
-  preferredUsername?: string,
+  preferredUsername?: unknown,
   markTiming = true,
 ): Promise<UserProfileRow | null> {
   console.log("[PindMap:auth] users 프로필/ensure 시작", { userId, markTiming });
@@ -312,37 +303,24 @@ async function loadUserProfileOrEnsure(
     console.log("[PindMap:auth] users 행 없음 — 신규 ensure upsert", userId);
   }
 
-  const baseUsername = resolveUsernameForEnsure(userId, email, preferredUsername);
-  const upsertOnce = (username: string) =>
-    supabase.from("users").upsert({ id: userId, username }, { onConflict: "id" });
+  const preferred =
+    typeof preferredUsername === "string"
+      ? preferredUsername
+      : preferredUsername != null && typeof preferredUsername !== "object"
+        ? String(preferredUsername)
+        : undefined;
+  const upsertResult = await upsertUserRowWithUniqueUsername(
+    supabase,
+    userId,
+    email,
+    preferred,
+  );
 
-  let username = baseUsername;
-  let { error: upsertError } = await upsertOnce(username);
-  if (upsertError) {
-    const code = typeof upsertError === "object" && upsertError && "code" in upsertError
-      ? String((upsertError as { code?: string }).code ?? "")
-      : "";
-    const msg = typeof upsertError === "object" && upsertError && "message" in upsertError
-      ? String((upsertError as { message?: string }).message ?? "")
-      : "";
-    const isUsernameConflict =
-      code === "23505" || /users_username_key|duplicate key.*username/i.test(msg);
-
-    // 최후 안전망: unique 위반일 때만 suffix. 그 외 에러는 같은 닉으로 재시도하지 않음.
-    if (isUsernameConflict) {
-      const retryUsername = `${baseUsername}2`;
-      console.error("[PindMap:auth] users upsert username conflict, suffix 재시도:", upsertError, {
-        from: username,
-        to: retryUsername,
-      });
-      await new Promise((resolve) => window.setTimeout(resolve, 300));
-      username = retryUsername;
-      ({ error: upsertError } = await upsertOnce(username));
-    }
-  }
-
-  if (upsertError) {
-    console.error("[PindMap:auth] users upsert 최종 실패:", upsertError, { userId, username });
+  if ("error" in upsertResult) {
+    console.error("[PindMap:auth] users upsert 최종 실패:", upsertResult.error, {
+      userId,
+      base: resolveUsernameForEnsure(userId, email, preferred),
+    });
     notifyToast("계정 설정에 문제가 생겼어요. 다시 시도해 주세요", "error");
     if (markTiming) {
       try {
@@ -365,7 +343,7 @@ async function loadUserProfileOrEnsure(
     }
   }
   if (verified) {
-    console.log("[PindMap:auth] users upsert 성공 확인:", username);
+    console.log("[PindMap:auth] users upsert 성공 확인:", upsertResult.username);
     writeEnsureOk(userId);
   } else {
     console.error("[PindMap:auth] users upsert 후 행 검증 실패:", userId);
