@@ -8,6 +8,7 @@ import type { AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { hasSeenOnboarding } from "@/lib/onboarding";
 import { hideNativeSplash } from "@/lib/nativeSplash";
+import { getSiteOrigin } from "@/lib/pindmapLinks";
 
 function formatLoginError(error: AuthError): string {
   const raw = (error.message || "").trim();
@@ -201,7 +202,7 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "kakao",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${getSiteOrigin()}/auth/callback`,
         scopes: "profile_nickname",
       },
     });

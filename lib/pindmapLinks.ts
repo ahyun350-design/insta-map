@@ -7,8 +7,10 @@ export function getAppStoreUrl(): string | null {
   return url || null;
 }
 
+/** 공개 사이트 origin — 인증 메일/OAuth redirect 에 window.location.origin 대신 사용 */
 export function getSiteOrigin(): string {
-  return process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://pindmap.com";
+  const raw = process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://pindmap.com";
+  return raw.replace(/\/$/, "");
 }
 
 /** iOS 커스텀 스킴 — Info.plist CFBundleURLSchemes 와 일치 */
@@ -22,7 +24,7 @@ export function openPindMapAppOrStore(path = "welcome"): void {
   if (typeof window === "undefined") return;
   const storeUrl = getAppStoreUrl();
   const deepLink = `${PIND_MAP_APP_SCHEME}://${path.replace(/^\//, "")}`;
-  const fallback = storeUrl || `${getSiteOrigin().replace(/\/$/, "")}/login`;
+  const fallback = storeUrl || `${getSiteOrigin()}/login`;
 
   const started = Date.now();
   const timer = window.setTimeout(() => {
@@ -43,8 +45,7 @@ export function openPindMapAppOrStore(path = "welcome"): void {
 
 /** F-1a 웹 코스 공유 페이지 URL */
 export function getCourseShareUrl(courseId: string): string {
-  const origin = getSiteOrigin().replace(/\/$/, "");
-  return `${origin}/course/${encodeURIComponent(courseId)}`;
+  return `${getSiteOrigin()}/course/${encodeURIComponent(courseId)}`;
 }
 
 /** 클립보드 복사 — clipboard API 우선, 실패 시 textarea fallback */

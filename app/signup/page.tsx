@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type CompositionEvent, type CSSProperties 
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { track } from "@/lib/track";
+import { getSiteOrigin } from "@/lib/pindmapLinks";
 
 /** 'idle' = 아직 검사 안 함 / 입력 변경됨 — 제출 전 재검사 (API 실패는 가입 허용) */
 type UsernameGate = "idle" | "checking" | "available" | "taken" | "error";
@@ -231,7 +232,7 @@ export default function SignupPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/welcome`,
+        emailRedirectTo: `${getSiteOrigin()}/auth/callback?next=/welcome`,
         data: {
           username: trimmedUsername,
           terms_agreed: true,
