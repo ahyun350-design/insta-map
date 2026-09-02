@@ -9,6 +9,7 @@ import {
   searchKakaoPlace,
 } from "@/app/api/extract/_shared";
 import { resolvePlaceCategoryFromKakao } from "@/lib/kakaoCategory";
+import { readReelCache, writeReelCache } from "@/lib/reelCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -185,20 +186,39 @@ export async function POST(req: Request) {
       throw new Error("작업에 사용자 정보가 없습니다.");
     }
     if (job.status === "completed") return NextResponse.json({ ok: true, skipped: true });
-    await waitForApifyConcurrencySlot(supabase, jobId);
-    await updateJobProgress(jobId, "인스타 캡션 가져오는 중");
-    const scrapeT0 = Date.now();
-    const caption = await scrapeInstagramCaption(job.instagram_url);
-    console.log(`[PindMap:perf] extract.process.scrape ${Date.now() - scrapeT0}ms`);
-    diagCaption = truncateCaption(caption);
-    await saveJobDiagnostics(jobId, { caption: diagCaption });
 
-    await updateJobProgress(jobId, "AI가 장소 분석하는 중");
-    const aiT0 = Date.now();
-    const rawPlaces = await extractPlacesByClaude(caption);
-    console.log(`[PindMap:perf] extract.process.ai ${Date.now() - aiT0}ms`);
-    diagClaudePlaces = rawPlaces;
-    await saveJobDiagnostics(jobId, { claude_places: diagClaudePlaces });
+    const cached = await readReelCache(supabase, job.instagram_url);
+    let caption: string;
+    let rawPlaces: RawPlace[];
+
+    if (cached?.caption && cached.claude_places) {
+      console.log("[extract] reel_cache hit", { jobId, url: cached.instagram_url });
+      caption = cached.caption;
+      rawPlaces = cached.claude_places;
+      diagCaption = truncateCaption(caption);
+      diagClaudePlaces = rawPlaces;
+      await saveJobDiagnostics(jobId, {
+        caption: diagCaption,
+        claude_places: diagClaudePlaces,
+      });
+    } else {
+      await waitForApifyConcurrencySlot(supabase, jobId);
+      await updateJobProgress(jobId, "인스타 캡션 가져오는 중");
+      const scrapeT0 = Date.now();
+      caption = await scrapeInstagramCaption(job.instagram_url);
+      console.log(`[PindMap:perf] extract.process.scrape ${Date.now() - scrapeT0}ms`);
+      diagCaption = truncateCaption(caption);
+      await saveJobDiagnostics(jobId, { caption: diagCaption });
+
+      await updateJobProgress(jobId, "AI가 장소 분석하는 중");
+      const aiT0 = Date.now();
+      rawPlaces = await extractPlacesByClaude(caption);
+      console.log(`[PindMap:perf] extract.process.ai ${Date.now() - aiT0}ms`);
+      diagClaudePlaces = rawPlaces;
+      await saveJobDiagnostics(jobId, { claude_places: diagClaudePlaces });
+
+      void writeReelCache(supabase, job.instagram_url, diagCaption, rawPlaces);
+    }
 
     type PlaceCandidate = {
       name: string;

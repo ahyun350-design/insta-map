@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 const ADMIN_USER_ID = "63772749-e01b-4396-a41c-c17a4d3acfe6";
 const EVENTS_RETENTION_DAYS = 90;
 const DIAGNOSTICS_RETENTION_DAYS = 30;
+const REEL_CACHE_RETENTION_DAYS = 30;
 
 function daysAgoIso(days: number, now = new Date()): string {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -51,6 +52,7 @@ export async function POST(req: Request) {
     const now = new Date();
     const eventsCutoff = daysAgoIso(EVENTS_RETENTION_DAYS, now);
     const diagCutoff = daysAgoIso(DIAGNOSTICS_RETENTION_DAYS, now);
+    const reelCacheCutoff = daysAgoIso(REEL_CACHE_RETENTION_DAYS, now);
 
     const eventsDelete = await admin
       .from("user_events")
@@ -79,12 +81,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "cleanup_failed" }, { status: 500 });
     }
 
+    const reelCacheDelete = await admin
+      .from("reel_cache")
+      .delete({ count: "exact" })
+      .lt("created_at", reelCacheCutoff);
+
+    if (reelCacheDelete.error) {
+      console.error("[admin/cleanup] reel_cache delete", reelCacheDelete.error);
+      return NextResponse.json({ error: "cleanup_failed" }, { status: 500 });
+    }
+
     return NextResponse.json({
       ok: true,
       deletedEvents: eventsDelete.count ?? 0,
       clearedJobDiagnostics: diagClear.count ?? 0,
+      deletedReelCache: reelCacheDelete.count ?? 0,
       eventsCutoff,
       diagnosticsCutoff: diagCutoff,
+      reelCacheCutoff,
     });
   } catch (error) {
     console.error("[admin/cleanup]", error);
