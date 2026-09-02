@@ -12594,17 +12594,6 @@ function HomePageContent() {
               <button
                 type="button"
                 className="settingItem"
-                style={{ width: "100%", padding: "16px 20px" }}
-                onClick={() => {
-                  setShowMypageSettingsSheet(false);
-                  showToast("준비 중이에요", "info");
-                }}
-              >
-                공개 범위 설정
-              </button>
-              <button
-                type="button"
-                className="settingItem"
                 style={{ width: "100%", padding: "16px 20px", color: "#d32f2f", fontWeight: 600 }}
                 onClick={() => {
                   setShowMypageSettingsSheet(false);
