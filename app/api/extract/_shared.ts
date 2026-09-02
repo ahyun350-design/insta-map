@@ -216,27 +216,51 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
   if (!actorId) throw new Error("APIFY actor ID가 설정되지 않았습니다.");
 
   const runUrl = `https://api.apify.com/v2/acts/${actorId}/runs?token=${token}`;
+  const maxStartAttempts = 3;
+  let runId: string | undefined;
+  let datasetId: string | undefined;
 
-  const runRes = await fetch(runUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      directUrls: [url],
-      resultsType: "posts",
-      resultsLimit: 1,
-    }),
-  });
+  for (let attempt = 0; attempt < maxStartAttempts; attempt++) {
+    const runRes = await fetch(runUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        directUrls: [url],
+        resultsType: "posts",
+        resultsLimit: 1,
+      }),
+    });
 
-  if (!runRes.ok) {
+    if (runRes.ok) {
+      const runData = (await runRes.json()) as {
+        data?: { id?: string; defaultDatasetId?: string };
+      };
+      runId = runData.data?.id;
+      datasetId = runData.data?.defaultDatasetId;
+      break;
+    }
+
     const runErrText = await runRes.text();
-    console.error("[extract] Apify run failed", { status: runRes.status, statusText: runRes.statusText, runErrText });
+    const isConcurrent =
+      /concurrent-runs-limit-exceeded/i.test(runErrText) || /concurrent/i.test(runErrText);
+    console.error("[extract] Apify run failed", {
+      status: runRes.status,
+      statusText: runRes.statusText,
+      runErrText,
+      attempt: attempt + 1,
+    });
+    if (isConcurrent && attempt < maxStartAttempts - 1) {
+      await new Promise((r) => setTimeout(r, 3000));
+      continue;
+    }
+    if (isConcurrent) {
+      throw new Error("concurrent-runs-limit-exceeded");
+    }
     throw new Error("Apify 실행 실패: " + runErrText);
   }
-  const runData = await runRes.json() as { data?: { id?: string; defaultDatasetId?: string } };
-  const runId = runData.data?.id;
+
   if (!runId) throw new Error("Apify run ID를 가져올 수 없습니다.");
 
-  let datasetId = runData.data?.defaultDatasetId;
   for (let i = 0; i < 12; i++) {
     await new Promise((r) => setTimeout(r, 5000));
     const statusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);

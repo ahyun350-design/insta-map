@@ -16,6 +16,13 @@ export function mapExtractErrorToUserMessage(raw: string | null | undefined): st
   }
 
   if (
+    /concurrent/i.test(msg) ||
+    /이용자가 많아요/i.test(msg)
+  ) {
+    return "지금 이용자가 많아요. 잠시 후 다시 시도해 주세요";
+  }
+
+  if (
     /claude/i.test(msg) ||
     /anthropic/i.test(msg) ||
     /credit balance/i.test(msg) ||

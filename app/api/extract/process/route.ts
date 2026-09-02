@@ -14,6 +14,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const CAPTION_MAX_CHARS = 2000;
+/** Apify free 동시 5한도 — 여유 1 두고 서버 측 soft limit */
+const APIFY_SOFT_CONCURRENCY = 4;
+const APIFY_QUEUE_WAIT_MS = 5000;
+const APIFY_QUEUE_MAX_ATTEMPTS = 6;
 
 type ExtractJobRow = {
   id: string;
@@ -86,6 +90,46 @@ async function updateJobProgress(jobId: string, progressStep: string) {
     .eq("id", jobId);
 }
 
+async function countProcessingExtractJobs(
+  supabase: ReturnType<typeof createServiceSupabase>,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("extract_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "processing");
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/** processing < 4 될 때까지 pending으로 대기. 최대 30초. */
+async function waitForApifyConcurrencySlot(
+  supabase: ReturnType<typeof createServiceSupabase>,
+  jobId: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < APIFY_QUEUE_MAX_ATTEMPTS; attempt++) {
+    const processingCount = await countProcessingExtractJobs(supabase);
+    if (processingCount < APIFY_SOFT_CONCURRENCY) return;
+
+    const { error } = await supabase
+      .from("extract_jobs")
+      .update({
+        status: "pending",
+        progress_step: "순서를 기다리는 중이에요",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", jobId);
+    if (error) throw error;
+
+    console.log("[extract] apify concurrency wait", {
+      jobId,
+      processingCount,
+      attempt: attempt + 1,
+    });
+    await new Promise((r) => setTimeout(r, APIFY_QUEUE_WAIT_MS));
+  }
+  throw new Error("concurrent-runs-limit-exceeded");
+}
+
 type ResolvedPlace = {
   name: string;
   category: Place["category"];
@@ -137,6 +181,7 @@ export async function POST(req: Request) {
       throw new Error("작업에 사용자 정보가 없습니다.");
     }
     if (job.status === "completed") return NextResponse.json({ ok: true, skipped: true });
+    await waitForApifyConcurrencySlot(supabase, jobId);
     await updateJobProgress(jobId, "인스타 캡션 가져오는 중");
     const scrapeT0 = Date.now();
     const caption = await scrapeInstagramCaption(job.instagram_url);
