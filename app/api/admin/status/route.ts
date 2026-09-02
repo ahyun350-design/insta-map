@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { reclaimStaleExtractJobs } from "@/app/api/extract/_reclaim";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -89,6 +90,13 @@ export async function GET(req: Request) {
     } catch (e) {
       console.error("[admin/status] admin client", e);
       return NextResponse.json({ error: "server_misconfigured" }, { status: 500 });
+    }
+
+    // Reclaim all users' stuck jobs before status counts (cron substitute)
+    try {
+      await reclaimStaleExtractJobs(admin);
+    } catch (e) {
+      console.error("[admin/status] reclaim", e);
     }
 
     const now = new Date();
