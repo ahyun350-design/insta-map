@@ -16,6 +16,13 @@ type ToastContextType = {
 
 const ToastContext = createContext<ToastContextType | null>(null);
 
+/** Provider 밖(ensure 등)에서도 호출 가능 — Provider 없으면 no-op */
+let globalShowToast: ((message: string, type?: ToastType) => void) | null = null;
+
+export function notifyToast(message: string, type: ToastType = "info") {
+  globalShowToast?.(message, type);
+}
+
 export function useToast() {
   const ctx = useContext(ToastContext);
   if (!ctx) throw new Error("useToast must be used within ToastProvider");
@@ -90,6 +97,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const id = Date.now();
     setToasts((prev) => [...prev, { id, message, type }]);
   }, []);
+
+  useEffect(() => {
+    globalShowToast = showToast;
+    return () => {
+      if (globalShowToast === showToast) globalShowToast = null;
+    };
+  }, [showToast]);
 
   return (
     <ToastContext.Provider value={{ showToast }}>

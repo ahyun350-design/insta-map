@@ -42,6 +42,8 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [usernameTaken, setUsernameTaken] = useState(false);
+  const [usernameChecking, setUsernameChecking] = useState(false);
 
   const [agreeAll, setAgreeAll] = useState(false);
   const [agreeAge, setAgreeAge] = useState(false);
@@ -61,6 +63,37 @@ export default function SignupPage() {
     setAgreeAll(checked);
   };
 
+  const checkUsernameAvailable = async (raw: string): Promise<boolean | null> => {
+    const trimmed = raw.trim();
+    if (trimmed.length < 2) return null;
+    try {
+      const res = await fetch(`/api/username-available?username=${encodeURIComponent(trimmed)}`);
+      const body = (await res.json()) as { available?: boolean; error?: string };
+      if (!res.ok || typeof body.available !== "boolean") return null;
+      return body.available;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleUsernameBlur = async () => {
+    const trimmed = username.trim();
+    if (trimmed.length < 2) {
+      setUsernameTaken(false);
+      return;
+    }
+    setUsernameChecking(true);
+    const available = await checkUsernameAvailable(trimmed);
+    setUsernameChecking(false);
+    if (available === false) {
+      setUsernameTaken(true);
+      setError("이미 사용 중인 닉네임이에요");
+    } else if (available === true) {
+      setUsernameTaken(false);
+      if (error === "이미 사용 중인 닉네임이에요") setError("");
+    }
+  };
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -77,12 +110,27 @@ export default function SignupPage() {
     }
 
     // 닉네임 길이 체크
-    if (username.trim().length < 2) {
+    const trimmedUsername = username.trim();
+    if (trimmedUsername.length < 2) {
       setError("닉네임은 2자 이상이어야 해요.");
       return;
     }
 
     setLoading(true);
+
+    // 제출 직전 재확인 (blur 이후 선점 레이스)
+    const available = await checkUsernameAvailable(trimmedUsername);
+    if (available === false) {
+      setUsernameTaken(true);
+      setError("이미 사용 중인 닉네임이에요");
+      setLoading(false);
+      return;
+    }
+    if (available === null) {
+      setError("닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요.");
+      setLoading(false);
+      return;
+    }
 
     const marketingChecked = agreeMarketing;
 
@@ -92,7 +140,7 @@ export default function SignupPage() {
       password,
       options: {
         data: {
-          username: username.trim(),
+          username: trimmedUsername,
           terms_agreed: true,
           privacy_agreed: true,
           is_adult: true,
@@ -117,7 +165,7 @@ export default function SignupPage() {
   };
 
   const consentReady = agreeAge && agreeTerms && agreePrivacy;
-  const submitDisabled = loading || !consentReady;
+  const submitDisabled = loading || !consentReady || usernameTaken || usernameChecking;
 
   // 성공 화면
   if (success) {
@@ -230,10 +278,21 @@ export default function SignupPage() {
             type="text"
             placeholder="닉네임 (2자 이상)"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              if (usernameTaken) setUsernameTaken(false);
+              if (error === "이미 사용 중인 닉네임이에요") setError("");
+            }}
+            onBlur={() => void handleUsernameBlur()}
             required
             style={inputStyle}
           />
+          {usernameChecking && (
+            <p style={{ margin: "-4px 0 0", fontSize: "11px", color: "#999" }}>닉네임 확인 중…</p>
+          )}
+          {usernameTaken && !usernameChecking && (
+            <p style={{ margin: "-4px 0 0", fontSize: "11px", color: "#e07070" }}>이미 사용 중인 닉네임이에요</p>
+          )}
           <input
             type="text"
             inputMode="email"

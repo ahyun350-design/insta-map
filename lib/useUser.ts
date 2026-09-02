@@ -7,6 +7,7 @@ import { supabase } from "./supabase";
 import { debugLog, logPerf, perfNow } from "./debugLog";
 import { runConnectionWarmupWithRetry, runExtraRefreshSession } from "./connectionRecovery";
 import { mark } from "./bootTiming";
+import { notifyToast } from "@/components/Toast";
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -311,19 +312,27 @@ async function loadUserProfileOrEnsure(
     console.log("[PindMap:auth] users 행 없음 — 신규 ensure upsert", userId);
   }
 
-  const username = resolveUsernameForEnsure(userId, email, preferredUsername);
-  const upsertOnce = () =>
+  const baseUsername = resolveUsernameForEnsure(userId, email, preferredUsername);
+  const upsertOnce = (username: string) =>
     supabase.from("users").upsert({ id: userId, username }, { onConflict: "id" });
 
-  let { error: upsertError } = await upsertOnce();
+  let username = baseUsername;
+  let { error: upsertError } = await upsertOnce(username);
   if (upsertError) {
-    console.error("[PindMap:auth] users upsert 실패, 1회 재시도:", upsertError);
+    // 같은 username 재시도는 unique 위반 시 무조건 실패 → suffix 붙여 1회만 재시도
+    const retryUsername = `${baseUsername}2`;
+    console.error("[PindMap:auth] users upsert 실패, suffix 재시도:", upsertError, {
+      from: username,
+      to: retryUsername,
+    });
     await new Promise((resolve) => window.setTimeout(resolve, 300));
-    ({ error: upsertError } = await upsertOnce());
+    username = retryUsername;
+    ({ error: upsertError } = await upsertOnce(username));
   }
 
   if (upsertError) {
     console.error("[PindMap:auth] users upsert 최종 실패:", upsertError, { userId, username });
+    notifyToast("계정 설정에 문제가 생겼어요. 다시 시도해 주세요", "error");
     if (markTiming) {
       try {
         mark("auth_ensure_done");
@@ -349,6 +358,7 @@ async function loadUserProfileOrEnsure(
     writeEnsureOk(userId);
   } else {
     console.error("[PindMap:auth] users upsert 후 행 검증 실패:", userId);
+    notifyToast("계정 설정에 문제가 생겼어요. 다시 시도해 주세요", "error");
   }
   return verified;
 }
