@@ -19,18 +19,22 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "server_misconfigured" }, { status: 500 });
     }
 
-    const { data, error } = await admin
+    // head+count — maybeSingle보다 중복 판정이 단순하고 안정적
+    const { count, error } = await admin
       .from("users")
-      .select("id")
-      .eq("username", username)
-      .maybeSingle();
+      .select("id", { count: "exact", head: true })
+      .eq("username", username);
 
     if (error) {
       console.error("[username-available]", error);
       return NextResponse.json({ error: "check_failed" }, { status: 500 });
     }
 
-    return NextResponse.json({ available: !data });
+    return NextResponse.json({
+      available: (count ?? 0) === 0,
+      // 디버그·클라이언트 가드용 (민감정보 아님)
+      checked: username,
+    });
   } catch (e) {
     console.error("[username-available] exception", e);
     return NextResponse.json({ error: "check_failed" }, { status: 500 });

@@ -319,15 +319,26 @@ async function loadUserProfileOrEnsure(
   let username = baseUsername;
   let { error: upsertError } = await upsertOnce(username);
   if (upsertError) {
-    // 같은 username 재시도는 unique 위반 시 무조건 실패 → suffix 붙여 1회만 재시도
-    const retryUsername = `${baseUsername}2`;
-    console.error("[PindMap:auth] users upsert 실패, suffix 재시도:", upsertError, {
-      from: username,
-      to: retryUsername,
-    });
-    await new Promise((resolve) => window.setTimeout(resolve, 300));
-    username = retryUsername;
-    ({ error: upsertError } = await upsertOnce(username));
+    const code = typeof upsertError === "object" && upsertError && "code" in upsertError
+      ? String((upsertError as { code?: string }).code ?? "")
+      : "";
+    const msg = typeof upsertError === "object" && upsertError && "message" in upsertError
+      ? String((upsertError as { message?: string }).message ?? "")
+      : "";
+    const isUsernameConflict =
+      code === "23505" || /users_username_key|duplicate key.*username/i.test(msg);
+
+    // 최후 안전망: unique 위반일 때만 suffix. 그 외 에러는 같은 닉으로 재시도하지 않음.
+    if (isUsernameConflict) {
+      const retryUsername = `${baseUsername}2`;
+      console.error("[PindMap:auth] users upsert username conflict, suffix 재시도:", upsertError, {
+        from: username,
+        to: retryUsername,
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+      username = retryUsername;
+      ({ error: upsertError } = await upsertOnce(username));
+    }
   }
 
   if (upsertError) {

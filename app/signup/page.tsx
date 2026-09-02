@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CompositionEvent, type CSSProperties } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+
+/** 'idle' = 아직 검사 안 함 / 입력 변경됨 — 제출 전 반드시 재검사 */
+type UsernameGate = "idle" | "checking" | "available" | "taken" | "error";
 
 const inputStyle: CSSProperties = {
   border: "0.5px solid #e0e0e0",
@@ -42,8 +45,10 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [usernameTaken, setUsernameTaken] = useState(false);
-  const [usernameChecking, setUsernameChecking] = useState(false);
+  const [usernameGate, setUsernameGate] = useState<UsernameGate>("idle");
+  /** 마지막으로 서버 검사한 trim 닉 — 한글 IME onChange가 taken을 지우지 않게 */
+  const lastCheckedRef = useRef<{ value: string; gate: UsernameGate } | null>(null);
+  const checkSeqRef = useRef(0);
 
   const [agreeAll, setAgreeAll] = useState(false);
   const [agreeAge, setAgreeAge] = useState(false);
@@ -67,7 +72,10 @@ export default function SignupPage() {
     const trimmed = raw.trim();
     if (trimmed.length < 2) return null;
     try {
-      const res = await fetch(`/api/username-available?username=${encodeURIComponent(trimmed)}`);
+      const res = await fetch(
+        `/api/username-available?username=${encodeURIComponent(trimmed)}`,
+        { cache: "no-store" },
+      );
       const body = (await res.json()) as { available?: boolean; error?: string };
       if (!res.ok || typeof body.available !== "boolean") return null;
       return body.available;
@@ -76,22 +84,51 @@ export default function SignupPage() {
     }
   };
 
-  const handleUsernameBlur = async () => {
-    const trimmed = username.trim();
+  const runUsernameCheck = async (raw: string) => {
+    const trimmed = raw.trim();
     if (trimmed.length < 2) {
-      setUsernameTaken(false);
-      return;
+      lastCheckedRef.current = null;
+      setUsernameGate("idle");
+      return null;
     }
-    setUsernameChecking(true);
+
+    // 같은 값으로 이미 taken/available이면 재호출 생략 (IME 중복 이벤트)
+    const prev = lastCheckedRef.current;
+    if (prev && prev.value === trimmed && (prev.gate === "taken" || prev.gate === "available")) {
+      setUsernameGate(prev.gate);
+      return prev.gate === "available";
+    }
+
+    const seq = ++checkSeqRef.current;
+    setUsernameGate("checking");
     const available = await checkUsernameAvailable(trimmed);
-    setUsernameChecking(false);
+    if (seq !== checkSeqRef.current) return available;
+
     if (available === false) {
-      setUsernameTaken(true);
+      lastCheckedRef.current = { value: trimmed, gate: "taken" };
+      setUsernameGate("taken");
       setError("이미 사용 중인 닉네임이에요");
-    } else if (available === true) {
-      setUsernameTaken(false);
-      if (error === "이미 사용 중인 닉네임이에요") setError("");
+      return false;
     }
+    if (available === true) {
+      lastCheckedRef.current = { value: trimmed, gate: "available" };
+      setUsernameGate("available");
+      setError((e) => (e === "이미 사용 중인 닉네임이에요" ? "" : e));
+      return true;
+    }
+    lastCheckedRef.current = { value: trimmed, gate: "error" };
+    setUsernameGate("error");
+    setError("닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    return null;
+  };
+
+  const handleUsernameBlur = () => {
+    void runUsernameCheck(username);
+  };
+
+  const handleUsernameCompositionEnd = (e: CompositionEvent<HTMLInputElement>) => {
+    // 한글 조합 확정 직후 검사 (blur 전에 조합만 끝나는 경우 대비)
+    void runUsernameCheck(e.currentTarget.value);
   };
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -116,19 +153,22 @@ export default function SignupPage() {
       return;
     }
 
-    setLoading(true);
-
-    // 제출 직전 재확인 (blur 이후 선점 레이스)
-    const available = await checkUsernameAvailable(trimmedUsername);
-    if (available === false) {
-      setUsernameTaken(true);
+    if (usernameGate === "taken") {
       setError("이미 사용 중인 닉네임이에요");
-      setLoading(false);
       return;
     }
-    if (available === null) {
-      setError("닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요.");
+
+    setLoading(true);
+
+    // 제출 직전 강제 재확인 — available===true 만 통과 (fail-closed)
+    const available = await runUsernameCheck(trimmedUsername);
+    if (available !== true) {
       setLoading(false);
+      if (available === false) {
+        setError("이미 사용 중인 닉네임이에요");
+      } else if (!error) {
+        setError("닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요.");
+      }
       return;
     }
 
@@ -165,7 +205,9 @@ export default function SignupPage() {
   };
 
   const consentReady = agreeAge && agreeTerms && agreePrivacy;
-  const submitDisabled = loading || !consentReady || usernameTaken || usernameChecking;
+  const usernameBlocked =
+    usernameGate === "taken" || usernameGate === "checking" || usernameGate === "error";
+  const submitDisabled = loading || !consentReady || usernameBlocked;
 
   // 성공 화면
   if (success) {
@@ -278,19 +320,36 @@ export default function SignupPage() {
             type="text"
             placeholder="닉네임 (2자 이상)"
             value={username}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
             onChange={(e) => {
-              setUsername(e.target.value);
-              if (usernameTaken) setUsernameTaken(false);
-              if (error === "이미 사용 중인 닉네임이에요") setError("");
+              const next = e.target.value;
+              setUsername(next);
+              const trimmed = next.trim();
+              const prev = lastCheckedRef.current;
+              // 값이 바뀐 경우에만 gate 리셋 — 한글 IME가 같은 값으로 onChange 내도 taken 유지
+              if (!prev || prev.value !== trimmed) {
+                lastCheckedRef.current = null;
+                setUsernameGate("idle");
+                setError((err) =>
+                  err === "이미 사용 중인 닉네임이에요" ||
+                  err === "닉네임 확인에 실패했어요. 잠시 후 다시 시도해 주세요."
+                    ? ""
+                    : err,
+                );
+              }
             }}
-            onBlur={() => void handleUsernameBlur()}
+            onBlur={handleUsernameBlur}
+            onCompositionEnd={handleUsernameCompositionEnd}
             required
             style={inputStyle}
           />
-          {usernameChecking && (
+          {usernameGate === "checking" && (
             <p style={{ margin: "-4px 0 0", fontSize: "11px", color: "#999" }}>닉네임 확인 중…</p>
           )}
-          {usernameTaken && !usernameChecking && (
+          {usernameGate === "taken" && (
             <p style={{ margin: "-4px 0 0", fontSize: "11px", color: "#e07070" }}>이미 사용 중인 닉네임이에요</p>
           )}
           <input
