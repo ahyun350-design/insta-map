@@ -215,7 +215,7 @@ import {
   getCourseShareUrl,
   shareViaNavigatorShare,
 } from "@/lib/pindmapLinks";
-import { parseFeedPostFromRow, feedCommentCount, FEED_PAGE_SIZE, FEED_POST_LIST_SELECT, FEED_POST_DETAIL_SELECT, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
+import { parseFeedPostFromRow, feedCommentCount, isOwnFeedAuthor, FEED_PAGE_SIZE, FEED_POST_LIST_SELECT, FEED_POST_DETAIL_SELECT, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
 import {
   getDisplayPlaceForPhoto,
   getFirstMatchingPhotoIndex,
@@ -1381,7 +1381,11 @@ function HomePageContent() {
   /** 마이페이지 「게시」전용 — 전역 feedPosts 와 분리 */
   const [myMypagePosts, setMyMypagePosts] = useState<FeedPost[]>([]);
   const [myMypagePostsCount, setMyMypagePostsCount] = useState(0);
+  const [myMypagePostsLoading, setMyMypagePostsLoading] = useState(false);
   const myMypagePostsLoadingRef = useRef(false);
+  const myMypagePostsRef = useRef<FeedPost[]>([]);
+  myMypagePostsRef.current = myMypagePosts;
+  const MYPAGE_POSTS_PAGE_SIZE = 30;
   const [feedHasMore, setFeedHasMore] = useState(true);
   const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const [detailCommentsLoading, setDetailCommentsLoading] = useState(false);
@@ -4590,7 +4594,8 @@ function HomePageContent() {
     }
   };
 
-  const loadMyMypagePosts = useCallback(async () => {
+  const loadMyMypagePosts = useCallback(async (opts?: { append?: boolean }) => {
+    const append = opts?.append === true;
     const uid = userIdRef.current;
     if (!uid) {
       setMyMypagePosts([]);
@@ -4599,15 +4604,16 @@ function HomePageContent() {
     }
     if (myMypagePostsLoadingRef.current) return;
     myMypagePostsLoadingRef.current = true;
-    const MYPAGE_POSTS_LIMIT = 30;
+    setMyMypagePostsLoading(true);
     try {
+      const offset = append ? myMypagePostsRef.current.length : 0;
       const { data, error, count } = await supabase
         .from("feed_posts")
         .select(FEED_POST_LIST_SELECT, { count: "exact" })
         .eq("user_id", uid)
         .eq("archived", false)
         .order("created_at", { ascending: false })
-        .range(0, MYPAGE_POSTS_LIMIT - 1);
+        .range(offset, offset + MYPAGE_POSTS_PAGE_SIZE - 1);
       if (error) {
         console.error("[PindMap:mypage] posts load failed", error);
         return;
@@ -4616,13 +4622,22 @@ function HomePageContent() {
       const rawPosts: FeedPost[] = (data ?? []).map((p: any) =>
         parseFeedPostFromRow(p, { likedByMe: liked.has(p.id) }),
       );
-      setMyMypagePosts(hydrateFeedPostsWithAvatars(rawPosts));
-      setMyMypagePostsCount(typeof count === "number" ? count : rawPosts.length);
+      const hydrated = hydrateFeedPostsWithAvatars(rawPosts);
+      if (append) {
+        setMyMypagePosts((prev) => {
+          const seen = new Set(prev.map((p) => p.id));
+          return [...prev, ...hydrated.filter((p) => !seen.has(p.id))];
+        });
+      } else {
+        setMyMypagePosts(hydrated);
+      }
+      setMyMypagePostsCount(typeof count === "number" ? count : offset + rawPosts.length);
       void prefetchAvatarsForFeedPosts(rawPosts).then(() => {
         setMyMypagePosts((prev) => hydrateFeedPostsWithAvatars(prev));
       });
     } finally {
       myMypagePostsLoadingRef.current = false;
+      setMyMypagePostsLoading(false);
     }
   }, [hydrateFeedPostsWithAvatars, prefetchAvatarsForFeedPosts]);
 
@@ -6648,7 +6663,7 @@ function HomePageContent() {
       const { data: existing } = await supabase
         .from("feed_posts")
         .select("id")
-        .eq("user_name", MY_USERNAME)
+        .eq("user_id", user?.id || "")
         .eq("place_name", normalizedPlaceName)
         .eq("address", normalizedAddress)
         .eq("archived", false)
@@ -10245,21 +10260,21 @@ function HomePageContent() {
                 </div>
               </button>
               <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
-                {detailPost.user !== MY_USERNAME && detailPost.userId && !followingIds.includes(detailPost.userId) && (
+                {!isOwnFeedAuthor(detailPost.userId, detailPost.user, MY_USER, MY_USERNAME) && detailPost.userId && !followingIds.includes(detailPost.userId) && (
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); followUser(detailPost.user); }}
                     style={{ border: "none", background: "#1a2a7a", color: "#fff", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
                   >+ 팔로우</button>
                 )}
-                {detailPost.user !== MY_USERNAME && detailPost.userId && followingIds.includes(detailPost.userId) && (
+                {!isOwnFeedAuthor(detailPost.userId, detailPost.user, MY_USER, MY_USERNAME) && detailPost.userId && followingIds.includes(detailPost.userId) && (
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); unfollowUser(detailPost.user); }}
                     style={{ border: "1px solid #d0d4e0", background: "#fff", color: "#76809a", borderRadius: "16px", padding: "4px 12px", fontSize: "11px", fontWeight: 500, cursor: "pointer", fontFamily: "inherit", marginRight: "4px" }}
                   >팔로잉</button>
                 )}
-                {detailPost.user === MY_USERNAME && (
+                {isOwnFeedAuthor(detailPost.userId, detailPost.user, MY_USER, MY_USERNAME) && (
                   <div style={{ position: "relative" }}>
                     <button type="button" onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === detailPost.id ? null : detailPost.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px 6px", display: "flex", flexDirection: "column", gap: "3px", alignItems: "center" }}>
                       <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} /><span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} /><span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#bbb", display: "block" }} />
@@ -10399,7 +10414,7 @@ function HomePageContent() {
                       </button>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <span style={{ fontSize: "10px", color: "#bbb" }}>{timeAgo(c.createdAt)}</span>
-                        {c.user === MY_USERNAME && <button onClick={(e) => { e.stopPropagation(); deleteComment(detailPost.id, c.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "13px", padding: 0, lineHeight: 1 }}>×</button>}
+                        {isOwnFeedAuthor(c.userId, c.user, MY_USER, MY_USERNAME) && <button onClick={(e) => { e.stopPropagation(); deleteComment(detailPost.id, c.id); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ccc", fontSize: "13px", padding: 0, lineHeight: 1 }}>×</button>}
                       </div>
                     </div>
                     <p style={{ margin: 0, fontSize: "13px", color: "#444", lineHeight: 1.5 }}>{c.text}</p>
@@ -12303,6 +12318,29 @@ function HomePageContent() {
                     );
                   })}
                 </PostGrid>
+                {myMypagePosts.length < myMypagePostsCount && (
+                  <button
+                    type="button"
+                    disabled={myMypagePostsLoading}
+                    onClick={() => void loadMyMypagePosts({ append: true })}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      marginTop: 12,
+                      padding: "12px 16px",
+                      border: "1px solid #d0d4e0",
+                      borderRadius: 10,
+                      background: "#fff",
+                      color: myMypagePostsLoading ? "#aaa" : "#1a2a7a",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      fontFamily: "inherit",
+                      cursor: myMypagePostsLoading ? "wait" : "pointer",
+                    }}
+                  >
+                    {myMypagePostsLoading ? "불러오는 중…" : "더 보기"}
+                  </button>
+                )}
               </div>
             </div>
           )}

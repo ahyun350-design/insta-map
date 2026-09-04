@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { dlog } from "@/lib/debugLog";
@@ -39,6 +39,8 @@ type FriendRoom = {
   friendAvatarUrl?: string;
 };
 
+const PROFILE_POSTS_PAGE_SIZE = 30;
+
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime();
   const m = Math.floor(diff / 60000);
@@ -58,6 +60,9 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<ProfileUser | null>(null);
   const [posts, setPosts] = useState<ProfilePost[]>([]);
   const [postCount, setPostCount] = useState(0);
+  const [postsLoadingMore, setPostsLoadingMore] = useState(false);
+  const postsLoadingMoreRef = useRef(false);
+  const myLikedPostIdsRef = useRef<Set<string>>(new Set());
   const [followerCount, setFollowerCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -148,9 +153,10 @@ export default function ProfilePage() {
       const postsPromise = supabase
         .from("feed_posts")
         .select("id, title, place_name, address, category, comment, images, created_at, likes_count, comments(id)", { count: "exact" })
-        .eq("user_name", target.username)
+        .eq("user_id", target.id)
         .eq("archived", false)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(0, PROFILE_POSTS_PAGE_SIZE - 1);
 
       const myLikesPromise = supabase.from("likes").select("post_id").eq("user_id", user.id);
 
@@ -181,6 +187,7 @@ export default function ProfilePage() {
       ]);
 
       const myLikedSet = new Set((myLikesRes.data ?? []).map((l: { post_id: string }) => l.post_id));
+      myLikedPostIdsRef.current = myLikedSet;
 
       const enrichedPosts: ProfilePost[] = (postsRes.data ?? []).map((p: any) => ({
         id: p.id,
@@ -209,6 +216,50 @@ export default function ProfilePage() {
     if (!sessionChecked || userLoading || !user) return;
     void loadProfile();
   }, [user, userLoading, sessionChecked, routeUsername]);
+
+  const loadMoreProfilePosts = async () => {
+    if (!profile || !user) return;
+    if (postsLoadingMoreRef.current) return;
+    if (posts.length >= postCount) return;
+    postsLoadingMoreRef.current = true;
+    setPostsLoadingMore(true);
+    try {
+      const offset = posts.length;
+      const { data, error, count } = await supabase
+        .from("feed_posts")
+        .select("id, title, place_name, address, category, comment, images, created_at, likes_count, comments(id)", { count: "exact" })
+        .eq("user_id", profile.id)
+        .eq("archived", false)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + PROFILE_POSTS_PAGE_SIZE - 1);
+      if (error) {
+        console.error("[PindMap:profile] posts load more failed", error);
+        return;
+      }
+      const liked = myLikedPostIdsRef.current;
+      const enriched: ProfilePost[] = (data ?? []).map((p: any) => ({
+        id: p.id,
+        title: p.title,
+        place_name: p.place_name,
+        address: p.address ?? "",
+        category: p.category,
+        comment: p.comment,
+        images: p.images ?? [],
+        created_at: p.created_at,
+        likes_count: p.likes_count ?? 0,
+        liked_by_me: liked.has(p.id),
+        commentCount: (p.comments ?? []).length,
+      }));
+      setPosts((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        return [...prev, ...enriched.filter((p) => !seen.has(p.id))];
+      });
+      if (typeof count === "number") setPostCount(count);
+    } finally {
+      postsLoadingMoreRef.current = false;
+      setPostsLoadingMore(false);
+    }
+  };
 
   const toggleFollow = async () => {
     if (!user || !profile || user.id === profile.id || followLoading) return;
@@ -472,6 +523,29 @@ export default function ProfilePage() {
                   />
                 ))}
                 </PostGrid>
+                {posts.length < postCount && (
+                  <button
+                    type="button"
+                    disabled={postsLoadingMore}
+                    onClick={() => void loadMoreProfilePosts()}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      marginTop: 12,
+                      padding: "12px 16px",
+                      border: "1px solid #d0d4e0",
+                      borderRadius: 10,
+                      background: "#fff",
+                      color: postsLoadingMore ? "#aaa" : "#1a2a7a",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      fontFamily: "inherit",
+                      cursor: postsLoadingMore ? "wait" : "pointer",
+                    }}
+                  >
+                    {postsLoadingMore ? "불러오는 중…" : "더 보기"}
+                  </button>
+                )}
               </section>
             </>
           )}

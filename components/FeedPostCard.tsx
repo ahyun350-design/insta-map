@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
-import type { PhotoPlaceTag } from "@/lib/feedPost";
+import { isOwnFeedAuthor, type PhotoPlaceTag } from "@/lib/feedPost";
 import { formatDisplayCategoriesForUi } from "@/lib/categoryUtil";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { getDisplayPlaceForPhoto, type PlaceRefForPhotoTagMatch } from "@/lib/photoPlaceTag";
@@ -403,7 +403,7 @@ export function FeedPostCard({
 }: Props) {
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const [likePop, setLikePop] = useState(false);
-  const isOwn = post.user === myUsername;
+  const isOwn = isOwnFeedAuthor(post.userId, post.user, currentUserId, myUsername);
   const showFollow = !isOwn && !!post.userId;
   const titleText = post.title?.trim();
   const commentText = post.comment?.trim() ?? "";

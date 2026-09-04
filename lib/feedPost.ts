@@ -143,6 +143,18 @@ export function feedCommentCount(post: Pick<FeedPost, "comments" | "commentsCoun
   return post.comments.length;
 }
 
+/** 내 글/댓글 여부 — userId 우선, 없으면 username 폴백(구 데이터) */
+export function isOwnFeedAuthor(
+  authorUserId: string | undefined | null,
+  authorUsername: string,
+  myUserId: string | undefined | null,
+  myUsername: string,
+): boolean {
+  const uid = (authorUserId ?? "").trim();
+  const mid = (myUserId ?? "").trim();
+  return (Boolean(uid && mid && uid === mid)) || (!uid && authorUsername === myUsername);
+}
+
 function isFeedPostCategory(value: string): value is FeedPostCategory {
   return (FEED_POST_CATEGORIES as readonly string[]).includes(value);
 }
