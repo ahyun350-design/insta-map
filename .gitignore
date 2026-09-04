@@ -11,3 +11,10 @@ app/page.tsx.backup2
 ios/App/App/KakaoMapKeys.plist
 spike/v7-native-map/plugin/.build
 spike/v7-native-map/plugin/.swiftpm
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/e2e/artifacts/

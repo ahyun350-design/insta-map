@@ -1424,6 +1424,7 @@ function HomePageContent() {
   const [courseShareLoading, setCourseShareLoading] = useState(false);
   const [courseShareSendingRoomId, setCourseShareSendingRoomId] = useState<string | null>(null);
   const [courseShareSearchQuery, setCourseShareSearchQuery] = useState("");
+  const courseShareSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [courseShareSentRoomIds, setCourseShareSentRoomIds] = useState<string[]>([]);
   const [courseInviteImageBusy, setCourseInviteImageBusy] = useState(false);
   const courseInviteImageInputRef = useRef<HTMLInputElement>(null);
@@ -3442,6 +3443,16 @@ function HomePageContent() {
     }, 80);
     return () => window.clearTimeout(t);
   }, [isEditingCourseTitleInline, keyboardHeight]);
+
+  useEffect(() => {
+    if (!showCourseShareModal || keyboardHeight <= 0) return;
+    const el = courseShareSearchInputRef.current;
+    if (!el || document.activeElement !== el) return;
+    const t = window.setTimeout(() => {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [showCourseShareModal, keyboardHeight]);
 
   const closeCourseSaveModal = () => {
     setShowCourseSaveModal(false);
@@ -10399,11 +10410,27 @@ function HomePageContent() {
       ? createPortal(
           <div
             className="courseShareModalBackdrop"
+            style={{
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight : 0,
+              transition: "padding-bottom 0.25s ease",
+              boxSizing: "border-box",
+            }}
             onClick={() => {
               if (!courseShareLoading && !courseInviteImageBusy) closeCourseShareModal();
             }}
           >
-            <div className="courseShareModalSheet" onClick={(e) => e.stopPropagation()}>
+            <div
+              className="courseShareModalSheet"
+              style={
+                keyboardHeight > 0
+                  ? {
+                      maxHeight: `calc(100dvh - ${keyboardHeight}px - env(safe-area-inset-top, 0px) - 8px)`,
+                      transition: "max-height 0.25s ease",
+                    }
+                  : undefined
+              }
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="courseShareModalHeader">
                 <span className="courseShareModalTitle">코스 공유하기</span>
                 <button
@@ -10416,105 +10443,110 @@ function HomePageContent() {
                   ×
                 </button>
               </div>
-              <div className="courseShareModalCourseBox">
-                <p className="courseShareModalCourseText">
-                  📍 {sharingCourse.title} · {sharingCourse.place_count ?? sharingCourse.items.length}곳
-                </p>
-              </div>
-              {user?.id && sharingCourse.user_id === user.id && (
-                <div className="courseShareModalInviteRow">
-                  <img
-                    src={resolveCourseInviteImage(sharingCourse)}
-                    alt=""
-                    className="courseShareModalInvitePreview"
-                    width={72}
-                    height={108}
-                    decoding="async"
-                  />
-                  <div className="courseShareModalInviteActions">
-                    <p className="courseShareModalInviteLabel">초대장 이미지</p>
-                    <div className="courseShareModalInviteBtns">
-                      <button
-                        type="button"
-                        className="courseShareModalInviteBtn"
-                        disabled={courseShareLoading || courseInviteImageBusy}
-                        onClick={openCourseInviteImagePicker}
-                      >
-                        {courseInviteImageBusy ? "올리는 중…" : "이미지 바꾸기"}
-                      </button>
-                      <button
-                        type="button"
-                        className="courseShareModalInviteBtn courseShareModalInviteBtnGhost"
-                        disabled={
-                          courseShareLoading ||
-                          courseInviteImageBusy ||
-                          !sharingCourse.invite_image
-                        }
-                        onClick={() => void handleResetCourseInviteImage()}
-                      >
-                        기본 이미지로
-                      </button>
+              <div className="courseShareModalTop">
+                <div className="courseShareModalCourseBox">
+                  <p className="courseShareModalCourseText">
+                    📍 {sharingCourse.title} · {sharingCourse.place_count ?? sharingCourse.items.length}곳
+                  </p>
+                </div>
+                {user?.id && sharingCourse.user_id === user.id && (
+                  <div className="courseShareModalInviteRow">
+                    <img
+                      src={resolveCourseInviteImage(sharingCourse)}
+                      alt=""
+                      className="courseShareModalInvitePreview"
+                      width={72}
+                      height={108}
+                      decoding="async"
+                    />
+                    <div className="courseShareModalInviteActions">
+                      <p className="courseShareModalInviteLabel">초대장 이미지</p>
+                      <div className="courseShareModalInviteBtns">
+                        <button
+                          type="button"
+                          className="courseShareModalInviteBtn"
+                          disabled={courseShareLoading || courseInviteImageBusy}
+                          onClick={openCourseInviteImagePicker}
+                        >
+                          {courseInviteImageBusy ? "올리는 중…" : "이미지 바꾸기"}
+                        </button>
+                        <button
+                          type="button"
+                          className="courseShareModalInviteBtn courseShareModalInviteBtnGhost"
+                          disabled={
+                            courseShareLoading ||
+                            courseInviteImageBusy ||
+                            !sharingCourse.invite_image
+                          }
+                          onClick={() => void handleResetCourseInviteImage()}
+                        >
+                          기본 이미지로
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-              <input
-                type="search"
-                className="courseShareModalSearch"
-                placeholder="친구 검색"
-                value={courseShareSearchQuery}
-                onChange={(e) => setCourseShareSearchQuery(e.target.value)}
-                disabled={courseShareLoading || courseInviteImageBusy}
-                aria-label="친구 검색"
-              />
-              <div className="courseShareModalGridScroll">
-                {courseShareFriendRooms.length === 0 ? (
-                  <p className="courseShareModalEmpty">아직 친구가 없어요</p>
-                ) : courseShareFilteredRooms.length === 0 ? (
-                  <p className="courseShareModalEmpty">검색 결과가 없어요</p>
-                ) : (
-                  <div className="courseShareModalGrid" role="list">
-                    {courseShareFilteredRooms.map((room) => {
-                      const isSending = courseShareSendingRoomId === room.id;
-                      const isSent = courseShareSentRoomIds.includes(room.id);
-                      return (
-                        <button
-                          key={room.id}
-                          type="button"
-                          role="listitem"
-                          className={
-                            isSent
-                              ? "courseShareModalFriendCell courseShareModalFriendCellSent"
-                              : "courseShareModalFriendCell"
-                          }
-                          onClick={() => void sendCourseToFriend(room)}
-                          disabled={courseShareLoading || isSent}
-                          aria-label={`${room.friendName}에게 코스 보내기`}
-                        >
-                          <span className="courseShareModalFriendAvatarWrap">
-                            <ProfileAvatar
-                              avatarUrl={room.friendAvatarUrl}
-                              username={room.friendName}
-                              size={72}
-                              fontSize={22}
-                            />
-                            {isSent && (
-                              <span className="courseShareModalFriendCheck" aria-hidden>
-                                ✓
-                              </span>
-                            )}
-                            {isSending && (
-                              <span className="courseShareModalFriendSending" aria-hidden>
-                                ···
-                              </span>
-                            )}
-                          </span>
-                          <span className="courseShareModalFriendName">{room.friendName}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
                 )}
+                <input
+                  ref={courseShareSearchInputRef}
+                  type="search"
+                  className="courseShareModalSearch"
+                  placeholder="친구 검색"
+                  value={courseShareSearchQuery}
+                  onChange={(e) => setCourseShareSearchQuery(e.target.value)}
+                  disabled={courseShareLoading || courseInviteImageBusy}
+                  aria-label="친구 검색"
+                />
+              </div>
+              <div className="courseShareModalBody">
+                <div className="courseShareModalGridScroll">
+                  {courseShareFriendRooms.length === 0 ? (
+                    <p className="courseShareModalEmpty">아직 친구가 없어요</p>
+                  ) : courseShareFilteredRooms.length === 0 ? (
+                    <p className="courseShareModalEmpty">검색 결과가 없어요</p>
+                  ) : (
+                    <div className="courseShareModalGrid" role="list">
+                      {courseShareFilteredRooms.map((room) => {
+                        const isSending = courseShareSendingRoomId === room.id;
+                        const isSent = courseShareSentRoomIds.includes(room.id);
+                        return (
+                          <button
+                            key={room.id}
+                            type="button"
+                            role="listitem"
+                            className={
+                              isSent
+                                ? "courseShareModalFriendCell courseShareModalFriendCellSent"
+                                : "courseShareModalFriendCell"
+                            }
+                            onClick={() => void sendCourseToFriend(room)}
+                            disabled={courseShareLoading || isSent}
+                            aria-label={`${room.friendName}에게 코스 보내기`}
+                          >
+                            <span className="courseShareModalFriendAvatarWrap">
+                              <ProfileAvatar
+                                avatarUrl={room.friendAvatarUrl}
+                                username={room.friendName}
+                                size={72}
+                                fontSize={22}
+                              />
+                              {isSent && (
+                                <span className="courseShareModalFriendCheck" aria-hidden>
+                                  ✓
+                                </span>
+                              )}
+                              {isSending && (
+                                <span className="courseShareModalFriendSending" aria-hidden>
+                                  ···
+                                </span>
+                              )}
+                            </span>
+                            <span className="courseShareModalFriendName">{room.friendName}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="courseShareModalActionBar">
                 <button

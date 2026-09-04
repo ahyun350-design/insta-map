@@ -282,6 +282,7 @@ export default function LoginPage() {
             autoCorrect="off"
             spellCheck={false}
             placeholder="이메일"
+            data-testid="login-email"
             value={email}
             onFocus={handleRealInputFocus}
             onChange={(e) => setEmail(e.target.value)}
@@ -301,6 +302,7 @@ export default function LoginPage() {
             autoCapitalize="none"
             autoCorrect="off"
             placeholder="비밀번호"
+            data-testid="login-password"
             value={password}
             onFocus={handleRealInputFocus}
             onChange={(e) => setPassword(e.target.value)}
@@ -321,6 +323,7 @@ export default function LoginPage() {
           )}
           <button
             type="submit"
+            data-testid="login-submit"
             disabled={loading}
             style={{
               border: "none",

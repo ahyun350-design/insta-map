@@ -95,9 +95,16 @@ export function PlaceSearchModal({
 }: Props) {
   const modalPaddingBottom =
     keyboardHeight > 0
-      ? `calc(12px + ${keyboardHeight}px)`
+      ? "12px"
       : "calc(12px + env(safe-area-inset-bottom, 0px))";
+  const sheetMaxHeight =
+    keyboardHeight > 0
+      ? `calc(100dvh - ${keyboardHeight}px - env(safe-area-inset-top, 0px) - 8px)`
+      : "min(78vh, 560px)";
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const manualNameRef = useRef<HTMLInputElement | null>(null);
+  const manualAddressRef = useRef<HTMLInputElement | null>(null);
+  const sheetBodyRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<"search" | "manual">("search");
   const [manualName, setManualName] = useState("");
   const [manualAddress, setManualAddress] = useState("");
@@ -124,6 +131,18 @@ export function PlaceSearchModal({
       return () => window.clearTimeout(id);
     }
   }, [open, mode]);
+
+  useEffect(() => {
+    if (!open || keyboardHeight <= 0) return;
+    const active = document.activeElement;
+    const candidates = [inputRef.current, manualNameRef.current, manualAddressRef.current];
+    const focused = candidates.find((el) => el && el === active);
+    if (!focused) return;
+    const t = window.setTimeout(() => {
+      focused.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [open, keyboardHeight, mode]);
 
   const openManual = () => {
     setMode("manual");
@@ -216,16 +235,18 @@ export function PlaceSearchModal({
           position: "fixed",
           left: 0,
           right: 0,
-          bottom: 0,
+          bottom: keyboardHeight > 0 ? keyboardHeight : 0,
           zIndex: 100002,
           background: "#fff",
           borderRadius: "16px 16px 0 0",
-          maxHeight: "min(78vh, 560px)",
+          maxHeight: sheetMaxHeight,
           display: "flex",
           flexDirection: "column",
+          overflow: "hidden",
           paddingBottom: modalPaddingBottom,
-          transition: "padding-bottom 0.25s ease",
+          transition: "bottom 0.25s ease, max-height 0.25s ease, padding-bottom 0.25s ease",
           boxShadow: "0 -8px 32px rgba(0,0,0,0.12)",
+          boxSizing: "border-box",
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -236,6 +257,8 @@ export function PlaceSearchModal({
             justifyContent: "space-between",
             padding: "14px 16px 10px",
             borderBottom: "0.5px solid #efefef",
+            flexShrink: 0,
+            background: "#fff",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -280,7 +303,15 @@ export function PlaceSearchModal({
 
         {mode === "search" ? (
           <>
-            <div style={{ padding: "12px 16px", display: "flex", gap: 8, flexShrink: 0 }}>
+            <div
+              style={{
+                padding: "12px 16px",
+                display: "flex",
+                gap: 8,
+                flexShrink: 0,
+                background: "#fff",
+              }}
+            >
               <input
                 ref={inputRef}
                 className="mapInput"
@@ -301,8 +332,10 @@ export function PlaceSearchModal({
             </div>
 
             <div
+              ref={sheetBodyRef}
               style={{
                 flex: 1,
+                minHeight: 0,
                 overflowY: "auto",
                 WebkitOverflowScrolling: "touch",
                 padding: "0 8px 8px",
@@ -405,8 +438,10 @@ export function PlaceSearchModal({
           </>
         ) : (
           <div
+            ref={sheetBodyRef}
             style={{
               flex: 1,
+              minHeight: 0,
               overflowY: "auto",
               WebkitOverflowScrolling: "touch",
               padding: "12px 16px 16px",
@@ -418,6 +453,7 @@ export function PlaceSearchModal({
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>가게 이름 *</span>
               <input
+                ref={manualNameRef}
                 className="mapInput"
                 value={manualName}
                 onChange={(e) => setManualName(e.target.value)}
@@ -429,6 +465,7 @@ export function PlaceSearchModal({
               <span style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>주소 *</span>
               <div style={{ display: "flex", gap: 8 }}>
                 <input
+                  ref={manualAddressRef}
                   className="mapInput"
                   value={manualAddress}
                   onChange={(e) => {

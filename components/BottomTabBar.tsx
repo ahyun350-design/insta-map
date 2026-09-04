@@ -77,12 +77,12 @@ function IconUser(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-const TABS: TabDef[] = [
-  { id: "home", label: "HOME", Icon: IconHome },
-  { id: "messages", label: "MESSAGE", Icon: IconMessage },
-  { id: "map", label: "MAP", Icon: IconMapPin },
-  { id: "saved", label: "SAVED", Icon: IconBookmark },
-  { id: "mypage", label: "MY", Icon: IconUser },
+const TABS: (TabDef & { testId: string })[] = [
+  { id: "home", label: "HOME", Icon: IconHome, testId: "tab-home" },
+  { id: "messages", label: "MESSAGE", Icon: IconMessage, testId: "tab-message" },
+  { id: "map", label: "MAP", Icon: IconMapPin, testId: "tab-map" },
+  { id: "saved", label: "SAVED", Icon: IconBookmark, testId: "tab-saved" },
+  { id: "mypage", label: "MY", Icon: IconUser, testId: "tab-my" },
 ];
 
 type Props = {
@@ -120,6 +120,7 @@ export function BottomTabBar({
               type="button"
               role="tab"
               aria-selected={selected}
+              data-testid={tab.testId}
               className={selected ? "tabItem tabItemActive" : "tabItem"}
               onClick={() => onTabChange(tab.id)}
             >
