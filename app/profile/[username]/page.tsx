@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { dlog } from "@/lib/debugLog";
@@ -63,6 +63,10 @@ export default function ProfilePage() {
   const [postsLoadingMore, setPostsLoadingMore] = useState(false);
   const postsLoadingMoreRef = useRef(false);
   const myLikedPostIdsRef = useRef<Set<string>>(new Set());
+  const profileScrollRef = useRef<HTMLDivElement | null>(null);
+  const profilePostsLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const postsRef = useRef<ProfilePost[]>([]);
+  postsRef.current = posts;
   const [followerCount, setFollowerCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -217,14 +221,14 @@ export default function ProfilePage() {
     void loadProfile();
   }, [user, userLoading, sessionChecked, routeUsername]);
 
-  const loadMoreProfilePosts = async () => {
+  const loadMoreProfilePosts = useCallback(async () => {
     if (!profile || !user) return;
     if (postsLoadingMoreRef.current) return;
-    if (posts.length >= postCount) return;
+    if (postsRef.current.length >= postCount) return;
     postsLoadingMoreRef.current = true;
     setPostsLoadingMore(true);
     try {
-      const offset = posts.length;
+      const offset = postsRef.current.length;
       const { data, error, count } = await supabase
         .from("feed_posts")
         .select("id, title, place_name, address, category, comment, images, created_at, likes_count, comments(id)", { count: "exact" })
@@ -259,7 +263,26 @@ export default function ProfilePage() {
       postsLoadingMoreRef.current = false;
       setPostsLoadingMore(false);
     }
-  };
+  }, [profile, user, postCount]);
+
+  useEffect(() => {
+    if (!profile || loadingProfile) return;
+    if (posts.length >= postCount) return;
+    const root = profileScrollRef.current;
+    const target = profilePostsLoadMoreSentinelRef.current;
+    if (!root || !target) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        if (postsLoadingMoreRef.current) return;
+        if (postsRef.current.length >= postCount) return;
+        void loadMoreProfilePosts();
+      },
+      { root, rootMargin: "240px 0px", threshold: 0 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  }, [profile, loadingProfile, posts.length, postCount, loadMoreProfilePosts]);
 
   const toggleFollow = async () => {
     if (!user || !profile || user.id === profile.id || followLoading) return;
@@ -406,7 +429,10 @@ export default function ProfilePage() {
           <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>프로필</span>
         </header>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff", padding: "20px" }}>
+        <div
+          ref={profileScrollRef}
+          style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff", padding: "20px" }}
+        >
           {notFound && (
             <div style={{ textAlign: "center", padding: "50px 0" }}>
               <p style={{ margin: 0, fontSize: "13px", color: "#aaa" }}>유저를 찾을 수 없어요</p>
@@ -524,27 +550,22 @@ export default function ProfilePage() {
                 ))}
                 </PostGrid>
                 {posts.length < postCount && (
-                  <button
-                    type="button"
-                    disabled={postsLoadingMore}
-                    onClick={() => void loadMoreProfilePosts()}
+                  <div
+                    ref={profilePostsLoadMoreSentinelRef}
+                    style={{ height: 1, width: "100%" }}
+                    aria-hidden
+                  />
+                )}
+                {postsLoadingMore && (
+                  <div
                     style={{
-                      display: "block",
-                      width: "100%",
-                      marginTop: 12,
-                      padding: "12px 16px",
-                      border: "1px solid #d0d4e0",
-                      borderRadius: 10,
-                      background: "#fff",
-                      color: postsLoadingMore ? "#aaa" : "#1a2a7a",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      fontFamily: "inherit",
-                      cursor: postsLoadingMore ? "wait" : "pointer",
+                      display: "flex",
+                      justifyContent: "center",
+                      padding: "14px 0 8px",
                     }}
                   >
-                    {postsLoadingMore ? "불러오는 중…" : "더 보기"}
-                  </button>
+                    <span className="postsGridLoadSpinner" aria-label="불러오는 중" />
+                  </div>
                 )}
               </section>
             </>

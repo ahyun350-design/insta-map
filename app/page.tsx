@@ -1385,6 +1385,8 @@ function HomePageContent() {
   const myMypagePostsLoadingRef = useRef(false);
   const myMypagePostsRef = useRef<FeedPost[]>([]);
   myMypagePostsRef.current = myMypagePosts;
+  const mypageTabScrollRef = useRef<HTMLDivElement | null>(null);
+  const mypagePostsLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const MYPAGE_POSTS_PAGE_SIZE = 30;
   const [feedHasMore, setFeedHasMore] = useState(true);
   const [feedLoadingMore, setFeedLoadingMore] = useState(false);
@@ -1626,6 +1628,8 @@ function HomePageContent() {
   const detailOpenLoggedRef = useRef<string | null>(null);
   const pollInFlightRef = useRef<Set<string>>(new Set());
   const handleAddSubmittingRef = useRef(false);
+  const postSubmittingRef = useRef(false);
+  const [isPostSubmitting, setIsPostSubmitting] = useState(false);
   const completedJobIdsRef = useRef<Set<string>>(new Set());
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
   const chatComposerInputRef = useRef<HTMLInputElement | null>(null);
@@ -4007,15 +4011,38 @@ function HomePageContent() {
       showToast(toUserMessage(err, "삭제에 실패했어요"), "error");
     }
   };
-  const submitPost = async (post: FeedPost): Promise<{ error: string | null }> => {
+  const submitPost = async (
+    post: FeedPost,
+  ): Promise<{ error: string | null; alreadyExists?: boolean }> => {
     if (!isCompanionTag(post.companionTag)) {
       alert("동행 태그를 선택해주세요.");
       return { error: "invalid_companion_tag" };
     }
     const coords = latLngFromRow(post);
+    const uid = user?.id || "";
+    const placeName = (post.placeName || "").trim();
+    const address = (post.address || "").trim();
+    // 연타 레이스: 조회→insert 틈 방어 — 동일 장소 60초 내 글이면 insert 생략
+    if (uid && placeName) {
+      const sinceIso = new Date(Date.now() - 60_000).toISOString();
+      const { data: recent } = await supabase
+        .from("feed_posts")
+        .select("id")
+        .eq("user_id", uid)
+        .eq("place_name", placeName)
+        .eq("address", address)
+        .eq("archived", false)
+        .gte("created_at", sinceIso)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (recent) {
+        return { error: null, alreadyExists: true };
+      }
+    }
     const { error } = await supabase.from("feed_posts").insert({
       id: post.id,
-      user_id: user?.id || "",
+      user_id: uid,
       user_name: MY_USERNAME,
       title: post.title,
       place_name: post.placeName,
@@ -6650,106 +6677,121 @@ function HomePageContent() {
     }
   };
   const handleSubmitPost = async () => {
+    if (postSubmittingRef.current) return;
     if (!canPost) return;
     if (!isCompanionTag(postCompanionTag)) {
       alert("동행 태그를 선택해주세요.");
       return;
     }
-    const repTag = getRepresentativePhotoPlaceTag(postPhotoPlaceTags);
-    const hasPhotoTags = postPhotoPlaceTags.length > 0;
-    const normalizedPlaceName = (repTag?.placeName ?? (hasPhotoTags ? postPlaceName : "")).trim();
-    const normalizedAddress = (repTag?.address ?? (hasPhotoTags ? postAddress : "")).trim();
-    if (normalizedPlaceName) {
-      const { data: existing } = await supabase
-        .from("feed_posts")
-        .select("id")
-        .eq("user_id", user?.id || "")
-        .eq("place_name", normalizedPlaceName)
-        .eq("address", normalizedAddress)
-        .eq("archived", false)
-        .maybeSingle();
-      if (existing) {
-        showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
-        return;
-      }
-    }
-    const imageUrls = postImages
-      .filter((img): img is PostImageItem & { publicUrl: string; status: "uploaded" } =>
-        img.status === "uploaded" && typeof img.publicUrl === "string",
-      )
-      .map((img) => img.publicUrl);
-    const postAspectRatio =
-      imageUrls.length > 0
-        ? await resolveCurationAspectRatioFromSrc(imageUrls[0])
-        : DEFAULT_CURATION_ASPECT_RATIO;
-    const postCoords = repTag
-      ? { lat: repTag.lat, lng: repTag.lng }
-      : coerceLatLng(postPlaceLat, postPlaceLng);
-
-    let linkedCourseId: string | null = null;
-    if (postSaveCourseChecked && user?.id) {
-      const courseItems = buildUniqueCourseItemsFromPhotoPlaceTags(postPhotoPlaceTags);
-      if (courseItems.length === 0) {
-        showToast("장소 태그가 없어 코스는 저장하지 않았어요", "info");
-      } else {
-        const { data: savedCourse, error: courseError } = await saveCourse(
-          user.id,
-          postCourseTitle,
-          courseItems,
-          "curation",
-        );
-        if (courseError || !savedCourse) {
-          showToast(toUserMessage(courseError, "코스를 저장하지 못했어요"), "error");
+    postSubmittingRef.current = true;
+    setIsPostSubmitting(true);
+    try {
+      const repTag = getRepresentativePhotoPlaceTag(postPhotoPlaceTags);
+      const hasPhotoTags = postPhotoPlaceTags.length > 0;
+      const normalizedPlaceName = (repTag?.placeName ?? (hasPhotoTags ? postPlaceName : "")).trim();
+      const normalizedAddress = (repTag?.address ?? (hasPhotoTags ? postAddress : "")).trim();
+      if (normalizedPlaceName) {
+        const { data: existing } = await supabase
+          .from("feed_posts")
+          .select("id")
+          .eq("user_id", user?.id || "")
+          .eq("place_name", normalizedPlaceName)
+          .eq("address", normalizedAddress)
+          .eq("archived", false)
+          .maybeSingle();
+        if (existing) {
+          showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
           return;
         }
-        linkedCourseId = savedCourse.id;
       }
+      const imageUrls = postImages
+        .filter((img): img is PostImageItem & { publicUrl: string; status: "uploaded" } =>
+          img.status === "uploaded" && typeof img.publicUrl === "string",
+        )
+        .map((img) => img.publicUrl);
+      const postAspectRatio =
+        imageUrls.length > 0
+          ? await resolveCurationAspectRatioFromSrc(imageUrls[0])
+          : DEFAULT_CURATION_ASPECT_RATIO;
+      const postCoords = repTag
+        ? { lat: repTag.lat, lng: repTag.lng }
+        : coerceLatLng(postPlaceLat, postPlaceLng);
+
+      let linkedCourseId: string | null = null;
+      if (postSaveCourseChecked && user?.id) {
+        const courseItems = buildUniqueCourseItemsFromPhotoPlaceTags(postPhotoPlaceTags);
+        if (courseItems.length === 0) {
+          showToast("장소 태그가 없어 코스는 저장하지 않았어요", "info");
+        } else {
+          const { data: savedCourse, error: courseError } = await saveCourse(
+            user.id,
+            postCourseTitle,
+            courseItems,
+            "curation",
+          );
+          if (courseError || !savedCourse) {
+            showToast(toUserMessage(courseError, "코스를 저장하지 못했어요"), "error");
+            return;
+          }
+          linkedCourseId = savedCourse.id;
+        }
+      }
+
+      const savedCategories = postCategories.length > 0 ? [...postCategories] : null;
+      const legacyCategory: Category =
+        (savedCategories?.[0] as Category | undefined) ??
+        (repTag?.category as Category | undefined) ??
+        postCategory;
+
+      const newPost: FeedPost = {
+        id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+        user: MY_USERNAME,
+        userId: user?.id || "",
+        userAvatarUrl: user?.avatar_url,
+        title: postTitle,
+        placeName: repTag?.placeName ?? (hasPhotoTags ? postPlaceName : ""),
+        address: repTag?.address ?? (hasPhotoTags ? postAddress : ""),
+        ...(postCoords ? { lat: postCoords.lat, lng: postCoords.lng } : {}),
+        category: legacyCategory,
+        categories: savedCategories,
+        comment: postComment,
+        companionTag: postCompanionTag,
+        photoPlaceTags: postPhotoPlaceTags.length > 0 ? postPhotoPlaceTags : null,
+        courseId: linkedCourseId,
+        images: imageUrls,
+        aspectRatio: postAspectRatio,
+        createdAt: new Date().toISOString(),
+        likes_count: 0,
+        liked_by_me: false,
+        comments: [],
+        commentsCount: 0,
+      };
+      const { error: postError, alreadyExists } = await submitPost(newPost);
+      if (alreadyExists) {
+        showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
+        void loadMyMypagePosts();
+        setShowPostModal(false);
+        setActiveTab("home");
+        return;
+      }
+      if (postError) {
+        console.error("[PindMap:curation] submitPost failed", postError);
+        showToast("큐레이션 등록에 실패했어요", "error");
+        return;
+      }
+
+      track("curation_publish");
+      showToast(
+        linkedCourseId ? "큐레이션과 코스가 등록됐어요 ✨" : "큐레이션이 등록됐어요 ✨",
+        "success",
+      );
+      void loadMyMypagePosts();
+      setShowPostModal(false);
+      setActiveTab("home");
+    } finally {
+      postSubmittingRef.current = false;
+      setIsPostSubmitting(false);
     }
-
-    const savedCategories = postCategories.length > 0 ? [...postCategories] : null;
-    const legacyCategory: Category =
-      (savedCategories?.[0] as Category | undefined) ??
-      (repTag?.category as Category | undefined) ??
-      postCategory;
-
-    const newPost: FeedPost = {
-      id: Math.random().toString(36).substring(2) + Date.now().toString(36),
-      user: MY_USERNAME,
-      userId: user?.id || "",
-      userAvatarUrl: user?.avatar_url,
-      title: postTitle,
-      placeName: repTag?.placeName ?? (hasPhotoTags ? postPlaceName : ""),
-      address: repTag?.address ?? (hasPhotoTags ? postAddress : ""),
-      ...(postCoords ? { lat: postCoords.lat, lng: postCoords.lng } : {}),
-      category: legacyCategory,
-      categories: savedCategories,
-      comment: postComment,
-      companionTag: postCompanionTag,
-      photoPlaceTags: postPhotoPlaceTags.length > 0 ? postPhotoPlaceTags : null,
-      courseId: linkedCourseId,
-      images: imageUrls,
-      aspectRatio: postAspectRatio,
-      createdAt: new Date().toISOString(),
-      likes_count: 0,
-      liked_by_me: false,
-      comments: [],
-      commentsCount: 0,
-    };
-    const { error: postError } = await submitPost(newPost);
-    if (postError) {
-      console.error("[PindMap:curation] submitPost failed", postError);
-      showToast("큐레이션 등록에 실패했어요", "error");
-      return;
-    }
-
-    track("curation_publish");
-    showToast(
-      linkedCourseId ? "큐레이션과 코스가 등록됐어요 ✨" : "큐레이션이 등록됐어요 ✨",
-      "success",
-    );
-    void loadMyMypagePosts();
-    setShowPostModal(false);
-    setActiveTab("home");
   };
   const togglePostCategory = useCallback((cat: Category) => {
     setPostCategories((prev) =>
@@ -8844,6 +8886,32 @@ function HomePageContent() {
     void loadMyMypagePosts();
   }, [activeTab, user?.id, loadMyMypagePosts]);
 
+  // 마이페이지 게시물 무한 스크롤
+  useEffect(() => {
+    if (activeTab !== "mypage" || !user?.id) return;
+    if (myMypagePosts.length >= myMypagePostsCount) return;
+    const root = mypageTabScrollRef.current;
+    const target = mypagePostsLoadMoreSentinelRef.current;
+    if (!root || !target) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        if (myMypagePostsLoadingRef.current) return;
+        if (myMypagePostsRef.current.length >= myMypagePostsCount) return;
+        void loadMyMypagePosts({ append: true });
+      },
+      { root, rootMargin: "240px 0px", threshold: 0 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  }, [
+    activeTab,
+    user?.id,
+    myMypagePosts.length,
+    myMypagePostsCount,
+    loadMyMypagePosts,
+  ]);
+
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id || user.id !== ADMIN_USER_ID) {
       setAdminStatus(null);
@@ -10530,6 +10598,7 @@ function HomePageContent() {
             onExited={resetPostForm}
             onSubmit={() => { void handleSubmitPost(); }}
             canPost={canPost}
+            isSubmitting={isPostSubmitting}
             validationHint={postValidationHint}
             title={postTitle}
             onTitleChange={setPostTitle}
@@ -12181,7 +12250,11 @@ function HomePageContent() {
                   )}
                 </div>
               </div>
-              <div className="mypageTabScroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}>
+              <div
+                ref={mypageTabScrollRef}
+                className="mypageTabScroll"
+                style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#fff" }}
+              >
                 {myCourses.length > 0 && (
                   <section style={{ padding: "0 16px", marginBottom: 16 }}>
                     <div
@@ -12319,27 +12392,22 @@ function HomePageContent() {
                   })}
                 </PostGrid>
                 {myMypagePosts.length < myMypagePostsCount && (
-                  <button
-                    type="button"
-                    disabled={myMypagePostsLoading}
-                    onClick={() => void loadMyMypagePosts({ append: true })}
+                  <div
+                    ref={mypagePostsLoadMoreSentinelRef}
+                    style={{ height: 1, width: "100%" }}
+                    aria-hidden
+                  />
+                )}
+                {myMypagePostsLoading && (
+                  <div
                     style={{
-                      display: "block",
-                      width: "100%",
-                      marginTop: 12,
-                      padding: "12px 16px",
-                      border: "1px solid #d0d4e0",
-                      borderRadius: 10,
-                      background: "#fff",
-                      color: myMypagePostsLoading ? "#aaa" : "#1a2a7a",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      fontFamily: "inherit",
-                      cursor: myMypagePostsLoading ? "wait" : "pointer",
+                      display: "flex",
+                      justifyContent: "center",
+                      padding: "14px 0 22px",
                     }}
                   >
-                    {myMypagePostsLoading ? "불러오는 중…" : "더 보기"}
-                  </button>
+                    <span className="postsGridLoadSpinner" aria-label="불러오는 중" />
+                  </div>
                 )}
               </div>
             </div>

@@ -612,6 +612,34 @@ body {
   cursor: default;
 }
 
+.curationSubmitSpinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: curationSubmitSpin 0.7s linear infinite;
+}
+
+@keyframes curationSubmitSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.postsGridLoadSpinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e8e8ec;
+  border-top-color: #1a2a7a;
+  border-radius: 50%;
+  animation: curationSubmitSpin 0.7s linear infinite;
+}
+
 .curationHeaderActionNext {
   background: #1a2a7a;
   color: #fff;

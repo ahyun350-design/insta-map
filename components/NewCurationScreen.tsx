@@ -20,6 +20,8 @@ type Props = {
   onExited?: () => void;
   onSubmit: () => void;
   canPost: boolean;
+  /** 등록 API 진행 중 — 버튼 비활성 + 「올리는 중…」 */
+  isSubmitting?: boolean;
   validationHint: string | null;
   title: string;
   onTitleChange: (value: string) => void;
@@ -106,6 +108,7 @@ export function NewCurationScreen({
   onExited,
   onSubmit,
   canPost,
+  isSubmitting = false,
   validationHint,
   title,
   onTitleChange,
@@ -188,10 +191,19 @@ export function NewCurationScreen({
 
   const isLastStep = currentStep === 3;
 
-  const rightActionEnabled = isLastStep ? canPost : currentStep === 1 ? canGoNextStep1 : canGoNextStep2;
-  const rightActionLabel = isLastStep ? "등록" : "다음";
+  const rightActionEnabled = isLastStep
+    ? canPost && !isSubmitting
+    : currentStep === 1
+      ? canGoNextStep1
+      : canGoNextStep2;
+  /** 제출 중에도 등록 버튼은 활성 스타일 유지 (클릭만 막음) */
+  const rightActionLooksEnabled =
+    isLastStep && isSubmitting ? canPost : rightActionEnabled;
+  const rightActionLabel =
+    isLastStep && isSubmitting ? "올리는 중…" : isLastStep ? "등록" : "다음";
 
   const handleLeftAction = () => {
+    if (isSubmitting) return;
     if (currentStep === 1) {
       onClose();
       return;
@@ -201,7 +213,8 @@ export function NewCurationScreen({
 
   const handleRightAction = () => {
     if (isLastStep) {
-      if (canPost) onSubmit();
+      if (!canPost || isSubmitting) return;
+      onSubmit();
       return;
     }
     if (currentStep === 1 && !canGoNextStep1) return;
@@ -254,8 +267,12 @@ export function NewCurationScreen({
           type="button"
           onClick={handleRightAction}
           disabled={!rightActionEnabled}
-          className={headerActionClass(isLastStep, rightActionEnabled)}
+          className={headerActionClass(isLastStep, rightActionLooksEnabled)}
+          aria-busy={isLastStep && isSubmitting}
         >
+          {isLastStep && isSubmitting && (
+            <span className="curationSubmitSpinner" aria-hidden />
+          )}
           {rightActionLabel}
         </button>
       </header>
