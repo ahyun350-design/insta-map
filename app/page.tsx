@@ -32,7 +32,7 @@ import {
 import { loadBootFailReport, type BootFailReport } from "@/lib/webviewRecovery";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
-import { ExtractLoadingOverlay } from "@/components/ExtractLoadingOverlay";
+import { ExtractLoadingOverlay, EXTRACT_EMPTY_RESULT_RAW } from "@/components/ExtractLoadingOverlay";
 import { mapExtractErrorToUserMessage } from "@/lib/extractUserError";
 import { toUserMessage } from "@/lib/userErrorMessage";
 
@@ -1440,6 +1440,9 @@ function HomePageContent() {
   const [extractOverlayError, setExtractOverlayError] = useState<string | null>(null);
   /** extract_jobs.error_message 원문 — 오버레이 사유 분기용 */
   const [extractOverlayErrorRaw, setExtractOverlayErrorRaw] = useState<string | null>(null);
+  const [extractOverlayCompleteVariant, setExtractOverlayCompleteVariant] = useState<
+    "success" | "all_saved"
+  >("success");
   const [extractRetryUrl, setExtractRetryUrl] = useState<string | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const selectedPlaceRef = useRef<any>(null);
@@ -1740,21 +1743,8 @@ function HomePageContent() {
   const realtimeRemountRetryCountRef = useRef<Map<string, number>>(new Map());
   const realtimeRemountDebounceRef = useRef<Map<string, number>>(new Map());
   const realtimeRemountBackoffRef = useRef<Map<string, number>>(new Map());
-  const placeExtractionToastTimerRef = useRef<number | null>(null);
-  const [showPlaceExtractionToast, setShowPlaceExtractionToast] = useState(false);
 
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
-  const showPlaceExtractionGuideToast = useCallback(() => {
-    if (placeExtractionToastTimerRef.current) {
-      window.clearTimeout(placeExtractionToastTimerRef.current);
-    }
-    setShowPlaceExtractionToast(true);
-    placeExtractionToastTimerRef.current = window.setTimeout(() => {
-      setShowPlaceExtractionToast(false);
-      placeExtractionToastTimerRef.current = null;
-    }, 4000);
-  }, []);
-
   /** 확장 지도 검색 결과 핀·픽셀 매칭 후보 제거 — 검색 초기화·새 검색 시에만 호출 */
   const clearSearchResultPins = useCallback(() => {
     mapSearchResultPinsRef.current.forEach((m) => {
@@ -3739,24 +3729,24 @@ function HomePageContent() {
   }, [activeJobs]);
 
   useEffect(() => {
+    // all_saved 는 사용자가 버튼을 누를 때까지 유지
     if (!showExtractOverlay || !extractOverlayComplete || extractOverlayError) return;
+    if (extractOverlayCompleteVariant === "all_saved") return;
     const timer = window.setTimeout(() => {
       setShowExtractOverlay(false);
       setExtractOverlayComplete(false);
       setExtractOverlayError(null);
       setExtractOverlayErrorRaw(null);
+      setExtractOverlayCompleteVariant("success");
       setExtractRetryUrl(null);
     }, 1800);
     return () => window.clearTimeout(timer);
-  }, [showExtractOverlay, extractOverlayComplete, extractOverlayError]);
-
-  useEffect(() => {
-    return () => {
-      if (placeExtractionToastTimerRef.current) {
-        window.clearTimeout(placeExtractionToastTimerRef.current);
-      }
-    };
-  }, []);
+  }, [
+    showExtractOverlay,
+    extractOverlayComplete,
+    extractOverlayError,
+    extractOverlayCompleteVariant,
+  ]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -3831,19 +3821,20 @@ function HomePageContent() {
           if (places.length === 0) {
             // all_saved_already 는 서버가 신규 insert 없이 끝난 경우만
             if (nextStep.includes("all_saved_already")) {
-              showToast("이미 저장된 장소만 추출됐어요", "info");
               setExtractOverlayError(null);
               setExtractOverlayErrorRaw(null);
+              setExtractOverlayCompleteVariant("all_saved");
               setExtractOverlayComplete(true);
+              setShowExtractOverlay(true);
             } else {
               const userMsg = "장소를 찾지 못했어요. 다른 릴스로 시도해 주세요";
-              showPlaceExtractionGuideToast();
-              showToast(userMsg, "info");
               setError(userMsg);
               setExtractOverlayError(userMsg);
-              setExtractOverlayErrorRaw(null);
+              setExtractOverlayErrorRaw(EXTRACT_EMPTY_RESULT_RAW);
               setExtractRetryUrl(failedUrl);
               setExtractOverlayComplete(false);
+              setExtractOverlayCompleteVariant("success");
+              setShowExtractOverlay(true);
             }
             setStatus("");
             devLog("[PindMap:url] extraction message hidden (empty result_places)");
@@ -3887,7 +3878,9 @@ function HomePageContent() {
           setStatus("");
           setExtractOverlayError(null);
           setExtractOverlayErrorRaw(null);
+          setExtractOverlayCompleteVariant("success");
           setExtractOverlayComplete(true);
+          setShowExtractOverlay(true);
           devLog("[PindMap:url] extraction message hidden (success)", {
             resultPlaces: places.length,
             newlyAddedCount,
@@ -3937,7 +3930,7 @@ function HomePageContent() {
     pollingTargets.forEach((job) => { void pollJob(job.jobId); });
 
     return () => window.clearInterval(interval);
-  }, [activeJobs, user?.id, showPlaceExtractionGuideToast, showToast]);
+  }, [activeJobs, user?.id, showToast]);
 
   const addPlace = async (place: Place) => {
     if (!userIdRef.current) {
@@ -6364,6 +6357,7 @@ function HomePageContent() {
     setIsSubmitting(true); setStatus(""); setError("");
     setExtractOverlayError(null);
     setExtractOverlayErrorRaw(null);
+    setExtractOverlayCompleteVariant("success");
     setExtractRetryUrl(null);
     orchestratorSuccessKeyRef.current = "";
     window.localStorage.removeItem(ACTIVE_JOBS_STORAGE_KEY);
@@ -6401,12 +6395,12 @@ function HomePageContent() {
       setExtractOverlayComplete(false);
       setExtractOverlayError(null);
       setExtractOverlayErrorRaw(null);
+      setExtractOverlayCompleteVariant("success");
       setExtractRetryUrl(trimmedUrl);
       setInstagramUrl("");
       setReelInputExpanded(false);
       setStatus("분석 작업이 시작됐어요. 다른 작업하셔도 돼요!");
       devLog("[PindMap:url] extraction message shown");
-      showToast("분석 작업을 백그라운드에서 시작했어요", "success");
       devLog("[PindMap:url] extraction success", { jobId: data.jobId });
       dlog.perf.markRender(perfScreen);
     } catch (e) {
@@ -10407,37 +10401,6 @@ function HomePageContent() {
 
   return (
     <>
-    {showPlaceExtractionToast && (
-      <div
-        style={{
-          position: "fixed",
-          top: "calc(env(safe-area-inset-top, 0px) + 12px)",
-          left: "16px",
-          right: "16px",
-          zIndex: 100001,
-          display: "flex",
-          justifyContent: "center",
-          pointerEvents: "none",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: "560px",
-            width: "100%",
-            background: "rgba(26, 42, 122, 0.96)",
-            color: "#fff",
-            borderRadius: "14px",
-            boxShadow: "0 10px 28px rgba(17, 24, 39, 0.28)",
-            padding: "12px 14px",
-            fontSize: "13px",
-            lineHeight: 1.45,
-            letterSpacing: "0.1px",
-          }}
-        >
-          📍 릴스 또는 게시물 캡션에 장소 정보가 기재되어있는지 확인해주세요
-        </div>
-      </div>
-    )}
     <main className="mobileRoot">
       <section className="phoneFrame">
         <section className={`appContent${tabBarHiddenByKeyboard ? " keyboardOpenContent" : ""}`}>
@@ -12885,6 +12848,7 @@ function HomePageContent() {
         <ExtractLoadingOverlay
           open={showExtractOverlay}
           complete={extractOverlayComplete}
+          completeVariant={extractOverlayCompleteVariant}
           errorMessage={extractOverlayError}
           errorRaw={extractOverlayErrorRaw}
           onDismiss={() => {
@@ -12892,7 +12856,20 @@ function HomePageContent() {
             setExtractOverlayComplete(false);
             setExtractOverlayError(null);
             setExtractOverlayErrorRaw(null);
+            setExtractOverlayCompleteVariant("success");
           }}
+          onViewMap={
+            extractOverlayCompleteVariant === "all_saved"
+              ? () => {
+                  setShowExtractOverlay(false);
+                  setExtractOverlayComplete(false);
+                  setExtractOverlayError(null);
+                  setExtractOverlayErrorRaw(null);
+                  setExtractOverlayCompleteVariant("success");
+                  setActiveTab("map");
+                }
+              : undefined
+          }
           onRetry={
             extractRetryUrl
               ? () => {
@@ -12900,6 +12877,7 @@ function HomePageContent() {
                   setExtractOverlayError(null);
                   setExtractOverlayErrorRaw(null);
                   setExtractOverlayComplete(false);
+                  setExtractOverlayCompleteVariant("success");
                   setShowExtractOverlay(false);
                   void handleAddFromInstagram(url);
                 }

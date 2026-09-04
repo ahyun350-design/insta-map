@@ -50,7 +50,15 @@ const TIPS = [
 
 const TIP_ROTATE_MS = 6500;
 
-/** 캡션에 장소/캡션 없음 — 재시도 무의미 */
+const NO_PLACE_VARIANTS = [
+  { icon: "👀", title: "이 릴스, 이름을 숨겼네요" },
+  { icon: "🕵️", title: "탐정도 못 찾았어요" },
+  { icon: "🙈", title: "캡션이 수줍음이 많네요" },
+  { icon: "🐕", title: "냄새는 났는데 이름이 없어요" },
+  { icon: "🔍", title: "이름표가 없는 릴스예요" },
+] as const;
+
+/** 서버 error_message — 캡션에 장소/캡션 없음 (재시도 무의미) */
 export function isExtractNoPlaceError(raw: string | null | undefined): boolean {
   const msg = (raw ?? "").trim();
   if (!msg) return false;
@@ -61,30 +69,56 @@ export function isExtractNoPlaceError(raw: string | null | undefined): boolean {
   );
 }
 
+/** 빈 result_places (캡션 가이드 흡수용) */
+export const EXTRACT_EMPTY_RESULT_RAW = "empty_extract_result";
+
+export function isExtractEmptyResult(raw: string | null | undefined): boolean {
+  return (raw ?? "").trim() === EXTRACT_EMPTY_RESULT_RAW;
+}
+
+function pickNoPlaceVariant(): (typeof NO_PLACE_VARIANTS)[number] {
+  const idx = Math.floor(Math.random() * NO_PLACE_VARIANTS.length);
+  return NO_PLACE_VARIANTS[idx] ?? NO_PLACE_VARIANTS[0];
+}
+
+export type ExtractOverlayCompleteVariant = "success" | "all_saved";
+
 type Props = {
   open: boolean;
   complete?: boolean;
+  /** success=신규 추가 / all_saved=이미 전부 저장됨 */
+  completeVariant?: ExtractOverlayCompleteVariant;
   errorMessage?: string | null;
   /** extract_jobs.error_message 원문 — 사유 분기용 */
   errorRaw?: string | null;
   onDismiss: () => void;
   onRetry?: () => void;
+  /** all_saved 시 「지도에서 보기」 */
+  onViewMap?: () => void;
 };
 
 export function ExtractLoadingOverlay({
   open,
   complete = false,
+  completeVariant = "success",
   errorMessage = null,
   errorRaw = null,
   onDismiss,
   onRetry,
+  onViewMap,
 }: Props) {
   const [progressIndex, setProgressIndex] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
+  const [noPlaceVariant, setNoPlaceVariant] = useState<(typeof NO_PLACE_VARIANTS)[number]>(
+    NO_PLACE_VARIANTS[0],
+  );
   const tip = TIPS[tipIndex];
   const showError = !!errorMessage;
   const showComplete = complete && !showError;
+  const showAllSaved = showComplete && completeVariant === "all_saved";
   const noPlaceError = showError && isExtractNoPlaceError(errorRaw);
+  const emptyResultError = showError && isExtractEmptyResult(errorRaw);
+  const captionTipError = noPlaceError || emptyResultError;
 
   useEffect(() => {
     if (!open || showComplete || showError) return;
@@ -109,14 +143,34 @@ export function ExtractLoadingOverlay({
     }
   }, [open]);
 
+  useEffect(() => {
+    if (open && noPlaceError) {
+      setNoPlaceVariant(pickNoPlaceVariant());
+    }
+  }, [open, noPlaceError, errorRaw]);
+
   if (!open) return null;
+
+  const footerNote = captionTipError
+    ? "캡션에 가게 이름이 있는 릴스는 잘 찾아요"
+    : showAllSaved
+      ? "저장된 장소는 지도 탭에서 볼 수 있어요"
+      : "앱을 닫아도 계속 저장돼요 · 여러 개 OK";
 
   return (
     <div
       className="extractLoadingOverlay"
       role="dialog"
       aria-modal="true"
-      aria-label={showError ? "추출 실패" : showComplete ? "추출 완료" : "장소 추출 중"}
+      aria-label={
+        showError
+          ? "추출 실패"
+          : showAllSaved
+            ? "이미 저장한 장소"
+            : showComplete
+              ? "추출 완료"
+              : "장소 추출 중"
+      }
       onClick={onDismiss}
     >
       <div
@@ -135,14 +189,35 @@ export function ExtractLoadingOverlay({
         {showError ? (
           noPlaceError ? (
             <div className="extractLoadingComplete">
-              <p className="extractLoadingCompleteEmoji" aria-hidden>
-                👀
+              <p
+                className="extractLoadingCompleteEmoji extractLoadingNoPlaceEmoji"
+                aria-hidden
+              >
+                {noPlaceVariant.icon}
               </p>
-              <p className="extractLoadingCompleteTitle">이 릴스엔 가게 이름이 없어요</p>
+              <p className="extractLoadingCompleteTitle">{noPlaceVariant.title}</p>
               <p className="extractLoadingCompleteSub">
                 글에 가게 이름이 안 적혀 있어요.
                 <br />
                 영상에는 있는데 캡션에 안 쓴 경우예요.
+              </p>
+              <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
+                확인
+              </button>
+            </div>
+          ) : emptyResultError ? (
+            <div className="extractLoadingComplete">
+              <p
+                className="extractLoadingCompleteEmoji extractLoadingNoPlaceEmoji"
+                aria-hidden
+              >
+                👀
+              </p>
+              <p className="extractLoadingCompleteTitle">장소를 찾지 못했어요</p>
+              <p className="extractLoadingCompleteSub">
+                캡션에서 가게 이름을 찾지 못했어요.
+                <br />
+                장소 이름이 적힌 릴스는 잘 찾아요.
               </p>
               <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
                 확인
@@ -162,6 +237,24 @@ export function ExtractLoadingOverlay({
               )}
             </div>
           )
+        ) : showAllSaved ? (
+          <div className="extractLoadingComplete">
+            <p className="extractLoadingCompleteEmoji" aria-hidden>
+              📌
+            </p>
+            <p className="extractLoadingCompleteTitle">이미 저장한 곳이에요</p>
+            <p className="extractLoadingCompleteSub">이 릴스의 장소는 전부 지도에 있어요.</p>
+            <button
+              type="button"
+              className="extractLoadingDismissBtn"
+              onClick={() => {
+                if (onViewMap) onViewMap();
+                else onDismiss();
+              }}
+            >
+              {onViewMap ? "지도에서 보기" : "확인"}
+            </button>
+          </div>
         ) : showComplete ? (
           <div className="extractLoadingComplete">
             <p className="extractLoadingCompleteEmoji" aria-hidden>
@@ -190,7 +283,7 @@ export function ExtractLoadingOverlay({
           </>
         )}
 
-        <p className="extractLoadingFooterNote">앱을 닫아도 계속 저장돼요 · 여러 개 OK</p>
+        <p className="extractLoadingFooterNote">{footerNote}</p>
 
         {!showComplete && !showError && (
           <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
