@@ -3169,51 +3169,96 @@ body {
 .dot.shopping   { background: #888; }
 
 /* ── 저장 탭 ── */
-.savedSortRow {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
-  overflow-x: auto;
+.savedSortDropdown {
+  position: relative;
+  display: inline-flex;
   margin: 0 0 16px;
-  padding-bottom: 2px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
 }
 
-.savedSortRow::-webkit-scrollbar {
-  display: none;
-}
-
-.savedSortChip {
-  flex-shrink: 0;
-  border: 0.5px solid var(--border);
-  background: transparent;
-  color: var(--gray-600);
-  border-radius: 2px;
-  padding: 6px 11px;
-  font-size: 11px;
-  letter-spacing: 0.4px;
-  cursor: pointer;
+.savedSortTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: #f0eee8;
+  color: #555555;
+  border-radius: 999px;
+  padding: 7px 12px 7px 14px;
+  font-size: 12px;
+  font-weight: 500;
   font-family: inherit;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  cursor: pointer;
+  letter-spacing: 0.2px;
 }
 
-.savedSortChipActive {
-  border-color: var(--navy);
-  color: var(--navy);
-  background: #f3f3f5;
+.savedSortTrigger:active {
+  background: #e8e5dc;
+}
+
+.savedSortChevron {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  color: #777777;
+  transition: transform 0.15s ease;
+}
+
+.savedSortDropdownOpen .savedSortChevron {
+  transform: rotate(180deg);
+}
+
+.savedSortMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 148px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: #ffffff;
+  border: 0.5px solid #ebe8e0;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(26, 42, 122, 0.12), 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-sizing: border-box;
+}
+
+.savedSortOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #555555;
+  text-align: left;
+  cursor: pointer;
+}
+
+.savedSortOption:hover {
+  background: #f7f6f2;
+}
+
+.savedSortOptionActive {
+  color: #1a2a7a;
   font-weight: 600;
+  background: #f3f1ea;
 }
 
-.savedSortChip:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.savedSortOptionCheck {
+  font-size: 12px;
+  color: #1a2a7a;
 }
 
 .savedSortRetryBtn {
   border: none;
   background: transparent;
-  color: var(--navy);
+  color: #1a2a7a;
   font-size: inherit;
   font-family: inherit;
   text-decoration: underline;

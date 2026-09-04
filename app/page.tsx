@@ -976,29 +976,27 @@ function extractRegion(address: string): string {
   return parts[0] || "기타";
 }
 
-type SavedPlacesSort = "region" | "saved" | "near" | "name" | "category";
+type SavedPlacesSort = "region" | "near" | "category";
 
 const SAVED_PLACES_SORT_KEY = "pindmap_saved_places_sort";
 const SAVED_PLACES_SORT_OPTIONS: { id: SavedPlacesSort; label: string }[] = [
   { id: "region", label: "지역순" },
-  { id: "saved", label: "저장순" },
   { id: "near", label: "가까운 순" },
-  { id: "name", label: "이름순" },
   { id: "category", label: "카테고리순" },
 ];
+
+function isSavedPlacesSort(value: string | null): value is SavedPlacesSort {
+  return value === "region" || value === "near" || value === "category";
+}
 
 function readSavedPlacesSort(): SavedPlacesSort {
   if (typeof window === "undefined") return "region";
   try {
     const raw = window.localStorage.getItem(SAVED_PLACES_SORT_KEY);
-    if (
-      raw === "region" ||
-      raw === "saved" ||
-      raw === "near" ||
-      raw === "name" ||
-      raw === "category"
-    ) {
-      return raw;
+    if (isSavedPlacesSort(raw)) return raw;
+    // 제거된 옵션(저장순/이름순) 또는 잘못된 값 → 지역순 폴백
+    if (raw != null) {
+      window.localStorage.setItem(SAVED_PLACES_SORT_KEY, "region");
     }
   } catch {
     /* ignore */
@@ -1013,6 +1011,10 @@ function writeSavedPlacesSort(sort: SavedPlacesSort): void {
   } catch {
     /* ignore */
   }
+}
+
+function savedPlacesSortLabel(sort: SavedPlacesSort): string {
+  return SAVED_PLACES_SORT_OPTIONS.find((o) => o.id === sort)?.label ?? "지역순";
 }
 
 function formatSavedPlaceDistanceM(meters: number): string {
@@ -1640,6 +1642,8 @@ function HomePageContent() {
   directionsChosenRef.current = directionsChosen;
   const [savedSearchQuery, setSavedSearchQuery] = useState("");
   const [savedPlacesSort, setSavedPlacesSort] = useState<SavedPlacesSort>(() => readSavedPlacesSort());
+  const [savedSortMenuOpen, setSavedSortMenuOpen] = useState(false);
+  const savedSortMenuRef = useRef<HTMLDivElement | null>(null);
   const [savedNearOrigin, setSavedNearOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const [savedNearLocating, setSavedNearLocating] = useState(false);
   const [savedNearDenied, setSavedNearDenied] = useState(false);
@@ -1891,6 +1895,28 @@ function HomePageContent() {
     },
     [requestSavedNearLocation],
   );
+
+  useEffect(() => {
+    if (!savedSortMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!savedSortMenuRef.current?.contains(event.target as Node)) {
+        setSavedSortMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSavedSortMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [savedSortMenuOpen]);
+
+  useEffect(() => {
+    if (activeTab !== "saved") setSavedSortMenuOpen(false);
+  }, [activeTab]);
 
   const savedNearAutoTriedRef = useRef(false);
   useEffect(() => {
@@ -12586,22 +12612,64 @@ function HomePageContent() {
             >×</button>
           )}
         </div>
-        <div className="savedSortRow" role="group" aria-label="저장 장소 정렬">
-          {SAVED_PLACES_SORT_OPTIONS.map((opt) => {
-            const isNear = opt.id === "near";
-            const isActive = savedPlacesSort === opt.id;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                className={`savedSortChip${isActive ? " savedSortChipActive" : ""}`}
-                aria-pressed={isActive}
-                onClick={() => handleSavedPlacesSortChange(opt.id)}
-              >
-                {isNear && savedNearLocating && isActive ? "위치 확인 중…" : opt.label}
-              </button>
-            );
-          })}
+        <div
+          ref={savedSortMenuRef}
+          className={`savedSortDropdown${savedSortMenuOpen ? " savedSortDropdownOpen" : ""}`}
+        >
+          <button
+            type="button"
+            className="savedSortTrigger"
+            aria-label="저장 장소 정렬"
+            aria-haspopup="listbox"
+            aria-expanded={savedSortMenuOpen}
+            aria-controls="saved-sort-listbox"
+            onClick={() => setSavedSortMenuOpen((open) => !open)}
+          >
+            <span>
+              {savedPlacesSort === "near" && savedNearLocating
+                ? "위치 확인 중…"
+                : savedPlacesSortLabel(savedPlacesSort)}
+            </span>
+            <svg className="savedSortChevron" viewBox="0 0 12 12" aria-hidden="true">
+              <path
+                d="M2.5 4.25L6 7.75L9.5 4.25"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          {savedSortMenuOpen && (
+            <ul
+              id="saved-sort-listbox"
+              className="savedSortMenu"
+              role="listbox"
+              aria-label="정렬 옵션"
+            >
+              {SAVED_PLACES_SORT_OPTIONS.map((opt) => {
+                const selected = savedPlacesSort === opt.id;
+                return (
+                  <li key={opt.id} role="presentation">
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      className={`savedSortOption${selected ? " savedSortOptionActive" : ""}`}
+                      onClick={() => {
+                        setSavedSortMenuOpen(false);
+                        handleSavedPlacesSortChange(opt.id);
+                      }}
+                    >
+                      <span>{opt.label}</span>
+                      {selected && <span className="savedSortOptionCheck" aria-hidden="true">✓</span>}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       </>
     )}
@@ -12758,24 +12826,7 @@ function HomePageContent() {
         });
       }
 
-      // ── 평면 목록: 저장순 / 가까운 순 / 이름순 ──
-      let flat = filtered.slice();
-      if (savedPlacesSort === "saved") {
-        flat.sort((a, b) => {
-          const ta = a.created_at ? Date.parse(a.created_at) : 0;
-          const tb = b.created_at ? Date.parse(b.created_at) : 0;
-          if (tb !== ta) return tb - ta;
-          return a.name.localeCompare(b.name, "ko");
-        });
-        return <div style={{ marginBottom: "16px" }}>{flat.map((place) => renderFlatItem(place))}</div>;
-      }
-
-      if (savedPlacesSort === "name") {
-        flat.sort((a, b) => a.name.localeCompare(b.name, "ko"));
-        return <div style={{ marginBottom: "16px" }}>{flat.map((place) => renderFlatItem(place))}</div>;
-      }
-
-      // near
+      // ── 가까운 순 (평면) ──
       const origin = savedNearOrigin ?? myLocationLatLngRef.current;
       if (!origin) {
         return (
@@ -12800,7 +12851,7 @@ function HomePageContent() {
           </p>
         );
       }
-      const withDist = flat.map((place) => {
+      const withDist = filtered.map((place) => {
         const hasCoords =
           typeof place.lat === "number" &&
           Number.isFinite(place.lat) &&
