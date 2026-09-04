@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1650,9 +1650,17 @@ function HomePageContent() {
   const [savedNearLocating, setSavedNearLocating] = useState(false);
   const [savedNearDenied, setSavedNearDenied] = useState(false);
   const [showMyListsScreen, setShowMyListsScreen] = useState(false);
-  const [addToListTarget, setAddToListTarget] = useState<{ id: string; name: string } | null>(null);
+  const [addToListTarget, setAddToListTarget] = useState<{
+    placeIds: string[];
+    placeName?: string;
+  } | null>(null);
   const [savedPlaceMenuId, setSavedPlaceMenuId] = useState<string | null>(null);
   const savedPlaceMenuRef = useRef<HTMLDivElement | null>(null);
+  const [savedSelectMode, setSavedSelectMode] = useState(false);
+  const [savedSelectedIds, setSavedSelectedIds] = useState<Set<string>>(() => new Set());
+  const savedLongPressTimerRef = useRef<number | null>(null);
+  const savedLongPressStartRef = useRef<{ x: number; y: number; id: string } | null>(null);
+  const savedSuppressClickRef = useRef(false);
   const isIOSLike = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   // 코스 만들기 관련 state
@@ -1936,8 +1944,27 @@ function HomePageContent() {
   }, [savedPlaceMenuId]);
 
   useEffect(() => {
-    if (activeTab !== "saved") setSavedPlaceMenuId(null);
+    if (activeTab !== "saved") {
+      setSavedPlaceMenuId(null);
+      setSavedSelectMode(false);
+      setSavedSelectedIds(new Set());
+    }
   }, [activeTab]);
+
+  const clearSavedLongPress = useCallback(() => {
+    if (savedLongPressTimerRef.current != null) {
+      window.clearTimeout(savedLongPressTimerRef.current);
+      savedLongPressTimerRef.current = null;
+    }
+    savedLongPressStartRef.current = null;
+  }, []);
+
+  const exitSavedSelectMode = useCallback(() => {
+    clearSavedLongPress();
+    setSavedSelectMode(false);
+    setSavedSelectedIds(new Set());
+    setSavedPlaceMenuId(null);
+  }, [clearSavedLongPress]);
 
   const openAddToListForSavedPlace = useCallback(
     (place: { id: string; name: string }) => {
@@ -1946,10 +1973,28 @@ function HomePageContent() {
         return;
       }
       setSavedPlaceMenuId(null);
-      setAddToListTarget({ id: place.id, name: place.name });
+      setAddToListTarget({ placeIds: [place.id], placeName: place.name });
     },
     [showToast],
   );
+
+  const openAddToListForSelectedPlaces = useCallback(() => {
+    if (!userIdRef.current) {
+      showToast("로그인 후 이용해주세요", "info");
+      return;
+    }
+    const ids = Array.from(savedSelectedIds);
+    if (ids.length === 0) {
+      showToast("장소를 선택해주세요", "info");
+      return;
+    }
+    setAddToListTarget({
+      placeIds: ids,
+      placeName: ids.length === 1
+        ? savedPlacesRef.current.find((p) => p.id === ids[0])?.name
+        : undefined,
+    });
+  }, [savedSelectedIds, showToast]);
 
   const savedNearAutoTriedRef = useRef(false);
   useEffect(() => {
@@ -12592,7 +12637,9 @@ function HomePageContent() {
         keyboardHeight > 0
           ? keyboardHeight
           : savedPlaces.length > 0 && !showCourseModal
-            ? "calc(100px + env(safe-area-inset-bottom, 0px))"
+            ? savedSelectMode
+              ? "calc(160px + env(safe-area-inset-bottom, 0px))"
+              : "calc(100px + env(safe-area-inset-bottom, 0px))"
             : 0,
       transition: "padding-bottom 0.25s ease",
       boxSizing: "border-box",
@@ -12600,52 +12647,37 @@ function HomePageContent() {
   >
   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
     <p className="screenTitle" style={{ margin: 0 }}>저장한 장소</p>
-    <div className="savedHeaderActions">
+    {savedPlaces.length > 0 && (
       <button
         type="button"
-        className="savedMyListsBtn"
+        data-coach="course_create"
         onClick={() => {
-          if (!userIdRef.current) {
-            showToast("로그인 후 이용해주세요", "info");
-            return;
-          }
-          setShowMyListsScreen(true);
+          track("course_create_open");
+          setShowCourseModal(true);
+          setCourseResult(null);
+          viewingSavedCourseIdRef.current = null;
+          setViewedCourseUserId(null);
+          setIsReadOnlyCourse(false);
+          setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
+        }}
+        style={{
+          border: "1px solid #1a2a7a",
+          background: "#fff",
+          color: "#1a2a7a",
+          borderRadius: "20px",
+          padding: "6px 14px",
+          fontSize: "12px",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontWeight: 500,
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
         }}
       >
-        내 목록
+        🗺️ 코스 만들기
       </button>
-      {savedPlaces.length > 0 && (
-        <button
-          type="button"
-          data-coach="course_create"
-          onClick={() => {
-            track("course_create_open");
-            setShowCourseModal(true);
-            setCourseResult(null);
-            viewingSavedCourseIdRef.current = null;
-            setViewedCourseUserId(null);
-            setIsReadOnlyCourse(false);
-            setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
-          }}
-          style={{
-            border: "1px solid #1a2a7a",
-            background: "#fff",
-            color: "#1a2a7a",
-            borderRadius: "20px",
-            padding: "6px 14px",
-            fontSize: "12px",
-            cursor: "pointer",
-            fontFamily: "inherit",
-            fontWeight: 500,
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-          }}
-        >
-          🗺️ 코스 만들기
-        </button>
-      )}
-    </div>
+    )}
   </div>
   {savedPlaces.length === 0 && (
   <EmptyState
@@ -12673,66 +12705,102 @@ function HomePageContent() {
             >×</button>
           )}
         </div>
-        <div
-          ref={savedSortMenuRef}
-          className={`savedSortDropdown${savedSortMenuOpen ? " savedSortDropdownOpen" : ""}`}
-        >
+        <div className="savedSortRow">
+          <div
+            ref={savedSortMenuRef}
+            className={`savedSortDropdown${savedSortMenuOpen ? " savedSortDropdownOpen" : ""}`}
+          >
+            <button
+              type="button"
+              className="savedSortTrigger"
+              aria-label="저장 장소 정렬"
+              aria-haspopup="listbox"
+              aria-expanded={savedSortMenuOpen}
+              aria-controls="saved-sort-listbox"
+              onClick={() => setSavedSortMenuOpen((open) => !open)}
+            >
+              <span>
+                {savedPlacesSort === "near" && savedNearLocating
+                  ? "위치 확인 중…"
+                  : savedPlacesSortLabel(savedPlacesSort)}
+              </span>
+              <svg className="savedSortChevron" viewBox="0 0 12 12" aria-hidden="true">
+                <path
+                  d="M2.5 4.25L6 7.75L9.5 4.25"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            {savedSortMenuOpen && (
+              <ul
+                id="saved-sort-listbox"
+                className="savedSortMenu"
+                role="listbox"
+                aria-label="정렬 옵션"
+              >
+                {SAVED_PLACES_SORT_OPTIONS.map((opt) => {
+                  const selected = savedPlacesSort === opt.id;
+                  return (
+                    <li key={opt.id} role="presentation">
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={`savedSortOption${selected ? " savedSortOptionActive" : ""}`}
+                        onClick={() => {
+                          setSavedSortMenuOpen(false);
+                          handleSavedPlacesSortChange(opt.id);
+                        }}
+                      >
+                        <span>{opt.label}</span>
+                        {selected && <span className="savedSortOptionCheck" aria-hidden="true">✓</span>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
           <button
             type="button"
-            className="savedSortTrigger"
-            aria-label="저장 장소 정렬"
-            aria-haspopup="listbox"
-            aria-expanded={savedSortMenuOpen}
-            aria-controls="saved-sort-listbox"
-            onClick={() => setSavedSortMenuOpen((open) => !open)}
+            className="savedMyListsPill"
+            onClick={() => {
+              if (!userIdRef.current) {
+                showToast("로그인 후 이용해주세요", "info");
+                return;
+              }
+              exitSavedSelectMode();
+              setShowMyListsScreen(true);
+            }}
           >
-            <span>
-              {savedPlacesSort === "near" && savedNearLocating
-                ? "위치 확인 중…"
-                : savedPlacesSortLabel(savedPlacesSort)}
-            </span>
-            <svg className="savedSortChevron" viewBox="0 0 12 12" aria-hidden="true">
-              <path
-                d="M2.5 4.25L6 7.75L9.5 4.25"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            내 목록
           </button>
-          {savedSortMenuOpen && (
-            <ul
-              id="saved-sort-listbox"
-              className="savedSortMenu"
-              role="listbox"
-              aria-label="정렬 옵션"
-            >
-              {SAVED_PLACES_SORT_OPTIONS.map((opt) => {
-                const selected = savedPlacesSort === opt.id;
-                return (
-                  <li key={opt.id} role="presentation">
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      className={`savedSortOption${selected ? " savedSortOptionActive" : ""}`}
-                      onClick={() => {
-                        setSavedSortMenuOpen(false);
-                        handleSavedPlacesSortChange(opt.id);
-                      }}
-                    >
-                      <span>{opt.label}</span>
-                      {selected && <span className="savedSortOptionCheck" aria-hidden="true">✓</span>}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
         </div>
       </>
+    )}
+    {savedSelectMode && savedPlaces.length > 0 && (
+      <div className="savedSelectBar" role="toolbar" aria-label="선택 모드">
+        <span className="savedSelectBarCount">{savedSelectedIds.size}개 선택</span>
+        <button
+          type="button"
+          className="savedSelectBarBtn"
+          onClick={exitSavedSelectMode}
+        >
+          취소
+        </button>
+        <button
+          type="button"
+          className="savedSelectBarBtn savedSelectBarBtnPrimary"
+          disabled={savedSelectedIds.size === 0}
+          onClick={openAddToListForSelectedPlaces}
+        >
+          목록에 담기
+        </button>
+      </div>
     )}
     {savedPlaces.length > 0 && (() => {
       // 검색어로 필터링
@@ -12744,77 +12812,140 @@ function HomePageContent() {
         return <p className="emptyText" style={{ textAlign: "center" }}>"{savedSearchQuery}"에 해당하는 장소가 없어요.</p>;
       }
 
-      const renderSavedItemActions = (place: Place) => (
-        <div
-          className="savedItemActions"
-          ref={savedPlaceMenuId === place.id ? savedPlaceMenuRef : undefined}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            className="savedItemMoreBtn"
-            aria-label="더보기"
-            aria-expanded={savedPlaceMenuId === place.id}
-            onClick={() =>
-              setSavedPlaceMenuId((id) => (id === place.id ? null : place.id))
-            }
-          >
-            ⋯
-          </button>
-          {savedPlaceMenuId === place.id && (
-            <div className="savedItemMoreMenu" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => openAddToListForSavedPlace(place)}
-              >
-                목록에 추가
-              </button>
-            </div>
-          )}
-          <button
-            className="ghostButton"
-            type="button"
-            onClick={() => deletePlace(place.id)}
-          >
-            삭제
-          </button>
-        </div>
-      );
+      const toggleSavedSelection = (placeId: string) => {
+        setSavedSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(placeId)) next.delete(placeId);
+          else next.add(placeId);
+          return next;
+        });
+      };
 
-      const renderFlatItem = (place: Place, metaExtra?: string) => (
-        <article
-          key={place.id}
-          className="savedItem"
-          style={{
-            cursor: "pointer",
-            borderLeft: `3px solid ${CATEGORY_COLORS[place.category]}`,
-            paddingLeft: "12px",
-            marginBottom: "2px",
-          }}
-          onClick={() => handleSavedPlaceClick(place)}
-        >
-          <span
-            style={{
-              width: "8px",
-              height: "8px",
-              borderRadius: "50%",
-              background: CATEGORY_COLORS[place.category],
-              flexShrink: 0,
-              display: "inline-block",
-            }}
-          />
-          <div className="savedBody">
-            <p className="savedName">{place.name}</p>
-            <p className="savedMeta">
-              {place.address}
-              {metaExtra ? ` · ${metaExtra}` : ""}
-              {` · ${place.category}`}
-            </p>
+      const bindSavedItemPress = (place: Place) => ({
+        onPointerDown: (e: ReactPointerEvent) => {
+          if (savedSelectMode) return;
+          if (e.pointerType === "mouse" && e.button !== 0) return;
+          clearSavedLongPress();
+          savedLongPressStartRef.current = { x: e.clientX, y: e.clientY, id: place.id };
+          savedLongPressTimerRef.current = window.setTimeout(() => {
+            savedLongPressTimerRef.current = null;
+            savedLongPressStartRef.current = null;
+            savedSuppressClickRef.current = true;
+            setSavedPlaceMenuId(null);
+            setSavedSelectMode(true);
+            setSavedSelectedIds(new Set([place.id]));
+          }, 500);
+        },
+        onPointerMove: (e: ReactPointerEvent) => {
+          const start = savedLongPressStartRef.current;
+          if (!start || savedLongPressTimerRef.current == null) return;
+          const dx = e.clientX - start.x;
+          const dy = e.clientY - start.y;
+          if (dx * dx + dy * dy > 100) clearSavedLongPress();
+        },
+        onPointerUp: () => clearSavedLongPress(),
+        onPointerCancel: () => clearSavedLongPress(),
+        onClick: () => {
+          if (savedSuppressClickRef.current) {
+            savedSuppressClickRef.current = false;
+            return;
+          }
+          if (savedSelectMode) {
+            toggleSavedSelection(place.id);
+            return;
+          }
+          handleSavedPlaceClick(place);
+        },
+      });
+
+      const renderSavedItemActions = (place: Place) => {
+        if (savedSelectMode) return null;
+        return (
+          <div
+            className="savedItemActions"
+            ref={savedPlaceMenuId === place.id ? savedPlaceMenuRef : undefined}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="savedItemMoreBtn"
+              aria-label="더보기"
+              aria-expanded={savedPlaceMenuId === place.id}
+              onClick={() =>
+                setSavedPlaceMenuId((id) => (id === place.id ? null : place.id))
+              }
+            >
+              ⋯
+            </button>
+            {savedPlaceMenuId === place.id && (
+              <div className="savedItemMoreMenu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => openAddToListForSavedPlace(place)}
+                >
+                  목록에 추가
+                </button>
+              </div>
+            )}
+            <button
+              className="ghostButton"
+              type="button"
+              onClick={() => deletePlace(place.id)}
+            >
+              삭제
+            </button>
           </div>
-          {renderSavedItemActions(place)}
-        </article>
-      );
+        );
+      };
+
+      const renderFlatItem = (place: Place, metaExtra?: string, accent?: string) => {
+        const color = accent ?? CATEGORY_COLORS[place.category];
+        const selected = savedSelectedIds.has(place.id);
+        return (
+          <article
+            key={place.id}
+            className={`savedItem${selected && savedSelectMode ? " savedItemSelected" : ""}`}
+            style={{
+              cursor: "pointer",
+              borderLeft: `3px solid ${color}`,
+              paddingLeft: "12px",
+              marginBottom: "2px",
+            }}
+            {...bindSavedItemPress(place)}
+          >
+            {savedSelectMode && (
+              <input
+                type="checkbox"
+                className="savedItemCheck"
+                checked={selected}
+                readOnly
+                tabIndex={-1}
+                aria-hidden
+              />
+            )}
+            <span
+              style={{
+                width: "8px",
+                height: "8px",
+                borderRadius: "50%",
+                background: color,
+                flexShrink: 0,
+                display: "inline-block",
+              }}
+            />
+            <div className="savedBody">
+              <p className="savedName">{place.name}</p>
+              <p className="savedMeta">
+                {place.address}
+                {metaExtra ? ` · ${metaExtra}` : ""}
+              </p>
+            </div>
+            {renderSavedItemActions(place)}
+          </article>
+        );
+      };
 
       // ── 지역순 (기본): 지역 > 카테고리 > 장소 ──
       if (savedPlacesSort === "region") {
@@ -12844,16 +12975,7 @@ function HomePageContent() {
                     <span style={{ fontSize: "11px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
                     <span style={{ fontSize: "10px", color: "#bbb" }}>{places.length}</span>
                   </div>
-                  {places.map(place => (
-                    <article key={place.id} className="savedItem" style={{ cursor: "pointer", borderLeft: `3px solid ${CATEGORY_COLORS[cat]}`, paddingLeft: "12px", marginBottom: "2px" }} onClick={() => handleSavedPlaceClick(place)}>
-                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[cat], flexShrink: 0, display: "inline-block" }} />
-                      <div className="savedBody">
-                        <p className="savedName">{place.name}</p>
-                        <p className="savedMeta">{place.address}</p>
-                      </div>
-                      {renderSavedItemActions(place)}
-                    </article>
-                  ))}
+                  {places.map(place => renderFlatItem(place, undefined, CATEGORY_COLORS[cat]))}
                 </div>
               );
             })}
@@ -12873,35 +12995,7 @@ function HomePageContent() {
                 <span style={{ fontSize: "14px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
                 <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{places.length}</span>
               </div>
-              {places.map((place) => (
-                <article
-                  key={place.id}
-                  className="savedItem"
-                  style={{
-                    cursor: "pointer",
-                    borderLeft: `3px solid ${CATEGORY_COLORS[cat]}`,
-                    paddingLeft: "12px",
-                    marginBottom: "2px",
-                  }}
-                  onClick={() => handleSavedPlaceClick(place)}
-                >
-                  <span
-                    style={{
-                      width: "8px",
-                      height: "8px",
-                      borderRadius: "50%",
-                      background: CATEGORY_COLORS[cat],
-                      flexShrink: 0,
-                      display: "inline-block",
-                    }}
-                  />
-                  <div className="savedBody">
-                    <p className="savedName">{place.name}</p>
-                    <p className="savedMeta">{place.address}</p>
-                  </div>
-                  {renderSavedItemActions(place)}
-                </article>
-              ))}
+              {places.map((place) => renderFlatItem(place, undefined, CATEGORY_COLORS[cat]))}
             </div>
           );
         });
@@ -12951,7 +13045,10 @@ function HomePageContent() {
       return (
         <div style={{ marginBottom: "16px" }}>
           {withDist.map(({ place, meters, hasCoords }) =>
-            renderFlatItem(place, hasCoords ? formatSavedPlaceDistanceM(meters) : "거리 정보 없음"),
+            renderFlatItem(
+              place,
+              `${hasCoords ? formatSavedPlaceDistanceM(meters) : "거리 정보 없음"} · ${place.category}`,
+            ),
           )}
         </div>
       );
@@ -13642,10 +13739,14 @@ function HomePageContent() {
         {user?.id && addToListTarget && (
           <AddToListSheet
             open
-            placeId={addToListTarget.id}
-            placeName={addToListTarget.name}
+            placeIds={addToListTarget.placeIds}
+            placeName={addToListTarget.placeName}
             userId={user.id}
+            keyboardHeight={keyboardHeight}
             onClose={() => setAddToListTarget(null)}
+            onChanged={() => {
+              if (savedSelectMode) exitSavedSelectMode();
+            }}
             showToast={showToast}
           />
         )}

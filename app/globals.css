@@ -3188,7 +3188,93 @@ body {
 .savedSortDropdown {
   position: relative;
   display: inline-flex;
+  margin: 0;
+}
+
+.savedSortRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 16px;
+  flex-wrap: wrap;
+}
+
+.savedMyListsPill {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: #f0eee8;
+  color: #555555;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+}
+
+.savedMyListsPill:active {
+  background: #e8e5dc;
+}
+
+.savedSelectBar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #fff;
+  border-top: 0.5px solid #ebe8e0;
+  box-shadow: 0 -4px 16px rgba(26, 42, 122, 0.08);
+  box-sizing: border-box;
+}
+
+.savedSelectBarCount {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a2a7a;
+}
+
+.savedSelectBarBtn {
+  border: 0.5px solid #d8d4c8;
+  background: #f3f1ea;
+  color: #1a2a7a;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.savedSelectBarBtnPrimary {
+  border: none;
+  background: #1a2a7a;
+  color: #fff;
+}
+
+.savedSelectBarBtnPrimary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.savedItemCheck {
+  width: 18px;
+  height: 18px;
+  accent-color: #1a2a7a;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.savedItemSelected {
+  background: #faf8f3;
 }
 
 .savedSortTrigger {
@@ -3375,8 +3461,13 @@ body {
 }
 
 .placeListSheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   width: 100%;
   max-width: 480px;
+  margin: 0 auto;
   max-height: min(78vh, 640px);
   background: #fff;
   border-radius: 16px 16px 0 0;

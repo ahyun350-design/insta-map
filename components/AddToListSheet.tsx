@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   addPlaceToList,
   createList,
@@ -12,9 +12,11 @@ import {
 
 type Props = {
   open: boolean;
-  placeId: string;
+  /** 한 개 이상 — 단일이면 체크/해제로 담기·빼기, 복수면 체크 시 전부 담기 */
+  placeIds: string[];
   userId: string;
   placeName?: string;
+  keyboardHeight?: number;
   onClose: () => void;
   onChanged?: () => void;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
@@ -22,13 +24,17 @@ type Props = {
 
 export function AddToListSheet({
   open,
-  placeId,
+  placeIds,
   userId,
   placeName,
+  keyboardHeight = 0,
   onClose,
   onChanged,
   showToast,
 }: Props) {
+  const bulk = placeIds.length > 1;
+  const singlePlaceId = placeIds.length === 1 ? placeIds[0]! : null;
+
   const [lists, setLists] = useState<PlaceListSummary[]>([]);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -36,30 +42,34 @@ export function AddToListSheet({
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
+  const createRowRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [listsRes, forPlaceRes] = await Promise.all([
-        fetchMyLists(userId),
-        fetchListsForPlace(placeId),
-      ]);
+      const listsRes = await fetchMyLists(userId);
       if (listsRes.error) {
         showToast(listsRes.error, "error");
         setLists([]);
       } else {
         setLists(listsRes.data);
       }
-      if (forPlaceRes.error) {
-        showToast(forPlaceRes.error, "error");
-        setCheckedIds(new Set());
+
+      if (singlePlaceId) {
+        const forPlaceRes = await fetchListsForPlace(singlePlaceId);
+        if (forPlaceRes.error) {
+          showToast(forPlaceRes.error, "error");
+          setCheckedIds(new Set());
+        } else {
+          setCheckedIds(new Set(forPlaceRes.data));
+        }
       } else {
-        setCheckedIds(new Set(forPlaceRes.data));
+        setCheckedIds(new Set());
       }
     } finally {
       setLoading(false);
     }
-  }, [placeId, userId, showToast]);
+  }, [singlePlaceId, userId, showToast]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,7 +78,31 @@ export function AddToListSheet({
     void load();
   }, [open, load]);
 
-  if (!open) return null;
+  useEffect(() => {
+    if (!open || !creating || keyboardHeight <= 0) return;
+    const id = window.setTimeout(() => {
+      createRowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, [open, creating, keyboardHeight]);
+
+  if (!open || placeIds.length === 0) return null;
+
+  const addAllToList = async (listId: string): Promise<string | null> => {
+    for (const placeId of placeIds) {
+      const { error } = await addPlaceToList(listId, placeId);
+      if (error) return error;
+    }
+    return null;
+  };
+
+  const removeAllFromList = async (listId: string): Promise<string | null> => {
+    for (const placeId of placeIds) {
+      const { error } = await removePlaceFromList(listId, placeId);
+      if (error) return error;
+    }
+    return null;
+  };
 
   const toggleList = async (listId: string) => {
     if (busyId) return;
@@ -85,21 +119,27 @@ export function AddToListSheet({
         l.id === listId
           ? {
               ...l,
-              place_count: Math.max(0, l.place_count + (wasChecked ? -1 : 1)),
+              place_count: Math.max(
+                0,
+                l.place_count + (wasChecked ? -placeIds.length : placeIds.length),
+              ),
             }
           : l,
       ),
     );
 
-    const result = wasChecked
-      ? await removePlaceFromList(listId, placeId)
-      : await addPlaceToList(listId, placeId);
+    const error = wasChecked
+      ? await removeAllFromList(listId)
+      : await addAllToList(listId);
 
     setBusyId(null);
-    if (result.error) {
-      showToast(result.error, "error");
+    if (error) {
+      showToast(error, "error");
       void load();
       return;
+    }
+    if (bulk && !wasChecked) {
+      showToast(`${placeIds.length}곳을 목록에 담았어요`, "success");
     }
     onChanged?.();
   };
@@ -114,19 +154,28 @@ export function AddToListSheet({
       showToast(error || "목록을 만들지 못했어요.", "error");
       return;
     }
-    const addRes = await addPlaceToList(data.id, placeId);
+    const addError = await addAllToList(data.id);
     setCreateBusy(false);
-    if (addRes.error) {
-      showToast(addRes.error, "error");
+    if (addError) {
+      showToast(addError, "error");
       void load();
       return;
     }
     setNewTitle("");
     setCreating(false);
-    showToast("새 목록에 담았어요", "success");
+    showToast(
+      bulk ? `새 목록에 ${placeIds.length}곳을 담았어요` : "새 목록에 담았어요",
+      "success",
+    );
     onChanged?.();
     void load();
   };
+
+  const subtitle = bulk
+    ? `${placeIds.length}곳 선택됨`
+    : placeName || undefined;
+
+  const sheetBottom = keyboardHeight > 0 ? keyboardHeight : 0;
 
   return (
     <div className="placeListSheetOverlay" role="presentation" onClick={onClose}>
@@ -134,13 +183,21 @@ export function AddToListSheet({
         className="placeListSheet"
         role="dialog"
         aria-label="목록에 추가"
+        style={{
+          bottom: sheetBottom,
+          transition: "bottom 0.25s ease, padding-bottom 0.25s ease",
+          paddingBottom:
+            keyboardHeight > 0
+              ? 16
+              : "calc(16px + env(safe-area-inset-bottom, 0px))",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="placeListSheetHandle" aria-hidden />
         <header className="placeListSheetHeader">
           <div>
             <p className="placeListSheetTitle">목록에 추가</p>
-            {placeName ? <p className="placeListSheetSubtitle">{placeName}</p> : null}
+            {subtitle ? <p className="placeListSheetSubtitle">{subtitle}</p> : null}
           </div>
           <button type="button" className="placeListSheetClose" onClick={onClose} aria-label="닫기">
             ×
@@ -157,7 +214,7 @@ export function AddToListSheet({
               + 새 목록 만들기
             </button>
           ) : (
-            <div className="placeListSheetCreateRow">
+            <div className="placeListSheetCreateRow" ref={createRowRef}>
               <input
                 className="placeListSheetCreateInput"
                 value={newTitle}
