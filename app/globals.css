@@ -4825,6 +4825,40 @@ body {
   opacity: 0.88;
 }
 
+.extractLoadingActions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.extractLoadingSecondaryBtn {
+  width: 100%;
+  margin: 0;
+  padding: 11px 16px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #8b93aa;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.extractLoadingSecondaryBtn:active {
+  opacity: 0.75;
+}
+
+.extractLoadingManualHint {
+  display: inline-block;
+  margin-top: 10px;
+  color: #5a6478;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .extractLoadingComplete {
   padding: 12px 0 8px;
 }

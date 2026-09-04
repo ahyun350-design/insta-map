@@ -96,6 +96,8 @@ type Props = {
   onRetry?: () => void;
   /** all_saved 시 「지도에서 보기」 */
   onViewMap?: () => void;
+  /** 캡션 실패 시 「직접 찾아보기」→ 지도 검색 */
+  onManualSearch?: () => void;
 };
 
 export function ExtractLoadingOverlay({
@@ -107,6 +109,7 @@ export function ExtractLoadingOverlay({
   onDismiss,
   onRetry,
   onViewMap,
+  onManualSearch,
 }: Props) {
   const [progressIndex, setProgressIndex] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
@@ -201,10 +204,25 @@ export function ExtractLoadingOverlay({
                 글에 가게 이름이 안 적혀 있어요.
                 <br />
                 영상에는 있는데 캡션에 안 쓴 경우예요.
+                <br />
+                <span className="extractLoadingManualHint">
+                  영상에 보이는 가게 이름을 알고 있다면 직접 찾아보세요
+                </span>
               </p>
-              <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
-                확인
-              </button>
+              <div className="extractLoadingActions">
+                {onManualSearch && (
+                  <button type="button" className="extractLoadingDismissBtn" onClick={onManualSearch}>
+                    직접 찾아보기
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={onManualSearch ? "extractLoadingSecondaryBtn" : "extractLoadingDismissBtn"}
+                  onClick={onDismiss}
+                >
+                  확인
+                </button>
+              </div>
             </div>
           ) : emptyResultError ? (
             <div className="extractLoadingComplete">
@@ -219,10 +237,25 @@ export function ExtractLoadingOverlay({
                 캡션에서 가게 이름을 찾지 못했어요.
                 <br />
                 장소 이름이 적힌 릴스는 잘 찾아요.
+                <br />
+                <span className="extractLoadingManualHint">
+                  영상에 보이는 가게 이름을 알고 있다면 직접 찾아보세요
+                </span>
               </p>
-              <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
-                확인
-              </button>
+              <div className="extractLoadingActions">
+                {onManualSearch && (
+                  <button type="button" className="extractLoadingDismissBtn" onClick={onManualSearch}>
+                    직접 찾아보기
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={onManualSearch ? "extractLoadingSecondaryBtn" : "extractLoadingDismissBtn"}
+                  onClick={onDismiss}
+                >
+                  확인
+                </button>
+              </div>
             </div>
           ) : (
             <div className="extractLoadingComplete">

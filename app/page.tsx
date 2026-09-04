@@ -1481,6 +1481,7 @@ function HomePageContent() {
   const selectedPlaceRef = useRef<any>(null);
   selectedPlaceRef.current = selectedPlace;
   const [searchQuery, setSearchQuery] = useState("");
+  const expandedMapSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [mapSearchResults, setMapSearchResults] = useState<MapSearchPlaceResult[]>([]);
   const mapSearchResultsRef = useRef<MapSearchPlaceResult[]>([]);
   mapSearchResultsRef.current = mapSearchResults;
@@ -11818,6 +11819,7 @@ function HomePageContent() {
                     >
                       <div style={{ position: "relative", flex: 1, display: "flex", alignItems: "center" }}>
                         <input
+                          ref={expandedMapSearchInputRef}
                           className="mapInput"
                           placeholder="장소명으로 검색"
                           value={searchQuery}
@@ -13364,6 +13366,18 @@ function HomePageContent() {
             setExtractOverlayCompleteVariant("success");
           }}
           onViewMap={undefined}
+          onManualSearch={() => {
+            setShowExtractOverlay(false);
+            setExtractOverlayComplete(false);
+            setExtractOverlayError(null);
+            setExtractOverlayErrorRaw(null);
+            setExtractOverlayCompleteVariant("success");
+            setActiveTab("map");
+            setMapExpanded(true);
+            window.setTimeout(() => {
+              expandedMapSearchInputRef.current?.focus();
+            }, 450);
+          }}
           onRetry={
             extractRetryUrl
               ? () => {

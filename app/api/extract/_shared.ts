@@ -115,15 +115,15 @@ function buildKakaoQueryFallbacks(name: string): { query: string; stage: string 
 }
 
 /**
- * 카카오 키워드 검색 — 0건이면 어절 폴백 순차 재시도(최대 4회), 1차 히트 시 즉시 종료.
- * size=5로 조회하되 이름/지역 검증 없이 documents[0]을 채택.
- * @param hint 호환용(현재 미사용).
- * @param region 호환용(현재 미사용).
+ * 카카오 키워드 검색 — 0건이면 어절 폴백 순차 재시도(최대 4회).
+ * size=15. hint가 있으면 주소 포함 후보 우선, 없으면 "hint + 상호명" 재검색, 그래도 없으면 documents[0].
+ * @param hint Claude가 뽑은 동네/역/구명 (주소 매칭·재검색에 사용).
+ * @param _region 호환용(현재 미사용).
  * @param _caption 호환용(미사용).
  */
 export async function searchKakaoPlace(
   name: string,
-  _hint: string = "",
+  hint: string = "",
   _region?: string,
   _caption: string = "",
   options?: SearchKakaoPlaceOptions,
@@ -133,6 +133,7 @@ export async function searchKakaoPlace(
 
   const trimmed = name.trim();
   if (!trimmed) return null;
+  const hintTrimmed = hint.trim();
 
   const deadlineMs = options?.deadlineMs;
   const queries = buildKakaoQueryFallbacks(trimmed);
@@ -147,14 +148,38 @@ export async function searchKakaoPlace(
     category_name?: string;
   };
 
-  const lookupOnce = async (
+  type PickKind = "hint_match" | "hint_query" | "first";
+
+  const toLookup = (doc: Doc, queryIndex: number): KakaoPlaceLookup | null => {
+    const lat = parseFloat(doc.y);
+    const lng = parseFloat(doc.x);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return {
+      address: doc.address_name,
+      roadAddress: doc.road_address_name || doc.address_name,
+      lat,
+      lng,
+      placeName: (doc.place_name || "").trim(),
+      category_group_code: (doc.category_group_code ?? "").trim(),
+      category_name: (doc.category_name ?? "").trim(),
+      queryIndex,
+    };
+  };
+
+  const addressIncludesHint = (doc: Doc, regionHint: string): boolean => {
+    const road = (doc.road_address_name || "").trim();
+    const addr = (doc.address_name || "").trim();
+    return road.includes(regionHint) || addr.includes(regionHint);
+  };
+
+  const fetchDocuments = async (
     query: string,
     queryIndex: number,
     stage: string,
-  ): Promise<KakaoPlaceLookup | null> => {
+  ): Promise<Doc[] | null> => {
     try {
       const res = await fetch(
-        `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=5`,
+        `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=15`,
         { headers: { Authorization: `KakaoAK ${kakaoKey}` } },
       );
       if (!res.ok) {
@@ -168,42 +193,7 @@ export async function searchKakaoPlace(
         return null;
       }
       const data = (await res.json()) as { documents?: Doc[] };
-      const first = data.documents?.[0];
-      if (!first) {
-        console.log("[extract] kakao search", { query, queryIndex, stage, hit: false });
-        return null;
-      }
-      const lat = parseFloat(first.y);
-      const lng = parseFloat(first.x);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        console.log("[extract] kakao search", {
-          query,
-          queryIndex,
-          stage,
-          hit: false,
-          reason: "invalid_coords",
-        });
-        return null;
-      }
-      const placeName = (first.place_name || "").trim();
-      console.log("[extract] kakao search", {
-        query,
-        queryIndex,
-        stage,
-        hit: true,
-        placeName,
-        address: first.road_address_name || first.address_name,
-      });
-      return {
-        address: first.address_name,
-        roadAddress: first.road_address_name || first.address_name,
-        lat,
-        lng,
-        placeName,
-        category_group_code: (first.category_group_code ?? "").trim(),
-        category_name: (first.category_name ?? "").trim(),
-        queryIndex,
-      };
+      return data.documents ?? [];
     } catch {
       console.log("[extract] kakao search", {
         query,
@@ -214,6 +204,94 @@ export async function searchKakaoPlace(
       });
       return null;
     }
+  };
+
+  const logPick = (
+    pick: PickKind,
+    lookup: KakaoPlaceLookup,
+    meta: { query: string; queryIndex: number; stage: string; candidates: number },
+  ) => {
+    console.log("[extract] kakao search", {
+      pick,
+      hint: hintTrimmed || undefined,
+      candidates: meta.candidates,
+      placeName: lookup.placeName,
+      query: meta.query,
+      queryIndex: meta.queryIndex,
+      stage: meta.stage,
+      hit: true,
+      address: lookup.roadAddress,
+    });
+  };
+
+  /** 결과 목록에서 hint 우선 → hint+상호명 재검색 → documents[0] */
+  const pickFromDocuments = async (
+    docs: Doc[],
+    query: string,
+    queryIndex: number,
+    stage: string,
+  ): Promise<KakaoPlaceLookup | null> => {
+    if (hintTrimmed) {
+      const matched = docs.find((d) => addressIncludesHint(d, hintTrimmed));
+      if (matched) {
+        const lookup = toLookup(matched, queryIndex);
+        if (lookup) {
+          logPick("hint_match", lookup, {
+            query,
+            queryIndex,
+            stage,
+            candidates: docs.length,
+          });
+          return lookup;
+        }
+      }
+
+      const hintQuery = `${hintTrimmed} ${trimmed}`.replace(/\s+/g, " ").trim();
+      if (hintQuery && hintQuery !== query) {
+        if (deadlineMs != null && Date.now() >= deadlineMs) {
+          console.log("[extract] kakao search", {
+            query: hintQuery,
+            queryIndex,
+            stage: `${stage}+hint_query`,
+            hit: false,
+            reason: "deadline",
+          });
+        } else {
+          const hintDocs = await fetchDocuments(hintQuery, queryIndex, `${stage}+hint_query`);
+          if (hintDocs && hintDocs.length > 0) {
+            const lookup = toLookup(hintDocs[0]!, queryIndex);
+            if (lookup) {
+              logPick("hint_query", lookup, {
+                query: hintQuery,
+                queryIndex,
+                stage: `${stage}+hint_query`,
+                candidates: hintDocs.length,
+              });
+              return lookup;
+            }
+          }
+        }
+      }
+    }
+
+    const lookup = toLookup(docs[0]!, queryIndex);
+    if (!lookup) {
+      console.log("[extract] kakao search", {
+        query,
+        queryIndex,
+        stage,
+        hit: false,
+        reason: "invalid_coords",
+      });
+      return null;
+    }
+    logPick("first", lookup, {
+      query,
+      queryIndex,
+      stage,
+      candidates: docs.length,
+    });
+    return lookup;
   };
 
   for (let i = 0; i < queries.length; i++) {
@@ -228,8 +306,19 @@ export async function searchKakaoPlace(
       });
       return null;
     }
-    const result = await lookupOnce(item.query, i, item.stage);
-    if (result) return result;
+    const docs = await fetchDocuments(item.query, i, item.stage);
+    if (docs == null) continue;
+    if (docs.length === 0) {
+      console.log("[extract] kakao search", {
+        query: item.query,
+        queryIndex: i,
+        stage: item.stage,
+        hit: false,
+      });
+      continue;
+    }
+    const picked = await pickFromDocuments(docs, item.query, i, item.stage);
+    if (picked) return picked;
   }
   return null;
 }
