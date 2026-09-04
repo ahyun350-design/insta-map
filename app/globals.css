@@ -5062,13 +5062,15 @@ body {
 
 .clipboardInstagramBannerClose {
   flex-shrink: 0;
-  width: 36px;
+  min-width: 44px;
   height: 36px;
+  padding: 0 8px;
   border: none;
-  border-radius: 50%;
+  border-radius: 8px;
   background: transparent;
   color: #8b93aa;
-  font-size: 20px;
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1;
   cursor: pointer;
   font-family: inherit;

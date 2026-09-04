@@ -7,22 +7,26 @@ import { findInstagramPostUrlInText } from "@/lib/instagramUrl";
 import { track } from "@/lib/track";
 import { supabase } from "@/lib/supabase";
 
-const PREFS_KEY = "clipboard_last_suggested_instagram_url";
+/** 앱 세션(완전 종료 전까지) 「안 함」 후 배너 재표시 금지 */
+const SESSION_DISMISS_KEY = "pindmap_clipboard_suggest_session_dismissed";
 
-async function readLastSuggestedUrl(): Promise<string | null> {
+function normalizeIgUrl(url: string): string {
+  return url.replace(/\/$/, "").toLowerCase();
+}
+
+function readSessionDismissed(): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    const { Preferences } = await import("@capacitor/preferences");
-    const { value } = await Preferences.get({ key: PREFS_KEY });
-    return value?.trim() || null;
+    return window.sessionStorage.getItem(SESSION_DISMISS_KEY) === "1";
   } catch {
-    return null;
+    return false;
   }
 }
 
-async function writeLastSuggestedUrl(url: string): Promise<void> {
+function writeSessionDismissed(): void {
+  if (typeof window === "undefined") return;
   try {
-    const { Preferences } = await import("@capacitor/preferences");
-    await Preferences.set({ key: PREFS_KEY, value: url });
+    window.sessionStorage.setItem(SESSION_DISMISS_KEY, "1");
   } catch {
     /* ignore */
   }
@@ -39,24 +43,32 @@ async function readClipboardText(): Promise<string | null> {
   }
 }
 
+/** 이미 추출·저장한 URL 이면 true (배너 스킵) */
 async function userAlreadyExtractedUrl(userId: string, url: string): Promise<boolean> {
   try {
+    const target = normalizeIgUrl(url);
     const { data, error } = await supabase
       .from("extract_jobs")
       .select("id, instagram_url")
       .eq("user_id", userId)
       .eq("status", "completed")
-      .limit(100);
+      .order("created_at", { ascending: false })
+      .limit(200);
     if (error || !data) return false;
-    const target = url.replace(/\/$/, "").toLowerCase();
-    return data.some((row) => {
-      const raw = typeof row.instagram_url === "string" ? row.instagram_url : "";
-      const normalized = raw.replace(/\/$/, "").toLowerCase();
-      return normalized === target || normalized.includes(target) || target.includes(normalized);
-    });
+    return data.some((row) => urlsMatch(row.instagram_url, target));
   } catch {
     return false;
   }
+}
+
+function urlsMatch(raw: unknown, targetNormalized: string): boolean {
+  if (typeof raw !== "string" || !raw.trim()) return false;
+  const normalized = normalizeIgUrl(raw);
+  return (
+    normalized === targetNormalized ||
+    normalized.includes(targetNormalized) ||
+    targetNormalized.includes(normalized)
+  );
 }
 
 type Options = {
@@ -66,8 +78,8 @@ type Options = {
 };
 
 /**
- * 포그라운드 진입 시 클립보드 Instagram URL 1회 확인 → 배너용 URL.
- * 실패·미로그인은 no-op. 앱 동작에 영향 없음.
+ * 포그라운드 진입 시 클립보드 Instagram URL 확인 → 배너용 URL.
+ * 「안 함」 후엔 해당 앱 세션 동안 재표시 안 함 (sessionStorage).
  */
 export function useClipboardInstagramSuggest({ userId, activeInstagramUrls = [] }: Options) {
   const [suggestedUrl, setSuggestedUrl] = useState<string | null>(null);
@@ -75,29 +87,46 @@ export function useClipboardInstagramSuggest({ userId, activeInstagramUrls = [] 
   const activeUrlsRef = useRef(activeInstagramUrls);
   activeUrlsRef.current = activeInstagramUrls;
 
-  const rememberAndClear = useCallback(async (url: string) => {
-    await writeLastSuggestedUrl(url);
-    setSuggestedUrl((prev) => (prev === url ? null : prev));
-  }, []);
+  /** 세션 전체 억제 (안 함) — 메모리 + sessionStorage */
+  const sessionDismissedRef = useRef(readSessionDismissed());
+  /** 이번 세션에 이미 제안했거나 스킵한 URL (포그라운드마다 재팝업 방지) */
+  const handledUrlsRef = useRef<Set<string>>(new Set());
 
   const dismiss = useCallback(() => {
     const url = suggestedUrl;
-    if (!url) return;
-    track("clipboard_dismiss", { url });
-    void rememberAndClear(url);
-  }, [suggestedUrl, rememberAndClear]);
+    sessionDismissedRef.current = true;
+    writeSessionDismissed();
+    if (url) {
+      handledUrlsRef.current.add(normalizeIgUrl(url));
+      track("clipboard_dismiss", { url });
+    }
+    setSuggestedUrl(null);
+  }, [suggestedUrl]);
+
+  /** 배너만 숨김 — 세션 억제는 아님 (다른 UI 동작 시) */
+  const clearBanner = useCallback(() => {
+    setSuggestedUrl((prev) => {
+      if (prev) handledUrlsRef.current.add(normalizeIgUrl(prev));
+      return null;
+    });
+  }, []);
 
   const accept = useCallback((): string | null => {
     const url = suggestedUrl;
     if (!url) return null;
     track("clipboard_accept", { url });
-    void rememberAndClear(url);
+    handledUrlsRef.current.add(normalizeIgUrl(url));
+    setSuggestedUrl(null);
     return url;
-  }, [suggestedUrl, rememberAndClear]);
+  }, [suggestedUrl]);
 
   const checkOnce = useCallback(async () => {
     if (!userId) return;
     if (!Capacitor.isNativePlatform()) return;
+    if (sessionDismissedRef.current || readSessionDismissed()) {
+      sessionDismissedRef.current = true;
+      return;
+    }
     if (checkingRef.current) return;
     checkingRef.current = true;
     try {
@@ -106,25 +135,31 @@ export function useClipboardInstagramSuggest({ userId, activeInstagramUrls = [] 
       const url = findInstagramPostUrlInText(text);
       if (!url) return;
 
-      const last = await readLastSuggestedUrl();
-      if (last && last.replace(/\/$/, "").toLowerCase() === url.replace(/\/$/, "").toLowerCase()) {
+      const key = normalizeIgUrl(url);
+      if (handledUrlsRef.current.has(key)) return;
+
+      const activeHit = activeUrlsRef.current.some((u) => {
+        const a = normalizeIgUrl(u);
+        return a === key || a.includes(key) || key.includes(a);
+      });
+      if (activeHit) {
+        handledUrlsRef.current.add(key);
         return;
       }
 
-      const activeHit = activeUrlsRef.current.some((u) => {
-        const a = u.replace(/\/$/, "").toLowerCase();
-        const b = url.replace(/\/$/, "").toLowerCase();
-        return a === b || a.includes(b) || b.includes(a);
-      });
-      if (activeHit) return;
-
       if (await userAlreadyExtractedUrl(userId, url)) {
-        await writeLastSuggestedUrl(url);
+        handledUrlsRef.current.add(key);
+        return;
+      }
+
+      // 다시 한 번 세션 플래그 (체크 중 닫기 가능)
+      if (sessionDismissedRef.current || readSessionDismissed()) {
+        sessionDismissedRef.current = true;
         return;
       }
 
       track("clipboard_detected", { url });
-      await writeLastSuggestedUrl(url);
+      handledUrlsRef.current.add(key);
       setSuggestedUrl(url);
     } catch {
       /* 클립보드 실패는 무시 */
@@ -140,11 +175,12 @@ export function useClipboardInstagramSuggest({ userId, activeInstagramUrls = [] 
     }
     if (!Capacitor.isNativePlatform()) return;
 
+    sessionDismissedRef.current = readSessionDismissed();
+
     let cancelled = false;
     let listener: { remove: () => Promise<void> | void } | undefined;
 
     void (async () => {
-      // 콜드 스타트: 진입 시 1회
       if (!cancelled) await checkOnce();
       try {
         listener = await App.addListener("appStateChange", ({ isActive }) => {
@@ -161,5 +197,5 @@ export function useClipboardInstagramSuggest({ userId, activeInstagramUrls = [] 
     };
   }, [userId, checkOnce]);
 
-  return { suggestedUrl, dismiss, accept };
+  return { suggestedUrl, dismiss, accept, clearBanner };
 }

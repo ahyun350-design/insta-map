@@ -1464,6 +1464,7 @@ function HomePageContent() {
     suggestedUrl: clipboardSuggestedUrl,
     dismiss: dismissClipboardSuggest,
     accept: acceptClipboardSuggest,
+    clearBanner: clearClipboardBanner,
   } = useClipboardInstagramSuggest({
     userId: user?.id,
     activeInstagramUrls: clipboardActiveUrls,
@@ -1582,6 +1583,19 @@ function HomePageContent() {
     놀거리: 0,
     여행지: 0,
   });
+
+  /** 클립보드 배너를 무시하고 다른 UI로 넘어가면 자동 숨김 (세션 「안 함」은 아님) */
+  useEffect(() => {
+    clearClipboardBanner();
+  }, [
+    activeTab,
+    mapExpanded,
+    selectedPlace,
+    showExtractOverlay,
+    detailPostId,
+    showCourseModal,
+    clearClipboardBanner,
+  ]);
   const [courseOriginMode, setCourseOriginMode] = useState<"current" | "manual">("current");
   const [courseOriginAddress, setCourseOriginAddress] = useState("");
   const [courseLoading, setCourseLoading] = useState(false);
@@ -11817,10 +11831,10 @@ function HomePageContent() {
                       <button
                         type="button"
                         className="clipboardInstagramBannerClose"
-                        aria-label="닫기"
+                        aria-label="안 함"
                         onClick={dismissClipboardSuggest}
                       >
-                        ×
+                        안 함
                       </button>
                     </div>
                   )}
