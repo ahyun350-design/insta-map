@@ -1570,6 +1570,12 @@ function HomePageContent() {
     approx?: boolean;
   } | null>(null);
   const [directionsMode, setDirectionsMode] = useState<"car" | "walk">("car");
+  /** 컴팩트에서 자동차/도보를 눌러 시간·거리를 받은 뒤에만 true — 지도 크게 보기 시 자동 길찾기 */
+  const [directionsChosen, setDirectionsChosen] = useState(false);
+  const directionsModeRef = useRef(directionsMode);
+  directionsModeRef.current = directionsMode;
+  const directionsChosenRef = useRef(directionsChosen);
+  directionsChosenRef.current = directionsChosen;
   const [savedSearchQuery, setSavedSearchQuery] = useState("");
   const isIOSLike = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -5778,9 +5784,27 @@ function HomePageContent() {
     })();
   };
 
-  /** 장소 시트 → 전체화면 지도 (클릭 좌표 우선, useMyLocation 무시) */
+  const resolveDirectionsOrigin = useCallback((): Promise<{ lat: number; lng: number } | null> => {
+    const stored = myLocationLatLngRef.current;
+    if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
+      return Promise.resolve(stored);
+    }
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const o = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          myLocationLatLngRef.current = o;
+          resolve(o);
+        },
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 12_000 },
+      );
+    });
+  }, []);
+
+  /** 장소 시트 → 전체화면 지도. 컴팩트에서 이동수단을 고른 뒤면 준비 후 자동 길찾기 */
   const expandPlaceSheetToFullscreen = useCallback(
-    (placeData: PlaceSheetData) => {
+    (placeData: PlaceSheetData, opts?: { runDirections?: boolean }) => {
       const lat = parseFloat(String(placeData.y ?? ""));
       const lng = parseFloat(String(placeData.x ?? ""));
       const hasCoord = Number.isFinite(lat) && Number.isFinite(lng);
@@ -5788,13 +5812,13 @@ function HomePageContent() {
         mapRef.current.setCenter(new window.kakao.maps.LatLng(lat, lng));
         mapRef.current.setLevel(4);
       }
+      const saved = resolveSavedMatch(placeData);
+      const markerId = saved ? `place-${saved.id}` : undefined;
+      if (saved) {
+        placePinByIdRef.current.set(`place-${saved.id}`, saved);
+      }
       if (hasCoord) {
         focusExpandedMapOnLatLng(lat, lng, 3);
-        const saved = resolveSavedMatch(placeData);
-        const markerId = saved ? `place-${saved.id}` : undefined;
-        if (saved) {
-          placePinByIdRef.current.set(`place-${saved.id}`, saved);
-        }
         // 네이티브 present 진입 시 restore snapshot 으로 좌표 카메라 강제
         fullscreenRestorePendingRef.current = true;
         fullscreenReturnStateRef.current = {
@@ -5807,9 +5831,89 @@ function HomePageContent() {
           selectedMarkerId: markerId,
         };
       }
+      setActiveTab("map");
       setMapExpanded(true);
+
+      const mode = directionsModeRef.current;
+      const shouldRun =
+        opts?.runDirections === true &&
+        directionsChosenRef.current &&
+        hasCoord &&
+        (mode === "car" || mode === "walk");
+
+      if (!shouldRun) return;
+
+      const destId = saved
+        ? `place-${saved.id}`
+        : `sheet-${lat.toFixed(5)},${lng.toFixed(5)}`;
+
+      void (async () => {
+        try {
+          if (isNativeMapAvailable()) {
+            await waitForFullscreenNativeMapReady();
+            if (mode === "walk") {
+              await runFullscreenNativeDirections({ id: destId, lat, lng });
+              return;
+            }
+            const origin = await resolveDirectionsOrigin();
+            if (!origin) {
+              showToast("현재 위치를 가져올 수 없어요", "error");
+              return;
+            }
+            const res = await fetch("/api/directions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                origin,
+                destination: { lat, lng },
+                mode: "car",
+              }),
+            });
+            const data = await res.json();
+            if (!data.routes?.[0]) {
+              showToast("경로를 찾을 수 없어요", "error");
+              return;
+            }
+            const route = data.routes[0];
+            const path = parseKakaoCarRoutePath(route);
+            if (path.length < 2) {
+              showToast("경로를 찾을 수 없어요", "error");
+              return;
+            }
+            await setFullscreenNativeRoute({ path, mode: "car" }, { silent: false });
+            const summary = route.summary;
+            if (summary) {
+              const durationMin = Math.round(summary.duration / 60);
+              const distanceM = Math.round(summary.distance);
+              setDirectionsInfo({
+                duration: durationMin,
+                distance: Math.round((summary.distance / 1000) * 10) / 10,
+              });
+              await setFullscreenNativeDirectionsInfo(
+                { id: destId, duration: durationMin, distance: distanceM },
+                { silent: false },
+              );
+            }
+            return;
+          }
+
+          // 웹 확장 맵
+          window.setTimeout(() => {
+            void drawRoute(lat, lng, mode);
+          }, 600);
+        } catch (err) {
+          console.error("[sheet] expand auto-directions failed", err);
+          showToast("길찾기에 실패했어요", "error");
+        }
+      })();
     },
-    [focusExpandedMapOnLatLng, resolveSavedMatch],
+    [
+      focusExpandedMapOnLatLng,
+      resolveDirectionsOrigin,
+      resolveSavedMatch,
+      runFullscreenNativeDirections,
+      showToast,
+    ],
   );
 
   /** 컴팩트 맵에 출발·도착(또는 경로)이 보이도록 맞춤 */
@@ -5852,25 +5956,7 @@ function HomePageContent() {
     [fitCompactMapToPoints],
   );
 
-  const resolveDirectionsOrigin = useCallback((): Promise<{ lat: number; lng: number } | null> => {
-    const stored = myLocationLatLngRef.current;
-    if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
-      return Promise.resolve(stored);
-    }
-    return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const o = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          myLocationLatLngRef.current = o;
-          resolve(o);
-        },
-        () => resolve(null),
-        { enableHighAccuracy: true, timeout: 12_000 },
-      );
-    });
-  }, []);
-
-  /** 컴팩트 시트 길찾기 — 전체화면으로 올리고 선택 모드로 즉시 경로 실행 */
+  /** 컴팩트 시트 길찾기 — 전체화면으로 올리지 않음. 시간·거리(+컴팩트 경로)만 표시 */
   const startDirectionsFromPlaceSheet = useCallback(
     async (placeData: PlaceSheetData, mode: "car" | "walk" | "transit") => {
       const lat = parseFloat(String(placeData.y ?? ""));
@@ -5885,88 +5971,106 @@ function HomePageContent() {
         return;
       }
 
-      const saved = resolveSavedMatch(placeData);
-      const destId = saved ? `place-${saved.id}` : `sheet-${lat.toFixed(5)},${lng.toFixed(5)}`;
-      if (saved) {
-        placePinByIdRef.current.set(`place-${saved.id}`, saved);
-      }
-
       setDirectionsMode(mode);
       setDirectionsLoading(true);
       setDirectionsInfo(null);
+      setDirectionsChosen(false);
+      if (routePolylineRef.current) {
+        routePolylineRef.current.setMap(null);
+        routePolylineRef.current = null;
+      }
 
-      // 네이티브: 전체화면 진입 후 같은 모드로 바로 경로 표시 (추가 길찾기 탭 불필요)
-      if (isNativeMapAvailable()) {
-        setActiveTab("map");
-        expandPlaceSheetToFullscreen(placeData);
-        try {
-          await waitForFullscreenNativeMapReady();
-          if (mode === "walk") {
-            await runFullscreenNativeDirections({ id: destId, lat, lng });
-            return;
-          }
-          const origin = await resolveDirectionsOrigin();
-          if (!origin) {
-            showToast("현재 위치를 가져올 수 없어요", "error");
-            return;
-          }
-          const res = await fetch("/api/directions", {
+      try {
+        const origin = await resolveDirectionsOrigin();
+        if (!origin) {
+          showToast("현재 위치를 가져올 수 없어요", "error");
+          return;
+        }
+
+        if (mode === "walk") {
+          const res = await fetch("/api/walk-directions", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               origin,
               destination: { lat, lng },
-              mode: "car",
             }),
           });
-          const data = await res.json();
-          if (!data.routes?.[0]) {
-            showToast("경로를 찾을 수 없어요", "error");
-            return;
-          }
-          const route = data.routes[0];
-          const path = parseKakaoCarRoutePath(route);
-          if (path.length < 2) {
-            showToast("경로를 찾을 수 없어요", "error");
-            return;
-          }
-          await setFullscreenNativeRoute({ path, mode: "car" }, { silent: false });
-          const summary = route.summary;
-          if (summary) {
-            const durationMin = Math.round(summary.duration / 60);
-            const distanceM = Math.round(summary.distance);
-            setDirectionsInfo({
-              duration: durationMin,
-              distance: Math.round((summary.distance / 1000) * 10) / 10,
-            });
-            await setFullscreenNativeDirectionsInfo(
-              { id: destId, duration: durationMin, distance: distanceM },
-              { silent: false },
-            );
-          }
-        } catch (err) {
-          console.error("[sheet] fullscreen directions failed", err);
-          showToast("길찾기에 실패했어요", "error");
-        } finally {
-          setDirectionsLoading(false);
-        }
-        return;
-      }
+          const data = await res.json().catch(() => null);
+          const path = data ? parseTmapWalkGeoJsonToPath(data) : [];
+          const totals = data ? readTmapWalkTotals(data) : { distanceM: null, timeSec: null };
 
-      // 웹: 확장 지도 + drawRoute (로딩은 drawRoute 가 관리)
-      setActiveTab("map");
-      setMapExpanded(true);
-      window.setTimeout(() => {
-        void drawRoute(lat, lng, mode);
-      }, 600);
+          if (res.ok && totals.timeSec != null && totals.timeSec > 0) {
+            const distanceM =
+              totals.distanceM != null && totals.distanceM > 0
+                ? totals.distanceM
+                : Math.round(distanceMeters(origin.lat, origin.lng, lat, lng));
+            setDirectionsInfo({
+              duration: Math.max(1, Math.round(totals.timeSec / 60)),
+              distance: Math.round((distanceM / 1000) * 10) / 10,
+            });
+            setDirectionsChosen(true);
+            if (path.length >= 2) {
+              drawRouteOnCompactMap(path, "walk");
+            } else {
+              fitCompactMapToPoints([origin, { lat, lng }]);
+            }
+            return;
+          }
+
+          const km = distanceMeters(origin.lat, origin.lng, lat, lng) / 1000;
+          setDirectionsInfo({
+            duration: estimateWalkMinutesFromKm(km),
+            distance: Math.round(km * 10) / 10,
+            approx: true,
+          });
+          setDirectionsChosen(true);
+          if (path.length >= 2) {
+            drawRouteOnCompactMap(path, "walk");
+          } else {
+            fitCompactMapToPoints([origin, { lat, lng }]);
+          }
+          return;
+        }
+
+        const res = await fetch("/api/directions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            origin,
+            destination: { lat, lng },
+            mode: "car",
+          }),
+        });
+        const data = await res.json();
+        if (!data.routes?.[0]) {
+          showToast("경로를 찾을 수 없어요", "error");
+          fitCompactMapToPoints([origin, { lat, lng }]);
+          return;
+        }
+        const route = data.routes[0];
+        const path = parseKakaoCarRoutePath(route);
+        const summary = route.summary;
+        if (summary) {
+          setDirectionsInfo({
+            duration: Math.round(summary.duration / 60),
+            distance: Math.round((summary.distance / 1000) * 10) / 10,
+          });
+          setDirectionsChosen(true);
+        }
+        if (path.length >= 2) {
+          drawRouteOnCompactMap(path, "car");
+        } else {
+          fitCompactMapToPoints([origin, { lat, lng }]);
+        }
+      } catch (err) {
+        console.error("[sheet] directions failed", err);
+        showToast("길찾기에 실패했어요", "error");
+      } finally {
+        setDirectionsLoading(false);
+      }
     },
-    [
-      expandPlaceSheetToFullscreen,
-      resolveDirectionsOrigin,
-      resolveSavedMatch,
-      runFullscreenNativeDirections,
-      showToast,
-    ],
+    [drawRouteOnCompactMap, fitCompactMapToPoints, resolveDirectionsOrigin, showToast],
   );
 
   /** 큐레이션 상세 → 저장된 장소면 저장 클릭과 동일, 아니면 임시로 지도만 열고 빈 하트(미저장) */
@@ -7924,6 +8028,7 @@ function HomePageContent() {
     });
     courseLabelOverlaysRef.current = [];
     setDirectionsInfo(null);
+    setDirectionsChosen(false);
   };
 
   const applyWebCourseRoutePath = useCallback((path: LatLng[], fitBounds = true) => {
@@ -12989,6 +13094,8 @@ function HomePageContent() {
               onClose={() => {
                 setSelectedPlace(null);
                 setSelectedMapPlace(null);
+                setDirectionsChosen(false);
+                setDirectionsInfo(null);
               }}
               onToggleSave={() => { void togglePlaceSheetSave(selectedPlace as PlaceSheetData); }}
               onCurationClick={(postId, photoIndex) => {
@@ -13005,7 +13112,11 @@ function HomePageContent() {
                   selectedPlace.x,
                 )
               }
-              onExpandMap={() => expandPlaceSheetToFullscreen(selectedPlace as PlaceSheetData)}
+              onExpandMap={() =>
+                expandPlaceSheetToFullscreen(selectedPlace as PlaceSheetData, {
+                  runDirections: directionsChosen,
+                })
+              }
               onDirectionsModeChange={(mode) => {
                 void startDirectionsFromPlaceSheet(selectedPlace as PlaceSheetData, mode);
               }}

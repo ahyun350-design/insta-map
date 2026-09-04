@@ -192,7 +192,8 @@ export function PlaceDetailSheet({
                   { id: "transit" as const, label: "🚌 대중교통" },
                 ] as const
               ).map((m) => {
-                const isActive = m.id !== "transit" && directionsMode === m.id;
+                const isActive =
+                  m.id !== "transit" && directionsMode === m.id && !!directionsInfo;
                 return (
                   <button
                     key={m.id}
