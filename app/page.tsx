@@ -169,6 +169,8 @@ import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
 import { FeedPostMedia } from "@/components/FeedPostCard";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
+import { AddToListSheet } from "@/components/AddToListSheet";
+import { MyListsScreen } from "@/components/MyListsScreen";
 import { CourseMapDesignOverlay } from "@/components/CourseMapDesignOverlay";
 import {
   PlacePostsListScreen,
@@ -1647,6 +1649,10 @@ function HomePageContent() {
   const [savedNearOrigin, setSavedNearOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const [savedNearLocating, setSavedNearLocating] = useState(false);
   const [savedNearDenied, setSavedNearDenied] = useState(false);
+  const [showMyListsScreen, setShowMyListsScreen] = useState(false);
+  const [addToListTarget, setAddToListTarget] = useState<{ id: string; name: string } | null>(null);
+  const [savedPlaceMenuId, setSavedPlaceMenuId] = useState<string | null>(null);
+  const savedPlaceMenuRef = useRef<HTMLDivElement | null>(null);
   const isIOSLike = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   // 코스 만들기 관련 state
@@ -1917,6 +1923,33 @@ function HomePageContent() {
   useEffect(() => {
     if (activeTab !== "saved") setSavedSortMenuOpen(false);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!savedPlaceMenuId) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!savedPlaceMenuRef.current?.contains(event.target as Node)) {
+        setSavedPlaceMenuId(null);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [savedPlaceMenuId]);
+
+  useEffect(() => {
+    if (activeTab !== "saved") setSavedPlaceMenuId(null);
+  }, [activeTab]);
+
+  const openAddToListForSavedPlace = useCallback(
+    (place: { id: string; name: string }) => {
+      if (!userIdRef.current) {
+        showToast("로그인 후 이용해주세요", "info");
+        return;
+      }
+      setSavedPlaceMenuId(null);
+      setAddToListTarget({ id: place.id, name: place.name });
+    },
+    [showToast],
+  );
 
   const savedNearAutoTriedRef = useRef(false);
   useEffect(() => {
@@ -3119,6 +3152,18 @@ function HomePageContent() {
       return np === nRoad || np === nAddr || np.includes(nRoad) || nRoad.includes(np) || np.includes(nAddr) || nAddr.includes(np);
     });
   }, []);
+
+  const openAddToListFromPlaceSheet = useCallback(
+    (placeData: PlaceSheetData) => {
+      const match = resolveSavedMatch(placeData);
+      if (!match) {
+        showToast("저장한 장소만 목록에 담을 수 있어요", "info");
+        return;
+      }
+      openAddToListForSavedPlace(match);
+    },
+    [resolveSavedMatch, openAddToListForSavedPlace, showToast],
+  );
 
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
   const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
@@ -10169,6 +10214,7 @@ function HomePageContent() {
             }
           });
         }}
+        onAddToList={() => openAddToListFromPlaceSheet(placeData)}
         onCurationClick={(postId, photoIndex) => {
           openPlaceCurationFromSheet(placeData, postId, photoIndex);
           setSelectedPlace(null);
@@ -12554,37 +12600,52 @@ function HomePageContent() {
   >
   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
     <p className="screenTitle" style={{ margin: 0 }}>저장한 장소</p>
-    {savedPlaces.length > 0 && (
+    <div className="savedHeaderActions">
       <button
         type="button"
-        data-coach="course_create"
+        className="savedMyListsBtn"
         onClick={() => {
-          track("course_create_open");
-          setShowCourseModal(true);
-          setCourseResult(null);
-          viewingSavedCourseIdRef.current = null;
-          setViewedCourseUserId(null);
-          setIsReadOnlyCourse(false);
-          setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
-        }}
-        style={{
-          border: "1px solid #1a2a7a",
-          background: "#fff",
-          color: "#1a2a7a",
-          borderRadius: "20px",
-          padding: "6px 14px",
-          fontSize: "12px",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          fontWeight: 500,
-          display: "flex",
-          alignItems: "center",
-          gap: "4px",
+          if (!userIdRef.current) {
+            showToast("로그인 후 이용해주세요", "info");
+            return;
+          }
+          setShowMyListsScreen(true);
         }}
       >
-        🗺️ 코스 만들기
+        내 목록
       </button>
-    )}
+      {savedPlaces.length > 0 && (
+        <button
+          type="button"
+          data-coach="course_create"
+          onClick={() => {
+            track("course_create_open");
+            setShowCourseModal(true);
+            setCourseResult(null);
+            viewingSavedCourseIdRef.current = null;
+            setViewedCourseUserId(null);
+            setIsReadOnlyCourse(false);
+            setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
+          }}
+          style={{
+            border: "1px solid #1a2a7a",
+            background: "#fff",
+            color: "#1a2a7a",
+            borderRadius: "20px",
+            padding: "6px 14px",
+            fontSize: "12px",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontWeight: 500,
+            display: "flex",
+            alignItems: "center",
+            gap: "4px",
+          }}
+        >
+          🗺️ 코스 만들기
+        </button>
+      )}
+    </div>
   </div>
   {savedPlaces.length === 0 && (
   <EmptyState
@@ -12683,6 +12744,44 @@ function HomePageContent() {
         return <p className="emptyText" style={{ textAlign: "center" }}>"{savedSearchQuery}"에 해당하는 장소가 없어요.</p>;
       }
 
+      const renderSavedItemActions = (place: Place) => (
+        <div
+          className="savedItemActions"
+          ref={savedPlaceMenuId === place.id ? savedPlaceMenuRef : undefined}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="savedItemMoreBtn"
+            aria-label="더보기"
+            aria-expanded={savedPlaceMenuId === place.id}
+            onClick={() =>
+              setSavedPlaceMenuId((id) => (id === place.id ? null : place.id))
+            }
+          >
+            ⋯
+          </button>
+          {savedPlaceMenuId === place.id && (
+            <div className="savedItemMoreMenu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => openAddToListForSavedPlace(place)}
+              >
+                목록에 추가
+              </button>
+            </div>
+          )}
+          <button
+            className="ghostButton"
+            type="button"
+            onClick={() => deletePlace(place.id)}
+          >
+            삭제
+          </button>
+        </div>
+      );
+
       const renderFlatItem = (place: Place, metaExtra?: string) => (
         <article
           key={place.id}
@@ -12713,16 +12812,7 @@ function HomePageContent() {
               {` · ${place.category}`}
             </p>
           </div>
-          <button
-            className="ghostButton"
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              deletePlace(place.id);
-            }}
-          >
-            삭제
-          </button>
+          {renderSavedItemActions(place)}
         </article>
       );
 
@@ -12761,7 +12851,7 @@ function HomePageContent() {
                         <p className="savedName">{place.name}</p>
                         <p className="savedMeta">{place.address}</p>
                       </div>
-                      <button className="ghostButton" type="button" onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }}>삭제</button>
+                      {renderSavedItemActions(place)}
                     </article>
                   ))}
                 </div>
@@ -12809,16 +12899,7 @@ function HomePageContent() {
                     <p className="savedName">{place.name}</p>
                     <p className="savedMeta">{place.address}</p>
                   </div>
-                  <button
-                    className="ghostButton"
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deletePlace(place.id);
-                    }}
-                  >
-                    삭제
-                  </button>
+                  {renderSavedItemActions(place)}
                 </article>
               ))}
             </div>
@@ -13476,6 +13557,7 @@ function HomePageContent() {
                 setDirectionsInfo(null);
               }}
               onToggleSave={() => { void togglePlaceSheetSave(selectedPlace as PlaceSheetData); }}
+              onAddToList={() => openAddToListFromPlaceSheet(selectedPlace as PlaceSheetData)}
               onCurationClick={(postId, photoIndex) => {
                 openPlaceCurationFromSheet(selectedPlace as PlaceSheetData, postId, photoIndex);
                 setSelectedPlace(null);
@@ -13515,6 +13597,7 @@ function HomePageContent() {
                 layout="overlay"
                 onClose={() => setHomePlaceSheet(null)}
                 onToggleSave={() => { void togglePlaceSheetSave(homePlaceSheet); }}
+                onAddToList={() => openAddToListFromPlaceSheet(homePlaceSheet)}
                 onCurationClick={(postId, photoIndex) => {
                   setHomePlaceSheet(null);
                   openPlaceCurationFromSheet(homePlaceSheet, postId, photoIndex);
@@ -13534,6 +13617,38 @@ function HomePageContent() {
             document.body,
           )}
         {courseShareModalEl}
+        {user?.id && (
+          <MyListsScreen
+            open={showMyListsScreen}
+            userId={user.id}
+            categoryColors={CATEGORY_COLORS}
+            categoryPin={CATEGORY_PIN}
+            onClose={() => setShowMyListsScreen(false)}
+            onOpenPlace={(place) => {
+              setShowMyListsScreen(false);
+              handleSavedPlaceClick({
+                id: place.id,
+                name: place.name,
+                address: place.address,
+                category: place.category as Category,
+                ...(typeof place.lat === "number" ? { lat: place.lat } : {}),
+                ...(typeof place.lng === "number" ? { lng: place.lng } : {}),
+                ...(place.created_at ? { created_at: place.created_at } : {}),
+              });
+            }}
+            showToast={showToast}
+          />
+        )}
+        {user?.id && addToListTarget && (
+          <AddToListSheet
+            open
+            placeId={addToListTarget.id}
+            placeName={addToListTarget.name}
+            userId={user.id}
+            onClose={() => setAddToListTarget(null)}
+            showToast={showToast}
+          />
+        )}
         {/* Stable file input outside portal — matches Step1Photos / profile avatar (no capture) */}
         <input
           ref={courseInviteImageInputRef}

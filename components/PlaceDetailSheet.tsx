@@ -17,6 +17,8 @@ type Props = {
   directionsInfo?: { duration: number; distance: number; approx?: boolean } | null;
   onClose: () => void;
   onToggleSave: () => void;
+  /** 저장한 장소를 내 목록에 담기 */
+  onAddToList?: () => void;
   onCurationClick: (postId: string, photoIndex?: number) => void;
   onImageLightbox: (url: string) => void;
   timeAgoLabel: (createdAt: string) => string;
@@ -98,6 +100,7 @@ export function PlaceDetailSheet({
   directionsInfo = null,
   onClose,
   onToggleSave,
+  onAddToList,
   onCurationClick,
   onImageLightbox,
   timeAgoLabel,
@@ -174,6 +177,16 @@ export function PlaceDetailSheet({
             onClick={onExpandMap}
           >
             지도 크게 보기
+          </button>
+        )}
+
+        {onAddToList && (
+          <button
+            type="button"
+            className="placeDetailSheetAddToListBtn"
+            onClick={onAddToList}
+          >
+            목록에 추가
           </button>
         )}
 

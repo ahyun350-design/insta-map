@@ -2019,6 +2019,22 @@ body {
   cursor: default;
 }
 
+.placeDetailSheetAddToListBtn {
+  font-size: 12px;
+  color: #1a2a7a;
+  background: #f3f1ea;
+  padding: 8px 16px;
+  letter-spacing: 0.3px;
+  display: inline-block;
+  margin-top: 8px;
+  border: 0.5px solid #ebe8e0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  font-weight: 600;
+}
+
 .placeDetailSheetAppleLink {
   display: block;
   width: 100%;
@@ -3273,6 +3289,524 @@ body {
   align-items: center;
   gap: 12px;
   background: transparent;
+}
+
+.savedItemActions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.savedItemMoreBtn {
+  border: 0.5px solid var(--navy-light);
+  background: transparent;
+  color: var(--navy);
+  border-radius: 2px;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.savedItemMoreMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 120px;
+  background: #fff;
+  border: 0.5px solid #ebe8e0;
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(26, 42, 122, 0.12);
+  padding: 4px;
+}
+
+.savedItemMoreMenu button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #333;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.savedItemMoreMenu button:hover {
+  background: #f7f6f2;
+}
+
+.savedHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.savedMyListsBtn {
+  border: 1px solid #d8d4c8;
+  background: #f3f1ea;
+  color: #1a2a7a;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 500;
+}
+
+/* ── 내 목록 ── */
+.placeListSheetOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100050;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.placeListSheet {
+  width: 100%;
+  max-width: 480px;
+  max-height: min(78vh, 640px);
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.placeListSheetHandle {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: #ddd;
+  margin: 4px auto 10px;
+}
+
+.placeListSheetHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.placeListSheetTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.placeListSheetSubtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #888;
+}
+
+.placeListSheetClose {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  color: #999;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.placeListSheetBody {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.placeListSheetCreateBtn {
+  width: 100%;
+  border: 1px dashed #cfc9b8;
+  background: #faf8f3;
+  color: #1a2a7a;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+.placeListSheetCreateRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.placeListSheetCreateInput {
+  flex: 1;
+  border: 0.5px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.placeListSheetCreateConfirm {
+  border: none;
+  background: #1a2a7a;
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.placeListSheetCreateConfirm:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.placeListSheetHint {
+  margin: 16px 0;
+  text-align: center;
+  font-size: 13px;
+  color: #999;
+}
+
+.placeListSheetCheckList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.placeListSheetCheckItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 0.5px solid #efefef;
+  cursor: pointer;
+}
+
+.placeListSheetCheckItem input {
+  width: 18px;
+  height: 18px;
+  accent-color: #1a2a7a;
+  flex-shrink: 0;
+}
+
+.placeListSheetCheckText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.placeListSheetCheckName {
+  font-size: 14px;
+  color: #1a1a2e;
+  font-weight: 500;
+}
+
+.placeListSheetCheckMeta {
+  font-size: 11px;
+  color: #999;
+}
+
+.myListsScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100040;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
+}
+
+.myListsHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid #efefef;
+  flex-shrink: 0;
+}
+
+.myListsHeaderBtn {
+  border: none;
+  background: transparent;
+  color: #1a2a7a;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 6px 4px;
+  flex-shrink: 0;
+}
+
+.myListsHeaderDanger {
+  color: #c62828;
+}
+
+.myListsHeaderTitle {
+  margin: 0;
+  flex: 1;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.myListsHeaderSpacer {
+  width: 28px;
+  flex-shrink: 0;
+}
+
+.myListsTitleBtn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+  font-family: inherit;
+  text-align: center;
+  cursor: pointer;
+  padding: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.myListsTitleInput {
+  flex: 1;
+  border: 0.5px solid #ddd;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 15px;
+  font-family: inherit;
+  text-align: center;
+}
+
+.myListsBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 16px 24px;
+  box-sizing: border-box;
+}
+
+.myListsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.myListsListItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: none;
+  background: transparent;
+  border-bottom: 0.5px solid #efefef;
+  padding: 16px 4px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.myListsListName {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1a1a2e;
+}
+
+.myListsListMeta {
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.myListsEmpty {
+  padding: 64px 20px;
+  text-align: center;
+}
+
+.myListsEmptyTitle {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.myListsEmptyDesc,
+.myListsEmptyHint {
+  margin: 0;
+  font-size: 13px;
+  color: #999;
+  text-align: center;
+  padding: 40px 16px;
+}
+
+.myListsDetailList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  touch-action: pan-y;
+}
+
+.myListsDetailListBusy {
+  opacity: 0.85;
+}
+
+.myListsDetailItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 0.5px solid #efefef;
+}
+
+.myListsDragHandle {
+  border: none;
+  background: transparent;
+  color: #bbb;
+  font-size: 18px;
+  line-height: 1;
+  padding: 8px 4px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.myListsDetailMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.myListsDetailDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.myListsDetailText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.myListsDetailName {
+  font-size: 14px;
+  color: #1a1a2e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.myListsDetailMeta {
+  font-size: 11px;
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.myListsRemoveBtn {
+  border: 0.5px solid #e0dcd0;
+  background: transparent;
+  color: #888;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.myListsConfirmOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 2;
+}
+
+.myListsConfirmDialog {
+  width: 100%;
+  max-width: 320px;
+  background: #fff;
+  border-radius: 14px;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.myListsConfirmTitle {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.myListsConfirmDesc {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: #888;
+  line-height: 1.4;
+}
+
+.myListsConfirmActions {
+  display: flex;
+  gap: 8px;
+}
+
+.myListsConfirmActions button {
+  flex: 1;
+  border: 0.5px solid #ddd;
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.myListsConfirmDelete {
+  border: none !important;
+  background: #c62828 !important;
+  color: #fff !important;
 }
 
 .savedBody {
