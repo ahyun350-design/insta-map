@@ -72,32 +72,59 @@ export type KakaoPlaceLookup = {
   queryIndex: number;
 };
 
-function stripKakaoBranchSuffix(name: string): string {
-  return name.replace(/\s+[^\s]+점$/u, "").trim();
-}
-
-function regionFromKakaoHint(hint: string): string {
-  return (
-    hint.replace(/[-~]/g, " ").split(/[\s,]+/).find((w) => w.length >= 2 && /[가-힣]/.test(w)) ?? ""
-  );
-}
-
 export type SearchKakaoPlaceOptions = {
   /** epoch ms — 넘기면 남은 폴백 쿼리 중단 (선택) */
   deadlineMs?: number;
 };
 
+const KAKAO_SEARCH_MAX_ATTEMPTS = 4;
+
 /**
- * 카카오 키워드 검색 — 쿼리 폴백은 순차(1차 히트 시 즉시 종료).
+ * 메뉴·수식어가 붙은 상호명 폴백 후보.
+ * 원본 → 마지막 어절 제거(최대 3회) → 첫 어절 단독. 최대 4개.
+ * 첫 어절이 1글자면 first_token 단계는 건너뜀.
+ */
+function buildKakaoQueryFallbacks(name: string): { query: string; stage: string }[] {
+  const trimmed = name.trim();
+  if (!trimmed) return [];
+
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const out: { query: string; stage: string }[] = [];
+  const push = (query: string, stage: string) => {
+    const t = query.trim();
+    if (!t) return;
+    if (out.some((x) => x.query === t)) return;
+    if (out.length >= KAKAO_SEARCH_MAX_ATTEMPTS) return;
+    out.push({ query: t, stage });
+  };
+
+  push(trimmed, "original");
+
+  let current = tokens.slice();
+  for (let n = 1; n <= 3 && current.length > 1; n += 1) {
+    current = current.slice(0, -1);
+    push(current.join(" "), `drop_last_${n}`);
+  }
+
+  const first = tokens[0];
+  if (first && first.length >= 2) {
+    push(first, "first_token");
+  }
+
+  return out;
+}
+
+/**
+ * 카카오 키워드 검색 — 0건이면 어절 폴백 순차 재시도(최대 4회), 1차 히트 시 즉시 종료.
  * size=5로 조회하되 이름/지역 검증 없이 documents[0]을 채택.
- * @param hint Claude hint. region 미지정 시 지역명 후보로 사용(5차 쿼리).
- * @param region 알고 있는 지역명(선택).
- * @param _caption 호환용(미사용). 지역 정합 검증은 하지 않음.
+ * @param hint 호환용(현재 미사용).
+ * @param region 호환용(현재 미사용).
+ * @param _caption 호환용(미사용).
  */
 export async function searchKakaoPlace(
   name: string,
-  hint: string = "",
-  region?: string,
+  _hint: string = "",
+  _region?: string,
   _caption: string = "",
   options?: SearchKakaoPlaceOptions,
 ): Promise<KakaoPlaceLookup | null> {
@@ -108,26 +135,7 @@ export async function searchKakaoPlace(
   if (!trimmed) return null;
 
   const deadlineMs = options?.deadlineMs;
-  const noSpace = trimmed.replace(/\s+/g, "");
-  const withoutBranch = stripKakaoBranchSuffix(trimmed);
-  const withoutBranchNoSpace = withoutBranch.replace(/\s+/g, "");
-  const regionName = (region?.trim() || regionFromKakaoHint(hint)).trim();
-
-  const queries: string[] = [];
-  const pushUnique = (q: string) => {
-    const t = q.trim();
-    if (!t) return;
-    if (!queries.includes(t)) queries.push(t);
-  };
-
-  // 1차: 원본 / 2차: 공백 제거 / 3차: ○○점 제거 / 4차: 지점+공백 제거 / 5차: 지역 붙이기
-  pushUnique(trimmed);
-  pushUnique(noSpace);
-  pushUnique(withoutBranch);
-  pushUnique(withoutBranchNoSpace);
-  if (regionName) {
-    pushUnique(`${trimmed} ${regionName}`);
-  }
+  const queries = buildKakaoQueryFallbacks(trimmed);
 
   type Doc = {
     place_name?: string;
@@ -142,6 +150,7 @@ export async function searchKakaoPlace(
   const lookupOnce = async (
     query: string,
     queryIndex: number,
+    stage: string,
   ): Promise<KakaoPlaceLookup | null> => {
     try {
       const res = await fetch(
@@ -149,13 +158,19 @@ export async function searchKakaoPlace(
         { headers: { Authorization: `KakaoAK ${kakaoKey}` } },
       );
       if (!res.ok) {
-        console.log("[extract] kakao search", { query, queryIndex, hit: false, status: res.status });
+        console.log("[extract] kakao search", {
+          query,
+          queryIndex,
+          stage,
+          hit: false,
+          status: res.status,
+        });
         return null;
       }
       const data = (await res.json()) as { documents?: Doc[] };
       const first = data.documents?.[0];
       if (!first) {
-        console.log("[extract] kakao search", { query, queryIndex, hit: false });
+        console.log("[extract] kakao search", { query, queryIndex, stage, hit: false });
         return null;
       }
       const lat = parseFloat(first.y);
@@ -164,6 +179,7 @@ export async function searchKakaoPlace(
         console.log("[extract] kakao search", {
           query,
           queryIndex,
+          stage,
           hit: false,
           reason: "invalid_coords",
         });
@@ -173,6 +189,7 @@ export async function searchKakaoPlace(
       console.log("[extract] kakao search", {
         query,
         queryIndex,
+        stage,
         hit: true,
         placeName,
         address: first.road_address_name || first.address_name,
@@ -188,22 +205,30 @@ export async function searchKakaoPlace(
         queryIndex,
       };
     } catch {
-      console.log("[extract] kakao search", { query, queryIndex, hit: false, reason: "exception" });
+      console.log("[extract] kakao search", {
+        query,
+        queryIndex,
+        stage,
+        hit: false,
+        reason: "exception",
+      });
       return null;
     }
   };
 
   for (let i = 0; i < queries.length; i++) {
+    const item = queries[i]!;
     if (deadlineMs != null && Date.now() >= deadlineMs) {
       console.log("[extract] kakao search", {
-        query: queries[i],
+        query: item.query,
         queryIndex: i,
+        stage: item.stage,
         hit: false,
         reason: "deadline",
       });
       return null;
     }
-    const result = await lookupOnce(queries[i]!, i);
+    const result = await lookupOnce(item.query, i, item.stage);
     if (result) return result;
   }
   return null;

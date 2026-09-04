@@ -9,7 +9,7 @@ import {
   searchKakaoPlace,
 } from "@/app/api/extract/_shared";
 import { resolvePlaceCategoryFromKakao } from "@/lib/kakaoCategory";
-import { readReelCache, writeReelCache } from "@/lib/reelCache";
+import { readReelCache, writeReelCache, isNoCaptionScrapeError } from "@/lib/reelCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -191,8 +191,33 @@ export async function POST(req: Request) {
     let caption: string;
     let rawPlaces: RawPlace[];
 
-    if (cached?.caption && cached.claude_places) {
-      console.log("[extract] reel_cache hit", { jobId, url: cached.instagram_url });
+    if (cached?.status === "no_places" || cached?.status === "no_caption") {
+      console.log("[extract] reel_cache fail hit", {
+        jobId,
+        url: cached.instagram_url,
+        status: cached.status,
+      });
+      diagCaption =
+        cached.status === "no_places" && cached.caption
+          ? truncateCaption(cached.caption)
+          : null;
+      diagClaudePlaces = cached.claude_places;
+      await saveJobDiagnostics(jobId, {
+        caption: diagCaption,
+        claude_places: diagClaudePlaces,
+      });
+      if (cached.status === "no_caption") {
+        throw new Error("캡션을 찾을 수 없습니다.");
+      }
+      throw new Error("no_places_in_caption");
+    }
+
+    if (cached?.status === "ok" && cached.caption && cached.claude_places) {
+      console.log("[extract] reel_cache hit", {
+        jobId,
+        url: cached.instagram_url,
+        status: cached.status,
+      });
       caption = cached.caption;
       rawPlaces = cached.claude_places;
       diagCaption = truncateCaption(caption);
@@ -205,7 +230,20 @@ export async function POST(req: Request) {
       await waitForApifyConcurrencySlot(supabase, jobId);
       await updateJobProgress(jobId, "인스타 캡션 가져오는 중");
       const scrapeT0 = Date.now();
-      caption = await scrapeInstagramCaption(job.instagram_url);
+      try {
+        caption = await scrapeInstagramCaption(job.instagram_url);
+      } catch (scrapeErr) {
+        const scrapeMsg =
+          scrapeErr instanceof Error ? scrapeErr.message : String(scrapeErr);
+        if (isNoCaptionScrapeError(scrapeMsg)) {
+          void writeReelCache(supabase, job.instagram_url, {
+            status: "no_caption",
+            caption: null,
+            claudePlaces: null,
+          });
+        }
+        throw scrapeErr;
+      }
       console.log(`[PindMap:perf] extract.process.scrape ${Date.now() - scrapeT0}ms`);
       diagCaption = truncateCaption(caption);
       await saveJobDiagnostics(jobId, { caption: diagCaption });
@@ -216,8 +254,6 @@ export async function POST(req: Request) {
       console.log(`[PindMap:perf] extract.process.ai ${Date.now() - aiT0}ms`);
       diagClaudePlaces = rawPlaces;
       await saveJobDiagnostics(jobId, { claude_places: diagClaudePlaces });
-
-      void writeReelCache(supabase, job.instagram_url, diagCaption, rawPlaces);
     }
 
     type PlaceCandidate = {
@@ -236,8 +272,20 @@ export async function POST(req: Request) {
     const candidateNames = candidates.map((c) => c.name);
 
     if (candidates.length === 0) {
+      void writeReelCache(supabase, job.instagram_url, {
+        status: "no_places",
+        caption: diagCaption,
+        claudePlaces: rawPlaces,
+      });
       throw new Error("no_places_in_caption");
     }
+
+    // 성공 경로 — Apify+Claude 결과 캐시 (캐시 히트로 온 경우에도 TTL 갱신)
+    void writeReelCache(supabase, job.instagram_url, {
+      status: "ok",
+      caption: diagCaption,
+      claudePlaces: rawPlaces,
+    });
 
     // 카카오 장소별 병렬 검색 (폴백은 장소 내부 순차, 검증 없이 첫 결과 채택)
     await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
