@@ -2785,19 +2785,124 @@ function HomePageContent() {
     if (mapRef.current) addPlacePins(mapRef.current, markersRef.current, feedPostsRef.current, savedPlaces, "main");
     if (mapExpanded && expandedMapRef.current) addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPostsRef.current, savedPlaces, "expanded");
   };
-  const toSelectedFromSavedPlace = useCallback((place: Place, relatedPosts: FeedPost[], lat?: number, lng?: number) => ({
-    place_name: place.name,
-    category_name: place.category,
-    road_address_name: place.address,
-    address_name: place.address,
-    phone: "",
-    place_url: "",
-    y: typeof lat === "number" ? String(lat) : undefined,
-    x: typeof lng === "number" ? String(lng) : undefined,
-    _feedPosts: relatedPosts,
-    _savedPlaceId: place.id,
-    _placeRef: placeRefFromPlace(place, lat, lng),
-  }), []);
+  const toSelectedFromSavedPlace = useCallback((place: Place, relatedPosts: FeedPost[], lat?: number, lng?: number) => {
+    const fromArgs = coerceLatLng(lat, lng);
+    const fromPlace = latLngFromRow(place);
+    const fromCache = savedPlaceCoordsRef.current[place.id] ?? null;
+    const coords = fromArgs ?? fromPlace ?? fromCache;
+    if (coords) {
+      savedPlaceCoordsRef.current[place.id] = coords;
+    }
+    return {
+      place_name: place.name,
+      category_name: place.category,
+      road_address_name: place.address,
+      address_name: place.address,
+      phone: "",
+      place_url: "",
+      y: coords ? String(coords.lat) : undefined,
+      x: coords ? String(coords.lng) : undefined,
+      _feedPosts: relatedPosts,
+      _savedPlaceId: place.id,
+      _placeRef: placeRefFromPlace(place, coords?.lat, coords?.lng),
+    };
+  }, []);
+
+  /** places 행/캐시에 좌표가 없을 때 DB → (가능하면) 지오코딩으로 채움 */
+  const resolveSavedPlaceCoords = useCallback(async (place: Place): Promise<LatLng | null> => {
+    const local = latLngFromRow(place) ?? savedPlaceCoordsRef.current[place.id] ?? null;
+    if (local) {
+      savedPlaceCoordsRef.current[place.id] = local;
+      return local;
+    }
+
+    const uid = userIdRef.current;
+    if (uid) {
+      try {
+        const byId = await supabase
+          .from("places")
+          .select("id, lat, lng, name, address")
+          .eq("user_id", uid)
+          .eq("id", place.id)
+          .maybeSingle();
+        const rowCoords = byId.data ? latLngFromRow(byId.data) : null;
+        if (rowCoords) {
+          savedPlaceCoordsRef.current[place.id] = rowCoords;
+          setSavedPlaces((prev) => {
+            const next = prev.map((p) =>
+              p.id === place.id ? { ...p, lat: rowCoords.lat, lng: rowCoords.lng } : p,
+            );
+            savedPlacesRef.current = next;
+            void writeCachedPlaces(uid, next);
+            return next;
+          });
+          return rowCoords;
+        }
+
+        // id 미스매치·옛 캐시: 이름+주소로 재조회
+        const byNameAddr = await supabase
+          .from("places")
+          .select("id, lat, lng, name, address")
+          .eq("user_id", uid)
+          .eq("name", place.name)
+          .eq("address", place.address)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const namedCoords = byNameAddr.data ? latLngFromRow(byNameAddr.data) : null;
+        if (namedCoords) {
+          savedPlaceCoordsRef.current[place.id] = namedCoords;
+          if (byNameAddr.data?.id) {
+            savedPlaceCoordsRef.current[byNameAddr.data.id] = namedCoords;
+          }
+          setSavedPlaces((prev) => {
+            const next = prev.map((p) =>
+              p.id === place.id || p.id === byNameAddr.data?.id
+                ? { ...p, lat: namedCoords.lat, lng: namedCoords.lng }
+                : p,
+            );
+            savedPlacesRef.current = next;
+            void writeCachedPlaces(uid, next);
+            return next;
+          });
+          return namedCoords;
+        }
+      } catch (err) {
+        console.warn("[PindMap:place] resolveSavedPlaceCoords DB failed", err);
+      }
+    }
+
+    // 지오코딩 폴백 (맵 준비된 경우)
+    if (geocoderRef.current && place.address.trim()) {
+      return await new Promise((resolve) => {
+        geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
+          if (sv !== window.kakao.maps.services.Status.OK || !result?.[0]) {
+            resolve(null);
+            return;
+          }
+          const lat = parseFloat(result[0].y);
+          const lng = parseFloat(result[0].x);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            resolve(null);
+            return;
+          }
+          const coords = { lat, lng };
+          savedPlaceCoordsRef.current[place.id] = coords;
+          setSavedPlaces((prev) => {
+            const next = prev.map((p) =>
+              p.id === place.id ? { ...p, lat, lng } : p,
+            );
+            savedPlacesRef.current = next;
+            if (userIdRef.current) void writeCachedPlaces(userIdRef.current, next);
+            return next;
+          });
+          resolve(coords);
+        });
+      });
+    }
+
+    return null;
+  }, []);
 
   const resolveSavedMatch = useCallback((candidate: any): Place | undefined => {
     if (!candidate) return undefined;
@@ -5633,7 +5738,7 @@ function HomePageContent() {
     setSelectedMapPlace(place);
     setActiveTab("map");
     const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
-    const stored = latLngFromRow(place);
+    const stored = latLngFromRow(place) ?? savedPlaceCoordsRef.current[place.id] ?? null;
     if (stored && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(stored.lat, stored.lng));
       mapRef.current.setLevel(4);
@@ -5641,24 +5746,22 @@ function HomePageContent() {
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
       return;
     }
-    if (mapRef.current && geocoderRef.current) {
-      geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
-        if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
-        const markerLat = parseFloat(result[0].y);
-        const markerLng = parseFloat(result[0].x);
-        mapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x));
-        mapRef.current.setLevel(4);
-        savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
-        setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
-      });
-      return;
-    }
-    // 맵 인스턴스가 아직 없으면 시트만이라도 표시
     if (stored) {
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
-    } else {
-      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
+      return;
     }
+
+    // 좌표 없음 → 시트 먼저 띄우고 DB/지오코딩 폴백
+    setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
+    void (async () => {
+      const coords = await resolveSavedPlaceCoords(place);
+      if (!coords) return;
+      if (mapRef.current && window.kakao?.maps) {
+        mapRef.current.setCenter(new window.kakao.maps.LatLng(coords.lat, coords.lng));
+        mapRef.current.setLevel(4);
+      }
+      setSelectedPlace(toSelectedFromSavedPlace({ ...place, ...coords }, relatedPosts, coords.lat, coords.lng));
+    })();
   };
 
   /** 장소 시트 → 전체화면 지도 (클릭 좌표 우선, useMyLocation 무시) */
@@ -5947,14 +6050,32 @@ function HomePageContent() {
     return () => window.clearTimeout(timer);
   }, [reelInputExpanded]);
 
-  // 지도 탭의 작은 목록에서 장소 클릭 → 상세 카드만 띄움 (전체화면 X)
+  // 지도 탭의 작은 목록("검색기록")에서 장소 클릭 → 상세 카드 (좌표 필수)
   const handleMiniListClick = (place: Place) => {
     const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
-    if (!window.kakao?.maps?.services) {
-      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
+    const local = latLngFromRow(place) ?? savedPlaceCoordsRef.current[place.id] ?? null;
+
+    if (local) {
+      savedPlaceCoordsRef.current[place.id] = local;
+      if (mapRef.current && window.kakao?.maps) {
+        mapRef.current.setCenter(new window.kakao.maps.LatLng(local.lat, local.lng));
+        mapRef.current.setLevel(4);
+      }
+      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, local.lat, local.lng));
       return;
     }
+
+    // 일단 시트 오픈 후 DB/지오코딩으로 좌표 채움
     setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
+    void (async () => {
+      const coords = await resolveSavedPlaceCoords(place);
+      if (!coords) return;
+      if (mapRef.current && window.kakao?.maps) {
+        mapRef.current.setCenter(new window.kakao.maps.LatLng(coords.lat, coords.lng));
+        mapRef.current.setLevel(4);
+      }
+      setSelectedPlace(toSelectedFromSavedPlace({ ...place, ...coords }, relatedPosts, coords.lat, coords.lng));
+    })();
   };
 
   // 게시물에서 바로 팔로우
