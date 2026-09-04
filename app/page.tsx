@@ -1378,6 +1378,10 @@ function HomePageContent() {
   const instagramUrlInputRef = useRef<HTMLInputElement | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
   const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
+  /** 마이페이지 「게시」전용 — 전역 feedPosts 와 분리 */
+  const [myMypagePosts, setMyMypagePosts] = useState<FeedPost[]>([]);
+  const [myMypagePostsCount, setMyMypagePostsCount] = useState(0);
+  const myMypagePostsLoadingRef = useRef(false);
   const [feedHasMore, setFeedHasMore] = useState(true);
   const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const [detailCommentsLoading, setDetailCommentsLoading] = useState(false);
@@ -4586,18 +4590,68 @@ function HomePageContent() {
     }
   };
 
+  const loadMyMypagePosts = useCallback(async () => {
+    const uid = userIdRef.current;
+    if (!uid) {
+      setMyMypagePosts([]);
+      setMyMypagePostsCount(0);
+      return;
+    }
+    if (myMypagePostsLoadingRef.current) return;
+    myMypagePostsLoadingRef.current = true;
+    const MYPAGE_POSTS_LIMIT = 30;
+    try {
+      const { data, error, count } = await supabase
+        .from("feed_posts")
+        .select(FEED_POST_LIST_SELECT, { count: "exact" })
+        .eq("user_id", uid)
+        .eq("archived", false)
+        .order("created_at", { ascending: false })
+        .range(0, MYPAGE_POSTS_LIMIT - 1);
+      if (error) {
+        console.error("[PindMap:mypage] posts load failed", error);
+        return;
+      }
+      const liked = myLikedPostIdsRef.current;
+      const rawPosts: FeedPost[] = (data ?? []).map((p: any) =>
+        parseFeedPostFromRow(p, { likedByMe: liked.has(p.id) }),
+      );
+      setMyMypagePosts(hydrateFeedPostsWithAvatars(rawPosts));
+      setMyMypagePostsCount(typeof count === "number" ? count : rawPosts.length);
+      void prefetchAvatarsForFeedPosts(rawPosts).then(() => {
+        setMyMypagePosts((prev) => hydrateFeedPostsWithAvatars(prev));
+      });
+    } finally {
+      myMypagePostsLoadingRef.current = false;
+    }
+  }, [hydrateFeedPostsWithAvatars, prefetchAvatarsForFeedPosts]);
+
   const deletePost = async (id: string) => {
-    const deleted = feedPosts.find((p) => p.id === id);
+    const deleted =
+      feedPosts.find((p) => p.id === id) ?? myMypagePosts.find((p) => p.id === id);
     await supabase.from("feed_posts").delete().eq("id", id);
-    setFeedPosts(prev => prev.filter(p => p.id !== id)); setOpenMenuId(null);
+    setFeedPosts((prev) => prev.filter((p) => p.id !== id));
+    setMyMypagePosts((prev) => prev.filter((p) => p.id !== id));
+    setOpenMenuId(null);
     if (deleted?.userId === user?.id) {
       void refreshMyTotalLikes();
     }
+    if (user?.id) {
+      void loadMyMypagePosts();
+    }
   };
   const toggleArchive = async (id: string) => {
-    const post = feedPosts.find(p => p.id === id); if (!post) return;
+    const post =
+      feedPosts.find((p) => p.id === id) ?? myMypagePosts.find((p) => p.id === id);
+    if (!post) return;
     await supabase.from("feed_posts").update({ archived: !post.archived }).eq("id", id);
-    setFeedPosts(prev => prev.map(p => p.id === id ? { ...p, archived: !p.archived } : p)); setOpenMenuId(null);
+    setFeedPosts((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, archived: !p.archived } : p)),
+    );
+    setOpenMenuId(null);
+    if (post.userId === user?.id) {
+      void loadMyMypagePosts();
+    }
   };
   const openEdit = (post: FeedPost) => { setEditingPost(post); setEditComment(post.comment); setOpenMenuId(null); };
   const submitEdit = async () => {
@@ -6355,13 +6409,18 @@ function HomePageContent() {
     const controller = new AbortController();
     devLog("[PindMap:url] extraction start", { url: trimmedUrl });
     setIsSubmitting(true); setStatus(""); setError("");
+    // fetch 전에 완료/에러 UI·1.8초 타이머를 끊어 이전 완료 화면이 남지 않게 함
+    setExtractOverlayComplete(false);
     setExtractOverlayError(null);
     setExtractOverlayErrorRaw(null);
     setExtractOverlayCompleteVariant("success");
     setExtractRetryUrl(null);
     orchestratorSuccessKeyRef.current = "";
     window.localStorage.removeItem(ACTIVE_JOBS_STORAGE_KEY);
-    completedJobIdsRef.current.clear();
+    // 진행 중 job 이 있으면 clear 금지 — 이전 job 완료 핸들러가 다시 complete=true 올리는 레이스 방지
+    if (activeJobs.length === 0) {
+      completedJobIdsRef.current.clear();
+    }
     let timeout: number | undefined;
     try {
       timeout = window.setTimeout(() => controller.abort(), 10000);
@@ -6673,6 +6732,7 @@ function HomePageContent() {
       linkedCourseId ? "큐레이션과 코스가 등록됐어요 ✨" : "큐레이션이 등록됐어요 ✨",
       "success",
     );
+    void loadMyMypagePosts();
     setShowPostModal(false);
     setActiveTab("home");
   };
@@ -8758,18 +8818,16 @@ function HomePageContent() {
     }
   }, [activeTab, isHomeSearchOpen, closeHomeSearch]);
 
-  const myMypagePosts = useMemo(() => {
-    if (!user?.id) return [];
-    const uname = user.username;
-    return feedPosts
-      .filter(
-        (p) =>
-          !p.archived &&
-          (p.userId === user.id || (uname && p.user === uname)),
-      )
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [feedPosts, user?.id, user?.username]);
-
+  useEffect(() => {
+    if (activeTab !== "mypage" || !user?.id) {
+      if (!user?.id) {
+        setMyMypagePosts([]);
+        setMyMypagePostsCount(0);
+      }
+      return;
+    }
+    void loadMyMypagePosts();
+  }, [activeTab, user?.id, loadMyMypagePosts]);
 
   useEffect(() => {
     if (activeTab !== "mypage" || !user?.id || user.id !== ADMIN_USER_ID) {
@@ -12046,7 +12104,7 @@ function HomePageContent() {
                   <div style={{ flex: 1, display: "flex", justifyContent: "space-around", textAlign: "center" }}>
                     {(
                       [
-                        { label: "게시", value: myMypagePosts.length },
+                        { label: "게시", value: myMypagePostsCount },
                         { label: "팔로워", value: mypageFollowerCount },
                         { label: "팔로잉", value: mypageFollowingCount },
                       ] as const
