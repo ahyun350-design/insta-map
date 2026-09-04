@@ -1438,6 +1438,8 @@ function HomePageContent() {
   const [showExtractOverlay, setShowExtractOverlay] = useState(false);
   const [extractOverlayComplete, setExtractOverlayComplete] = useState(false);
   const [extractOverlayError, setExtractOverlayError] = useState<string | null>(null);
+  /** extract_jobs.error_message 원문 — 오버레이 사유 분기용 */
+  const [extractOverlayErrorRaw, setExtractOverlayErrorRaw] = useState<string | null>(null);
   const [extractRetryUrl, setExtractRetryUrl] = useState<string | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const selectedPlaceRef = useRef<any>(null);
@@ -3742,6 +3744,7 @@ function HomePageContent() {
       setShowExtractOverlay(false);
       setExtractOverlayComplete(false);
       setExtractOverlayError(null);
+      setExtractOverlayErrorRaw(null);
       setExtractRetryUrl(null);
     }, 1800);
     return () => window.clearTimeout(timer);
@@ -3830,6 +3833,7 @@ function HomePageContent() {
             if (nextStep.includes("all_saved_already")) {
               showToast("이미 저장된 장소만 추출됐어요", "info");
               setExtractOverlayError(null);
+              setExtractOverlayErrorRaw(null);
               setExtractOverlayComplete(true);
             } else {
               const userMsg = "장소를 찾지 못했어요. 다른 릴스로 시도해 주세요";
@@ -3837,6 +3841,7 @@ function HomePageContent() {
               showToast(userMsg, "info");
               setError(userMsg);
               setExtractOverlayError(userMsg);
+              setExtractOverlayErrorRaw(null);
               setExtractRetryUrl(failedUrl);
               setExtractOverlayComplete(false);
             }
@@ -3881,6 +3886,7 @@ function HomePageContent() {
           showToast(`✨ ${displayCount}개 장소를 추가했어요`, "success");
           setStatus("");
           setExtractOverlayError(null);
+          setExtractOverlayErrorRaw(null);
           setExtractOverlayComplete(true);
           devLog("[PindMap:url] extraction message hidden (success)", {
             resultPlaces: places.length,
@@ -3893,13 +3899,15 @@ function HomePageContent() {
           const userMsg = mapExtractErrorToUserMessage(data.error_message);
           const failedUrl =
             activeJobs.find((j) => j.jobId === jobId)?.instagramUrl ?? null;
-          showToast(userMsg, "error");
-          showPlaceExtractionGuideToast();
           setStatus("");
           setError(userMsg);
           setExtractOverlayError(userMsg);
+          setExtractOverlayErrorRaw(
+            typeof data.error_message === "string" ? data.error_message : null,
+          );
           setExtractRetryUrl(failedUrl);
           setExtractOverlayComplete(false);
+          setShowExtractOverlay(true);
           devLog("[PindMap:url] extraction message hidden (failed)");
           removeJob(jobId);
         }
@@ -3908,13 +3916,13 @@ function HomePageContent() {
         const userMsg = mapExtractErrorToUserMessage(raw);
         const failedUrl =
           activeJobs.find((j) => j.jobId === jobId)?.instagramUrl ?? null;
-        showToast(userMsg, "error");
-        showPlaceExtractionGuideToast();
         setStatus("");
         setError(userMsg);
         setExtractOverlayError(userMsg);
+        setExtractOverlayErrorRaw(raw);
         setExtractRetryUrl(failedUrl);
         setExtractOverlayComplete(false);
+        setShowExtractOverlay(true);
         devLog("[PindMap:url] extraction message hidden (failed)");
         removeJob(jobId);
       } finally {
@@ -6355,6 +6363,7 @@ function HomePageContent() {
     devLog("[PindMap:url] extraction start", { url: trimmedUrl });
     setIsSubmitting(true); setStatus(""); setError("");
     setExtractOverlayError(null);
+    setExtractOverlayErrorRaw(null);
     setExtractRetryUrl(null);
     orchestratorSuccessKeyRef.current = "";
     window.localStorage.removeItem(ACTIVE_JOBS_STORAGE_KEY);
@@ -6391,6 +6400,7 @@ function HomePageContent() {
       setShowExtractOverlay(true);
       setExtractOverlayComplete(false);
       setExtractOverlayError(null);
+      setExtractOverlayErrorRaw(null);
       setExtractRetryUrl(trimmedUrl);
       setInstagramUrl("");
       setReelInputExpanded(false);
@@ -6414,6 +6424,7 @@ function HomePageContent() {
       devLog(`[PindMap:url] extraction message hidden (${isTimeout ? "timeout" : "failed"})`);
       setError(message);
       setExtractOverlayError(message);
+      setExtractOverlayErrorRaw(rawMessage);
       setExtractRetryUrl(trimmedUrl);
       setShowExtractOverlay(true);
       setExtractOverlayComplete(false);
@@ -12875,16 +12886,19 @@ function HomePageContent() {
           open={showExtractOverlay}
           complete={extractOverlayComplete}
           errorMessage={extractOverlayError}
+          errorRaw={extractOverlayErrorRaw}
           onDismiss={() => {
             setShowExtractOverlay(false);
             setExtractOverlayComplete(false);
             setExtractOverlayError(null);
+            setExtractOverlayErrorRaw(null);
           }}
           onRetry={
             extractRetryUrl
               ? () => {
                   const url = extractRetryUrl;
                   setExtractOverlayError(null);
+                  setExtractOverlayErrorRaw(null);
                   setExtractOverlayComplete(false);
                   setShowExtractOverlay(false);
                   void handleAddFromInstagram(url);

@@ -145,8 +145,5 @@ export async function writeReelCache(
 
 /** Apify 결과가 캡션 없음으로 확정될 때만 no_caption 캐시 */
 export function isNoCaptionScrapeError(message: string): boolean {
-  return (
-    message === "캡션을 찾을 수 없습니다." ||
-    message === "Instagram 게시물을 가져올 수 없습니다."
-  );
+  return message === "캡션을 찾을 수 없습니다.";
 }

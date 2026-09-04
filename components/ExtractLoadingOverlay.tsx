@@ -50,10 +50,23 @@ const TIPS = [
 
 const TIP_ROTATE_MS = 6500;
 
+/** 캡션에 장소/캡션 없음 — 재시도 무의미 */
+export function isExtractNoPlaceError(raw: string | null | undefined): boolean {
+  const msg = (raw ?? "").trim();
+  if (!msg) return false;
+  return (
+    msg === "no_places_in_caption" ||
+    msg.startsWith("no_places_in_caption|") ||
+    msg.includes("캡션을 찾을 수 없습니다")
+  );
+}
+
 type Props = {
   open: boolean;
   complete?: boolean;
   errorMessage?: string | null;
+  /** extract_jobs.error_message 원문 — 사유 분기용 */
+  errorRaw?: string | null;
   onDismiss: () => void;
   onRetry?: () => void;
 };
@@ -62,6 +75,7 @@ export function ExtractLoadingOverlay({
   open,
   complete = false,
   errorMessage = null,
+  errorRaw = null,
   onDismiss,
   onRetry,
 }: Props) {
@@ -70,6 +84,7 @@ export function ExtractLoadingOverlay({
   const tip = TIPS[tipIndex];
   const showError = !!errorMessage;
   const showComplete = complete && !showError;
+  const noPlaceError = showError && isExtractNoPlaceError(errorRaw);
 
   useEffect(() => {
     if (!open || showComplete || showError) return;
@@ -118,18 +133,35 @@ export function ExtractLoadingOverlay({
         </button>
 
         {showError ? (
-          <div className="extractLoadingComplete">
-            <p className="extractLoadingCompleteEmoji" aria-hidden>
-              😢
-            </p>
-            <p className="extractLoadingCompleteTitle">추출에 실패했어요</p>
-            <p className="extractLoadingCompleteSub">{errorMessage}</p>
-            {onRetry && (
-              <button type="button" className="extractLoadingDismissBtn" onClick={onRetry}>
-                다시 시도
+          noPlaceError ? (
+            <div className="extractLoadingComplete">
+              <p className="extractLoadingCompleteEmoji" aria-hidden>
+                👀
+              </p>
+              <p className="extractLoadingCompleteTitle">이 릴스엔 가게 이름이 없어요</p>
+              <p className="extractLoadingCompleteSub">
+                글에 가게 이름이 안 적혀 있어요.
+                <br />
+                영상에는 있는데 캡션에 안 쓴 경우예요.
+              </p>
+              <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
+                확인
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="extractLoadingComplete">
+              <p className="extractLoadingCompleteEmoji" aria-hidden>
+                😢
+              </p>
+              <p className="extractLoadingCompleteTitle">추출에 실패했어요</p>
+              <p className="extractLoadingCompleteSub">{errorMessage}</p>
+              {onRetry && (
+                <button type="button" className="extractLoadingDismissBtn" onClick={onRetry}>
+                  다시 시도
+                </button>
+              )}
+            </div>
+          )
         ) : showComplete ? (
           <div className="extractLoadingComplete">
             <p className="extractLoadingCompleteEmoji" aria-hidden>
