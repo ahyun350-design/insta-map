@@ -12858,18 +12858,7 @@ function HomePageContent() {
             setExtractOverlayErrorRaw(null);
             setExtractOverlayCompleteVariant("success");
           }}
-          onViewMap={
-            extractOverlayCompleteVariant === "all_saved"
-              ? () => {
-                  setShowExtractOverlay(false);
-                  setExtractOverlayComplete(false);
-                  setExtractOverlayError(null);
-                  setExtractOverlayErrorRaw(null);
-                  setExtractOverlayCompleteVariant("success");
-                  setActiveTab("map");
-                }
-              : undefined
-          }
+          onViewMap={undefined}
           onRetry={
             extractRetryUrl
               ? () => {

@@ -51,11 +51,12 @@ const TIPS = [
 const TIP_ROTATE_MS = 6500;
 
 const NO_PLACE_VARIANTS = [
-  { icon: "👀", title: "이 릴스, 이름을 숨겼네요" },
+  { icon: "👀", title: "가게 이름이 안 보여요" },
   { icon: "🕵️", title: "탐정도 못 찾았어요" },
-  { icon: "🙈", title: "캡션이 수줍음이 많네요" },
-  { icon: "🐕", title: "냄새는 났는데 이름이 없어요" },
+  { icon: "🙈", title: "이름을 꽁꽁 숨겼네요" },
+  { icon: "🐕", title: "냄새는 맡았는데 이름이 없어요" },
   { icon: "🔍", title: "이름표가 없는 릴스예요" },
+  { icon: "🤔", title: "가게 이름을 못 찾겠어요" },
 ] as const;
 
 /** 서버 error_message — 캡션에 장소/캡션 없음 (재시도 무의미) */
