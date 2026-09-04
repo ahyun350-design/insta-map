@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { dlog } from "@/lib/debugLog";
@@ -9,28 +9,17 @@ import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
+import {
+  readProfilePageCache,
+  updateProfilePageScroll,
+  writeProfilePageCache,
+  type ProfilePageCacheEntry,
+  type ProfilePageCachePost,
+  type ProfilePageCacheUser,
+} from "@/lib/profilePageCache";
 
-type ProfileUser = {
-  id: string;
-  username: string;
-  avatar_url?: string | null;
-  bio?: string | null;
-  total_likes_received: number;
-};
-
-type ProfilePost = {
-  id: string;
-  title: string;
-  place_name: string;
-  address: string;
-  category: string;
-  comment: string;
-  images: string[];
-  created_at: string;
-  likes_count: number;
-  liked_by_me: boolean;
-  commentCount: number;
-};
+type ProfileUser = ProfilePageCacheUser;
+type ProfilePost = ProfilePageCachePost;
 
 type FriendRoom = {
   id: string;
@@ -51,26 +40,41 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(h / 24)}일 전`;
 }
 
+function hydrateFromCache(username: string): ProfilePageCacheEntry | null {
+  if (!username || typeof window === "undefined") return null;
+  return readProfilePageCache(username);
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const params = useParams<{ username: string }>();
   const routeUsername = useMemo(() => decodeURIComponent(params?.username ?? ""), [params?.username]);
   const { user, loading: userLoading, sessionChecked, reloadUserFromSession, verifySessionQuick } = useUser();
 
-  const [profile, setProfile] = useState<ProfileUser | null>(null);
-  const [posts, setPosts] = useState<ProfilePost[]>([]);
-  const [postCount, setPostCount] = useState(0);
+  const initialCacheRef = useRef<ProfilePageCacheEntry | null | undefined>(undefined);
+  if (initialCacheRef.current === undefined) {
+    initialCacheRef.current = hydrateFromCache(routeUsername);
+  }
+  const initialCache = initialCacheRef.current;
+
+  const [profile, setProfile] = useState<ProfileUser | null>(() => initialCache?.profile ?? null);
+  const [posts, setPosts] = useState<ProfilePost[]>(() => initialCache?.posts ?? []);
+  const [postCount, setPostCount] = useState(() => initialCache?.postCount ?? 0);
   const [postsLoadingMore, setPostsLoadingMore] = useState(false);
   const postsLoadingMoreRef = useRef(false);
-  const myLikedPostIdsRef = useRef<Set<string>>(new Set());
+  const myLikedPostIdsRef = useRef<Set<string>>(
+    new Set(initialCache?.likedPostIds ?? []),
+  );
   const profileScrollRef = useRef<HTMLDivElement | null>(null);
   const profilePostsLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const postsRef = useRef<ProfilePost[]>([]);
   postsRef.current = posts;
-  const [followerCount, setFollowerCount] = useState(0);
-  const [followingCount, setFollowingCount] = useState(0);
-  const [isFollowing, setIsFollowing] = useState(false);
-  const [loadingProfile, setLoadingProfile] = useState(true);
+  const scrollRestorePendingRef = useRef(initialCache != null && (initialCache.scrollTop ?? 0) > 0);
+  const [followerCount, setFollowerCount] = useState(() => initialCache?.followerCount ?? 0);
+  const [followingCount, setFollowingCount] = useState(() => initialCache?.followingCount ?? 0);
+  const [isFollowing, setIsFollowing] = useState(() => initialCache?.isFollowing ?? false);
+  // 캐시가 있으면 즉시 화면 — 백그라운드 갱신만
+  const [loadingProfile, setLoadingProfile] = useState(() => initialCache == null);
   const [followLoading, setFollowLoading] = useState(false);
   const [messageLoading, setMessageLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -83,6 +87,24 @@ export default function ProfilePage() {
   const [shareLoading, setShareLoading] = useState(false);
 
   const isOwnProfile = !!user && !!profile && user.id === profile.id;
+
+  /** SSR 직후 클라이언트에서 sessionStorage 캐시를 paint 전에 복원 */
+  useLayoutEffect(() => {
+    const cached = readProfilePageCache(routeUsername);
+    if (!cached) return;
+    setProfile(cached.profile);
+    setPosts(cached.posts);
+    setPostCount(cached.postCount);
+    setFollowerCount(cached.followerCount);
+    setFollowingCount(cached.followingCount);
+    setIsFollowing(cached.isFollowing);
+    myLikedPostIdsRef.current = new Set(cached.likedPostIds);
+    setNotFound(false);
+    setLoadingProfile(false);
+    if ((cached.scrollTop ?? 0) > 0) {
+      scrollRestorePendingRef.current = true;
+    }
+  }, [routeUsername]);
 
   useEffect(() => {
     if (!sessionChecked) return;
@@ -122,8 +144,26 @@ export default function ProfilePage() {
       const perfScreen = `profile:${routeUsername}`;
       dlog.perf.start(perfScreen);
       dlog.perf.fetchStart(perfScreen);
-      setLoadingProfile(true);
-      setNotFound(false);
+
+      const cached = readProfilePageCache(routeUsername);
+      const hasWarmCache = cached != null && cached.profile.username === routeUsername;
+      if (hasWarmCache && cached) {
+        setProfile(cached.profile);
+        setPosts(cached.posts);
+        setPostCount(cached.postCount);
+        setFollowerCount(cached.followerCount);
+        setFollowingCount(cached.followingCount);
+        setIsFollowing(cached.isFollowing);
+        myLikedPostIdsRef.current = new Set(cached.likedPostIds);
+        setNotFound(false);
+        setLoadingProfile(false);
+        if ((cached.scrollTop ?? 0) > 0) {
+          scrollRestorePendingRef.current = true;
+        }
+      } else {
+        setLoadingProfile(true);
+        setNotFound(false);
+      }
 
       const { data: profileData } = await supabase
         .from("users")
@@ -207,12 +247,29 @@ export default function ProfilePage() {
         commentCount: (p.comments ?? []).length,
       }));
 
+      const nextFollowerCount = followersRes.count ?? 0;
+      const nextFollowingCount = followingsRes.count ?? 0;
+      const nextIsFollowing = (myFollowRes.count ?? 0) > 0;
+      const nextPostCount = postsRes.count ?? enrichedPosts.length;
+      const prevScroll = readProfilePageCache(routeUsername)?.scrollTop ?? 0;
+
       setPosts(enrichedPosts);
-      setPostCount(postsRes.count ?? enrichedPosts.length);
-      setFollowerCount(followersRes.count ?? 0);
-      setFollowingCount(followingsRes.count ?? 0);
-      setIsFollowing((myFollowRes.count ?? 0) > 0);
+      setPostCount(nextPostCount);
+      setFollowerCount(nextFollowerCount);
+      setFollowingCount(nextFollowingCount);
+      setIsFollowing(nextIsFollowing);
       setLoadingProfile(false);
+      writeProfilePageCache({
+        username: routeUsername,
+        profile: target,
+        posts: enrichedPosts,
+        postCount: nextPostCount,
+        followerCount: nextFollowerCount,
+        followingCount: nextFollowingCount,
+        isFollowing: nextIsFollowing,
+        likedPostIds: Array.from(myLikedSet),
+        scrollTop: prevScroll,
+      });
       dlog.perf.fetchEnd(perfScreen);
       dlog.perf.markRender(perfScreen);
     };
@@ -220,6 +277,52 @@ export default function ProfilePage() {
     if (!sessionChecked || userLoading || !user) return;
     void loadProfile();
   }, [user, userLoading, sessionChecked, routeUsername]);
+
+  /** 상세에서 돌아올 때 스크롤 복원 */
+  useEffect(() => {
+    if (loadingProfile || !profile) return;
+    if (!scrollRestorePendingRef.current) return;
+    const cached = readProfilePageCache(routeUsername);
+    const top = cached?.scrollTop ?? 0;
+    if (top <= 0) {
+      scrollRestorePendingRef.current = false;
+      return;
+    }
+    const el = profileScrollRef.current;
+    if (!el) return;
+    const id = window.requestAnimationFrame(() => {
+      el.scrollTop = top;
+      scrollRestorePendingRef.current = false;
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [loadingProfile, profile, routeUsername, posts.length]);
+
+  /** 언마운트 / 이탈 시 스크롤 저장 */
+  useEffect(() => {
+    const username = routeUsername;
+    return () => {
+      const el = profileScrollRef.current;
+      if (el && username) {
+        updateProfilePageScroll(username, el.scrollTop);
+      }
+    };
+  }, [routeUsername]);
+
+  const persistProfileSnapshot = useCallback(() => {
+    if (!profile || profile.username !== routeUsername) return;
+    const scrollTop = profileScrollRef.current?.scrollTop ?? 0;
+    writeProfilePageCache({
+      username: routeUsername,
+      profile,
+      posts: postsRef.current,
+      postCount,
+      followerCount,
+      followingCount,
+      isFollowing,
+      likedPostIds: Array.from(myLikedPostIdsRef.current),
+      scrollTop,
+    });
+  }, [profile, routeUsername, postCount, followerCount, followingCount, isFollowing]);
 
   const loadMoreProfilePosts = useCallback(async () => {
     if (!profile || !user) return;
@@ -254,16 +357,38 @@ export default function ProfilePage() {
         liked_by_me: liked.has(p.id),
         commentCount: (p.comments ?? []).length,
       }));
+      let merged: ProfilePost[] = postsRef.current;
       setPosts((prev) => {
         const seen = new Set(prev.map((p) => p.id));
-        return [...prev, ...enriched.filter((p) => !seen.has(p.id))];
+        merged = [...prev, ...enriched.filter((p) => !seen.has(p.id))];
+        return merged;
       });
+      const nextCount = typeof count === "number" ? count : postCount;
       if (typeof count === "number") setPostCount(count);
+      writeProfilePageCache({
+        username: routeUsername,
+        profile,
+        posts: merged,
+        postCount: nextCount,
+        followerCount,
+        followingCount,
+        isFollowing,
+        likedPostIds: Array.from(myLikedPostIdsRef.current),
+        scrollTop: profileScrollRef.current?.scrollTop ?? 0,
+      });
     } finally {
       postsLoadingMoreRef.current = false;
       setPostsLoadingMore(false);
     }
-  }, [profile, user, postCount]);
+  }, [
+    profile,
+    user,
+    postCount,
+    routeUsername,
+    followerCount,
+    followingCount,
+    isFollowing,
+  ]);
 
   useEffect(() => {
     if (!profile || loadingProfile) return;
@@ -379,7 +504,8 @@ export default function ProfilePage() {
     }
   };
 
-  if (userLoading || loadingProfile || !sessionChecked) {
+  // 캐시된 프로필이 있으면 세션/재조회 대기 중에도 즉시 표시 (뒤로가기 로딩 깜빡임 방지)
+  if ((!sessionChecked || userLoading || loadingProfile) && !profile) {
     return (
       <main style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}>
         <p style={{ fontSize: "13px", color: "#888" }}>불러오는 중...</p>
@@ -387,7 +513,7 @@ export default function ProfilePage() {
     );
   }
 
-  if (!user) return null;
+  if (!user && sessionChecked && !userLoading) return null;
 
   return (
     <main className="mobileRoot">
@@ -542,6 +668,7 @@ export default function ProfilePage() {
                     address={post.address}
                     likeCount={post.likes_count}
                     onClick={() => {
+                      persistProfileSnapshot();
                       router.push(
                         `/?postId=${encodeURIComponent(post.id)}&from=profile&username=${encodeURIComponent(profile.username)}&tab=home`,
                       );

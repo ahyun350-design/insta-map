@@ -487,9 +487,9 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** 도보 추정(분) — 평균 보행 4.5km/h. 카카오 자동차 API 시간을 쓰지 않을 때 사용 */
+/** 도보 추정(분) — 직선거리 ×1.3(우회) / 4.5km/h. Tmap 없을 때만 사용 */
 function estimateWalkMinutesFromKm(km: number): number {
-  return Math.max(1, Math.round((km / 4.5) * 60));
+  return Math.max(1, Math.round(((km * 1.3) / 4.5) * 60));
 }
 
 function parseKakaoCarRoutePath(route: {
