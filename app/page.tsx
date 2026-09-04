@@ -181,6 +181,7 @@ import { nextCoachToShow, setCoachSeen, COACHMARK_DEFS } from "@/lib/coachmarks"
 import {
   buildCourseWalkNavigationFromTmap,
   parseTmapWalkGeoJsonToPath,
+  readTmapWalkTotals,
   type CourseWalkNavigation,
 } from "@/lib/courseWalkNavigation";
 import { feedPostToPlaceSheet, placeRefFromPlaceSheet, type PlaceSheetData } from "@/lib/placeSheet";
@@ -484,6 +485,26 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** 도보 추정(분) — 평균 보행 4.5km/h. 카카오 자동차 API 시간을 쓰지 않을 때 사용 */
+function estimateWalkMinutesFromKm(km: number): number {
+  return Math.max(1, Math.round((km / 4.5) * 60));
+}
+
+function parseKakaoCarRoutePath(route: {
+  sections?: { roads?: { vertexes?: number[] }[] }[];
+}): { lat: number; lng: number }[] {
+  const path: { lat: number; lng: number }[] = [];
+  route.sections?.forEach((section) => {
+    section.roads?.forEach((road) => {
+      const vertexes = road.vertexes ?? [];
+      for (let i = 0; i < vertexes.length; i += 2) {
+        path.push({ lat: vertexes[i + 1], lng: vertexes[i] });
+      }
+    });
+  });
+  return path;
 }
 
 /** 이 지역 재검색 버튼 — 최소 이동 거리(m) 및 화면 높이 대비 비율 */
@@ -1541,7 +1562,11 @@ function HomePageContent() {
   const messageUserSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
-  const [directionsInfo, setDirectionsInfo] = useState<{duration: number; distance: number} | null>(null);
+  const [directionsInfo, setDirectionsInfo] = useState<{
+    duration: number;
+    distance: number;
+    approx?: boolean;
+  } | null>(null);
   const [directionsMode, setDirectionsMode] = useState<"car" | "walk">("car");
   const [savedSearchQuery, setSavedSearchQuery] = useState("");
   const isIOSLike = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -4125,6 +4150,37 @@ function HomePageContent() {
     window.open(webUrl, "_blank");
   };
 
+  /** 대중교통: 카카오맵 앱 scheme → 웹 폴백 (WKWebView 에서 window.open 무반응 방지) */
+  const openTransitInKakaoMap = (destName: string, destLat: number, destLng: number) => {
+    const openAppThenWeb = (appUrl: string, webUrl: string) => {
+      devLog("[PindMap:transit] open kakao", { appUrl, webUrl, isIOSLike });
+      if (isIOSLike) {
+        window.location.href = appUrl;
+        window.setTimeout(() => {
+          window.location.href = webUrl;
+        }, 700);
+        return;
+      }
+      window.open(webUrl, "_blank");
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const olat = pos.coords.latitude;
+        const olng = pos.coords.longitude;
+        const appUrl = `kakaomap://route?sp=${olat},${olng}&ep=${destLat},${destLng}&by=pubtrans`;
+        const webUrl = `https://map.kakao.com/?sName=${encodeURIComponent("현재위치")}&sX=${olng}&sY=${olat}&eName=${encodeURIComponent(destName)}&eX=${destLng}&eY=${destLat}`;
+        openAppThenWeb(appUrl, webUrl);
+      },
+      () => {
+        const appUrl = `kakaomap://look?p=${destLat},${destLng}`;
+        const webUrl = `https://map.kakao.com/link/to/${encodeURIComponent(destName)},${destLat},${destLng}`;
+        openAppThenWeb(appUrl, webUrl);
+      },
+      { enableHighAccuracy: true, timeout: 12_000 },
+    );
+  };
+
   const revokeProfileEditAvatarBlob = () => {
     if (profileEditAvatarBlobRef.current) {
       URL.revokeObjectURL(profileEditAvatarBlobRef.current);
@@ -5557,7 +5613,65 @@ function HomePageContent() {
     [focusExpandedMapOnLatLng, resolveSavedMatch],
   );
 
-  /** 컴팩트 시트 길찾기 — 전체화면 검색과 동일하게 네이티브 경로(또는 웹 drawRoute) 사용 */
+  /** 컴팩트 맵에 출발·도착(또는 경로)이 보이도록 맞춤 */
+  const fitCompactMapToPoints = useCallback((points: { lat: number; lng: number }[]) => {
+    if (!mapRef.current || !window.kakao?.maps || points.length === 0) return;
+    if (points.length === 1) {
+      mapRef.current.setCenter(new window.kakao.maps.LatLng(points[0].lat, points[0].lng));
+      mapRef.current.setLevel(4);
+      return;
+    }
+    const bounds = new window.kakao.maps.LatLngBounds();
+    points.forEach((p) => bounds.extend(new window.kakao.maps.LatLng(p.lat, p.lng)));
+    // 하단 시트가 가리지 않도록 bottom padding
+    mapRef.current.setBounds(bounds, 48, 36, 300, 36);
+  }, []);
+
+  /** 컴팩트(mapRef) 카카오 맵에 경로 폴리라인 표시 */
+  const drawRouteOnCompactMap = useCallback(
+    (path: { lat: number; lng: number }[], mode: "car" | "walk") => {
+      if (!mapRef.current || !window.kakao?.maps || path.length < 2) return false;
+      if (routePolylineRef.current) {
+        routePolylineRef.current.setMap(null);
+        routePolylineRef.current = null;
+      }
+      const linePath = path.map((p) => new window.kakao.maps.LatLng(p.lat, p.lng));
+      const strokeColor = mode === "walk" ? "#16a34a" : "#1a2a7a";
+      const strokeWeight = mode === "walk" ? 7 : 5;
+      const strokeStyle = mode === "walk" ? "shortdash" : "solid";
+      routePolylineRef.current = new window.kakao.maps.Polyline({
+        path: linePath,
+        strokeWeight,
+        strokeColor,
+        strokeOpacity: 0.95,
+        strokeStyle,
+      });
+      routePolylineRef.current.setMap(mapRef.current);
+      fitCompactMapToPoints(path);
+      return true;
+    },
+    [fitCompactMapToPoints],
+  );
+
+  const resolveDirectionsOrigin = useCallback((): Promise<{ lat: number; lng: number } | null> => {
+    const stored = myLocationLatLngRef.current;
+    if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
+      return Promise.resolve(stored);
+    }
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const o = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          myLocationLatLngRef.current = o;
+          resolve(o);
+        },
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 12_000 },
+      );
+    });
+  }, []);
+
+  /** 컴팩트 시트 길찾기 — 전체화면으로 올리지 않고 mapRef에 경로/카메라 맞춤 */
   const startDirectionsFromPlaceSheet = useCallback(
     async (placeData: PlaceSheetData, mode: "car" | "walk" | "transit") => {
       const lat = parseFloat(String(placeData.y ?? ""));
@@ -5572,107 +5686,105 @@ function HomePageContent() {
         return;
       }
 
-      const saved = resolveSavedMatch(placeData);
-      const destId = saved ? `place-${saved.id}` : `sheet-${lat.toFixed(5)},${lng.toFixed(5)}`;
+      setDirectionsMode(mode);
+      setDirectionsLoading(true);
+      setDirectionsInfo(null);
+      if (routePolylineRef.current) {
+        routePolylineRef.current.setMap(null);
+        routePolylineRef.current = null;
+      }
 
-      // iOS 네이티브: 전체화면 검색 길찾기와 동일 경로
-      if (isNativeMapAvailable()) {
-        expandPlaceSheetToFullscreen(placeData);
-        setDirectionsMode(mode);
-        setDirectionsLoading(true);
-        try {
-          await waitForFullscreenNativeMapReady();
-          if (mode === "walk") {
-            await runFullscreenNativeDirections({ id: destId, lat, lng });
-            return;
-          }
-          // 자동차: 웹 drawRoute 와 같은 /api/directions → 네이티브 폴리라인
-          const resolveOrigin = async (): Promise<{ lat: number; lng: number } | null> => {
-            const stored = myLocationLatLngRef.current;
-            if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
-              return stored;
-            }
-            return await new Promise((resolve) => {
-              navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                  const o = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                  myLocationLatLngRef.current = o;
-                  resolve(o);
-                },
-                () => resolve(null),
-              );
-            });
-          };
-          const origin = await resolveOrigin();
-          if (!origin) {
-            showToast("현재 위치를 가져올 수 없어요", "error");
-            return;
-          }
-          const res = await fetch("/api/directions", {
+      try {
+        const origin = await resolveDirectionsOrigin();
+        if (!origin) {
+          showToast("현재 위치를 가져올 수 없어요", "error");
+          return;
+        }
+
+        if (mode === "walk") {
+          // /api/directions 는 카카오 모빌리티 자동차 전용 — 도보에 절대 쓰지 않음
+          const res = await fetch("/api/walk-directions", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               origin,
               destination: { lat, lng },
-              mode: "car",
             }),
           });
-          const data = await res.json();
-          if (!data.routes?.[0]) {
-            showToast("경로를 찾을 수 없어요", "error");
-            return;
-          }
-          const route = data.routes[0];
-          const path: { lat: number; lng: number }[] = [];
-          route.sections.forEach((section: any) => {
-            section.roads.forEach((road: any) => {
-              for (let i = 0; i < road.vertexes.length; i += 2) {
-                path.push({ lat: road.vertexes[i + 1], lng: road.vertexes[i] });
-              }
-            });
-          });
-          if (path.length < 2) {
-            showToast("경로를 찾을 수 없어요", "error");
-            return;
-          }
-          await setFullscreenNativeRoute({ path, mode: "car" }, { silent: false });
-          const summary = route.summary;
-          if (summary) {
-            setDirectionsInfo({
-              duration: Math.round(summary.duration / 60),
-              distance: Math.round((summary.distance / 1000) * 10) / 10,
-            });
-            await setFullscreenNativeDirectionsInfo(
-              {
-                id: destId,
-                duration: Math.round(summary.duration / 60),
-                distance: Math.round(summary.distance),
-              },
-              { silent: false },
-            );
-          }
-        } catch (err) {
-          console.error("[sheet] directions failed", err);
-          showToast("길찾기에 실패했어요", "error");
-        } finally {
-          setDirectionsLoading(false);
-        }
-        return;
-      }
+          const data = await res.json().catch(() => null);
+          const path = data ? parseTmapWalkGeoJsonToPath(data) : [];
+          const totals = data ? readTmapWalkTotals(data) : { distanceM: null, timeSec: null };
 
-      // 웹 확장 맵: 기존 drawRoute
-      setMapExpanded(true);
-      setDirectionsMode(mode);
-      window.setTimeout(() => {
-        void drawRoute(lat, lng, mode);
-      }, 600);
+          if (res.ok && totals.timeSec != null && totals.timeSec > 0) {
+            const distanceM =
+              totals.distanceM != null && totals.distanceM > 0
+                ? totals.distanceM
+                : Math.round(distanceMeters(origin.lat, origin.lng, lat, lng));
+            setDirectionsInfo({
+              duration: Math.max(1, Math.round(totals.timeSec / 60)),
+              distance: Math.round((distanceM / 1000) * 10) / 10,
+            });
+            if (path.length >= 2) {
+              drawRouteOnCompactMap(path, "walk");
+            } else {
+              fitCompactMapToPoints([origin, { lat, lng }]);
+            }
+            return;
+          }
+
+          // Tmap 실패·미지원 시: 직선 거리 기반 추정 (+ '약')
+          const km = distanceMeters(origin.lat, origin.lng, lat, lng) / 1000;
+          setDirectionsInfo({
+            duration: estimateWalkMinutesFromKm(km),
+            distance: Math.round(km * 10) / 10,
+            approx: true,
+          });
+          if (path.length >= 2) {
+            drawRouteOnCompactMap(path, "walk");
+          } else {
+            fitCompactMapToPoints([origin, { lat, lng }]);
+          }
+          return;
+        }
+
+        // 자동차: 카카오 모빌리티 /api/directions
+        const res = await fetch("/api/directions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            origin,
+            destination: { lat, lng },
+            mode: "car",
+          }),
+        });
+        const data = await res.json();
+        if (!data.routes?.[0]) {
+          showToast("경로를 찾을 수 없어요", "error");
+          fitCompactMapToPoints([origin, { lat, lng }]);
+          return;
+        }
+        const route = data.routes[0];
+        const path = parseKakaoCarRoutePath(route);
+        const summary = route.summary;
+        if (summary) {
+          setDirectionsInfo({
+            duration: Math.round(summary.duration / 60),
+            distance: Math.round((summary.distance / 1000) * 10) / 10,
+          });
+        }
+        if (path.length >= 2) {
+          drawRouteOnCompactMap(path, "car");
+        } else {
+          fitCompactMapToPoints([origin, { lat, lng }]);
+        }
+      } catch (err) {
+        console.error("[sheet] directions failed", err);
+        showToast("길찾기에 실패했어요", "error");
+      } finally {
+        setDirectionsLoading(false);
+      }
     },
-    [
-      expandPlaceSheetToFullscreen,
-      resolveSavedMatch,
-      runFullscreenNativeDirections,
-      showToast,
-    ],
+    [drawRouteOnCompactMap, fitCompactMapToPoints, resolveDirectionsOrigin, showToast],
   );
 
   /** 큐레이션 상세 → 저장된 장소면 저장 클릭과 동일, 아니면 임시로 지도만 열고 빈 하트(미저장) */
@@ -7723,50 +7835,105 @@ function HomePageContent() {
   const drawRoute = async (destLat: number, destLng: number, mode: "car" | "walk" = "car") => {
     if (!expandedMapRef.current || !window.kakao?.maps) return;
     track("course_directions");
+    setDirectionsMode(mode);
     setDirectionsLoading(true);
     clearRoute();
     navigator.geolocation.getCurrentPosition(async (pos) => {
+      const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      myLocationLatLngRef.current = origin;
       try {
+        const paintOnExpanded = (path: { lat: number; lng: number }[]) => {
+          if (!expandedMapRef.current || path.length < 2) return;
+          const linePath = path.map((p) => new window.kakao.maps.LatLng(p.lat, p.lng));
+          const strokeColor = mode === "walk" ? "#16a34a" : "#1a2a7a";
+          const strokeWeight = mode === "walk" ? 7 : 5;
+          const strokeStyle = mode === "walk" ? "shortdash" : "solid";
+          routePolylineRef.current = new window.kakao.maps.Polyline({
+            path: linePath,
+            strokeWeight,
+            strokeColor,
+            strokeOpacity: 0.95,
+            strokeStyle,
+          });
+          routePolylineRef.current.setMap(expandedMapRef.current);
+          const bounds = new window.kakao.maps.LatLngBounds();
+          linePath.forEach((p) => bounds.extend(p));
+          expandedMapRef.current.setBounds(bounds);
+        };
+
+        if (mode === "walk") {
+          // 카카오 /api/directions 는 자동차 전용 — 도보는 Tmap
+          const res = await fetch("/api/walk-directions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              origin,
+              destination: { lat: destLat, lng: destLng },
+            }),
+          });
+          const data = await res.json().catch(() => null);
+          const path = data ? parseTmapWalkGeoJsonToPath(data) : [];
+          const totals = data ? readTmapWalkTotals(data) : { distanceM: null, timeSec: null };
+
+          if (res.ok && path.length >= 2 && totals.timeSec != null && totals.timeSec > 0) {
+            const distanceM =
+              totals.distanceM != null && totals.distanceM > 0
+                ? totals.distanceM
+                : Math.round(distanceMeters(origin.lat, origin.lng, destLat, destLng));
+            setDirectionsInfo({
+              duration: Math.max(1, Math.round(totals.timeSec / 60)),
+              distance: Math.round((distanceM / 1000) * 10) / 10,
+            });
+            paintOnExpanded(path);
+            return;
+          }
+
+          const km = distanceMeters(origin.lat, origin.lng, destLat, destLng) / 1000;
+          setDirectionsInfo({
+            duration: estimateWalkMinutesFromKm(km),
+            distance: Math.round(km * 10) / 10,
+            approx: true,
+          });
+          if (path.length >= 2) {
+            paintOnExpanded(path);
+          } else if (expandedMapRef.current) {
+            const bounds = new window.kakao.maps.LatLngBounds();
+            bounds.extend(new window.kakao.maps.LatLng(origin.lat, origin.lng));
+            bounds.extend(new window.kakao.maps.LatLng(destLat, destLng));
+            expandedMapRef.current.setBounds(bounds);
+          }
+          return;
+        }
+
         const res = await fetch("/api/directions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ origin: { lat: pos.coords.latitude, lng: pos.coords.longitude }, destination: { lat: destLat, lng: destLng }, mode }),
+          body: JSON.stringify({
+            origin,
+            destination: { lat: destLat, lng: destLng },
+            mode: "car",
+          }),
         });
         const data = await res.json();
-        if (!data.routes?.[0]) { showToast("경로를 찾을 수 없어요", "error"); setDirectionsLoading(false); return; }
+        if (!data.routes?.[0]) {
+          showToast("경로를 찾을 수 없어요", "error");
+          return;
+        }
         const route = data.routes[0];
         const summary = route.summary;
-        setDirectionsInfo({ duration: Math.round(summary.duration / 60), distance: Math.round(summary.distance / 1000 * 10) / 10 });
-        const linePath: any[] = [];
-        route.sections.forEach((section: any) => {
-          section.roads.forEach((road: any) => {
-            for (let i = 0; i < road.vertexes.length; i += 2) {
-              linePath.push(new window.kakao.maps.LatLng(road.vertexes[i + 1], road.vertexes[i]));
-            }
-          });
+        setDirectionsInfo({
+          duration: Math.round(summary.duration / 60),
+          distance: Math.round((summary.distance / 1000) * 10) / 10,
         });
-        const strokeColor = mode === "walk" ? "#16a34a" : "#1a2a7a";
-        const strokeWeight = mode === "walk" ? 7 : 5;
-        const strokeStyle = mode === "walk" ? "shortdash" : "solid";
-        routePolylineRef.current = new window.kakao.maps.Polyline({ path: linePath, strokeWeight, strokeColor, strokeOpacity: 0.95, strokeStyle });
-        routePolylineRef.current.setMap(expandedMapRef.current);
-        const bounds = new window.kakao.maps.LatLngBounds();
-        linePath.forEach(p => bounds.extend(p));
-        expandedMapRef.current.setBounds(bounds);
-      } catch { showToast("길찾기에 실패했어요", "error"); }
-      finally { setDirectionsLoading(false); }
-    }, () => { showToast("현재 위치를 가져올 수 없어요", "error"); setDirectionsLoading(false); });
-  };
-
-  const openTransitInKakaoMap = (destName: string, destLat: number, destLng: number) => {
-    // 카카오맵 앱 딥링크: 출발지=현재위치, 도착지=장소
-    navigator.geolocation.getCurrentPosition((pos) => {
-      const url = `https://map.kakao.com/?sName=현재위치&sX=${pos.coords.longitude}&sY=${pos.coords.latitude}&eName=${encodeURIComponent(destName)}&eX=${destLng}&eY=${destLat}`;
-      window.open(url, "_blank");
+        paintOnExpanded(parseKakaoCarRoutePath(route));
+      } catch {
+        showToast("길찾기에 실패했어요", "error");
+      } finally {
+        setDirectionsLoading(false);
+      }
     }, () => {
-      // 위치 권한 없으면 도착지만으로
-      const url = `https://map.kakao.com/?eName=${encodeURIComponent(destName)}&eX=${destLng}&eY=${destLat}`;
-      window.open(url, "_blank");
+      showToast("현재 위치를 가져올 수 없어요", "error");
+      setDirectionsLoading(false);
     });
   };
 
@@ -12654,6 +12821,7 @@ function HomePageContent() {
               onOpenTransit={() => {
                 void startDirectionsFromPlaceSheet(selectedPlace as PlaceSheetData, "transit");
               }}
+              onClearRoute={clearRoute}
             />
           </>
         )}

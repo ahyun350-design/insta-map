@@ -14,7 +14,7 @@ type Props = {
   showDirections?: boolean;
   directionsMode?: DirectionsMode;
   directionsLoading?: boolean;
-  directionsInfo?: { duration: number; distance: number } | null;
+  directionsInfo?: { duration: number; distance: number; approx?: boolean } | null;
   onClose: () => void;
   onToggleSave: () => void;
   onCurationClick: (postId: string, photoIndex?: number) => void;
@@ -216,7 +216,7 @@ export function PlaceDetailSheet({
             {directionsLoading && <p className="placeDetailSheetDirectionsHint">경로 계산 중...</p>}
             {directionsInfo && !directionsLoading && (
               <div className="placeDetailSheetDirectionsResult">
-                <span>🕐 {directionsInfo.duration}분</span>
+                <span>🕐 {directionsInfo.approx ? `약 ${directionsInfo.duration}분` : `${directionsInfo.duration}분`}</span>
                 <span>📍 {directionsInfo.distance}km</span>
                 {onClearRoute && (
                   <button type="button" className="placeDetailSheetClearRoute" onClick={onClearRoute}>
