@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import type { SavedCourseItem } from "@/lib/courses";
 
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
@@ -44,7 +44,6 @@ const rootStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   paddingTop: "env(safe-area-inset-top, 0px)",
-  paddingBottom: "env(safe-area-inset-bottom, 0px)",
   boxSizing: "border-box",
 };
 
@@ -65,8 +64,30 @@ export function CourseEditScreen({
   onRemoveItem,
   onAddPlace,
 }: Props) {
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (keyboardHeight <= 0) return;
+    const el = titleInputRef.current;
+    if (!el || document.activeElement !== el) return;
+    const t = window.setTimeout(() => {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [keyboardHeight]);
+
   return (
-    <section style={rootStyle}>
+    <section
+      style={{
+        ...rootStyle,
+        // KeyboardResize.None: 하단 여백으로 입력 영역만 확보, 헤더는 fixed 컬럼에 고정
+        paddingBottom:
+          keyboardHeight > 0
+            ? keyboardHeight
+            : "env(safe-area-inset-bottom, 0px)",
+        transition: "padding-bottom 0.25s ease",
+      }}
+    >
       <header
         style={{
           position: "sticky",
@@ -126,12 +147,12 @@ export function CourseEditScreen({
           minHeight: 0,
           overflowY: "auto",
           padding: "16px",
-          paddingBottom: keyboardHeight > 0 ? 16 + keyboardHeight : 16,
-          transition: "padding-bottom 0.25s ease",
+          paddingBottom: 16,
         }}
       >
         <p style={{ margin: "0 0 8px", fontSize: 12, color: "#666", fontWeight: 500 }}>제목</p>
         <input
+          ref={titleInputRef}
           className="profileEditField"
           value={draft.title}
           maxLength={60}

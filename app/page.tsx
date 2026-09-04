@@ -3435,6 +3435,14 @@ function HomePageContent() {
     return () => window.clearTimeout(t);
   }, [isEditingCourseTitleInline]);
 
+  useEffect(() => {
+    if (!isEditingCourseTitleInline || keyboardHeight <= 0) return;
+    const t = window.setTimeout(() => {
+      courseTitleInlineInputRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [isEditingCourseTitleInline, keyboardHeight]);
+
   const closeCourseSaveModal = () => {
     setShowCourseSaveModal(false);
     setCourseSaveTitle("");
@@ -10699,8 +10707,18 @@ function HomePageContent() {
                             boxSizing: "border-box",
                           }}
                         >
-                          <div className="courseModalSheet">
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                          <div
+                            className="courseModalSheet"
+                            style={
+                              keyboardHeight > 0
+                                ? {
+                                    maxHeight: `calc(100dvh - ${keyboardHeight}px - env(safe-area-inset-top, 0px) - 8px)`,
+                                    transition: "max-height 0.25s ease",
+                                  }
+                                : undefined
+                            }
+                          >
+                            <div className="courseModalSheetHeader">
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 {savedCourseId ? (
                                   isEditingCourseTitleInline && !isReadOnlyCourse ? (
@@ -10832,7 +10850,8 @@ function HomePageContent() {
                                 ×
                               </button>
                             </div>
-            
+
+                            <div className="courseModalSheetBody">
                             {!courseResult && (
                               <>
                                 <div>
@@ -11031,6 +11050,7 @@ function HomePageContent() {
                                 )}
                               </>
                             )}
+                            </div>
                           </div>
                         </div>
                       )}
@@ -12632,6 +12652,7 @@ function HomePageContent() {
           {activeTab === "saved" && (
   <div className="screen" style={{ paddingTop: "env(safe-area-inset-top, 0px)", boxSizing: "border-box" }}>
   <div
+    className={savedSelectMode ? "savedPlacesListSelectMode" : undefined}
     style={{
       paddingBottom:
         keyboardHeight > 0
