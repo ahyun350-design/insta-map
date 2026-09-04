@@ -2109,13 +2109,38 @@ function HomePageContent() {
           return;
         }
         await setFullscreenNativeRoute({ path, mode: "walk" }, { silent: false });
-        const duration = Number(data.properties?.totalTime);
-        const distance = Number(data.properties?.totalDistance);
-        if (Number.isFinite(duration) && Number.isFinite(distance) && duration > 0 && distance > 0) {
+        const totals = readTmapWalkTotals(data);
+        const durationSec = totals.timeSec;
+        const distanceM = totals.distanceM;
+        if (durationSec != null && durationSec > 0) {
+          const durationMin = Math.max(1, Math.round(durationSec / 60));
+          const distM =
+            distanceM != null && distanceM > 0
+              ? distanceM
+              : Math.round(distanceMeters(origin.lat, origin.lng, destLat, destLng));
+          setDirectionsInfo({
+            duration: durationMin,
+            distance: Math.round((distM / 1000) * 10) / 10,
+          });
           await setFullscreenNativeDirectionsInfo(
-            { id: destination.id, duration: Math.round(duration), distance: Math.round(distance) },
+            { id: destination.id, duration: durationMin, distance: Math.round(distM) },
             { silent: false },
           );
+        } else {
+          const duration = Number(data.properties?.totalTime);
+          const distance = Number(data.properties?.totalDistance);
+          if (Number.isFinite(duration) && Number.isFinite(distance) && duration > 0 && distance > 0) {
+            // Tmap properties.totalTime 은 초 — 분으로 변환
+            const durationMin = Math.max(1, Math.round(duration / 60));
+            setDirectionsInfo({
+              duration: durationMin,
+              distance: Math.round((distance / 1000) * 10) / 10,
+            });
+            await setFullscreenNativeDirectionsInfo(
+              { id: destination.id, duration: durationMin, distance: Math.round(distance) },
+              { silent: false },
+            );
+          }
         }
       };
 
@@ -4151,35 +4176,91 @@ function HomePageContent() {
     window.open(webUrl, "_blank");
   };
 
-  /** 대중교통: 카카오맵 앱 scheme → 웹 폴백 (WKWebView 에서 window.open 무반응 방지) */
+  /** 대중교통: 웹을 즉시 연다 (GPS 대기 금지). 앱 스킴은 보조 시도. */
   const openTransitInKakaoMap = (destName: string, destLat: number, destLng: number) => {
-    const openAppThenWeb = (appUrl: string, webUrl: string) => {
-      devLog("[PindMap:transit] open kakao", { appUrl, webUrl, isIOSLike });
-      if (isIOSLike) {
-        window.location.href = appUrl;
-        window.setTimeout(() => {
-          window.location.href = webUrl;
-        }, 700);
+    console.log("[PindMap:transit] click", { destName, destLat, destLng, isIOSLike });
+
+    const openWebReliable = (webUrl: string) => {
+      console.log("[PindMap:transit] open web", webUrl);
+      let opened: Window | null = null;
+      try {
+        opened = window.open(webUrl, "_blank", "noopener,noreferrer");
+      } catch (err) {
+        console.warn("[PindMap:transit] window.open threw", err);
+      }
+      if (opened) {
+        console.log("[PindMap:transit] window.open ok");
         return;
       }
-      window.open(webUrl, "_blank");
+      // Capacitor WKWebView: window.open 이 막히면 <a target=_blank> 클릭 시도
+      try {
+        const a = document.createElement("a");
+        a.href = webUrl;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        console.log("[PindMap:transit] anchor click dispatched");
+      } catch (err) {
+        console.warn("[PindMap:transit] anchor failed, location.href fallback", err);
+        window.location.href = webUrl;
+      }
     };
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const olat = pos.coords.latitude;
-        const olng = pos.coords.longitude;
-        const appUrl = `kakaomap://route?sp=${olat},${olng}&ep=${destLat},${destLng}&by=pubtrans`;
-        const webUrl = `https://map.kakao.com/?sName=${encodeURIComponent("현재위치")}&sX=${olng}&sY=${olat}&eName=${encodeURIComponent(destName)}&eX=${destLng}&eY=${destLat}`;
-        openAppThenWeb(appUrl, webUrl);
-      },
-      () => {
-        const appUrl = `kakaomap://look?p=${destLat},${destLng}`;
-        const webUrl = `https://map.kakao.com/link/to/${encodeURIComponent(destName)},${destLat},${destLng}`;
-        openAppThenWeb(appUrl, webUrl);
-      },
-      { enableHighAccuracy: true, timeout: 12_000 },
-    );
+    const tryAppScheme = (appUrl: string) => {
+      console.log("[PindMap:transit] try app scheme", appUrl);
+      try {
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.src = appUrl;
+        document.body.appendChild(iframe);
+        window.setTimeout(() => {
+          try {
+            iframe.remove();
+          } catch {
+            /* noop */
+          }
+        }, 2000);
+      } catch (err) {
+        console.warn("[PindMap:transit] app scheme iframe failed", err);
+      }
+    };
+
+    const stored = myLocationLatLngRef.current;
+    const hasOrigin =
+      !!stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng);
+
+    let webUrl: string;
+    let appUrl: string;
+    if (hasOrigin && stored) {
+      webUrl = `https://map.kakao.com/?sName=${encodeURIComponent("현재위치")}&sX=${stored.lng}&sY=${stored.lat}&eName=${encodeURIComponent(destName)}&eX=${destLng}&eY=${destLat}`;
+      appUrl = `kakaomap://route?sp=${stored.lat},${stored.lng}&ep=${destLat},${destLng}&by=pubtrans`;
+    } else {
+      webUrl = `https://map.kakao.com/link/to/${encodeURIComponent(destName)},${destLat},${destLng}`;
+      appUrl = `kakaomap://look?p=${destLat},${destLng}`;
+    }
+
+    // 웹 먼저 (확실), 앱 스킴은 비차단 보조
+    openWebReliable(webUrl);
+    if (isIOSLike) {
+      window.setTimeout(() => tryAppScheme(appUrl), 120);
+    }
+
+    // 저장된 위치 없으면 백그라운드로 GPS만 갱신 (이미 웹은 연 상태)
+    if (!hasOrigin) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          myLocationLatLngRef.current = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          };
+        },
+        () => {},
+        { enableHighAccuracy: false, timeout: 5000 },
+      );
+    }
   };
 
   const revokeProfileEditAvatarBlob = () => {
@@ -5672,7 +5753,7 @@ function HomePageContent() {
     });
   }, []);
 
-  /** 컴팩트 시트 길찾기 — 전체화면으로 올리지 않고 mapRef에 경로/카메라 맞춤 */
+  /** 컴팩트 시트 길찾기 — 전체화면으로 올리고 선택 모드로 즉시 경로 실행 */
   const startDirectionsFromPlaceSheet = useCallback(
     async (placeData: PlaceSheetData, mode: "car" | "walk" | "transit") => {
       const lat = parseFloat(String(placeData.y ?? ""));
@@ -5687,105 +5768,88 @@ function HomePageContent() {
         return;
       }
 
+      const saved = resolveSavedMatch(placeData);
+      const destId = saved ? `place-${saved.id}` : `sheet-${lat.toFixed(5)},${lng.toFixed(5)}`;
+      if (saved) {
+        placePinByIdRef.current.set(`place-${saved.id}`, saved);
+      }
+
       setDirectionsMode(mode);
       setDirectionsLoading(true);
       setDirectionsInfo(null);
-      if (routePolylineRef.current) {
-        routePolylineRef.current.setMap(null);
-        routePolylineRef.current = null;
-      }
 
-      try {
-        const origin = await resolveDirectionsOrigin();
-        if (!origin) {
-          showToast("현재 위치를 가져올 수 없어요", "error");
-          return;
-        }
-
-        if (mode === "walk") {
-          // /api/directions 는 카카오 모빌리티 자동차 전용 — 도보에 절대 쓰지 않음
-          const res = await fetch("/api/walk-directions", {
+      // 네이티브: 전체화면 진입 후 같은 모드로 바로 경로 표시 (추가 길찾기 탭 불필요)
+      if (isNativeMapAvailable()) {
+        setActiveTab("map");
+        expandPlaceSheetToFullscreen(placeData);
+        try {
+          await waitForFullscreenNativeMapReady();
+          if (mode === "walk") {
+            await runFullscreenNativeDirections({ id: destId, lat, lng });
+            return;
+          }
+          const origin = await resolveDirectionsOrigin();
+          if (!origin) {
+            showToast("현재 위치를 가져올 수 없어요", "error");
+            return;
+          }
+          const res = await fetch("/api/directions", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               origin,
               destination: { lat, lng },
+              mode: "car",
             }),
           });
-          const data = await res.json().catch(() => null);
-          const path = data ? parseTmapWalkGeoJsonToPath(data) : [];
-          const totals = data ? readTmapWalkTotals(data) : { distanceM: null, timeSec: null };
-
-          if (res.ok && totals.timeSec != null && totals.timeSec > 0) {
-            const distanceM =
-              totals.distanceM != null && totals.distanceM > 0
-                ? totals.distanceM
-                : Math.round(distanceMeters(origin.lat, origin.lng, lat, lng));
-            setDirectionsInfo({
-              duration: Math.max(1, Math.round(totals.timeSec / 60)),
-              distance: Math.round((distanceM / 1000) * 10) / 10,
-            });
-            if (path.length >= 2) {
-              drawRouteOnCompactMap(path, "walk");
-            } else {
-              fitCompactMapToPoints([origin, { lat, lng }]);
-            }
+          const data = await res.json();
+          if (!data.routes?.[0]) {
+            showToast("경로를 찾을 수 없어요", "error");
             return;
           }
-
-          // Tmap 실패·미지원 시: 직선 거리 기반 추정 (+ '약')
-          const km = distanceMeters(origin.lat, origin.lng, lat, lng) / 1000;
-          setDirectionsInfo({
-            duration: estimateWalkMinutesFromKm(km),
-            distance: Math.round(km * 10) / 10,
-            approx: true,
-          });
-          if (path.length >= 2) {
-            drawRouteOnCompactMap(path, "walk");
-          } else {
-            fitCompactMapToPoints([origin, { lat, lng }]);
+          const route = data.routes[0];
+          const path = parseKakaoCarRoutePath(route);
+          if (path.length < 2) {
+            showToast("경로를 찾을 수 없어요", "error");
+            return;
           }
-          return;
+          await setFullscreenNativeRoute({ path, mode: "car" }, { silent: false });
+          const summary = route.summary;
+          if (summary) {
+            const durationMin = Math.round(summary.duration / 60);
+            const distanceM = Math.round(summary.distance);
+            setDirectionsInfo({
+              duration: durationMin,
+              distance: Math.round((summary.distance / 1000) * 10) / 10,
+            });
+            await setFullscreenNativeDirectionsInfo(
+              { id: destId, duration: durationMin, distance: distanceM },
+              { silent: false },
+            );
+          }
+        } catch (err) {
+          console.error("[sheet] fullscreen directions failed", err);
+          showToast("길찾기에 실패했어요", "error");
+        } finally {
+          setDirectionsLoading(false);
         }
-
-        // 자동차: 카카오 모빌리티 /api/directions
-        const res = await fetch("/api/directions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            origin,
-            destination: { lat, lng },
-            mode: "car",
-          }),
-        });
-        const data = await res.json();
-        if (!data.routes?.[0]) {
-          showToast("경로를 찾을 수 없어요", "error");
-          fitCompactMapToPoints([origin, { lat, lng }]);
-          return;
-        }
-        const route = data.routes[0];
-        const path = parseKakaoCarRoutePath(route);
-        const summary = route.summary;
-        if (summary) {
-          setDirectionsInfo({
-            duration: Math.round(summary.duration / 60),
-            distance: Math.round((summary.distance / 1000) * 10) / 10,
-          });
-        }
-        if (path.length >= 2) {
-          drawRouteOnCompactMap(path, "car");
-        } else {
-          fitCompactMapToPoints([origin, { lat, lng }]);
-        }
-      } catch (err) {
-        console.error("[sheet] directions failed", err);
-        showToast("길찾기에 실패했어요", "error");
-      } finally {
-        setDirectionsLoading(false);
+        return;
       }
+
+      // 웹: 확장 지도 + drawRoute (로딩은 drawRoute 가 관리)
+      setActiveTab("map");
+      setMapExpanded(true);
+      window.setTimeout(() => {
+        void drawRoute(lat, lng, mode);
+      }, 600);
     },
-    [drawRouteOnCompactMap, fitCompactMapToPoints, resolveDirectionsOrigin, showToast],
+    [
+      expandPlaceSheetToFullscreen,
+      resolveDirectionsOrigin,
+      resolveSavedMatch,
+      runFullscreenNativeDirections,
+      showToast,
+    ],
   );
 
   /** 큐레이션 상세 → 저장된 장소면 저장 클릭과 동일, 아니면 임시로 지도만 열고 빈 하트(미저장) */
@@ -9507,20 +9571,18 @@ function HomePageContent() {
   }, [resolveFullscreenMarkerPlaceSheet, resolveSavedMatch, togglePlaceSheetSave, showToast]);
 
   const handleFullscreenNativeOpenExternal = useCallback((markerId: string, type: "apple" | "transit") => {
+    console.log("[PindMap:transit] fullscreenOpenExternal", { markerId, type });
     const placeData = resolveFullscreenMarkerPlaceSheet(markerId);
     if (!placeData) {
+      console.warn("[PindMap:transit] place resolve failed", markerId);
       showToast("장소 정보를 찾을 수 없어요", "error");
       return;
     }
     const lat = Number(placeData.y);
     const lng = Number(placeData.x);
     if (type === "apple") {
-      openAppleMapsPlace(
-        placeData.place_name,
-        placeData.road_address_name || placeData.address_name,
-        placeData.y,
-        placeData.x,
-      );
+      // 전체화면에서는 Apple 지도 버튼 제거 — 혹시 이벤트만 오면 무시
+      console.log("[PindMap:transit] apple ignored on fullscreen");
       return;
     }
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -9528,7 +9590,7 @@ function HomePageContent() {
       return;
     }
     openTransitInKakaoMap(placeData.place_name ?? "장소", lat, lng);
-  }, [resolveFullscreenMarkerPlaceSheet, openAppleMapsPlace, showToast]);
+  }, [resolveFullscreenMarkerPlaceSheet, showToast]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
@@ -9707,14 +9769,6 @@ function HomePageContent() {
         }}
         onImageLightbox={setLightboxImg}
         timeAgoLabel={timeAgo}
-        onOpenAppleMaps={() =>
-          openAppleMapsPlace(
-            selectedPlace.place_name,
-            selectedPlace.road_address_name || selectedPlace.address_name,
-            selectedPlace.y,
-            selectedPlace.x,
-          )
-        }
         onDirectionsModeChange={(mode) => {
           setDirectionsMode(mode);
           drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), mode);

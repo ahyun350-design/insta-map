@@ -1757,6 +1757,8 @@ private final class KakaoMapTestViewController: UIViewController {
         appleMapsButton.layer.borderWidth = 1
         appleMapsButton.layer.borderColor = UIColor(hex: 0x1a2a7a).cgColor
         appleMapsButton.addTarget(self, action: #selector(placeSheetAppleMapsTapped), for: .touchUpInside)
+        // 컴팩트 시트에만 Apple 지도 — 전체화면에서는 숨김
+        appleMapsButton.isHidden = true
 
         let transitButton = UIButton(type: .system)
         transitButton.translatesAutoresizingMaskIntoConstraints = false
@@ -1769,7 +1771,7 @@ private final class KakaoMapTestViewController: UIViewController {
         transitButton.layer.borderColor = UIColor(hex: 0x1a2a7a).cgColor
         transitButton.addTarget(self, action: #selector(placeSheetTransitTapped), for: .touchUpInside)
 
-        let externalStack = UIStackView(arrangedSubviews: [appleMapsButton, transitButton])
+        let externalStack = UIStackView(arrangedSubviews: [transitButton])
         externalStack.translatesAutoresizingMaskIntoConstraints = false
         externalStack.axis = .horizontal
         externalStack.spacing = 8

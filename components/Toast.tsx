@@ -94,8 +94,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const showToast = useCallback((message: string, type: ToastType = "info") => {
-    const id = Date.now();
-    setToasts((prev) => [...prev, { id, message, type }]);
+    setToasts((prev) => {
+      // 같은 문구가 이미 보이면 추가하지 않음 (반복 호출 스팸 방지)
+      if (prev.some((t) => t.message === message)) {
+        return prev;
+      }
+      const id = Date.now() + Math.floor(Math.random() * 1000);
+      // 동시에 너무 많이 쌓이지 않도록 상한
+      const next = [...prev, { id, message, type }];
+      return next.length > 4 ? next.slice(next.length - 4) : next;
+    });
   }, []);
 
   useEffect(() => {

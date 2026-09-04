@@ -35,6 +35,11 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>kakaomap</string>
+		<string>maps</string>
+	</array>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>PindMap은 주변 핀과 코스를 추천하기 위해 위치 정보를 사용합니다.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
