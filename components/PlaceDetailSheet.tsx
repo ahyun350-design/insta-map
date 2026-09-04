@@ -111,6 +111,9 @@ export function PlaceDetailSheet({
   const placeRef = placeRefFromPlaceSheet(place);
   const heartFill = isSaved ? "#e53935" : "none";
   const heartStroke = isSaved ? "#e53935" : "#1a2a7a";
+  const lat = parseFloat(String(place.y ?? ""));
+  const lng = parseFloat(String(place.x ?? ""));
+  const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
 
   return (
     <div
@@ -162,19 +165,25 @@ export function PlaceDetailSheet({
             카카오맵에서 영업시간 보기
           </a>
         )}
-        {onOpenAppleMaps && (
-          <button type="button" className="placeDetailSheetAppleBtn" onClick={onOpenAppleMaps}>
-            🗺 Apple 지도에서 열기
-          </button>
-        )}
-        {onExpandMap && place.y && place.x && (
-          <button type="button" className="placeDetailSheetExpandMapBtn" onClick={onExpandMap}>
+
+        {onExpandMap && (
+          <button
+            type="button"
+            className="placeDetailSheetExpandMapBtn"
+            disabled={!hasCoordinates}
+            onClick={onExpandMap}
+          >
             지도 크게 보기
           </button>
         )}
 
-        {showDirections && place.y && place.x && (
+        {showDirections && (
           <div className="placeDetailSheetDirections">
+            {!hasCoordinates && (
+              <p className="placeDetailSheetDirectionsHint">
+                이 장소는 위치 정보가 없어 길찾기를 할 수 없어요
+              </p>
+            )}
             <div className="placeDetailSheetDirectionsModes">
               {(
                 [
@@ -188,9 +197,10 @@ export function PlaceDetailSheet({
                   <button
                     key={m.id}
                     type="button"
-                    disabled={directionsLoading}
+                    disabled={directionsLoading || !hasCoordinates}
                     className={isActive ? "placeDetailSheetModeBtn placeDetailSheetModeBtnActive" : "placeDetailSheetModeBtn"}
                     onClick={() => {
+                      if (!hasCoordinates) return;
                       if (m.id === "transit") {
                         onOpenTransit?.();
                       } else {
@@ -216,6 +226,12 @@ export function PlaceDetailSheet({
               </div>
             )}
           </div>
+        )}
+
+        {onOpenAppleMaps && (
+          <button type="button" className="placeDetailSheetAppleLink" onClick={onOpenAppleMaps}>
+            Apple 지도에서 열기
+          </button>
         )}
       </div>
 

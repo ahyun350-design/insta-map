@@ -1996,21 +1996,6 @@ body {
   border-radius: 6px;
 }
 
-.placeDetailSheetAppleBtn {
-  font-size: 12px;
-  color: #1a2a7a;
-  background: #fff;
-  padding: 8px 16px;
-  letter-spacing: 0.4px;
-  display: inline-block;
-  margin-top: 4px;
-  border: 1px solid #d6ddf2;
-  border-radius: 8px;
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-}
-
 .placeDetailSheetExpandMapBtn {
   font-size: 12px;
   color: #fff;
@@ -2025,6 +2010,27 @@ body {
   font-family: inherit;
   text-align: left;
   font-weight: 600;
+}
+
+.placeDetailSheetExpandMapBtn:disabled {
+  background: #e8e8ec;
+  color: #aaa;
+  cursor: default;
+}
+
+.placeDetailSheetAppleLink {
+  display: block;
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #9aa1bc;
+  font-size: 11px;
+  font-family: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .placeDetailSheetDirections {

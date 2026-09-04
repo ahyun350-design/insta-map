@@ -1632,6 +1632,8 @@ function HomePageContent() {
   const handleAddSubmittingRef = useRef(false);
   const postSubmittingRef = useRef(false);
   const [isPostSubmitting, setIsPostSubmitting] = useState(false);
+  /** 프로필→상세가 router.push 로 열린 경우 close 시 router.back() 사용 */
+  const detailReturnUseBackRef = useRef(false);
   const completedJobIdsRef = useRef<Set<string>>(new Set());
   const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
   const chatComposerInputRef = useRef<HTMLInputElement | null>(null);
@@ -2882,9 +2884,15 @@ function HomePageContent() {
     setScrollToComment(false);
     setDetailReturnTo(null);
     if (ret?.type === "profile") {
-      // 상세를 유지한 채 이동 시작 → 한 프레임 뒤 상세 제거 (맵 깜빡임 방지)
+      // push 로 연 경우에만 back — 이전 프로필 유지(로딩 없음). 아니면 push 폴백
+      const useBack = detailReturnUseBackRef.current && typeof window !== "undefined" && window.history.length > 1;
+      detailReturnUseBackRef.current = false;
       setActiveTab("home");
-      router.push(`/profile/${encodeURIComponent(ret.username)}`);
+      if (useBack) {
+        router.back();
+      } else {
+        router.push(`/profile/${encodeURIComponent(ret.username)}`);
+      }
       requestAnimationFrame(() => {
         setDetailPostId(null);
       });
@@ -5549,6 +5557,124 @@ function HomePageContent() {
     [focusExpandedMapOnLatLng, resolveSavedMatch],
   );
 
+  /** 컴팩트 시트 길찾기 — 전체화면 검색과 동일하게 네이티브 경로(또는 웹 drawRoute) 사용 */
+  const startDirectionsFromPlaceSheet = useCallback(
+    async (placeData: PlaceSheetData, mode: "car" | "walk" | "transit") => {
+      const lat = parseFloat(String(placeData.y ?? ""));
+      const lng = parseFloat(String(placeData.x ?? ""));
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        showToast("이 장소는 위치 정보가 없어 길찾기를 할 수 없어요", "info");
+        return;
+      }
+      const destName = String(placeData.place_name ?? "장소");
+      if (mode === "transit") {
+        openTransitInKakaoMap(destName, lat, lng);
+        return;
+      }
+
+      const saved = resolveSavedMatch(placeData);
+      const destId = saved ? `place-${saved.id}` : `sheet-${lat.toFixed(5)},${lng.toFixed(5)}`;
+
+      // iOS 네이티브: 전체화면 검색 길찾기와 동일 경로
+      if (isNativeMapAvailable()) {
+        expandPlaceSheetToFullscreen(placeData);
+        setDirectionsMode(mode);
+        setDirectionsLoading(true);
+        try {
+          await waitForFullscreenNativeMapReady();
+          if (mode === "walk") {
+            await runFullscreenNativeDirections({ id: destId, lat, lng });
+            return;
+          }
+          // 자동차: 웹 drawRoute 와 같은 /api/directions → 네이티브 폴리라인
+          const resolveOrigin = async (): Promise<{ lat: number; lng: number } | null> => {
+            const stored = myLocationLatLngRef.current;
+            if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
+              return stored;
+            }
+            return await new Promise((resolve) => {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                  const o = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                  myLocationLatLngRef.current = o;
+                  resolve(o);
+                },
+                () => resolve(null),
+              );
+            });
+          };
+          const origin = await resolveOrigin();
+          if (!origin) {
+            showToast("현재 위치를 가져올 수 없어요", "error");
+            return;
+          }
+          const res = await fetch("/api/directions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              origin,
+              destination: { lat, lng },
+              mode: "car",
+            }),
+          });
+          const data = await res.json();
+          if (!data.routes?.[0]) {
+            showToast("경로를 찾을 수 없어요", "error");
+            return;
+          }
+          const route = data.routes[0];
+          const path: { lat: number; lng: number }[] = [];
+          route.sections.forEach((section: any) => {
+            section.roads.forEach((road: any) => {
+              for (let i = 0; i < road.vertexes.length; i += 2) {
+                path.push({ lat: road.vertexes[i + 1], lng: road.vertexes[i] });
+              }
+            });
+          });
+          if (path.length < 2) {
+            showToast("경로를 찾을 수 없어요", "error");
+            return;
+          }
+          await setFullscreenNativeRoute({ path, mode: "car" }, { silent: false });
+          const summary = route.summary;
+          if (summary) {
+            setDirectionsInfo({
+              duration: Math.round(summary.duration / 60),
+              distance: Math.round((summary.distance / 1000) * 10) / 10,
+            });
+            await setFullscreenNativeDirectionsInfo(
+              {
+                id: destId,
+                duration: Math.round(summary.duration / 60),
+                distance: Math.round(summary.distance),
+              },
+              { silent: false },
+            );
+          }
+        } catch (err) {
+          console.error("[sheet] directions failed", err);
+          showToast("길찾기에 실패했어요", "error");
+        } finally {
+          setDirectionsLoading(false);
+        }
+        return;
+      }
+
+      // 웹 확장 맵: 기존 drawRoute
+      setMapExpanded(true);
+      setDirectionsMode(mode);
+      window.setTimeout(() => {
+        void drawRoute(lat, lng, mode);
+      }, 600);
+    },
+    [
+      expandPlaceSheetToFullscreen,
+      resolveSavedMatch,
+      runFullscreenNativeDirections,
+      showToast,
+    ],
+  );
+
   /** 큐레이션 상세 → 저장된 장소면 저장 클릭과 동일, 아니면 임시로 지도만 열고 빈 하트(미저장) */
   const goToMapFromDetailPost = () => {
     if (!detailPost) return;
@@ -8095,9 +8221,11 @@ function HomePageContent() {
     setDetailPostId((prev) => (prev === postId ? prev : postId));
     setDetailReturnTo(parseDetailReturnTo(searchParams));
     if (searchParams.get("from") === "mypage") {
+      detailReturnUseBackRef.current = false;
       setActiveTab("mypage");
     } else if (searchParams.get("from") === "profile") {
-      // 상세 아래 밑바닥이 map 이 되지 않도록
+      // 프로필에서 push 로 진입 → close 시 router.back()
+      detailReturnUseBackRef.current = true;
       setActiveTab("home");
     }
     if (searchParams.get("tab") === "home") {
@@ -12496,7 +12624,7 @@ function HomePageContent() {
               place={selectedPlace as PlaceSheetData}
               isSaved={!!resolveSavedMatch(selectedPlace)}
               layout="overlay"
-              showDirections={!!(selectedPlace.y && selectedPlace.x)}
+              showDirections
               directionsMode={directionsMode}
               directionsLoading={directionsLoading}
               directionsInfo={directionsInfo}
@@ -12521,20 +12649,11 @@ function HomePageContent() {
               }
               onExpandMap={() => expandPlaceSheetToFullscreen(selectedPlace as PlaceSheetData)}
               onDirectionsModeChange={(mode) => {
-                setMapExpanded(true);
-                setDirectionsMode(mode);
-                setTimeout(
-                  () => drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), mode),
-                  600,
-                );
+                void startDirectionsFromPlaceSheet(selectedPlace as PlaceSheetData, mode);
               }}
-              onOpenTransit={() =>
-                openTransitInKakaoMap(
-                  selectedPlace.place_name,
-                  parseFloat(selectedPlace.y),
-                  parseFloat(selectedPlace.x),
-                )
-              }
+              onOpenTransit={() => {
+                void startDirectionsFromPlaceSheet(selectedPlace as PlaceSheetData, "transit");
+              }}
             />
           </>
         )}
