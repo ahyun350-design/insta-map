@@ -10,6 +10,7 @@ export type CachedPlace = {
   category: string;
   lat?: number;
   lng?: number;
+  created_at?: string;
 };
 
 export type CachedPlacesPayload = {
@@ -89,6 +90,9 @@ function parsePlace(raw: unknown): CachedPlace | null {
     place.lat = o.lat;
     place.lng = o.lng;
   }
+  if (typeof o.created_at === "string" && o.created_at.trim()) {
+    place.created_at = o.created_at.trim();
+  }
   return place;
 }
 
@@ -118,6 +122,9 @@ export async function writeCachedPlaces(userId: string, places: CachedPlace[]): 
       address: p.address,
       category: p.category,
       ...(isFiniteNumber(p.lat) && isFiniteNumber(p.lng) ? { lat: p.lat, lng: p.lng } : {}),
+      ...(typeof p.created_at === "string" && p.created_at.trim()
+        ? { created_at: p.created_at.trim() }
+        : {}),
     })),
   };
   await prefsSet(CACHE_PLACES_KEY, JSON.stringify(payload));
@@ -152,7 +159,7 @@ export function placesCacheFingerprint(places: ReadonlyArray<CachedPlace>): stri
   return places
     .map(
       (p) =>
-        `${p.id}\t${p.name}\t${p.address}\t${p.category}\t${p.lat ?? ""}\t${p.lng ?? ""}`,
+        `${p.id}\t${p.name}\t${p.address}\t${p.category}\t${p.lat ?? ""}\t${p.lng ?? ""}\t${p.created_at ?? ""}`,
     )
     .sort()
     .join("\n");

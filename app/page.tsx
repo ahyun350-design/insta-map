@@ -290,7 +290,15 @@ function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): C
   }
   return "쇼핑";
 }
-type Place = { id: string; name: string; address: string; category: Category; lat?: number; lng?: number };
+type Place = {
+  id: string;
+  name: string;
+  address: string;
+  category: Category;
+  lat?: number;
+  lng?: number;
+  created_at?: string;
+};
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
 
 /** autoload=false: script onload 후 maps.load() 완료 전에는 LatLng 등이 없음 */
@@ -448,14 +456,24 @@ function latLngFromRow(row: { lat?: unknown; lng?: unknown }): LatLng | null {
   return coerceLatLng(row.lat, row.lng);
 }
 
-function mapPlaceRow(p: { id: string; name: string; address: string; category: string; lat?: unknown; lng?: unknown }): Place {
+function mapPlaceRow(p: {
+  id: string;
+  name: string;
+  address: string;
+  category: string;
+  lat?: unknown;
+  lng?: unknown;
+  created_at?: unknown;
+}): Place {
   const coords = latLngFromRow(p);
+  const createdAt = typeof p.created_at === "string" && p.created_at.trim() ? p.created_at.trim() : undefined;
   return {
     id: p.id,
     name: p.name,
     address: p.address,
     category: p.category as Category,
     ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+    ...(createdAt ? { created_at: createdAt } : {}),
   };
 }
 
@@ -956,6 +974,50 @@ function extractRegion(address: string): string {
   const parts = address.trim().split(/\s+/);
   if (parts.length >= 2) return `${parts[0]} ${parts[1]}`;
   return parts[0] || "기타";
+}
+
+type SavedPlacesSort = "region" | "saved" | "near" | "name" | "category";
+
+const SAVED_PLACES_SORT_KEY = "pindmap_saved_places_sort";
+const SAVED_PLACES_SORT_OPTIONS: { id: SavedPlacesSort; label: string }[] = [
+  { id: "region", label: "지역순" },
+  { id: "saved", label: "저장순" },
+  { id: "near", label: "가까운 순" },
+  { id: "name", label: "이름순" },
+  { id: "category", label: "카테고리순" },
+];
+
+function readSavedPlacesSort(): SavedPlacesSort {
+  if (typeof window === "undefined") return "region";
+  try {
+    const raw = window.localStorage.getItem(SAVED_PLACES_SORT_KEY);
+    if (
+      raw === "region" ||
+      raw === "saved" ||
+      raw === "near" ||
+      raw === "name" ||
+      raw === "category"
+    ) {
+      return raw;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "region";
+}
+
+function writeSavedPlacesSort(sort: SavedPlacesSort): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SAVED_PLACES_SORT_KEY, sort);
+  } catch {
+    /* ignore */
+  }
+}
+
+function formatSavedPlaceDistanceM(meters: number): string {
+  if (meters < 1000) return `${Math.round(meters)}m`;
+  return `${(meters / 1000).toFixed(1)}km`;
 }
 
 // 두 좌표 사이의 직선거리 (km) - Haversine 공식
@@ -1577,6 +1639,10 @@ function HomePageContent() {
   const directionsChosenRef = useRef(directionsChosen);
   directionsChosenRef.current = directionsChosen;
   const [savedSearchQuery, setSavedSearchQuery] = useState("");
+  const [savedPlacesSort, setSavedPlacesSort] = useState<SavedPlacesSort>(() => readSavedPlacesSort());
+  const [savedNearOrigin, setSavedNearOrigin] = useState<{ lat: number; lng: number } | null>(null);
+  const [savedNearLocating, setSavedNearLocating] = useState(false);
+  const [savedNearDenied, setSavedNearDenied] = useState(false);
   const isIOSLike = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   // 코스 만들기 관련 state
@@ -1772,6 +1838,77 @@ function HomePageContent() {
   hiddenIdsRef.current = hiddenIds;
   const activeTabRef = useRef<TabId>(activeTab);
   activeTabRef.current = activeTab;
+
+  const requestSavedNearLocation = useCallback(async (): Promise<boolean> => {
+    const stored = myLocationLatLngRef.current;
+    if (stored) {
+      setSavedNearOrigin(stored);
+      setSavedNearDenied(false);
+      return true;
+    }
+    setSavedNearLocating(true);
+    try {
+      const pos = await getCurrentPositionForMapStage1();
+      const lat = Number(pos.latitude);
+      const lng = Number(pos.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        throw new Error("invalid_coords");
+      }
+      const origin = { lat, lng };
+      myLocationLatLngRef.current = origin;
+      setSavedNearOrigin(origin);
+      setSavedNearDenied(false);
+      return true;
+    } catch (err) {
+      setSavedNearOrigin(null);
+      setSavedNearDenied(isGeolocationPermissionDenied(err));
+      showToast(
+        isGeolocationPermissionDenied(err)
+          ? "위치 권한이 필요해요. 설정에서 허용해주세요"
+          : "현재 위치를 가져올 수 없어요",
+        "error",
+      );
+      return false;
+    } finally {
+      setSavedNearLocating(false);
+    }
+  }, [showToast]);
+
+  const handleSavedPlacesSortChange = useCallback(
+    (sort: SavedPlacesSort) => {
+      if (sort === "near") {
+        void (async () => {
+          const ok = await requestSavedNearLocation();
+          if (!ok) return;
+          setSavedPlacesSort("near");
+          writeSavedPlacesSort("near");
+        })();
+        return;
+      }
+      setSavedNearDenied(false);
+      setSavedPlacesSort(sort);
+      writeSavedPlacesSort(sort);
+    },
+    [requestSavedNearLocation],
+  );
+
+  const savedNearAutoTriedRef = useRef(false);
+  useEffect(() => {
+    if (savedPlacesSort !== "near") {
+      savedNearAutoTriedRef.current = false;
+      return;
+    }
+    if (activeTab !== "saved") return;
+    if (savedNearOrigin || savedNearLocating || savedNearAutoTriedRef.current) return;
+    savedNearAutoTriedRef.current = true;
+    void requestSavedNearLocation();
+  }, [
+    activeTab,
+    savedPlacesSort,
+    savedNearOrigin,
+    savedNearLocating,
+    requestSavedNearLocation,
+  ]);
   const prevActiveTabRef = useRef<TabId>(activeTab);
   /** M-1: 오케스트레이터 3회 실패 후 지연 재시도 (WKWebView 지오코딩 지연) */
   const mainPinFallbackTimerRef = useRef<number | null>(null);
@@ -3558,6 +3695,7 @@ function HomePageContent() {
                 category: p.category,
                 lat: p.lat,
                 lng: p.lng,
+                created_at: p.created_at,
               }),
             );
             asPlaces.forEach((place) => {
@@ -4144,7 +4282,10 @@ function HomePageContent() {
       return;
     }
 
-    const optimisticPlace = { ...place };
+    const optimisticPlace: Place = {
+      ...place,
+      created_at: place.created_at ?? new Date().toISOString(),
+    };
     savedPlacesRef.current = [optimisticPlace, ...savedPlacesRef.current.filter((p) => p.id !== place.id)];
     setSavedPlaces((prev) => [optimisticPlace, ...prev.filter((p) => p.id !== place.id)]);
 
@@ -12428,22 +12569,41 @@ function HomePageContent() {
   />
 )}
     {savedPlaces.length > 0 && (
-      <div style={{ position: "relative", marginBottom: "16px" }}>
-        <input
-          className="mapInput"
-          placeholder="🔍 지역, 장소명으로 검색 (예: 마포구)"
-          value={savedSearchQuery}
-          onChange={(e) => setSavedSearchQuery(e.target.value)}
-          style={{ width: "100%", boxSizing: "border-box", paddingRight: savedSearchQuery ? "32px" : undefined }}
-        />
-        {savedSearchQuery && (
-          <button
-            type="button"
-            onClick={() => setSavedSearchQuery("")}
-            style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", color: "#bbb", fontSize: "16px", cursor: "pointer", padding: "0 4px" }}
-          >×</button>
-        )}
-      </div>
+      <>
+        <div style={{ position: "relative", marginBottom: "10px" }}>
+          <input
+            className="mapInput"
+            placeholder="🔍 지역, 장소명으로 검색 (예: 마포구)"
+            value={savedSearchQuery}
+            onChange={(e) => setSavedSearchQuery(e.target.value)}
+            style={{ width: "100%", boxSizing: "border-box", paddingRight: savedSearchQuery ? "32px" : undefined }}
+          />
+          {savedSearchQuery && (
+            <button
+              type="button"
+              onClick={() => setSavedSearchQuery("")}
+              style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", color: "#bbb", fontSize: "16px", cursor: "pointer", padding: "0 4px" }}
+            >×</button>
+          )}
+        </div>
+        <div className="savedSortRow" role="group" aria-label="저장 장소 정렬">
+          {SAVED_PLACES_SORT_OPTIONS.map((opt) => {
+            const isNear = opt.id === "near";
+            const isActive = savedPlacesSort === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                className={`savedSortChip${isActive ? " savedSortChipActive" : ""}`}
+                aria-pressed={isActive}
+                onClick={() => handleSavedPlacesSortChange(opt.id)}
+              >
+                {isNear && savedNearLocating && isActive ? "위치 확인 중…" : opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </>
     )}
     {savedPlaces.length > 0 && (() => {
       // 검색어로 필터링
@@ -12454,48 +12614,215 @@ function HomePageContent() {
       if (filtered.length === 0) {
         return <p className="emptyText" style={{ textAlign: "center" }}>"{savedSearchQuery}"에 해당하는 장소가 없어요.</p>;
       }
-      // 1차: 지역별로 그룹
-      const regions = new Map<string, Place[]>();
-      filtered.forEach(p => {
-        const region = extractRegion(p.address);
-        if (!regions.has(region)) regions.set(region, []);
-        regions.get(region)!.push(p);
-      });
-      const sorted = Array.from(regions.entries()).sort((a, b) => a[0].localeCompare(b[0], "ko"));
-      return sorted.map(([region, regionPlaces]) => (
-        <div key={region} style={{ marginBottom: "28px" }}>
-          {/* 지역 헤더 */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", padding: "0 4px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
-            <span style={{ fontSize: "16px" }}>📍</span>
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "#1a2a7a", letterSpacing: "0.5px" }}>{region}</span>
-            <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{regionPlaces.length}</span>
+
+      const renderFlatItem = (place: Place, metaExtra?: string) => (
+        <article
+          key={place.id}
+          className="savedItem"
+          style={{
+            cursor: "pointer",
+            borderLeft: `3px solid ${CATEGORY_COLORS[place.category]}`,
+            paddingLeft: "12px",
+            marginBottom: "2px",
+          }}
+          onClick={() => handleSavedPlaceClick(place)}
+        >
+          <span
+            style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "50%",
+              background: CATEGORY_COLORS[place.category],
+              flexShrink: 0,
+              display: "inline-block",
+            }}
+          />
+          <div className="savedBody">
+            <p className="savedName">{place.name}</p>
+            <p className="savedMeta">
+              {place.address}
+              {metaExtra ? ` · ${metaExtra}` : ""}
+              {` · ${place.category}`}
+            </p>
           </div>
-          {/* 2차: 지역 안에서 카테고리별 소그룹 */}
-          {CATEGORY_MAIN_ORDER.map(cat => {
-            const places = regionPlaces.filter(p => p.category === cat);
-            if (places.length === 0) return null;
-            return (
-              <div key={cat} style={{ marginBottom: "16px", paddingLeft: "8px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "13px" }}>{CATEGORY_PIN[cat].emoji}</span>
-                  <span style={{ fontSize: "11px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
-                  <span style={{ fontSize: "10px", color: "#bbb" }}>{places.length}</span>
+          <button
+            className="ghostButton"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              deletePlace(place.id);
+            }}
+          >
+            삭제
+          </button>
+        </article>
+      );
+
+      // ── 지역순 (기본): 지역 > 카테고리 > 장소 ──
+      if (savedPlacesSort === "region") {
+        const regions = new Map<string, Place[]>();
+        filtered.forEach(p => {
+          const region = extractRegion(p.address);
+          if (!regions.has(region)) regions.set(region, []);
+          regions.get(region)!.push(p);
+        });
+        const sorted = Array.from(regions.entries()).sort((a, b) => a[0].localeCompare(b[0], "ko"));
+        return sorted.map(([region, regionPlaces]) => (
+          <div key={region} style={{ marginBottom: "28px" }}>
+            {/* 지역 헤더 */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", padding: "0 4px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
+              <span style={{ fontSize: "16px" }}>📍</span>
+              <span style={{ fontSize: "14px", fontWeight: 600, color: "#1a2a7a", letterSpacing: "0.5px" }}>{region}</span>
+              <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{regionPlaces.length}</span>
+            </div>
+            {/* 2차: 지역 안에서 카테고리별 소그룹 */}
+            {CATEGORY_MAIN_ORDER.map(cat => {
+              const places = regionPlaces.filter(p => p.category === cat);
+              if (places.length === 0) return null;
+              return (
+                <div key={cat} style={{ marginBottom: "16px", paddingLeft: "8px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "13px" }}>{CATEGORY_PIN[cat].emoji}</span>
+                    <span style={{ fontSize: "11px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
+                    <span style={{ fontSize: "10px", color: "#bbb" }}>{places.length}</span>
+                  </div>
+                  {places.map(place => (
+                    <article key={place.id} className="savedItem" style={{ cursor: "pointer", borderLeft: `3px solid ${CATEGORY_COLORS[cat]}`, paddingLeft: "12px", marginBottom: "2px" }} onClick={() => handleSavedPlaceClick(place)}>
+                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[cat], flexShrink: 0, display: "inline-block" }} />
+                      <div className="savedBody">
+                        <p className="savedName">{place.name}</p>
+                        <p className="savedMeta">{place.address}</p>
+                      </div>
+                      <button className="ghostButton" type="button" onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }}>삭제</button>
+                    </article>
+                  ))}
                 </div>
-                {places.map(place => (
-                  <article key={place.id} className="savedItem" style={{ cursor: "pointer", borderLeft: `3px solid ${CATEGORY_COLORS[cat]}`, paddingLeft: "12px", marginBottom: "2px" }} onClick={() => handleSavedPlaceClick(place)}>
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: CATEGORY_COLORS[cat], flexShrink: 0, display: "inline-block" }} />
-                    <div className="savedBody">
-                      <p className="savedName">{place.name}</p>
-                      <p className="savedMeta">{place.address}</p>
-                    </div>
-                    <button className="ghostButton" type="button" onClick={(e) => { e.stopPropagation(); deletePlace(place.id); }}>삭제</button>
-                  </article>
-                ))}
+              );
+            })}
+          </div>
+        ));
+      }
+
+      // ── 카테고리순: 카테고리 > 장소 ──
+      if (savedPlacesSort === "category") {
+        return CATEGORY_MAIN_ORDER.map((cat) => {
+          const places = filtered.filter((p) => p.category === cat);
+          if (places.length === 0) return null;
+          return (
+            <div key={cat} style={{ marginBottom: "28px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", padding: "0 4px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
+                <span style={{ fontSize: "16px" }}>{CATEGORY_PIN[cat].emoji}</span>
+                <span style={{ fontSize: "14px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
+                <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{places.length}</span>
               </div>
-            );
-          })}
+              {places.map((place) => (
+                <article
+                  key={place.id}
+                  className="savedItem"
+                  style={{
+                    cursor: "pointer",
+                    borderLeft: `3px solid ${CATEGORY_COLORS[cat]}`,
+                    paddingLeft: "12px",
+                    marginBottom: "2px",
+                  }}
+                  onClick={() => handleSavedPlaceClick(place)}
+                >
+                  <span
+                    style={{
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      background: CATEGORY_COLORS[cat],
+                      flexShrink: 0,
+                      display: "inline-block",
+                    }}
+                  />
+                  <div className="savedBody">
+                    <p className="savedName">{place.name}</p>
+                    <p className="savedMeta">{place.address}</p>
+                  </div>
+                  <button
+                    className="ghostButton"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deletePlace(place.id);
+                    }}
+                  >
+                    삭제
+                  </button>
+                </article>
+              ))}
+            </div>
+          );
+        });
+      }
+
+      // ── 평면 목록: 저장순 / 가까운 순 / 이름순 ──
+      let flat = filtered.slice();
+      if (savedPlacesSort === "saved") {
+        flat.sort((a, b) => {
+          const ta = a.created_at ? Date.parse(a.created_at) : 0;
+          const tb = b.created_at ? Date.parse(b.created_at) : 0;
+          if (tb !== ta) return tb - ta;
+          return a.name.localeCompare(b.name, "ko");
+        });
+        return <div style={{ marginBottom: "16px" }}>{flat.map((place) => renderFlatItem(place))}</div>;
+      }
+
+      if (savedPlacesSort === "name") {
+        flat.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+        return <div style={{ marginBottom: "16px" }}>{flat.map((place) => renderFlatItem(place))}</div>;
+      }
+
+      // near
+      const origin = savedNearOrigin ?? myLocationLatLngRef.current;
+      if (!origin) {
+        return (
+          <p className="emptyText" style={{ textAlign: "center" }}>
+            {savedNearLocating
+              ? "현재 위치를 확인하는 중이에요…"
+              : savedNearDenied
+                ? "위치 권한이 꺼져 있어요. 설정에서 허용한 뒤 다시 시도해주세요."
+                : "가까운 순으로 보려면 위치 권한이 필요해요."}
+            {!savedNearLocating && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="savedSortRetryBtn"
+                  onClick={() => void handleSavedPlacesSortChange("near")}
+                >
+                  다시 시도
+                </button>
+              </>
+            )}
+          </p>
+        );
+      }
+      const withDist = flat.map((place) => {
+        const hasCoords =
+          typeof place.lat === "number" &&
+          Number.isFinite(place.lat) &&
+          typeof place.lng === "number" &&
+          Number.isFinite(place.lng);
+        const meters = hasCoords
+          ? distanceMeters(origin.lat, origin.lng, place.lat!, place.lng!)
+          : Number.POSITIVE_INFINITY;
+        return { place, meters, hasCoords };
+      });
+      withDist.sort((a, b) => {
+        if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
+        if (a.meters !== b.meters) return a.meters - b.meters;
+        return a.place.name.localeCompare(b.place.name, "ko");
+      });
+      return (
+        <div style={{ marginBottom: "16px" }}>
+          {withDist.map(({ place, meters, hasCoords }) =>
+            renderFlatItem(place, hasCoords ? formatSavedPlaceDistanceM(meters) : "거리 정보 없음"),
+          )}
         </div>
-      ));
+      );
     })()}
   </div>
   </div>

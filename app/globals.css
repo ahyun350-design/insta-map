@@ -3169,6 +3169,58 @@ body {
 .dot.shopping   { background: #888; }
 
 /* ── 저장 탭 ── */
+.savedSortRow {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  margin: 0 0 16px;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.savedSortRow::-webkit-scrollbar {
+  display: none;
+}
+
+.savedSortChip {
+  flex-shrink: 0;
+  border: 0.5px solid var(--border);
+  background: transparent;
+  color: var(--gray-600);
+  border-radius: 2px;
+  padding: 6px 11px;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.savedSortChipActive {
+  border-color: var(--navy);
+  color: var(--navy);
+  background: #f3f3f5;
+  font-weight: 600;
+}
+
+.savedSortChip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.savedSortRetryBtn {
+  border: none;
+  background: transparent;
+  color: var(--navy);
+  font-size: inherit;
+  font-family: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
 .savedItem {
   border-bottom: 0.5px solid var(--border);
   padding: 14px 0;
