@@ -1372,6 +1372,8 @@ function HomePageContent() {
     if (tab === "home") return "home";
     if (tab === "messages") return "messages";
     if (tab === "mypage" || searchParams?.get("from") === "mypage") return "mypage";
+    // 프로필→상세 진입 시 밑바닥이 map 으로 떨어지지 않게
+    if (searchParams?.get("from") === "profile") return "home";
     return "map";
   });
   const [instagramUrl, setInstagramUrl] = useState("");
@@ -2877,16 +2879,24 @@ function HomePageContent() {
       return;
     }
     const ret = detailReturnTo;
-    setDetailPostId(null);
     setScrollToComment(false);
     setDetailReturnTo(null);
     if (ret?.type === "profile") {
+      // 상세를 유지한 채 이동 시작 → 한 프레임 뒤 상세 제거 (맵 깜빡임 방지)
+      setActiveTab("home");
       router.push(`/profile/${encodeURIComponent(ret.username)}`);
+      requestAnimationFrame(() => {
+        setDetailPostId(null);
+      });
       return;
     }
     if (ret?.type === "mypage") {
+      // 목적 탭을 먼저 깔고 상세 제거
       setActiveTab("mypage");
+      setDetailPostId(null);
+      return;
     }
+    setDetailPostId(null);
   }, [detailReturnTo, router]);
   const isAnalyzing = activeJobs.length > 0;
   const analyzingMainText = isAnalyzing
@@ -5472,7 +5482,7 @@ function HomePageContent() {
     }
   };
 
-  // 저장 목록 장소 클릭 → 지도에서 보기
+  // 저장 목록 장소 클릭 → 지도 탭 + 컴팩트 맵 이동 + 시트 (전체화면 X)
   const handleSavedPlaceClick = (place: Place) => {
     setSelectedMapPlace(place);
     setActiveTab("map");
@@ -5483,7 +5493,6 @@ function HomePageContent() {
       mapRef.current.setLevel(4);
       savedPlaceCoordsRef.current[place.id] = stored;
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
-      setMapExpanded(true);
       return;
     }
     if (mapRef.current && geocoderRef.current) {
@@ -5493,11 +5502,52 @@ function HomePageContent() {
         const markerLng = parseFloat(result[0].x);
         mapRef.current.setCenter(new window.kakao.maps.LatLng(result[0].y, result[0].x));
         mapRef.current.setLevel(4);
+        savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
         setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
-        setMapExpanded(true);
       });
+      return;
+    }
+    // 맵 인스턴스가 아직 없으면 시트만이라도 표시
+    if (stored) {
+      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
+    } else {
+      setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
     }
   };
+
+  /** 장소 시트 → 전체화면 지도 (클릭 좌표 우선, useMyLocation 무시) */
+  const expandPlaceSheetToFullscreen = useCallback(
+    (placeData: PlaceSheetData) => {
+      const lat = parseFloat(String(placeData.y ?? ""));
+      const lng = parseFloat(String(placeData.x ?? ""));
+      const hasCoord = Number.isFinite(lat) && Number.isFinite(lng);
+      if (hasCoord && mapRef.current && window.kakao?.maps) {
+        mapRef.current.setCenter(new window.kakao.maps.LatLng(lat, lng));
+        mapRef.current.setLevel(4);
+      }
+      if (hasCoord) {
+        focusExpandedMapOnLatLng(lat, lng, 3);
+        const saved = resolveSavedMatch(placeData);
+        const markerId = saved ? `place-${saved.id}` : undefined;
+        if (saved) {
+          placePinByIdRef.current.set(`place-${saved.id}`, saved);
+        }
+        // 네이티브 present 진입 시 restore snapshot 으로 좌표 카메라 강제
+        fullscreenRestorePendingRef.current = true;
+        fullscreenReturnStateRef.current = {
+          mode: "saved",
+          camera: {
+            lat,
+            lng,
+            zoom: FULLSCREEN_NATIVE_NEIGHBORHOOD_ZOOM,
+          },
+          selectedMarkerId: markerId,
+        };
+      }
+      setMapExpanded(true);
+    },
+    [focusExpandedMapOnLatLng, resolveSavedMatch],
+  );
 
   /** 큐레이션 상세 → 저장된 장소면 저장 클릭과 동일, 아니면 임시로 지도만 열고 빈 하트(미저장) */
   const goToMapFromDetailPost = () => {
@@ -8046,6 +8096,9 @@ function HomePageContent() {
     setDetailReturnTo(parseDetailReturnTo(searchParams));
     if (searchParams.get("from") === "mypage") {
       setActiveTab("mypage");
+    } else if (searchParams.get("from") === "profile") {
+      // 상세 아래 밑바닥이 map 이 되지 않도록
+      setActiveTab("home");
     }
     if (searchParams.get("tab") === "home") {
       setActiveTab("home");
@@ -12466,6 +12519,7 @@ function HomePageContent() {
                   selectedPlace.x,
                 )
               }
+              onExpandMap={() => expandPlaceSheetToFullscreen(selectedPlace as PlaceSheetData)}
               onDirectionsModeChange={(mode) => {
                 setMapExpanded(true);
                 setDirectionsMode(mode);

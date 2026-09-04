@@ -21,6 +21,8 @@ type Props = {
   onImageLightbox: (url: string) => void;
   timeAgoLabel: (createdAt: string) => string;
   onOpenAppleMaps?: () => void;
+  /** 컴팩트 맵 위 시트에서 전체화면 지도로 확대 (좌표 우선) */
+  onExpandMap?: () => void;
   onDirectionsModeChange?: (mode: DirectionsMode) => void;
   onOpenTransit?: () => void;
   onClearRoute?: () => void;
@@ -100,6 +102,7 @@ export function PlaceDetailSheet({
   onImageLightbox,
   timeAgoLabel,
   onOpenAppleMaps,
+  onExpandMap,
   onDirectionsModeChange,
   onOpenTransit,
   onClearRoute,
@@ -162,6 +165,11 @@ export function PlaceDetailSheet({
         {onOpenAppleMaps && (
           <button type="button" className="placeDetailSheetAppleBtn" onClick={onOpenAppleMaps}>
             🗺 Apple 지도에서 열기
+          </button>
+        )}
+        {onExpandMap && place.y && place.x && (
+          <button type="button" className="placeDetailSheetExpandMapBtn" onClick={onExpandMap}>
+            지도 크게 보기
           </button>
         )}
 

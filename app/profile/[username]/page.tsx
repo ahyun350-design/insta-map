@@ -543,7 +543,7 @@ export default function ProfilePage() {
                     likeCount={post.likes_count}
                     onClick={() => {
                       router.push(
-                        `/?postId=${encodeURIComponent(post.id)}&from=profile&username=${encodeURIComponent(profile.username)}`,
+                        `/?postId=${encodeURIComponent(post.id)}&from=profile&username=${encodeURIComponent(profile.username)}&tab=home`,
                       );
                     }}
                   />

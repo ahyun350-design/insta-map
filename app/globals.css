@@ -2011,6 +2011,22 @@ body {
   text-align: left;
 }
 
+.placeDetailSheetExpandMapBtn {
+  font-size: 12px;
+  color: #fff;
+  background: #1a2a7a;
+  padding: 8px 16px;
+  letter-spacing: 0.4px;
+  display: inline-block;
+  margin-top: 4px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  font-weight: 600;
+}
+
 .placeDetailSheetDirections {
   margin-top: 8px;
   display: flex;
