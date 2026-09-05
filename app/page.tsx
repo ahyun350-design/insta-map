@@ -1670,6 +1670,8 @@ function HomePageContent() {
   const savedPlaceMenuRef = useRef<HTMLDivElement | null>(null);
   const [savedSelectMode, setSavedSelectMode] = useState(false);
   const [savedSelectedIds, setSavedSelectedIds] = useState<Set<string>>(() => new Set());
+  const [savedBulkDeleteConfirm, setSavedBulkDeleteConfirm] = useState(false);
+  const [savedBulkDeleting, setSavedBulkDeleting] = useState(false);
   const savedLongPressTimerRef = useRef<number | null>(null);
   const savedLongPressStartRef = useRef<{ x: number; y: number; id: string } | null>(null);
   const savedSuppressClickRef = useRef(false);
@@ -1982,6 +1984,7 @@ function HomePageContent() {
     setSavedSelectMode(false);
     setSavedSelectedIds(new Set());
     setSavedPlaceMenuId(null);
+    setSavedBulkDeleteConfirm(false);
   }, [clearSavedLongPress]);
 
   const openAddToListForSavedPlace = useCallback(
@@ -4548,6 +4551,59 @@ function HomePageContent() {
       savedPlacesRef.current = previous;
       setSavedPlaces(previous);
       showToast(toUserMessage(err, "삭제에 실패했어요"), "error");
+    }
+  };
+
+  /** SAVED 선택 모드 — 여러 장소 일괄 삭제 (낙관적) */
+  const deleteSelectedSavedPlaces = async () => {
+    const ids = Array.from(savedSelectedIds);
+    if (ids.length === 0 || savedBulkDeleting) return;
+    const idSet = new Set(ids);
+    const previous = savedPlacesRef.current.slice();
+    const next = previous.filter((p) => !idSet.has(p.id));
+    savedPlacesRef.current = next;
+    setSavedPlaces(next);
+    setSavedBulkDeleteConfirm(false);
+    setSavedBulkDeleting(true);
+    exitSavedSelectMode();
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("세션 만료");
+
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          const res = await fetch(`/api/places/${encodeURIComponent(id)}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          });
+          return { id, ok: res.ok };
+        }),
+      );
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length > 0) {
+        savedPlacesRef.current = previous;
+        setSavedPlaces(previous);
+        showToast(
+          failed.length === ids.length
+            ? "삭제에 실패했어요"
+            : `${failed.length}곳은 삭제하지 못했어요`,
+          "error",
+        );
+        return;
+      }
+      showToast(
+        ids.length === 1 ? "삭제했어요" : `${ids.length}곳을 삭제했어요`,
+        "success",
+      );
+    } catch (err) {
+      savedPlacesRef.current = previous;
+      setSavedPlaces(previous);
+      showToast(toUserMessage(err, "삭제에 실패했어요"), "error");
+    } finally {
+      setSavedBulkDeleting(false);
     }
   };
   const submitPost = async (
@@ -12949,6 +13005,16 @@ function HomePageContent() {
           >
             내 목록
           </button>
+          {savedSelectMode && (
+            <button
+              type="button"
+              className="savedSelectDeletePill"
+              disabled={savedSelectedIds.size === 0 || savedBulkDeleting}
+              onClick={() => setSavedBulkDeleteConfirm(true)}
+            >
+              선택 삭제
+            </button>
+          )}
         </div>
       </>
     )}
@@ -12970,6 +13036,42 @@ function HomePageContent() {
         >
           목록에 담기
         </button>
+      </div>
+    )}
+    {savedBulkDeleteConfirm && (
+      <div
+        className="myListsConfirmOverlay"
+        role="presentation"
+        onClick={() => !savedBulkDeleting && setSavedBulkDeleteConfirm(false)}
+      >
+        <div
+          className="myListsConfirmDialog"
+          role="alertdialog"
+          aria-labelledby="saved-bulk-delete-title"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p id="saved-bulk-delete-title" className="myListsConfirmTitle">
+            {savedSelectedIds.size}개 장소를 삭제할까요?
+          </p>
+          <p className="myListsConfirmDesc">삭제한 장소는 저장 목록에서 사라져요.</p>
+          <div className="myListsConfirmActions">
+            <button
+              type="button"
+              disabled={savedBulkDeleting}
+              onClick={() => setSavedBulkDeleteConfirm(false)}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              className="myListsConfirmDelete"
+              disabled={savedBulkDeleting || savedSelectedIds.size === 0}
+              onClick={() => void deleteSelectedSavedPlaces()}
+            >
+              {savedBulkDeleting ? "삭제 중…" : "삭제"}
+            </button>
+          </div>
+        </div>
       </div>
     )}
     {savedPlaces.length > 0 && (() => {
@@ -13057,15 +13159,18 @@ function HomePageContent() {
                 >
                   목록에 추가
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setSavedPlaceMenuId(null);
+                    handleSavedPlaceClick(place);
+                  }}
+                >
+                  지도에서 보기
+                </button>
               </div>
             )}
-            <button
-              className="ghostButton"
-              type="button"
-              onClick={() => deletePlace(place.id)}
-            >
-              삭제
-            </button>
           </div>
         );
       };
