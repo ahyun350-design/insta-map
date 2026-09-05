@@ -1843,6 +1843,8 @@ function HomePageContent() {
   const chatRoomsListFetchInFlightRef = useRef<Promise<ChatRoom[]> | null>(null);
   /** 마이페이지 탭 묶음 조회 성공 시각 — 30s TTL */
   const mypageTabFetchedAtRef = useRef(0);
+  /** 마이페이지 게시물 그리드 조회 성공 시각 — 30s TTL (append·force 제외) */
+  const mypagePostsFetchedAtRef = useRef(0);
   /** Preferences places 캐시 히트 — loadData silent refresh / 스플래시 조기 hide */
   const bootstrapCacheHitRef = useRef(false);
   const bootstrapCacheUserIdRef = useRef<string | null>(null);
@@ -5303,13 +5305,25 @@ function HomePageContent() {
     }
   };
 
-  const loadMyMypagePosts = useCallback(async (opts?: { append?: boolean }) => {
+  const loadMyMypagePosts = useCallback(async (opts?: { append?: boolean; force?: boolean }) => {
     const append = opts?.append === true;
+    const force = opts?.force === true;
     const uid = userIdRef.current;
     if (!uid) {
       setMyMypagePosts([]);
       setMyMypagePostsCount(0);
+      mypagePostsFetchedAtRef.current = 0;
       return;
+    }
+    // 탭 재진입 TTL — append·force 는 항상 통과
+    if (!append && !force) {
+      const now = Date.now();
+      if (
+        mypagePostsFetchedAtRef.current > 0 &&
+        now - mypagePostsFetchedAtRef.current < MYPAGE_TAB_TTL_MS
+      ) {
+        return;
+      }
     }
     if (myMypagePostsLoadingRef.current) return;
     myMypagePostsLoadingRef.current = true;
@@ -5339,6 +5353,7 @@ function HomePageContent() {
         });
       } else {
         setMyMypagePosts(hydrated);
+        mypagePostsFetchedAtRef.current = Date.now();
       }
       setMyMypagePostsCount(typeof count === "number" ? count : offset + rawPosts.length);
       void prefetchAvatarsForFeedPosts(rawPosts).then(() => {
@@ -5361,7 +5376,7 @@ function HomePageContent() {
       void refreshMyTotalLikes();
     }
     if (user?.id) {
-      void loadMyMypagePosts();
+      void loadMyMypagePosts({ force: true });
     }
   };
   const toggleArchive = async (id: string) => {
@@ -5374,7 +5389,7 @@ function HomePageContent() {
     );
     setOpenMenuId(null);
     if (post.userId === user?.id) {
-      void loadMyMypagePosts();
+      void loadMyMypagePosts({ force: true });
     }
   };
   const openEdit = (post: FeedPost) => { setEditingPost(post); setEditComment(post.comment); setOpenMenuId(null); };
@@ -7796,7 +7811,7 @@ function HomePageContent() {
       const { error: postError, alreadyExists } = await submitPost(newPost);
       if (alreadyExists) {
         showToast("이미 이 장소에 큐레이션을 작성하셨어요", "info");
-        void loadMyMypagePosts();
+        void loadMyMypagePosts({ force: true });
         setShowPostModal(false);
         setActiveTab("home");
         return;
@@ -7812,7 +7827,7 @@ function HomePageContent() {
         linkedCourseId ? "큐레이션과 코스가 등록됐어요 ✨" : "큐레이션이 등록됐어요 ✨",
         "success",
       );
-      void loadMyMypagePosts();
+      void loadMyMypagePosts({ force: true });
       setShowPostModal(false);
       setActiveTab("home");
     } finally {
@@ -9924,6 +9939,92 @@ function HomePageContent() {
     return result;
   }, [visibleFeedPosts, selectedCompanionTag, selectedHomeCategory]);
 
+  /** SAVED 목록 필터·그룹·정렬 — 렌더와 분리 (DOM은 JSX에서 동일하게 그림) */
+  const savedPlacesListModel = useMemo(() => {
+    if (savedPlaces.length === 0) {
+      return { kind: "idle" as const };
+    }
+    const q = savedSearchQuery.trim().toLowerCase();
+    const filtered = q
+      ? savedPlaces.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            p.address.toLowerCase().includes(q) ||
+            p.category.toLowerCase().includes(q),
+        )
+      : savedPlaces;
+    if (filtered.length === 0) {
+      return { kind: "empty_search" as const, query: savedSearchQuery };
+    }
+
+    if (savedPlacesSort === "region") {
+      const regions = new Map<string, Place[]>();
+      filtered.forEach((p) => {
+        const region = extractRegion(p.address);
+        if (!regions.has(region)) regions.set(region, []);
+        regions.get(region)!.push(p);
+      });
+      const sorted = Array.from(regions.entries()).sort((a, b) =>
+        a[0].localeCompare(b[0], "ko"),
+      );
+      return {
+        kind: "region" as const,
+        regions: sorted.map(([region, regionPlaces]) => ({
+          region,
+          regionPlaces,
+          categories: CATEGORY_MAIN_ORDER.map((cat) => ({
+            cat,
+            places: regionPlaces.filter((p) => p.category === cat),
+          })).filter((g) => g.places.length > 0),
+        })),
+      };
+    }
+
+    if (savedPlacesSort === "category") {
+      return {
+        kind: "category" as const,
+        groups: CATEGORY_MAIN_ORDER.map((cat) => ({
+          cat,
+          places: filtered.filter((p) => p.category === cat),
+        })).filter((g) => g.places.length > 0),
+      };
+    }
+
+    // near
+    const origin = savedNearOrigin ?? myLocationLatLngRef.current;
+    if (!origin) {
+      return {
+        kind: "near_need_location" as const,
+        locating: savedNearLocating,
+        denied: savedNearDenied,
+      };
+    }
+    const withDist = filtered.map((place) => {
+      const hasCoords =
+        typeof place.lat === "number" &&
+        Number.isFinite(place.lat) &&
+        typeof place.lng === "number" &&
+        Number.isFinite(place.lng);
+      const meters = hasCoords
+        ? distanceMeters(origin.lat, origin.lng, place.lat!, place.lng!)
+        : Number.POSITIVE_INFINITY;
+      return { place, meters, hasCoords };
+    });
+    withDist.sort((a, b) => {
+      if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
+      if (a.meters !== b.meters) return a.meters - b.meters;
+      return a.place.name.localeCompare(b.place.name, "ko");
+    });
+    return { kind: "near" as const, items: withDist };
+  }, [
+    savedPlaces,
+    savedSearchQuery,
+    savedPlacesSort,
+    savedNearOrigin,
+    savedNearLocating,
+    savedNearDenied,
+  ]);
+
   // 홈 피드 무한 스크롤
   useEffect(() => {
     if (activeTab !== "home" || loading || homeLoadError) return;
@@ -9969,6 +10070,7 @@ function HomePageContent() {
       if (!user?.id) {
         setMyMypagePosts([]);
         setMyMypagePostsCount(0);
+        mypagePostsFetchedAtRef.current = 0;
       }
       return;
     }
@@ -13075,14 +13177,7 @@ function HomePageContent() {
       </div>
     )}
     {savedPlaces.length > 0 && (() => {
-      // 검색어로 필터링
-      const q = savedSearchQuery.trim().toLowerCase();
-      const filtered = q
-        ? savedPlaces.filter(p => p.name.toLowerCase().includes(q) || p.address.toLowerCase().includes(q) || p.category.toLowerCase().includes(q))
-        : savedPlaces;
-      if (filtered.length === 0) {
-        return <p className="emptyText" style={{ textAlign: "center" }}>"{savedSearchQuery}"에 해당하는 장소가 없어요.</p>;
-      }
+      const model = savedPlacesListModel;
 
       const toggleSavedSelection = (placeId: string) => {
         setSavedSelectedIds((prev) => {
@@ -13222,16 +13317,15 @@ function HomePageContent() {
         );
       };
 
+      if (model.kind === "idle") return null;
+
+      if (model.kind === "empty_search") {
+        return <p className="emptyText" style={{ textAlign: "center" }}>"{model.query}"에 해당하는 장소가 없어요.</p>;
+      }
+
       // ── 지역순 (기본): 지역 > 카테고리 > 장소 ──
-      if (savedPlacesSort === "region") {
-        const regions = new Map<string, Place[]>();
-        filtered.forEach(p => {
-          const region = extractRegion(p.address);
-          if (!regions.has(region)) regions.set(region, []);
-          regions.get(region)!.push(p);
-        });
-        const sorted = Array.from(regions.entries()).sort((a, b) => a[0].localeCompare(b[0], "ko"));
-        return sorted.map(([region, regionPlaces]) => (
+      if (model.kind === "region") {
+        return model.regions.map(({ region, regionPlaces, categories }) => (
           <div key={region} style={{ marginBottom: "28px" }}>
             {/* 지역 헤더 */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", padding: "0 4px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
@@ -13240,53 +13334,44 @@ function HomePageContent() {
               <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{regionPlaces.length}</span>
             </div>
             {/* 2차: 지역 안에서 카테고리별 소그룹 */}
-            {CATEGORY_MAIN_ORDER.map(cat => {
-              const places = regionPlaces.filter(p => p.category === cat);
-              if (places.length === 0) return null;
-              return (
-                <div key={cat} style={{ marginBottom: "16px", paddingLeft: "8px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
-                    <span style={{ fontSize: "13px" }}>{CATEGORY_PIN[cat].emoji}</span>
-                    <span style={{ fontSize: "11px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
-                    <span style={{ fontSize: "10px", color: "#bbb" }}>{places.length}</span>
-                  </div>
-                  {places.map(place => renderFlatItem(place, undefined, CATEGORY_COLORS[cat]))}
+            {categories.map(({ cat, places }) => (
+              <div key={cat} style={{ marginBottom: "16px", paddingLeft: "8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "13px" }}>{CATEGORY_PIN[cat].emoji}</span>
+                  <span style={{ fontSize: "11px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
+                  <span style={{ fontSize: "10px", color: "#bbb" }}>{places.length}</span>
                 </div>
-              );
-            })}
+                {places.map((place) => renderFlatItem(place, undefined, CATEGORY_COLORS[cat]))}
+              </div>
+            ))}
           </div>
         ));
       }
 
       // ── 카테고리순: 카테고리 > 장소 ──
-      if (savedPlacesSort === "category") {
-        return CATEGORY_MAIN_ORDER.map((cat) => {
-          const places = filtered.filter((p) => p.category === cat);
-          if (places.length === 0) return null;
-          return (
-            <div key={cat} style={{ marginBottom: "28px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", padding: "0 4px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
-                <span style={{ fontSize: "16px" }}>{CATEGORY_PIN[cat].emoji}</span>
-                <span style={{ fontSize: "14px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
-                <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{places.length}</span>
-              </div>
-              {places.map((place) => renderFlatItem(place, undefined, CATEGORY_COLORS[cat]))}
+      if (model.kind === "category") {
+        return model.groups.map(({ cat, places }) => (
+          <div key={cat} style={{ marginBottom: "28px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", padding: "0 4px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
+              <span style={{ fontSize: "16px" }}>{CATEGORY_PIN[cat].emoji}</span>
+              <span style={{ fontSize: "14px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
+              <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{places.length}</span>
             </div>
-          );
-        });
+            {places.map((place) => renderFlatItem(place, undefined, CATEGORY_COLORS[cat]))}
+          </div>
+        ));
       }
 
       // ── 가까운 순 (평면) ──
-      const origin = savedNearOrigin ?? myLocationLatLngRef.current;
-      if (!origin) {
+      if (model.kind === "near_need_location") {
         return (
           <p className="emptyText" style={{ textAlign: "center" }}>
-            {savedNearLocating
+            {model.locating
               ? "현재 위치를 확인하는 중이에요…"
-              : savedNearDenied
+              : model.denied
                 ? "위치 권한이 꺼져 있어요. 설정에서 허용한 뒤 다시 시도해주세요."
                 : "가까운 순으로 보려면 위치 권한이 필요해요."}
-            {!savedNearLocating && (
+            {!model.locating && (
               <>
                 {" "}
                 <button
@@ -13301,25 +13386,10 @@ function HomePageContent() {
           </p>
         );
       }
-      const withDist = filtered.map((place) => {
-        const hasCoords =
-          typeof place.lat === "number" &&
-          Number.isFinite(place.lat) &&
-          typeof place.lng === "number" &&
-          Number.isFinite(place.lng);
-        const meters = hasCoords
-          ? distanceMeters(origin.lat, origin.lng, place.lat!, place.lng!)
-          : Number.POSITIVE_INFINITY;
-        return { place, meters, hasCoords };
-      });
-      withDist.sort((a, b) => {
-        if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
-        if (a.meters !== b.meters) return a.meters - b.meters;
-        return a.place.name.localeCompare(b.place.name, "ko");
-      });
+
       return (
         <div style={{ marginBottom: "16px" }}>
-          {withDist.map(({ place, meters, hasCoords }) =>
+          {model.items.map(({ place, meters, hasCoords }) =>
             renderFlatItem(
               place,
               `${hasCoords ? formatSavedPlaceDistanceM(meters) : "거리 정보 없음"} · ${place.category}`,

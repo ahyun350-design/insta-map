@@ -26,6 +26,8 @@ function isTempListId(id: string): boolean {
   return id.startsWith("temp-");
 }
 
+const LISTS_TTL_MS = 30_000;
+
 export function AddToListSheet({
   open,
   placeIds,
@@ -48,25 +50,52 @@ export function AddToListSheet({
   const [createBusy, setCreateBusy] = useState(false);
   const createRowRef = useRef<HTMLDivElement | null>(null);
   const hasLoadedRef = useRef(false);
+  const listsFetchedAtRef = useRef(0);
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
-    const silent = opts?.silent === true && hasLoadedRef.current;
-    if (!silent) setLoading(true);
+  const load = useCallback(async (opts?: { force?: boolean }) => {
+    const force = opts?.force === true;
+    const now = Date.now();
+    const listsFresh =
+      !force &&
+      hasLoadedRef.current &&
+      listsFetchedAtRef.current > 0 &&
+      now - listsFetchedAtRef.current < LISTS_TTL_MS;
+
+    if (listsFresh) {
+      // 목록은 TTL 재사용 — 체크 상태만 장소 기준으로 갱신
+      if (singlePlaceId) {
+        const forPlaceRes = await fetchListsForPlace(singlePlaceId);
+        if (forPlaceRes.error) {
+          showToast(forPlaceRes.error, "error");
+          setCheckedIds(new Set());
+        } else {
+          setCheckedIds(new Set(forPlaceRes.data));
+        }
+      } else {
+        setCheckedIds(new Set());
+      }
+      return;
+    }
+
+    setLoading(true);
     try {
       const listsRes = await fetchMyLists(userId);
       if (listsRes.error) {
         showToast(listsRes.error, "error");
-        if (!silent) setLists([]);
+        setLists([]);
+        hasLoadedRef.current = false;
+        listsFetchedAtRef.current = 0;
       } else {
         setLists(listsRes.data);
         hasLoadedRef.current = true;
+        listsFetchedAtRef.current = Date.now();
       }
 
       if (singlePlaceId) {
         const forPlaceRes = await fetchListsForPlace(singlePlaceId);
         if (forPlaceRes.error) {
           showToast(forPlaceRes.error, "error");
-          if (!silent) setCheckedIds(new Set());
+          setCheckedIds(new Set());
         } else {
           setCheckedIds(new Set(forPlaceRes.data));
         }
@@ -74,15 +103,12 @@ export function AddToListSheet({
         setCheckedIds(new Set());
       }
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   }, [singlePlaceId, userId, showToast]);
 
   useEffect(() => {
-    if (!open) {
-      hasLoadedRef.current = false;
-      return;
-    }
+    if (!open) return;
     setCreating(false);
     setNewTitle("");
     void load();
@@ -213,8 +239,14 @@ export function AddToListSheet({
         prev.map((l) => (l.id === data.id ? { ...l, place_count: 0 } : l)),
       );
       showToast(addError, "error");
+      // 생성은 됐으므로 다음 오픈 시 목록 강제 재조회
+      listsFetchedAtRef.current = 0;
       return;
     }
+
+    // 목록 생성 직후 — TTL 무효화 후 서버 목록으로 맞춤
+    listsFetchedAtRef.current = 0;
+    void load({ force: true });
 
     showToast(
       bulk ? `새 목록에 ${placeIds.length}곳을 담았어요` : "새 목록에 담았어요",

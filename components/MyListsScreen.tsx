@@ -57,9 +57,22 @@ export function MyListsScreen({
   const listIdRef = useRef<string | null>(null);
   listIdRef.current = detailList?.id ?? null;
   const hasListsRef = useRef(false);
+  const listsFetchedAtRef = useRef(0);
+
+  const LISTS_TTL_MS = 30_000;
 
   const loadLists = useCallback(
-    async (opts?: { silent?: boolean }) => {
+    async (opts?: { silent?: boolean; force?: boolean }) => {
+      const force = opts?.force === true;
+      const now = Date.now();
+      if (
+        !force &&
+        hasListsRef.current &&
+        listsFetchedAtRef.current > 0 &&
+        now - listsFetchedAtRef.current < LISTS_TTL_MS
+      ) {
+        return;
+      }
       const silent = opts?.silent === true && hasListsRef.current;
       if (!silent) setLoading(true);
       const { data, error } = await fetchMyLists(userId);
@@ -69,11 +82,13 @@ export function MyListsScreen({
         if (!silent) {
           setLists([]);
           hasListsRef.current = false;
+          listsFetchedAtRef.current = 0;
         }
         return;
       }
       setLists(data);
       hasListsRef.current = true;
+      listsFetchedAtRef.current = Date.now();
     },
     [userId, showToast],
   );
@@ -216,6 +231,8 @@ export function MyListsScreen({
     setDetailList(data);
     setTitleDraft(data.title);
     setLists((prev) => prev.map((l) => (l.id === data.id ? { ...l, title: data.title } : l)));
+    listsFetchedAtRef.current = 0;
+    void loadLists({ force: true, silent: true });
   };
 
   const handleDeleteList = async () => {
@@ -237,6 +254,8 @@ export function MyListsScreen({
       });
       return;
     }
+    listsFetchedAtRef.current = 0;
+    void loadLists({ force: true, silent: true });
     showToast("목록을 삭제했어요", "success");
   };
 
