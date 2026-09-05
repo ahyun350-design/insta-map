@@ -946,6 +946,15 @@ const CATEGORY_COLORS: Record<Category, string> = {
 const ACTIVE_JOBS_STORAGE_KEY = "pindmap_active_extract_jobs";
 const HIDDEN_PLACE_IDS_STORAGE_KEY = "pindmap_hidden_place_ids";
 
+/** extract job client polling — was 2s × 30 ≈ 60s hard stop */
+const EXTRACT_POLL_TICK_MS = 1000;
+const EXTRACT_POLL_FAST_INTERVAL_MS = 2000;
+const EXTRACT_POLL_BG_INTERVAL_MS = 15_000;
+/** After this, treat as background (not failure) and slow the poll */
+const EXTRACT_SOFT_TIMEOUT_MS = 120_000;
+/** Interval polling stops; visibility/resume still polls */
+const EXTRACT_INTERVAL_GIVE_UP_MS = 12 * 60_000;
+
 function makeMarkerImage(category: Category) {
   const { color, emoji } = CATEGORY_PIN[category];
   const stroke = category === "맛집" ? "#fff" : "#999";
@@ -1541,6 +1550,8 @@ function HomePageContent() {
   const [extractOverlayError, setExtractOverlayError] = useState<string | null>(null);
   /** extract_jobs.error_message 원문 — 오버레이 사유 분기용 */
   const [extractOverlayErrorRaw, setExtractOverlayErrorRaw] = useState<string | null>(null);
+  /** soft-timeout — 실패가 아니라 백그라운드 계속 안내 */
+  const [extractOverlayBackground, setExtractOverlayBackground] = useState(false);
   const [extractOverlayCompleteVariant, setExtractOverlayCompleteVariant] = useState<
     "success" | "all_saved"
   >("success");
@@ -1757,6 +1768,8 @@ function HomePageContent() {
   const courseTitleInlineInputRef = useRef<HTMLInputElement>(null);
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const extractPollStartRef = useRef<Record<string, number>>({});
+  const pollLastAtRef = useRef<Record<string, number>>({});
+  const extractSoftTimeoutNotifiedRef = useRef<Set<string>>(new Set());
   const detailOpenPerfRef = useRef<{ postId: string; t: number } | null>(null);
   const detailOpenLoggedRef = useRef<string | null>(null);
   const pollInFlightRef = useRef<Set<string>>(new Set());
@@ -4208,14 +4221,16 @@ function HomePageContent() {
   }, [activeJobs]);
 
   useEffect(() => {
-    // all_saved 는 사용자가 버튼을 누를 때까지 유지
+    // all_saved / background 는 사용자가 닫을 때까지 유지
     if (!showExtractOverlay || !extractOverlayComplete || extractOverlayError) return;
+    if (extractOverlayBackground) return;
     if (extractOverlayCompleteVariant === "all_saved") return;
     const timer = window.setTimeout(() => {
       setShowExtractOverlay(false);
       setExtractOverlayComplete(false);
       setExtractOverlayError(null);
       setExtractOverlayErrorRaw(null);
+      setExtractOverlayBackground(false);
       setExtractOverlayCompleteVariant("success");
       setExtractRetryUrl(null);
     }, 1800);
@@ -4224,6 +4239,7 @@ function HomePageContent() {
     showExtractOverlay,
     extractOverlayComplete,
     extractOverlayError,
+    extractOverlayBackground,
     extractOverlayCompleteVariant,
   ]);
 
@@ -4239,24 +4255,83 @@ function HomePageContent() {
         delete extractPollStartRef.current[jobId];
       }
       delete pollAttemptsRef.current[jobId];
+      delete pollLastAtRef.current[jobId];
+      extractSoftTimeoutNotifiedRef.current.delete(jobId);
       pollInFlightRef.current.delete(jobId);
       setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
     };
 
-    const pollJob = async (jobId: string) => {
+    const applyOverlayBackground = () => {
+      setExtractOverlayError(null);
+      setExtractOverlayErrorRaw(null);
+      setExtractOverlayComplete(false);
+      setExtractOverlayCompleteVariant("success");
+      setExtractOverlayBackground(true);
+      setShowExtractOverlay(true);
+      setStatus("시간이 좀 걸리고 있어요. 다 되면 알려드릴게요.");
+    };
+
+    const applyOverlaySuccess = (variant: "success" | "all_saved") => {
+      setExtractOverlayError(null);
+      setExtractOverlayErrorRaw(null);
+      setExtractOverlayBackground(false);
+      setExtractOverlayCompleteVariant(variant);
+      setExtractOverlayComplete(true);
+      setShowExtractOverlay(true);
+    };
+
+    const applyOverlayError = (userMsg: string, raw: string | null, failedUrl: string | null) => {
+      setExtractOverlayBackground(false);
+      setExtractOverlayComplete(false);
+      setExtractOverlayCompleteVariant("success");
+      setExtractOverlayError(userMsg);
+      setExtractOverlayErrorRaw(raw);
+      setExtractRetryUrl(failedUrl);
+      setShowExtractOverlay(true);
+    };
+
+    const pollJob = async (jobId: string, opts?: { force?: boolean }) => {
       if (pollInFlightRef.current.has(jobId)) return;
       if (extractPollStartRef.current[jobId] === undefined) {
         extractPollStartRef.current[jobId] = perfNow();
       }
 
-      const attempts = (pollAttemptsRef.current[jobId] ?? 0) + 1;
-      pollAttemptsRef.current[jobId] = attempts;
-      if (attempts > 30) {
-        showToast("작업 상태 확인 시간이 초과되어 자동 중단했어요.", "info");
-        setStatus("");
-        removeJob(jobId);
+      const elapsed = perfNow() - (extractPollStartRef.current[jobId] ?? perfNow());
+      const lastAt = pollLastAtRef.current[jobId] ?? 0;
+      const intervalMs =
+        elapsed >= EXTRACT_SOFT_TIMEOUT_MS
+          ? EXTRACT_POLL_BG_INTERVAL_MS
+          : EXTRACT_POLL_FAST_INTERVAL_MS;
+
+      if (!opts?.force && lastAt > 0 && Date.now() - lastAt < intervalMs) {
         return;
       }
+
+      // Soft timeout: keep tracking, switch UI to background (not failure)
+      if (
+        elapsed >= EXTRACT_SOFT_TIMEOUT_MS &&
+        !extractSoftTimeoutNotifiedRef.current.has(jobId)
+      ) {
+        extractSoftTimeoutNotifiedRef.current.add(jobId);
+        applyOverlayBackground();
+        setActiveJobs((prev) =>
+          prev.map((job) =>
+            job.jobId === jobId
+              ? { ...job, progressStep: "시간이 좀 걸리고 있어요" }
+              : job,
+          ),
+        );
+        showToast("시간이 좀 걸리고 있어요. 다 되면 알려드릴게요.", "info");
+      }
+
+      // After long wait: pause interval polling (visibility/resume still force-polls)
+      if (!opts?.force && elapsed >= EXTRACT_INTERVAL_GIVE_UP_MS) {
+        return;
+      }
+
+      const attempts = (pollAttemptsRef.current[jobId] ?? 0) + 1;
+      pollAttemptsRef.current[jobId] = attempts;
+      pollLastAtRef.current[jobId] = Date.now();
 
       pollInFlightRef.current.add(jobId);
       try {
@@ -4277,6 +4352,8 @@ function HomePageContent() {
           status: data.status,
           step: data.progress_step,
           placesCount: data.result_places?.length ?? "no_array",
+          elapsedMs: Math.round(elapsed),
+          attempt: attempts,
         });
         if (!res.ok) {
           throw new Error(data.error || "작업 상태를 확인할 수 없어요.");
@@ -4298,31 +4375,18 @@ function HomePageContent() {
           removeJob(jobId);
           const places = data.result_places ?? [];
           if (places.length === 0) {
-            // all_saved_already 는 서버가 신규 insert 없이 끝난 경우만
             if (nextStep.includes("all_saved_already")) {
-              setExtractOverlayError(null);
-              setExtractOverlayErrorRaw(null);
-              setExtractOverlayCompleteVariant("all_saved");
-              setExtractOverlayComplete(true);
-              setShowExtractOverlay(true);
+              applyOverlaySuccess("all_saved");
             } else {
               const userMsg = "장소를 찾지 못했어요. 다른 릴스로 시도해 주세요";
               setError(userMsg);
-              setExtractOverlayError(userMsg);
-              setExtractOverlayErrorRaw(EXTRACT_EMPTY_RESULT_RAW);
-              setExtractRetryUrl(failedUrl);
-              setExtractOverlayComplete(false);
-              setExtractOverlayCompleteVariant("success");
-              setShowExtractOverlay(true);
+              applyOverlayError(userMsg, EXTRACT_EMPTY_RESULT_RAW, failedUrl);
             }
             setStatus("");
             devLog("[PindMap:url] extraction message hidden (empty result_places)");
             return;
           }
 
-          // 서버가 result_places 를 준 경우(= insert 성공)는 로컬 savedPlaces 와
-          // 이름+주소 비교로 "이미 있음" 처리하지 않는다.
-          // (폴링 전에 DB 동기화가 된 경우 성공인데도 중복 토스트가 뜨는 레이스 방지)
           const existingIds = new Set(savedPlaces.map((p) => String(p.id)));
           const merged: Place[] = places.map((p) => {
             const coords = latLngFromRow(p);
@@ -4355,11 +4419,7 @@ function HomePageContent() {
           }
           showToast(`✨ ${displayCount}개 장소를 추가했어요`, "success");
           setStatus("");
-          setExtractOverlayError(null);
-          setExtractOverlayErrorRaw(null);
-          setExtractOverlayCompleteVariant("success");
-          setExtractOverlayComplete(true);
-          setShowExtractOverlay(true);
+          applyOverlaySuccess("success");
           devLog("[PindMap:url] extraction message hidden (success)", {
             resultPlaces: places.length,
             newlyAddedCount,
@@ -4373,42 +4433,47 @@ function HomePageContent() {
             activeJobs.find((j) => j.jobId === jobId)?.instagramUrl ?? null;
           setStatus("");
           setError(userMsg);
-          setExtractOverlayError(userMsg);
-          setExtractOverlayErrorRaw(
+          applyOverlayError(
+            userMsg,
             typeof data.error_message === "string" ? data.error_message : null,
+            failedUrl,
           );
-          setExtractRetryUrl(failedUrl);
-          setExtractOverlayComplete(false);
-          setShowExtractOverlay(true);
           devLog("[PindMap:url] extraction message hidden (failed)");
           removeJob(jobId);
         }
       } catch (err) {
+        // Transient network/status errors: keep tracking (don't treat as extract failure)
         const raw = err instanceof Error ? err.message : "작업 상태 확인 중 오류가 발생했어요.";
-        const userMsg = mapExtractErrorToUserMessage(raw);
-        const failedUrl =
-          activeJobs.find((j) => j.jobId === jobId)?.instagramUrl ?? null;
-        setStatus("");
-        setError(userMsg);
-        setExtractOverlayError(userMsg);
-        setExtractOverlayErrorRaw(raw);
-        setExtractRetryUrl(failedUrl);
-        setExtractOverlayComplete(false);
-        setShowExtractOverlay(true);
-        devLog("[PindMap:url] extraction message hidden (failed)");
-        removeJob(jobId);
+        devLog("[PindMap:url] extract poll error (keep tracking)", { jobId: jobId.slice(0, 8), raw });
+        // After soft timeout UI already shown; otherwise leave loading overlay alone
       } finally {
         pollInFlightRef.current.delete(jobId);
       }
     };
 
-    const interval = window.setInterval(() => {
-      pollingTargets.forEach((job) => { void pollJob(job.jobId); });
-    }, 2000);
+    const tick = () => {
+      pollingTargets.forEach((job) => {
+        void pollJob(job.jobId);
+      });
+    };
 
-    pollingTargets.forEach((job) => { void pollJob(job.jobId); });
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      pollingTargets.forEach((job) => {
+        void pollJob(job.jobId, { force: true });
+      });
+    };
 
-    return () => window.clearInterval(interval);
+    const interval = window.setInterval(tick, EXTRACT_POLL_TICK_MS);
+    tick();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onVisibility);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onVisibility);
+    };
   }, [activeJobs, user?.id, showToast]);
 
   const addPlace = async (place: Place) => {
@@ -7323,6 +7388,7 @@ function HomePageContent() {
     setExtractOverlayComplete(false);
     setExtractOverlayError(null);
     setExtractOverlayErrorRaw(null);
+    setExtractOverlayBackground(false);
     setExtractOverlayCompleteVariant("success");
     setExtractRetryUrl(null);
     orchestratorSuccessKeyRef.current = "";
@@ -7364,6 +7430,7 @@ function HomePageContent() {
       setExtractOverlayComplete(false);
       setExtractOverlayError(null);
       setExtractOverlayErrorRaw(null);
+      setExtractOverlayBackground(false);
       setExtractOverlayCompleteVariant("success");
       setExtractRetryUrl(trimmedUrl);
       setInstagramUrl("");
@@ -7388,6 +7455,7 @@ function HomePageContent() {
       setError(message);
       setExtractOverlayError(message);
       setExtractOverlayErrorRaw(rawMessage);
+      setExtractOverlayBackground(false);
       setExtractRetryUrl(trimmedUrl);
       setShowExtractOverlay(true);
       setExtractOverlayComplete(false);
@@ -14303,6 +14371,7 @@ function HomePageContent() {
           open={showExtractOverlay}
           complete={extractOverlayComplete}
           completeVariant={extractOverlayCompleteVariant}
+          backgroundWaiting={extractOverlayBackground}
           errorMessage={extractOverlayError}
           errorRaw={extractOverlayErrorRaw}
           onDismiss={() => {
@@ -14310,6 +14379,7 @@ function HomePageContent() {
             setExtractOverlayComplete(false);
             setExtractOverlayError(null);
             setExtractOverlayErrorRaw(null);
+            setExtractOverlayBackground(false);
             setExtractOverlayCompleteVariant("success");
           }}
           onViewMap={undefined}
@@ -14318,6 +14388,7 @@ function HomePageContent() {
             setExtractOverlayComplete(false);
             setExtractOverlayError(null);
             setExtractOverlayErrorRaw(null);
+            setExtractOverlayBackground(false);
             setExtractOverlayCompleteVariant("success");
             setActiveTab("map");
             setMapExpanded(true);
@@ -14332,6 +14403,7 @@ function HomePageContent() {
                   setExtractOverlayError(null);
                   setExtractOverlayErrorRaw(null);
                   setExtractOverlayComplete(false);
+                  setExtractOverlayBackground(false);
                   setExtractOverlayCompleteVariant("success");
                   setShowExtractOverlay(false);
                   void handleAddFromInstagram(url);

@@ -84,11 +84,16 @@ function pickNoPlaceVariant(): (typeof NO_PLACE_VARIANTS)[number] {
 
 export type ExtractOverlayCompleteVariant = "success" | "all_saved";
 
+/** 배타적 UI 모드 — 진행/백그라운드/완료/실패가 한 카드에 겹치지 않게 */
+export type ExtractOverlayMode = "loading" | "background" | "complete" | "error";
+
 type Props = {
   open: boolean;
   complete?: boolean;
   /** success=신규 추가 / all_saved=이미 전부 저장됨 */
   completeVariant?: ExtractOverlayCompleteVariant;
+  /** 폴링 soft-timeout — 실패가 아니라 백그라운드 계속 */
+  backgroundWaiting?: boolean;
   errorMessage?: string | null;
   /** extract_jobs.error_message 원문 — 사유 분기용 */
   errorRaw?: string | null;
@@ -104,6 +109,7 @@ export function ExtractLoadingOverlay({
   open,
   complete = false,
   completeVariant = "success",
+  backgroundWaiting = false,
   errorMessage = null,
   errorRaw = null,
   onDismiss,
@@ -117,28 +123,36 @@ export function ExtractLoadingOverlay({
     NO_PLACE_VARIANTS[0],
   );
   const tip = TIPS[tipIndex];
-  const showError = !!errorMessage;
-  const showComplete = complete && !showError;
-  const showAllSaved = showComplete && completeVariant === "all_saved";
-  const noPlaceError = showError && isExtractNoPlaceError(errorRaw);
-  const emptyResultError = showError && isExtractEmptyResult(errorRaw);
+
+  // Priority: error > complete > background > loading (never mix)
+  const mode: ExtractOverlayMode = errorMessage
+    ? "error"
+    : complete
+      ? "complete"
+      : backgroundWaiting
+        ? "background"
+        : "loading";
+
+  const showAllSaved = mode === "complete" && completeVariant === "all_saved";
+  const noPlaceError = mode === "error" && isExtractNoPlaceError(errorRaw);
+  const emptyResultError = mode === "error" && isExtractEmptyResult(errorRaw);
   const captionTipError = noPlaceError || emptyResultError;
 
   useEffect(() => {
-    if (!open || showComplete || showError) return;
+    if (!open || mode !== "loading") return;
     const id = window.setInterval(() => {
       setProgressIndex((i) => (i + 1) % PROGRESS_MESSAGES.length);
     }, 2800);
     return () => window.clearInterval(id);
-  }, [open, showComplete, showError]);
+  }, [open, mode]);
 
   useEffect(() => {
-    if (!open || showComplete || showError) return;
+    if (!open || mode !== "loading") return;
     const id = window.setInterval(() => {
       setTipIndex((i) => (i + 1) % TIPS.length);
     }, TIP_ROTATE_MS);
     return () => window.clearInterval(id);
-  }, [open, showComplete, showError]);
+  }, [open, mode]);
 
   useEffect(() => {
     if (!open) {
@@ -155,26 +169,34 @@ export function ExtractLoadingOverlay({
 
   if (!open) return null;
 
-  const footerNote = captionTipError
-    ? "캡션에 가게 이름이 있는 릴스는 잘 찾아요"
-    : showAllSaved
-      ? "저장된 장소는 지도 탭에서 볼 수 있어요"
-      : "앱을 닫아도 계속 저장돼요 · 여러 개 OK";
+  const ariaLabel =
+    mode === "error"
+      ? "추출 실패"
+      : showAllSaved
+        ? "이미 저장한 장소"
+        : mode === "complete"
+          ? "추출 완료"
+          : mode === "background"
+            ? "백그라운드 저장 중"
+            : "장소 추출 중";
+
+  const footerNote =
+    mode === "error" && captionTipError
+      ? "캡션에 가게 이름이 있는 릴스는 잘 찾아요"
+      : showAllSaved
+        ? "저장된 장소는 지도 탭에서 볼 수 있어요"
+        : mode === "background"
+          ? "알림이 오면 지도에서 확인해 주세요"
+          : mode === "loading"
+            ? "앱을 닫아도 계속 저장돼요 · 여러 개 OK"
+            : null;
 
   return (
     <div
       className="extractLoadingOverlay"
       role="dialog"
       aria-modal="true"
-      aria-label={
-        showError
-          ? "추출 실패"
-          : showAllSaved
-            ? "이미 저장한 장소"
-            : showComplete
-              ? "추출 완료"
-              : "장소 추출 중"
-      }
+      aria-label={ariaLabel}
       onClick={onDismiss}
     >
       <div
@@ -190,7 +212,7 @@ export function ExtractLoadingOverlay({
           ✕
         </button>
 
-        {showError ? (
+        {mode === "error" ? (
           noPlaceError ? (
             <div className="extractLoadingComplete">
               <p
@@ -271,6 +293,21 @@ export function ExtractLoadingOverlay({
               )}
             </div>
           )
+        ) : mode === "background" ? (
+          <div className="extractLoadingComplete">
+            <p className="extractLoadingCompleteEmoji" aria-hidden>
+              ⏳
+            </p>
+            <p className="extractLoadingCompleteTitle">시간이 좀 걸리고 있어요</p>
+            <p className="extractLoadingCompleteSub">
+              다 되면 알려드릴게요.
+              <br />
+              앱을 닫아도 계속 진행돼요
+            </p>
+            <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
+              확인
+            </button>
+          </div>
         ) : showAllSaved ? (
           <div className="extractLoadingComplete">
             <p className="extractLoadingCompleteEmoji" aria-hidden>
@@ -289,7 +326,7 @@ export function ExtractLoadingOverlay({
               {onViewMap ? "지도에서 보기" : "확인"}
             </button>
           </div>
-        ) : showComplete ? (
+        ) : mode === "complete" ? (
           <div className="extractLoadingComplete">
             <p className="extractLoadingCompleteEmoji" aria-hidden>
               ✨
@@ -317,9 +354,9 @@ export function ExtractLoadingOverlay({
           </>
         )}
 
-        <p className="extractLoadingFooterNote">{footerNote}</p>
+        {footerNote ? <p className="extractLoadingFooterNote">{footerNote}</p> : null}
 
-        {!showComplete && !showError && (
+        {mode === "loading" && (
           <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
             백그라운드에서 계속하기
           </button>
