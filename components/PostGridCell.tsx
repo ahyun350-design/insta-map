@@ -166,9 +166,17 @@ export function PostGridCell({
         }}
       >
         {isHome && showUsername && username ? (
-          <button
-            type="button"
+          <span
+            role="button"
+            tabIndex={0}
+            data-testid="feed-post-author"
             onClick={(e) => {
+              e.stopPropagation();
+              onProfileClick?.();
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
               e.stopPropagation();
               onProfileClick?.();
             }}
@@ -191,7 +199,7 @@ export function PostGridCell({
             }}
           >
             {username}
-          </button>
+          </span>
         ) : null}
         {isHome ? (
           <>

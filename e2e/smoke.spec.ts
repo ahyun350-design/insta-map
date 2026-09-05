@@ -107,7 +107,7 @@ test("production smoke — major tabs (continue on failure)", async ({
   await runner.step("4a. SAVED — 목록 표시", async () => {
     await gotoTab(page, "saved");
     await expect(page.locator(".savedSortTrigger")).toBeVisible({ timeout: 20_000 });
-    const items = page.locator(".savedItem");
+    const items = page.locator("article.savedItem");
     const empty = page.getByText(/저장한 장소가 없어요|아직 저장/);
     const hasItems = (await items.count()) > 0;
     const isEmpty = await empty.first().isVisible().catch(() => false);
@@ -135,7 +135,7 @@ test("production smoke — major tabs (continue on failure)", async ({
 
   await runner.step("4c. SAVED — 장소 시트 / 길찾기", async () => {
     await gotoTab(page, "saved");
-    const items = page.locator(".savedItem");
+    const items = page.locator("article.savedItem");
     if ((await items.count()) === 0) {
       throw new Error("저장된 장소가 없어 시트/길찾기 스킵 불가 — 실패로 기록");
     }
@@ -164,11 +164,15 @@ test("production smoke — major tabs (continue on failure)", async ({
 
   await runner.step("4d. SAVED — 내 목록 생성·담기·순서·삭제", async () => {
     await gotoTab(page, "saved");
-    const items = page.locator(".savedItem");
+    // 지역순 계층에서도 장소 행은 article.savedItem
+    const items = page.locator("article.savedItem");
+    await expect(items.first()).toBeVisible({ timeout: 20_000 });
     const itemCount = await items.count();
     if (itemCount === 0) {
       throw new Error("저장된 장소가 없어 내 목록 E2E를 진행할 수 없음");
     }
+    // eslint-disable-next-line no-console
+    console.log(`  (info) saved places: ${itemCount}${itemCount < 2 ? " — 장소 1개로 진행" : ""}`);
 
     await safeClick(items.first());
     const sheet = page.locator(".placeDetailSheet");
@@ -182,9 +186,15 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(addSheet.getByText(listTitle)).toBeVisible({ timeout: 15_000 });
     await safeClick(addSheet.getByRole("button", { name: "닫기" }));
     await safeClick(sheet.getByRole("button", { name: "닫기" })).catch(() => null);
+    await expect(page.locator(".placeDetailSheet")).toHaveCount(0, { timeout: 10_000 }).catch(() => null);
 
-    if (itemCount >= 2) {
-      await safeClick(items.nth(1));
+    // 다중 담기는 장소 2개 이상일 때만 (시트 닫은 뒤 다시 카운트)
+    const itemsAfter = page.locator("article.savedItem");
+    const countAfter = await itemsAfter.count();
+    if (countAfter >= 2) {
+      const second = itemsAfter.nth(1);
+      await second.scrollIntoViewIfNeeded();
+      await safeClick(second);
       const sheet2 = page.locator(".placeDetailSheet");
       await expect(sheet2).toBeVisible({ timeout: 15_000 });
       await safeClick(sheet2.getByRole("button", { name: "목록에 추가" }));
@@ -195,6 +205,9 @@ test("production smoke — major tabs (continue on failure)", async ({
       await page.waitForTimeout(800);
       await safeClick(add2.getByRole("button", { name: "닫기" }));
       await safeClick(sheet2.getByRole("button", { name: "닫기" })).catch(() => null);
+    } else {
+      // eslint-disable-next-line no-console
+      console.log("  (info) 장소 1개 — 두 번째 담기 스킵");
     }
 
     await safeClick(page.locator(".savedMyListsPill"));
@@ -229,7 +242,7 @@ test("production smoke — major tabs (continue on failure)", async ({
       }
     } else {
       // eslint-disable-next-line no-console
-      console.log("  (info) 장소 1개 — 순서 변경 스킵, 목록 표시만 확인");
+      console.log("  (info) 목록 장소 1개 — 순서 변경 스킵");
     }
 
     await safeClick(myLists.getByRole("button", { name: "목록 삭제" }));
@@ -271,24 +284,10 @@ test("production smoke — major tabs (continue on failure)", async ({
     await gotoTab(page, "home");
     await waitForHomeFeed(page);
 
-    const usernameBtns = page.locator(".homeFeedGrid button").filter({
-      hasNotText: /좋아요|저장/,
-    });
-    const count = await usernameBtns.count();
-    if (count === 0) {
-      throw new Error("HOME 피드에서 프로필 진입용 username 버튼을 찾지 못함");
-    }
-
-    let clicked = false;
-    for (let i = 0; i < Math.min(count, 12); i++) {
-      const btn = usernameBtns.nth(i);
-      const text = (await btn.innerText()).trim();
-      if (!text || text.length > 40) continue;
-      await safeClick(btn);
-      clicked = true;
-      break;
-    }
-    expect(clicked).toBeTruthy();
+    // 작성자 이름(피드 카드 안) — 카드 전체 button 과 구분
+    const authors = page.getByTestId("feed-post-author");
+    await expect(authors.first()).toBeVisible({ timeout: 20_000 });
+    await safeClick(authors.first());
 
     await expect(page).toHaveURL(/\/profile\//, { timeout: 20_000 });
     await expect(page.getByText("프로필", { exact: true }).first()).toBeVisible();
@@ -302,10 +301,17 @@ test("production smoke — major tabs (continue on failure)", async ({
     }
 
     await safeClick(firstThumb);
-    await expect(page.locator(".curationDetailOverlay")).toBeVisible({ timeout: 25_000 });
-    await safeClick(page.locator(".curationDetailOverlay .subpageHeader button").first());
+    const overlay = page.locator(".curationDetailOverlay");
+    await expect(overlay).toBeVisible({ timeout: 25_000 });
+
+    const closeBtn = page
+      .getByTestId("curation-detail-close")
+      .or(overlay.getByRole("button", { name: "뒤로가기" }))
+      .or(overlay.locator(".subpageHeader button").first());
+    await safeClick(closeBtn.first());
+    await expect(overlay).toBeHidden({ timeout: 15_000 });
     await expect(page.locator(".curationDetailOverlay")).toHaveCount(0, {
-      timeout: 15_000,
+      timeout: 5_000,
     });
 
     if (page.url().includes("/profile/")) {
