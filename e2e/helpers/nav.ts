@@ -91,6 +91,50 @@ export async function dismissCoachmarks(page: Page, max = 5): Promise<void> {
 }
 
 /**
+ * Close SAVED-tab sheets/overlays that can cover 「내 목록」.
+ * Place detail / add-to-list / my-lists confirm — best-effort.
+ */
+export async function dismissSavedOverlays(page: Page): Promise<void> {
+  await dismissCoachmarks(page);
+
+  const addSheet = page.locator(".placeListSheet");
+  if (await addSheet.isVisible().catch(() => false)) {
+    const close = addSheet.getByRole("button", { name: "닫기" });
+    if (await close.isVisible().catch(() => false)) {
+      await close.click({ force: true }).catch(() => null);
+    } else {
+      await page.keyboard.press("Escape").catch(() => null);
+    }
+    await expect(addSheet).toBeHidden({ timeout: 5_000 }).catch(() => null);
+  }
+
+  const detail = page.locator(".placeDetailSheet");
+  if (await detail.first().isVisible().catch(() => false)) {
+    const close = detail.getByRole("button", { name: "닫기" }).first();
+    if (await close.isVisible().catch(() => false)) {
+      await close.click({ force: true }).catch(() => null);
+    } else {
+      await page.keyboard.press("Escape").catch(() => null);
+    }
+    await expect(page.locator(".placeDetailSheet")).toHaveCount(0, { timeout: 5_000 }).catch(() => null);
+  }
+
+  // Sort dropdown open — click away
+  const sortMenu = page.locator(".savedSortMenu");
+  if (await sortMenu.isVisible().catch(() => false)) {
+    await page.locator(".savedSortTrigger").click({ force: true }).catch(() => null);
+    await expect(sortMenu).toBeHidden({ timeout: 3_000 }).catch(() => null);
+  }
+}
+
+export function savedMyListsButton(page: Page): Locator {
+  return page
+    .getByTestId("saved-my-lists")
+    .or(page.locator("button.savedMyListsPill"))
+    .or(page.getByRole("button", { name: "내 목록", exact: true }));
+}
+
+/**
  * Click with retry when a coachmark (or similar overlay) intercepts pointer events.
  */
 export async function safeClick(

@@ -12901,6 +12901,7 @@ function HomePageContent() {
           <button
             type="button"
             className="savedMyListsPill"
+            data-testid="saved-my-lists"
             onClick={() => {
               if (!userIdRef.current) {
                 showToast("로그인 후 이용해주세요", "info");

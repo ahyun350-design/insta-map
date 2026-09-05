@@ -6,12 +6,14 @@ import { createSoftRunner } from "./helpers/softRunner";
 import {
   assertHomeFeedContent,
   dismissCoachmarks,
+  dismissSavedOverlays,
   gotoTab,
   loginEmailInput,
   loginPasswordInput,
   loginSubmitButton,
   reachLoginForm,
   safeClick,
+  savedMyListsButton,
   suppressCoachmarks,
   tabBar,
   tabButton,
@@ -164,7 +166,14 @@ test("production smoke — major tabs (continue on failure)", async ({
 
   await runner.step("4d. SAVED — 내 목록 생성·담기·순서·삭제", async () => {
     await gotoTab(page, "saved");
+    // 4c 등에서 남은 시트/메뉴가 「내 목록」을 가리지 않게
+    await dismissSavedOverlays(page);
+
     // 지역순 계층에서도 장소 행은 article.savedItem
+    // 「내 목록」 pill 은 savedPlaces.length > 0 일 때만 렌더 (.savedMyListsPill)
+    const myListsBtn = savedMyListsButton(page);
+    await expect(myListsBtn).toBeVisible({ timeout: 20_000 });
+
     const items = page.locator("article.savedItem");
     await expect(items.first()).toBeVisible({ timeout: 20_000 });
     const itemCount = await items.count();
@@ -186,7 +195,7 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(addSheet.getByText(listTitle)).toBeVisible({ timeout: 15_000 });
     await safeClick(addSheet.getByRole("button", { name: "닫기" }));
     await safeClick(sheet.getByRole("button", { name: "닫기" })).catch(() => null);
-    await expect(page.locator(".placeDetailSheet")).toHaveCount(0, { timeout: 10_000 }).catch(() => null);
+    await dismissSavedOverlays(page);
 
     // 다중 담기는 장소 2개 이상일 때만 (시트 닫은 뒤 다시 카운트)
     const itemsAfter = page.locator("article.savedItem");
@@ -205,12 +214,14 @@ test("production smoke — major tabs (continue on failure)", async ({
       await page.waitForTimeout(800);
       await safeClick(add2.getByRole("button", { name: "닫기" }));
       await safeClick(sheet2.getByRole("button", { name: "닫기" })).catch(() => null);
+      await dismissSavedOverlays(page);
     } else {
       // eslint-disable-next-line no-console
       console.log("  (info) 장소 1개 — 두 번째 담기 스킵");
     }
 
-    await safeClick(page.locator(".savedMyListsPill"));
+    await expect(myListsBtn).toBeVisible({ timeout: 15_000 });
+    await safeClick(myListsBtn);
     const myLists = page.locator(".myListsScreen");
     await expect(myLists).toBeVisible({ timeout: 15_000 });
     await safeClick(myLists.locator(".myListsListItem", { hasText: listTitle }));
@@ -325,11 +336,9 @@ test("production smoke — major tabs (continue on failure)", async ({
     await gotoTab(page, "my");
     await safeClick(page.getByRole("button", { name: "설정" }));
     await safeClick(page.getByRole("button", { name: "로그아웃" }));
-    // confirm dialog auto-accepted — may land on /login or /onboarding
+    // 성공 = 로그인 이메일 필드만 (버튼·placeholder 조합은 strict mode 위반)
     await expect(
-      loginEmailInput(page)
-        .or(page.locator(".onboardingRoot, .onboardingRootFinal"))
-        .or(page.getByRole("button", { name: "로그인", exact: true })),
+      page.getByTestId("login-email").or(page.getByPlaceholder("이메일")).first(),
     ).toBeVisible({ timeout: 30_000 });
   });
 
