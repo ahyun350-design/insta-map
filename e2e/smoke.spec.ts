@@ -107,6 +107,7 @@ test("production smoke — major tabs (continue on failure)", async ({
 
   // ── 4. SAVED ──────────────────────────────────────────────
   await runner.step("4a. SAVED — 목록 표시", async () => {
+    await dismissSavedOverlays(page);
     await gotoTab(page, "saved");
     await expect(page.locator(".savedSortTrigger")).toBeVisible({ timeout: 20_000 });
     const items = page.locator("article.savedItem");
@@ -120,6 +121,7 @@ test("production smoke — major tabs (continue on failure)", async ({
   });
 
   await runner.step("4b. SAVED — 정렬 드롭다운 3옵션", async () => {
+    await dismissSavedOverlays(page);
     await gotoTab(page, "saved");
     const trigger = page.locator(".savedSortTrigger");
     await safeClick(trigger);
@@ -136,6 +138,7 @@ test("production smoke — major tabs (continue on failure)", async ({
   });
 
   await runner.step("4c. SAVED — 장소 시트 / 길찾기", async () => {
+    await dismissSavedOverlays(page);
     await gotoTab(page, "saved");
     const items = page.locator("article.savedItem");
     if ((await items.count()) === 0) {
@@ -162,15 +165,16 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(sheet).toBeHidden({ timeout: 10_000 }).catch(async () => {
       await page.keyboard.press("Escape");
     });
+    await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
+    await expect(savedMyListsButton(page)).toBeVisible({ timeout: 15_000 });
   });
 
   await runner.step("4d. SAVED — 내 목록 생성·담기·순서·삭제", async () => {
-    await gotoTab(page, "saved");
-    // 4c 등에서 남은 시트/메뉴가 「내 목록」을 가리지 않게
+    // 시트가 탭바를 가리면 gotoTab 실패 → 먼저 정리 후 SAVED 로 이동
     await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
 
-    // 지역순 계층에서도 장소 행은 article.savedItem
-    // 「내 목록」 pill 은 savedPlaces.length > 0 일 때만 렌더 (.savedMyListsPill)
     const myListsBtn = savedMyListsButton(page);
     await expect(myListsBtn).toBeVisible({ timeout: 20_000 });
 
@@ -196,8 +200,9 @@ test("production smoke — major tabs (continue on failure)", async ({
     await safeClick(addSheet.getByRole("button", { name: "닫기" }));
     await safeClick(sheet.getByRole("button", { name: "닫기" })).catch(() => null);
     await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
 
-    // 다중 담기는 장소 2개 이상일 때만 (시트 닫은 뒤 다시 카운트)
+    // 다중 담기는 장소 2개 이상일 때만
     const itemsAfter = page.locator("article.savedItem");
     const countAfter = await itemsAfter.count();
     if (countAfter >= 2) {
@@ -215,6 +220,7 @@ test("production smoke — major tabs (continue on failure)", async ({
       await safeClick(add2.getByRole("button", { name: "닫기" }));
       await safeClick(sheet2.getByRole("button", { name: "닫기" })).catch(() => null);
       await dismissSavedOverlays(page);
+      await gotoTab(page, "saved");
     } else {
       // eslint-disable-next-line no-console
       console.log("  (info) 장소 1개 — 두 번째 담기 스킵");

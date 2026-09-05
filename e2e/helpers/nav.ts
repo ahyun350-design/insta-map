@@ -210,6 +210,10 @@ export async function reachLoginForm(page: Page): Promise<void> {
 
 export async function gotoTab(page: Page, tab: MainTab): Promise<void> {
   await dismissCoachmarks(page);
+  // Place sheet on MAP can cover the tab bar — close before switching away from map
+  if (tab !== "map") {
+    await dismissSavedOverlays(page);
+  }
   const btn = tabButton(page, tab);
   await expect(btn).toBeVisible({ timeout: 30_000 });
   await safeClick(btn);

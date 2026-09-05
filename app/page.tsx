@@ -1770,6 +1770,8 @@ function HomePageContent() {
   const extractPollStartRef = useRef<Record<string, number>>({});
   const pollLastAtRef = useRef<Record<string, number>>({});
   const extractSoftTimeoutNotifiedRef = useRef<Set<string>>(new Set());
+  /** PlaceDetailSheet(compact overlay) 닫을 때 복귀 탭 — SAVED에서 연 경우만 "saved" */
+  const placeSheetReturnTabRef = useRef<"saved" | null>(null);
   const detailOpenPerfRef = useRef<{ postId: string; t: number } | null>(null);
   const detailOpenLoggedRef = useRef<string | null>(null);
   const pollInFlightRef = useRef<Set<string>>(new Set());
@@ -6095,7 +6097,9 @@ function HomePageContent() {
   };
 
   // 저장 목록 장소 클릭 → 지도 탭 + 컴팩트 맵 이동 + 시트 (전체화면 X)
-  const handleSavedPlaceClick = (place: Place) => {
+  // returnTab: SAVED/내 목록에서 열면 닫을 때 saved 로 복귀. 그 외(상세→지도 등)는 null.
+  const handleSavedPlaceClick = (place: Place, opts?: { returnTab?: "saved" | null }) => {
+    placeSheetReturnTabRef.current = opts?.returnTab === undefined ? "saved" : opts.returnTab;
     setSelectedMapPlace(place);
     setActiveTab("map");
     const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
@@ -6125,6 +6129,19 @@ function HomePageContent() {
     })();
   };
 
+  /** 컴팩트 PlaceDetailSheet 닫기 — SAVED에서 열었으면 saved 탭 복귀 */
+  const closeCompactPlaceSheet = useCallback(() => {
+    const returnTab = placeSheetReturnTabRef.current;
+    placeSheetReturnTabRef.current = null;
+    setSelectedPlace(null);
+    setSelectedMapPlace(null);
+    setDirectionsChosen(false);
+    setDirectionsInfo(null);
+    if (returnTab === "saved") {
+      setActiveTab("saved");
+    }
+  }, []);
+
   const resolveDirectionsOrigin = useCallback((): Promise<{ lat: number; lng: number } | null> => {
     const stored = myLocationLatLngRef.current;
     if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
@@ -6146,6 +6163,8 @@ function HomePageContent() {
   /** 장소 시트 → 전체화면 지도. 컴팩트에서 이동수단을 고른 뒤면 준비 후 자동 길찾기 */
   const expandPlaceSheetToFullscreen = useCallback(
     (placeData: PlaceSheetData, opts?: { runDirections?: boolean }) => {
+      // 전체화면으로 넘기면 SAVED 복귀 의도 종료 — 지도에 머묾
+      placeSheetReturnTabRef.current = null;
       const lat = parseFloat(String(placeData.y ?? ""));
       const lng = parseFloat(String(placeData.x ?? ""));
       const hasCoord = Number.isFinite(lat) && Number.isFinite(lng);
@@ -6424,13 +6443,14 @@ function HomePageContent() {
       (p) => String(p.name).trim() === name && String(p.address).trim() === addr,
     );
     if (matchedPlace) {
-      handleSavedPlaceClick(matchedPlace);
+      handleSavedPlaceClick(matchedPlace, { returnTab: null });
       setDetailPostId(null);
       return;
     }
 
     const postCoords =
       rep.lat != null && rep.lng != null ? { lat: rep.lat, lng: rep.lng } : latLngFromRow(detailPost);
+    placeSheetReturnTabRef.current = null;
     setActiveTab("map");
     if (postCoords && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(postCoords.lat, postCoords.lng));
@@ -7998,6 +8018,7 @@ function HomePageContent() {
     const runSavedPlaceMarkerClick = (place: Place, markerLat: number, markerLng: number) => {
       const clickToken = Date.now();
       selectedPlaceTokenRef.current = clickToken;
+      placeSheetReturnTabRef.current = null;
       const relatedPosts = getRelatedPostsForPlaceSheet(
         feedPostsRef.current,
         placeRefFromPlace(place, markerLat, markerLng),
@@ -13769,8 +13790,7 @@ function HomePageContent() {
             <div
               className="placeDetailSheetBackdrop"
               onClick={() => {
-                setSelectedPlace(null);
-                setSelectedMapPlace(null);
+                closeCompactPlaceSheet();
               }}
             />
             <PlaceDetailSheet
@@ -13782,14 +13802,12 @@ function HomePageContent() {
               directionsLoading={directionsLoading}
               directionsInfo={directionsInfo}
               onClose={() => {
-                setSelectedPlace(null);
-                setSelectedMapPlace(null);
-                setDirectionsChosen(false);
-                setDirectionsInfo(null);
+                closeCompactPlaceSheet();
               }}
               onToggleSave={() => { void togglePlaceSheetSave(selectedPlace as PlaceSheetData); }}
               onAddToList={() => openAddToListFromPlaceSheet(selectedPlace as PlaceSheetData)}
               onCurationClick={(postId, photoIndex) => {
+                placeSheetReturnTabRef.current = null;
                 openPlaceCurationFromSheet(selectedPlace as PlaceSheetData, postId, photoIndex);
                 setSelectedPlace(null);
               }}
