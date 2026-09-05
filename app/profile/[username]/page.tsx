@@ -324,6 +324,23 @@ export default function ProfilePage() {
     });
   }, [profile, routeUsername, postCount, followerCount, followingCount, isFollowing]);
 
+  const persistProfileSnapshotRef = useRef(persistProfileSnapshot);
+  persistProfileSnapshotRef.current = persistProfileSnapshot;
+  const profileUsernameRef = useRef(profile?.username);
+  profileUsernameRef.current = profile?.username;
+
+  const handlePostGridSelect = useCallback(
+    (postId: string) => {
+      const username = profileUsernameRef.current;
+      if (!username) return;
+      persistProfileSnapshotRef.current();
+      router.push(
+        `/?postId=${encodeURIComponent(postId)}&from=profile&username=${encodeURIComponent(username)}&tab=home`,
+      );
+    },
+    [router],
+  );
+
   const loadMoreProfilePosts = useCallback(async () => {
     if (!profile || !user) return;
     if (postsLoadingMoreRef.current) return;
@@ -667,12 +684,8 @@ export default function ProfilePage() {
                     placeName={post.place_name}
                     address={post.address}
                     likeCount={post.likes_count}
-                    onClick={() => {
-                      persistProfileSnapshot();
-                      router.push(
-                        `/?postId=${encodeURIComponent(post.id)}&from=profile&username=${encodeURIComponent(profile.username)}&tab=home`,
-                      );
-                    }}
+                    postId={post.id}
+                    onSelect={handlePostGridSelect}
                   />
                 ))}
                 </PostGrid>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
 import { isOwnFeedAuthor, type PhotoPlaceTag } from "@/lib/feedPost";
@@ -377,7 +377,7 @@ export function FeedPostMedia({
   );
 }
 
-export function FeedPostCard({
+export function FeedPostCardComponent({
   post,
   myUsername,
   isFollowing,
@@ -419,12 +419,19 @@ export function FeedPostCard({
       ? companionTagDisplayLabel(post.companionTag)
       : null;
 
-  const handleLike = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setLikePop(true);
-    window.setTimeout(() => setLikePop(false), 320);
-    onToggleLike();
-  };
+  const handleLike = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setLikePop(true);
+      window.setTimeout(() => setLikePop(false), 320);
+      onToggleLike();
+    },
+    [onToggleLike],
+  );
+
+  const handleMediaClick = useCallback(() => {
+    onCardClick();
+  }, [onCardClick]);
 
   return (
     <article className="feedPostCard" onClick={onCardClick} role="button" tabIndex={0}>
@@ -466,7 +473,7 @@ export function FeedPostCard({
         images={post.images}
         placeSource={post}
         aspectRatio={post.aspectRatio}
-        onMediaClick={() => onCardClick()}
+        onMediaClick={handleMediaClick}
         onPlaceOverlayClick={onPlaceOverlayClick}
       />
 
@@ -579,3 +586,6 @@ export function FeedPostCard({
     </article>
   );
 }
+
+export const FeedPostCard = memo(FeedPostCardComponent);
+FeedPostCard.displayName = "FeedPostCard";

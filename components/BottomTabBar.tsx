@@ -1,6 +1,6 @@
 "use client";
 
-import type { JSX, SVGProps } from "react";
+import { memo, type JSX, type SVGProps } from "react";
 
 export type BottomTabId = "home" | "messages" | "map" | "saved" | "mypage";
 
@@ -95,7 +95,7 @@ type Props = {
   messageUnreadCount?: number;
 };
 
-export function BottomTabBar({
+function BottomTabBarComponent({
   activeTab,
   onTabChange,
   hidden = false,
@@ -141,3 +141,6 @@ export function BottomTabBar({
     </nav>
   );
 }
+
+export const BottomTabBar = memo(BottomTabBarComponent);
+BottomTabBar.displayName = "BottomTabBar";

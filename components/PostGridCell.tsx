@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { extractRegion } from "@/lib/extractRegion";
 
 type PostGridCellProps = {
@@ -8,7 +9,13 @@ type PostGridCellProps = {
   placeName: string;
   address?: string;
   likeCount: number;
-  onClick: () => void;
+  /** 안정된 부모 핸들러 — 셀이 자기 postId로 호출 */
+  postId?: string;
+  onSelect?: (postId: string) => void;
+  /** 안정된 프로필 핸들러 — username으로 호출 */
+  onSelectProfile?: (username: string) => void;
+  /** 레거시: postId/onSelect 없을 때 (매 렌더 새 함수면 memo 무효) */
+  onClick?: () => void;
   variant?: "default" | "home";
   username?: string;
   showUsername?: boolean;
@@ -26,12 +33,15 @@ function MultiImageIcon() {
   );
 }
 
-export function PostGridCell({
+function PostGridCellComponent({
   imageUrl,
   titleLine,
   placeName,
   address,
   likeCount,
+  postId,
+  onSelect,
+  onSelectProfile,
   onClick,
   variant = "default",
   username,
@@ -70,10 +80,22 @@ export function PostGridCell({
     lineHeight: 1.3,
   };
 
+  const handleClick = () => {
+    if (postId && onSelect) onSelect(postId);
+    else onClick?.();
+  };
+
+  const handleProfileActivate = () => {
+    if (username && onSelectProfile) onSelectProfile(username);
+    else onProfileClick?.();
+  };
+
+  const profileInteractive = !!(onSelectProfile || onProfileClick);
+
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={handleClick}
       className={isHome ? "postGridCell postGridCellHome" : "postGridCell"}
       style={{
         display: "flex",
@@ -172,13 +194,13 @@ export function PostGridCell({
             data-testid="feed-post-author"
             onClick={(e) => {
               e.stopPropagation();
-              onProfileClick?.();
+              handleProfileActivate();
             }}
             onKeyDown={(e) => {
               if (e.key !== "Enter" && e.key !== " ") return;
               e.preventDefault();
               e.stopPropagation();
-              onProfileClick?.();
+              handleProfileActivate();
             }}
             style={{
               display: "block",
@@ -194,7 +216,7 @@ export function PostGridCell({
               whiteSpace: "nowrap",
               lineHeight: 1.3,
               textAlign: "left",
-              cursor: onProfileClick ? "pointer" : "default",
+              cursor: profileInteractive ? "pointer" : "default",
               fontFamily: "inherit",
             }}
           >
@@ -241,3 +263,6 @@ export function PostGridCell({
     </button>
   );
 }
+
+export const PostGridCell = memo(PostGridCellComponent);
+PostGridCell.displayName = "PostGridCell";

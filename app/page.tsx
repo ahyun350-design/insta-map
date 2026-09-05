@@ -257,6 +257,15 @@ const MessageUserSearchRow = dynamic(
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
+/** BottomTabBar onTabChange용 — 모듈 상수로 매 렌더 재생성 방지 */
+const TAB_TRACK_EVENT: Record<TabId, string> = {
+  home: "tab_home",
+  messages: "tab_message",
+  map: "tab_map",
+  saved: "tab_saved",
+  mypage: "tab_mypage",
+};
+
 /** 큐레이션·저장 탭 카테고리 나열 순 */
 const CATEGORY_MAIN_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"];
 const CATEGORY_COURSE_MODAL_ORDER: Category[] = ["카페", "맛집", "쇼핑", "숙소", "놀거리", "여행지"];
@@ -1596,6 +1605,8 @@ function HomePageContent() {
   const [homePlaceSheet, setHomePlaceSheet] = useState<PlaceSheetData | null>(null);
   const [placePostsList, setPlacePostsList] = useState<PlacePostsListData | null>(null);
   const placePostsListReturnFullscreenRef = useRef(false);
+  const placePostsListRef = useRef(placePostsList);
+  placePostsListRef.current = placePostsList;
   const [postTitle, setPostTitle] = useState(""); const [postPlaceName, setPostPlaceName] = useState("");
   const [postAddress, setPostAddress] = useState("");
   const [postCategory, setPostCategory] = useState<Category>("카페");
@@ -10069,6 +10080,50 @@ function HomePageContent() {
     setDebouncedHomeSearchQuery("");
   }, []);
 
+  const handleBottomTabChange = useCallback((id: TabId) => {
+    track(TAB_TRACK_EVENT[id]);
+    setActiveTab(id);
+  }, []);
+
+  const handlePostGridSelect = useCallback((postId: string) => {
+    setDetailPostId(postId);
+  }, []);
+
+  const handleHomeFeedProfileSelect = useCallback(
+    (username: string) => {
+      router.push(`/profile/${encodeURIComponent(username)}?from=feed`);
+    },
+    [router],
+  );
+
+  const handleHomeSearchProfileSelect = useCallback(
+    (username: string) => {
+      router.push(`/profile/${encodeURIComponent(username)}?from=search`);
+    },
+    [router],
+  );
+
+  const handleMypagePostGridSelect = useCallback((postId: string) => {
+    setDetailReturnTo({ type: "mypage" });
+    setActiveTab("mypage");
+    setDetailPostId(postId);
+  }, []);
+
+  const handlePlacePostsListPostClick = useCallback((postId: string) => {
+    const list = placePostsListRef.current;
+    if (!list) return;
+    const post = list.posts.find((p) => p.id === postId);
+    setDetailEntryPhotoIndex(
+      post
+        ? getFirstMatchingPhotoIndex(post, {
+            placeName: list.placeName,
+            address: list.address,
+          })
+        : 0,
+    );
+    setDetailPostId(postId);
+  }, []);
+
   useEffect(() => {
     if (activeTab !== "home" && isHomeSearchOpen) {
       closeHomeSearch();
@@ -11947,10 +12002,9 @@ function HomePageContent() {
                       showUsername
                       showMultiIcon
                       username={post.user}
-                      onProfileClick={() =>
-                        router.push(`/profile/${encodeURIComponent(post.user)}?from=feed`)
-                      }
-                      onClick={() => setDetailPostId(post.id)}
+                      postId={post.id}
+                      onSelect={handlePostGridSelect}
+                      onSelectProfile={handleHomeFeedProfileSelect}
                     />
                     );
                   })}
@@ -13943,11 +13997,8 @@ function HomePageContent() {
                       placeName={repPlace.placeName}
                       address={repPlace.address}
                       likeCount={post.likes_count}
-                      onClick={() => {
-                        setDetailReturnTo({ type: "mypage" });
-                        setActiveTab("mypage");
-                        setDetailPostId(post.id);
-                      }}
+                      postId={post.id}
+                      onSelect={handleMypagePostGridSelect}
                     />
                     );
                   })}
@@ -13976,17 +14027,7 @@ function HomePageContent() {
         </section>
         <BottomTabBar
           activeTab={activeTab}
-          onTabChange={(id) => {
-            const tabEvent: Record<TabId, string> = {
-              home: "tab_home",
-              messages: "tab_message",
-              map: "tab_map",
-              saved: "tab_saved",
-              mypage: "tab_mypage",
-            };
-            track(tabEvent[id]);
-            setActiveTab(id);
-          }}
+          onTabChange={handleBottomTabChange}
           hidden={activeTab === "messages" && !!activeChatRoom}
           keyboardHidden={tabBarHiddenByKeyboard}
           messageUnreadCount={messageUnreadTotal}
@@ -14555,10 +14596,9 @@ function HomePageContent() {
                 showUsername
                 showMultiIcon
                 username={post.user}
-                onProfileClick={() =>
-                  router.push(`/profile/${encodeURIComponent(post.user)}?from=search`)
-                }
-                onClick={() => setDetailPostId(post.id)}
+                postId={post.id}
+                onSelect={handlePostGridSelect}
+                onSelectProfile={handleHomeSearchProfileSelect}
               />
               );
             })}
@@ -14654,18 +14694,7 @@ function HomePageContent() {
       <PlacePostsListScreen
         data={placePostsList}
         onClose={closePlacePostsList}
-        onPostClick={(postId) => {
-          const post = placePostsList.posts.find((p) => p.id === postId);
-          setDetailEntryPhotoIndex(
-            post
-              ? getFirstMatchingPhotoIndex(post, {
-                  placeName: placePostsList.placeName,
-                  address: placePostsList.address,
-                })
-              : 0,
-          );
-          setDetailPostId(postId);
-        }}
+        onPostClick={handlePlacePostsListPostClick}
       />
     )}
     {curationDetailOverlayEl}

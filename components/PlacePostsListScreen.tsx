@@ -123,7 +123,8 @@ export function PlacePostsListScreen({ data, onClose, onPostClick }: Props) {
                     showUsername
                     showMultiIcon
                     username={post.user}
-                    onClick={() => onPostClick(post.id)}
+                    postId={post.id}
+                    onSelect={onPostClick}
                   />
                 );
               })}
