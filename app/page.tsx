@@ -1880,6 +1880,7 @@ function HomePageContent() {
   activeTabRef.current = activeTab;
 
   const requestSavedNearLocation = useCallback(async (): Promise<boolean> => {
+    if (activeTabRef.current !== "saved") return false;
     const stored = myLocationLatLngRef.current;
     if (stored) {
       setSavedNearOrigin(stored);
@@ -1889,6 +1890,7 @@ function HomePageContent() {
     setSavedNearLocating(true);
     try {
       const pos = await getCurrentPositionForMapStage1();
+      if (activeTabRef.current !== "saved") return false;
       const lat = Number(pos.latitude);
       const lng = Number(pos.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -1900,6 +1902,7 @@ function HomePageContent() {
       setSavedNearDenied(false);
       return true;
     } catch (err) {
+      if (activeTabRef.current !== "saved") return false;
       setSavedNearOrigin(null);
       setSavedNearDenied(isGeolocationPermissionDenied(err));
       showToast(
@@ -1916,10 +1919,13 @@ function HomePageContent() {
 
   const handleSavedPlacesSortChange = useCallback(
     (sort: SavedPlacesSort) => {
+      if (activeTabRef.current !== "saved") return;
       if (sort === "near") {
         void (async () => {
+          if (activeTabRef.current !== "saved") return;
           const ok = await requestSavedNearLocation();
           if (!ok) return;
+          if (activeTabRef.current !== "saved") return;
           setSavedPlacesSort("near");
           writeSavedPlacesSort("near");
         })();
@@ -1933,7 +1939,7 @@ function HomePageContent() {
   );
 
   useEffect(() => {
-    if (!savedSortMenuOpen) return;
+    if (activeTab !== "saved" || !savedSortMenuOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       if (!savedSortMenuRef.current?.contains(event.target as Node)) {
         setSavedSortMenuOpen(false);
@@ -1948,14 +1954,14 @@ function HomePageContent() {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [savedSortMenuOpen]);
+  }, [activeTab, savedSortMenuOpen]);
 
   useEffect(() => {
     if (activeTab !== "saved") setSavedSortMenuOpen(false);
   }, [activeTab]);
 
   useEffect(() => {
-    if (!savedPlaceMenuId) return;
+    if (activeTab !== "saved" || !savedPlaceMenuId) return;
     const onPointerDown = (event: PointerEvent) => {
       if (!savedPlaceMenuRef.current?.contains(event.target as Node)) {
         setSavedPlaceMenuId(null);
@@ -1963,15 +1969,7 @@ function HomePageContent() {
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [savedPlaceMenuId]);
-
-  useEffect(() => {
-    if (activeTab !== "saved") {
-      setSavedPlaceMenuId(null);
-      setSavedSelectMode(false);
-      setSavedSelectedIds(new Set());
-    }
-  }, [activeTab]);
+  }, [activeTab, savedPlaceMenuId]);
 
   const clearSavedLongPress = useCallback(() => {
     if (savedLongPressTimerRef.current != null) {
@@ -1980,6 +1978,16 @@ function HomePageContent() {
     }
     savedLongPressStartRef.current = null;
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "saved") {
+      clearSavedLongPress();
+      setSavedPlaceMenuId(null);
+      setSavedSelectMode(false);
+      setSavedSelectedIds(new Set());
+      setSavedBulkDeleteConfirm(false);
+    }
+  }, [activeTab, clearSavedLongPress]);
 
   const exitSavedSelectMode = useCallback(() => {
     clearSavedLongPress();
@@ -9939,7 +9947,9 @@ function HomePageContent() {
     return result;
   }, [visibleFeedPosts, selectedCompanionTag, selectedHomeCategory]);
 
-  /** SAVED 목록 필터·그룹·정렬 — 렌더와 분리 (DOM은 JSX에서 동일하게 그림) */
+  /** SAVED 목록 필터·그룹·정렬 — 렌더와 분리 (DOM은 JSX에서 동일하게 그림).
+   * keep-alive(display:none) 중에도 스크롤 유지를 위해 activeTab으로 early-return 하지 않음.
+   * deps 미변경 시 재계산 없음. */
   const savedPlacesListModel = useMemo(() => {
     if (savedPlaces.length === 0) {
       return { kind: "idle" as const };
@@ -12955,8 +12965,15 @@ function HomePageContent() {
               </div>
           </div>
 
-          {activeTab === "saved" && (
-  <div className="screen" style={{ paddingTop: "env(safe-area-inset-top, 0px)", boxSizing: "border-box" }}>
+          <div
+            className="screen"
+            style={{
+              display: activeTab === "saved" ? "block" : "none",
+              paddingTop: "env(safe-area-inset-top, 0px)",
+              boxSizing: "border-box",
+            }}
+            aria-hidden={activeTab !== "saved"}
+          >
   <div
     className={savedSelectMode ? "savedPlacesListSelectMode" : undefined}
     style={{
@@ -13400,7 +13417,6 @@ function HomePageContent() {
     })()}
   </div>
   </div>
-)}
 
           {activeTab === "mypage" && (
             <div
