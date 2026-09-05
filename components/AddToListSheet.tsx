@@ -22,6 +22,10 @@ type Props = {
   showToast: (message: string, type?: "success" | "error" | "info") => void;
 };
 
+function isTempListId(id: string): boolean {
+  return id.startsWith("temp-");
+}
+
 export function AddToListSheet({
   open,
   placeIds,
@@ -43,23 +47,26 @@ export function AddToListSheet({
   const [newTitle, setNewTitle] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const createRowRef = useRef<HTMLDivElement | null>(null);
+  const hasLoadedRef = useRef(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true && hasLoadedRef.current;
+    if (!silent) setLoading(true);
     try {
       const listsRes = await fetchMyLists(userId);
       if (listsRes.error) {
         showToast(listsRes.error, "error");
-        setLists([]);
+        if (!silent) setLists([]);
       } else {
         setLists(listsRes.data);
+        hasLoadedRef.current = true;
       }
 
       if (singlePlaceId) {
         const forPlaceRes = await fetchListsForPlace(singlePlaceId);
         if (forPlaceRes.error) {
           showToast(forPlaceRes.error, "error");
-          setCheckedIds(new Set());
+          if (!silent) setCheckedIds(new Set());
         } else {
           setCheckedIds(new Set(forPlaceRes.data));
         }
@@ -67,12 +74,15 @@ export function AddToListSheet({
         setCheckedIds(new Set());
       }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [singlePlaceId, userId, showToast]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      hasLoadedRef.current = false;
+      return;
+    }
     setCreating(false);
     setNewTitle("");
     void load();
@@ -105,8 +115,12 @@ export function AddToListSheet({
   };
 
   const toggleList = async (listId: string) => {
-    if (busyId) return;
+    if (busyId || createBusy || isTempListId(listId)) return;
     const wasChecked = checkedIds.has(listId);
+    const delta = wasChecked ? -placeIds.length : placeIds.length;
+    const prevChecked = checkedIds;
+    const prevLists = lists;
+
     setBusyId(listId);
     setCheckedIds((prev) => {
       const next = new Set(prev);
@@ -117,13 +131,7 @@ export function AddToListSheet({
     setLists((prev) =>
       prev.map((l) =>
         l.id === listId
-          ? {
-              ...l,
-              place_count: Math.max(
-                0,
-                l.place_count + (wasChecked ? -placeIds.length : placeIds.length),
-              ),
-            }
+          ? { ...l, place_count: Math.max(0, l.place_count + delta) }
           : l,
       ),
     );
@@ -135,7 +143,8 @@ export function AddToListSheet({
     setBusyId(null);
     if (error) {
       showToast(error, "error");
-      void load();
+      setCheckedIds(prevChecked);
+      setLists(prevLists);
       return;
     }
     if (bulk && !wasChecked) {
@@ -147,28 +156,71 @@ export function AddToListSheet({
   const handleCreate = async () => {
     const trimmed = newTitle.trim();
     if (!trimmed || createBusy) return;
+
+    const tempId = `temp-${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    const optimistic: PlaceListSummary = {
+      id: tempId,
+      user_id: userId,
+      title: trimmed,
+      place_count: placeIds.length,
+      created_at: now,
+      updated_at: now,
+    };
+
+    // 즉시 UI 반영 — 서버는 뒤에서
+    setLists((prev) => [optimistic, ...prev]);
+    setCheckedIds((prev) => new Set(prev).add(tempId));
+    setNewTitle("");
+    setCreating(false);
     setCreateBusy(true);
+
     const { data, error } = await createList(userId, trimmed);
     if (error || !data) {
+      setLists((prev) => prev.filter((l) => l.id !== tempId));
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(tempId);
+        return next;
+      });
       setCreateBusy(false);
       showToast(error || "목록을 만들지 못했어요.", "error");
       return;
     }
+
+    // temp → 서버 id 교체 (전체 재조회 없음)
+    setLists((prev) =>
+      prev.map((l) =>
+        l.id === tempId ? { ...data, place_count: placeIds.length } : l,
+      ),
+    );
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(tempId);
+      next.add(data.id);
+      return next;
+    });
+
     const addError = await addAllToList(data.id);
     setCreateBusy(false);
     if (addError) {
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(data.id);
+        return next;
+      });
+      setLists((prev) =>
+        prev.map((l) => (l.id === data.id ? { ...l, place_count: 0 } : l)),
+      );
       showToast(addError, "error");
-      void load();
       return;
     }
-    setNewTitle("");
-    setCreating(false);
+
     showToast(
       bulk ? `새 목록에 ${placeIds.length}곳을 담았어요` : "새 목록에 담았어요",
       "success",
     );
     onChanged?.();
-    void load();
   };
 
   const subtitle = bulk
@@ -176,6 +228,7 @@ export function AddToListSheet({
     : placeName || undefined;
 
   const sheetBottom = keyboardHeight > 0 ? keyboardHeight : 0;
+  const showInitialLoading = loading && lists.length === 0;
 
   return (
     <div className="placeListSheetOverlay" role="presentation" onClick={onClose}>
@@ -209,9 +262,10 @@ export function AddToListSheet({
             <button
               type="button"
               className="placeListSheetCreateBtn"
+              disabled={createBusy}
               onClick={() => setCreating(true)}
             >
-              + 새 목록 만들기
+              {createBusy ? "목록 저장 중…" : "+ 새 목록 만들기"}
             </button>
           ) : (
             <div className="placeListSheetCreateRow" ref={createRowRef}>
@@ -222,6 +276,7 @@ export function AddToListSheet({
                 placeholder="목록 이름 (예: 데이트용)"
                 maxLength={60}
                 autoFocus
+                disabled={createBusy}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void handleCreate();
                 }}
@@ -237,7 +292,7 @@ export function AddToListSheet({
             </div>
           )}
 
-          {loading ? (
+          {showInitialLoading ? (
             <p className="placeListSheetHint">불러오는 중…</p>
           ) : lists.length === 0 ? (
             <p className="placeListSheetHint">아직 목록이 없어요. 위에서 새 목록을 만들어보세요.</p>
@@ -245,17 +300,27 @@ export function AddToListSheet({
             <ul className="placeListSheetCheckList">
               {lists.map((list) => {
                 const checked = checkedIds.has(list.id);
+                const rowBusy =
+                  busyId === list.id || isTempListId(list.id) || (createBusy && isTempListId(list.id));
+                const pendingCreate = isTempListId(list.id);
                 return (
                   <li key={list.id}>
-                    <label className="placeListSheetCheckItem">
+                    <label
+                      className={`placeListSheetCheckItem${rowBusy ? " placeListSheetCheckItemBusy" : ""}`}
+                    >
                       <input
                         type="checkbox"
                         checked={checked}
-                        disabled={busyId === list.id}
+                        disabled={!!busyId || pendingCreate || createBusy}
                         onChange={() => void toggleList(list.id)}
                       />
                       <span className="placeListSheetCheckText">
-                        <span className="placeListSheetCheckName">{list.title}</span>
+                        <span className="placeListSheetCheckName">
+                          {list.title}
+                          {pendingCreate ? (
+                            <span className="placeListSheetPending"> 저장 중…</span>
+                          ) : null}
+                        </span>
                         <span className="placeListSheetCheckMeta">{list.place_count}곳</span>
                       </span>
                     </label>

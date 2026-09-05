@@ -3580,6 +3580,11 @@ body {
   cursor: default;
 }
 
+.placeListSheetCreateBtn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
 .placeListSheetHint {
   margin: 16px 0;
   text-align: center;
@@ -3600,6 +3605,17 @@ body {
   padding: 12px 4px;
   border-bottom: 0.5px solid #efefef;
   cursor: pointer;
+}
+
+.placeListSheetCheckItemBusy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.placeListSheetPending {
+  font-size: 11px;
+  font-weight: 500;
+  color: #888;
 }
 
 .placeListSheetCheckItem input {
@@ -3788,6 +3804,10 @@ body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+}
+
+.myListsDetailItemBusy {
+  opacity: 0.5;
 }
 
 .myListsDragHandle {

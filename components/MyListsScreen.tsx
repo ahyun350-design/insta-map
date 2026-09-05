@@ -48,24 +48,35 @@ export function MyListsScreen({
   const [titleDraft, setTitleDraft] = useState("");
   const [savingTitle, setSavingTitle] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deletingList, setDeletingList] = useState(false);
   const [reordering, setReordering] = useState(false);
+  const [removingPlaceId, setRemovingPlaceId] = useState<string | null>(null);
 
   const placesRef = useRef(places);
   placesRef.current = places;
   const listIdRef = useRef<string | null>(null);
   listIdRef.current = detailList?.id ?? null;
+  const hasListsRef = useRef(false);
 
-  const loadLists = useCallback(async () => {
-    setLoading(true);
-    const { data, error } = await fetchMyLists(userId);
-    setLoading(false);
-    if (error) {
-      showToast(error, "error");
-      setLists([]);
-      return;
-    }
-    setLists(data);
-  }, [userId, showToast]);
+  const loadLists = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = opts?.silent === true && hasListsRef.current;
+      if (!silent) setLoading(true);
+      const { data, error } = await fetchMyLists(userId);
+      if (!silent) setLoading(false);
+      if (error) {
+        showToast(error, "error");
+        if (!silent) {
+          setLists([]);
+          hasListsRef.current = false;
+        }
+        return;
+      }
+      setLists(data);
+      hasListsRef.current = true;
+    },
+    [userId, showToast],
+  );
 
   const openDetail = useCallback(
     async (list: PlaceListSummary) => {
@@ -92,9 +103,11 @@ export function MyListsScreen({
       setPlaces([]);
       setEditingTitle(false);
       setConfirmDelete(false);
+      setDeletingList(false);
+      setRemovingPlaceId(null);
       return;
     }
-    void loadLists();
+    void loadLists({ silent: hasListsRef.current });
   }, [open, loadLists]);
 
   if (!open) return null;
@@ -102,6 +115,8 @@ export function MyListsScreen({
   const commitReorder = async (next: PlaceListPlace[]) => {
     const listId = listIdRef.current;
     if (!listId) return;
+    const prev = placesRef.current;
+    // 순서 변경: 이미 드래그 중·커밋 시 즉시 반영
     setPlaces(next);
     setReordering(true);
     const { error } = await reorderListPlaces(
@@ -111,18 +126,25 @@ export function MyListsScreen({
     setReordering(false);
     if (error) {
       showToast(error, "error");
-      const refreshed = await fetchListPlaces(listId);
-      if (!refreshed.error) setPlaces(refreshed.data);
-    } else {
-      setDetailList((prev) =>
-        prev ? { ...prev, place_count: next.length, updated_at: new Date().toISOString() } : prev,
-      );
+      setPlaces(prev);
+      return;
     }
+    setDetailList((d) =>
+      d ? { ...d, place_count: next.length, updated_at: new Date().toISOString() } : d,
+    );
+    setLists((prevLists) =>
+      prevLists.map((l) =>
+        l.id === listId
+          ? { ...l, place_count: next.length, updated_at: new Date().toISOString() }
+          : l,
+      ),
+    );
   };
 
   const onDragHandlePointerDown = (index: number, e: ReactPointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    if (reordering) return;
     const handle = e.currentTarget;
     handle.setPointerCapture(e.pointerId);
     const initial = placesRef.current.slice();
@@ -168,54 +190,88 @@ export function MyListsScreen({
       setEditingTitle(false);
       return;
     }
+    if (!trimmed) {
+      showToast("이름을 입력해주세요", "error");
+      setTitleDraft(detailList.title);
+      setEditingTitle(false);
+      return;
+    }
+
+    const listId = detailList.id;
+    const prevTitle = detailList.title;
+    setDetailList((d) => (d ? { ...d, title: trimmed } : d));
+    setLists((prev) => prev.map((l) => (l.id === listId ? { ...l, title: trimmed } : l)));
+    setEditingTitle(false);
     setSavingTitle(true);
-    const { data, error } = await renameList(detailList.id, trimmed);
+
+    const { data, error } = await renameList(listId, trimmed);
     setSavingTitle(false);
     if (error || !data) {
       showToast(error || "이름을 바꾸지 못했어요.", "error");
+      setDetailList((d) => (d ? { ...d, title: prevTitle } : d));
+      setTitleDraft(prevTitle);
+      setLists((prev) => prev.map((l) => (l.id === listId ? { ...l, title: prevTitle } : l)));
       return;
     }
     setDetailList(data);
     setTitleDraft(data.title);
-    setEditingTitle(false);
     setLists((prev) => prev.map((l) => (l.id === data.id ? { ...l, title: data.title } : l)));
   };
 
   const handleDeleteList = async () => {
-    if (!detailList) return;
-    const { error } = await deleteList(detailList.id);
+    if (!detailList || deletingList) return;
+    const deleted = detailList;
+    setDeletingList(true);
+    setConfirmDelete(false);
+    setDetailList(null);
+    setPlaces([]);
+    setLists((prev) => prev.filter((l) => l.id !== deleted.id));
+
+    const { error } = await deleteList(deleted.id);
+    setDeletingList(false);
     if (error) {
       showToast(error, "error");
+      setLists((prev) => {
+        if (prev.some((l) => l.id === deleted.id)) return prev;
+        return [deleted, ...prev];
+      });
       return;
     }
     showToast("목록을 삭제했어요", "success");
-    setDetailList(null);
-    setPlaces([]);
-    setConfirmDelete(false);
-    void loadLists();
   };
 
   const handleRemovePlace = async (placeId: string) => {
-    if (!detailList) return;
-    const prev = places;
+    if (!detailList || removingPlaceId) return;
+    const listId = detailList.id;
+    const prevPlaces = places;
+    const prevCount = detailList.place_count;
+
+    setRemovingPlaceId(placeId);
     setPlaces((p) => p.filter((x) => x.id !== placeId));
-    const { error } = await removePlaceFromList(detailList.id, placeId);
-    if (error) {
-      showToast(error, "error");
-      setPlaces(prev);
-      return;
-    }
     setDetailList((d) =>
       d ? { ...d, place_count: Math.max(0, d.place_count - 1) } : d,
     );
     setLists((prevLists) =>
       prevLists.map((l) =>
-        l.id === detailList.id
+        l.id === listId
           ? { ...l, place_count: Math.max(0, l.place_count - 1) }
           : l,
       ),
     );
+
+    const { error } = await removePlaceFromList(listId, placeId);
+    setRemovingPlaceId(null);
+    if (error) {
+      showToast(error, "error");
+      setPlaces(prevPlaces);
+      setDetailList((d) => (d ? { ...d, place_count: prevCount } : d));
+      setLists((prevLists) =>
+        prevLists.map((l) => (l.id === listId ? { ...l, place_count: prevCount } : l)),
+      );
+    }
   };
+
+  const showListLoading = loading && lists.length === 0;
 
   return (
     <div className="myListsScreen" role="dialog" aria-label="내 목록">
@@ -226,11 +282,11 @@ export function MyListsScreen({
               type="button"
               className="myListsHeaderBtn"
               onClick={() => {
+                // 로컬 place_count 이미 동기화됨 — 전체 재조회 없이 목록으로
                 setDetailList(null);
                 setPlaces([]);
                 setConfirmDelete(false);
                 setEditingTitle(false);
-                void loadLists();
               }}
             >
               ←
@@ -242,6 +298,7 @@ export function MyListsScreen({
                 onChange={(e) => setTitleDraft(e.target.value)}
                 maxLength={60}
                 autoFocus
+                disabled={savingTitle}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void handleRename();
                   if (e.key === "Escape") {
@@ -261,15 +318,17 @@ export function MyListsScreen({
                 }}
               >
                 {detailList.title}
+                {savingTitle ? " …" : ""}
               </button>
             )}
             <button
               type="button"
               className="myListsHeaderBtn myListsHeaderDanger"
               onClick={() => setConfirmDelete(true)}
+              disabled={deletingList}
               aria-label="목록 삭제"
             >
-              삭제
+              {deletingList ? "…" : "삭제"}
             </button>
           </>
         ) : (
@@ -285,7 +344,7 @@ export function MyListsScreen({
 
       <div className="myListsBody">
         {!detailList ? (
-          loading ? (
+          showListLoading ? (
             <p className="myListsEmptyHint">불러오는 중…</p>
           ) : lists.length === 0 ? (
             <div className="myListsEmpty">
@@ -321,12 +380,17 @@ export function MyListsScreen({
               const cat = place.category as Category;
               const color = categoryColors[cat] ?? "#1a2a7a";
               const emoji = categoryPin[cat]?.emoji ?? "📍";
+              const removing = removingPlaceId === place.id;
               return (
-                <li key={place.id} className="myListsDetailItem">
+                <li
+                  key={place.id}
+                  className={`myListsDetailItem${removing ? " myListsDetailItemBusy" : ""}`}
+                >
                   <button
                     type="button"
                     className="myListsDragHandle"
                     aria-label="순서 변경"
+                    disabled={reordering || !!removingPlaceId}
                     onPointerDown={(e) => onDragHandlePointerDown(index, e)}
                   >
                     ⠿
@@ -335,6 +399,7 @@ export function MyListsScreen({
                     type="button"
                     className="myListsDetailMain"
                     onClick={() => onOpenPlace(place)}
+                    disabled={removing}
                   >
                     <span
                       className="myListsDetailDot"
@@ -351,9 +416,10 @@ export function MyListsScreen({
                   <button
                     type="button"
                     className="myListsRemoveBtn"
+                    disabled={!!removingPlaceId || reordering}
                     onClick={() => void handleRemovePlace(place.id)}
                   >
-                    빼기
+                    {removing ? "…" : "빼기"}
                   </button>
                 </li>
               );
@@ -375,11 +441,16 @@ export function MyListsScreen({
             </p>
             <p className="myListsConfirmDesc">목록만 삭제되며, 저장한 장소는 그대로 남아요.</p>
             <div className="myListsConfirmActions">
-              <button type="button" onClick={() => setConfirmDelete(false)}>
+              <button type="button" onClick={() => setConfirmDelete(false)} disabled={deletingList}>
                 취소
               </button>
-              <button type="button" className="myListsConfirmDelete" onClick={() => void handleDeleteList()}>
-                삭제
+              <button
+                type="button"
+                className="myListsConfirmDelete"
+                disabled={deletingList}
+                onClick={() => void handleDeleteList()}
+              >
+                {deletingList ? "삭제 중…" : "삭제"}
               </button>
             </div>
           </div>

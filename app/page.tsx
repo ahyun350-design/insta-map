@@ -1770,8 +1770,10 @@ function HomePageContent() {
   const extractPollStartRef = useRef<Record<string, number>>({});
   const pollLastAtRef = useRef<Record<string, number>>({});
   const extractSoftTimeoutNotifiedRef = useRef<Set<string>>(new Set());
-  /** PlaceDetailSheet(compact overlay) 닫을 때 복귀 탭 — SAVED에서 연 경우만 "saved" */
-  const placeSheetReturnTabRef = useRef<"saved" | null>(null);
+  /** PlaceDetailSheet(compact overlay) 닫을 때 복귀 대상 */
+  const placeSheetReturnRef = useRef<
+    { type: "saved" } | { type: "curation"; postId: string; fromTab?: TabId } | null
+  >(null);
   const detailOpenPerfRef = useRef<{ postId: string; t: number } | null>(null);
   const detailOpenLoggedRef = useRef<string | null>(null);
   const pollInFlightRef = useRef<Set<string>>(new Set());
@@ -6097,9 +6099,28 @@ function HomePageContent() {
   };
 
   // 저장 목록 장소 클릭 → 지도 탭 + 컴팩트 맵 이동 + 시트 (전체화면 X)
-  // returnTab: SAVED/내 목록에서 열면 닫을 때 saved 로 복귀. 그 외(상세→지도 등)는 null.
-  const handleSavedPlaceClick = (place: Place, opts?: { returnTab?: "saved" | null }) => {
-    placeSheetReturnTabRef.current = opts?.returnTab === undefined ? "saved" : opts.returnTab;
+  // returnTo: SAVED/내 목록 → saved, 큐레이션 상세 → curation(시트 닫으면 상세 복귀)
+  const handleSavedPlaceClick = (
+    place: Place,
+    opts?: {
+      returnTo?:
+        | { type: "saved" }
+        | { type: "curation"; postId: string; fromTab?: TabId }
+        | null;
+    },
+  ) => {
+    console.log("[PindMap:placeSheet] handleSavedPlaceClick", {
+      placeId: place.id,
+      name: place.name,
+      lat: place.lat,
+      lng: place.lng,
+      returnTo: opts?.returnTo === undefined ? { type: "saved" } : opts.returnTo,
+      hasMap: !!mapRef.current,
+    });
+    placeSheetReturnRef.current =
+      opts?.returnTo === undefined ? { type: "saved" } : opts.returnTo;
+    // 컴팩트 시트는 !mapExpanded 일 때만 보임
+    setMapExpanded(false);
     setSelectedMapPlace(place);
     setActiveTab("map");
     const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
@@ -6120,7 +6141,10 @@ function HomePageContent() {
     setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
     void (async () => {
       const coords = await resolveSavedPlaceCoords(place);
-      if (!coords) return;
+      if (!coords) {
+        console.warn("[PindMap:placeSheet] resolveSavedPlaceCoords failed", place.id, place.address);
+        return;
+      }
       if (mapRef.current && window.kakao?.maps) {
         mapRef.current.setCenter(new window.kakao.maps.LatLng(coords.lat, coords.lng));
         mapRef.current.setLevel(4);
@@ -6129,16 +6153,21 @@ function HomePageContent() {
     })();
   };
 
-  /** 컴팩트 PlaceDetailSheet 닫기 — SAVED에서 열었으면 saved 탭 복귀 */
+  /** 컴팩트 PlaceDetailSheet 닫기 — 열었던 곳(SAVED / 큐레이션 상세)으로 복귀 */
   const closeCompactPlaceSheet = useCallback(() => {
-    const returnTab = placeSheetReturnTabRef.current;
-    placeSheetReturnTabRef.current = null;
+    const returnTo = placeSheetReturnRef.current;
+    placeSheetReturnRef.current = null;
     setSelectedPlace(null);
     setSelectedMapPlace(null);
     setDirectionsChosen(false);
     setDirectionsInfo(null);
-    if (returnTab === "saved") {
+    if (returnTo?.type === "saved") {
       setActiveTab("saved");
+      return;
+    }
+    if (returnTo?.type === "curation" && returnTo.postId) {
+      if (returnTo.fromTab) setActiveTab(returnTo.fromTab);
+      setDetailPostId(returnTo.postId);
     }
   }, []);
 
@@ -6163,8 +6192,8 @@ function HomePageContent() {
   /** 장소 시트 → 전체화면 지도. 컴팩트에서 이동수단을 고른 뒤면 준비 후 자동 길찾기 */
   const expandPlaceSheetToFullscreen = useCallback(
     (placeData: PlaceSheetData, opts?: { runDirections?: boolean }) => {
-      // 전체화면으로 넘기면 SAVED 복귀 의도 종료 — 지도에 머묾
-      placeSheetReturnTabRef.current = null;
+      // 전체화면으로 넘기면 SAVED/큐레이션 복귀 의도 종료 — 지도에 머묾
+      placeSheetReturnRef.current = null;
       const lat = parseFloat(String(placeData.y ?? ""));
       const lng = parseFloat(String(placeData.x ?? ""));
       const hasCoord = Number.isFinite(lat) && Number.isFinite(lng);
@@ -6433,78 +6462,64 @@ function HomePageContent() {
     [drawRouteOnCompactMap, fitCompactMapToPoints, resolveDirectionsOrigin, showToast],
   );
 
-  /** 큐레이션 상세 → 저장된 장소면 저장 클릭과 동일, 아니면 임시로 지도만 열고 빈 하트(미저장) */
+  /** 큐레이션 상세 → SAVED 장소 클릭과 동일 경로 (지도 탭 + 컴팩트 시트, 닫으면 상세 복귀) */
   const goToMapFromDetailPost = () => {
-    if (!detailPost) return;
+    console.log("[PindMap:curation→map] button click");
+    if (!detailPost) {
+      console.warn("[PindMap:curation→map] no detailPost");
+      return;
+    }
+    const postId = detailPost.id;
+    const fromTab = activeTabRef.current;
     const rep = getRepresentativePlaceForPost(detailPost);
     const name = rep.placeName.trim();
     const addr = rep.address.trim();
+    const postCoords =
+      rep.lat != null && rep.lng != null ? { lat: rep.lat, lng: rep.lng } : latLngFromRow(detailPost);
+    console.log("[PindMap:curation→map] place payload", {
+      postId,
+      name,
+      addr,
+      lat: postCoords?.lat ?? null,
+      lng: postCoords?.lng ?? null,
+      repLat: rep.lat ?? null,
+      repLng: rep.lng ?? null,
+      fromTab,
+      hasMap: !!mapRef.current,
+    });
+    if (!name) {
+      console.warn("[PindMap:curation→map] empty place name");
+      showToast("장소 정보가 없어요", "info");
+      return;
+    }
+
+    const returnTo = { type: "curation" as const, postId, fromTab };
     const matchedPlace = savedPlaces.find(
       (p) => String(p.name).trim() === name && String(p.address).trim() === addr,
     );
-    if (matchedPlace) {
-      handleSavedPlaceClick(matchedPlace, { returnTab: null });
-      setDetailPostId(null);
-      return;
-    }
-
-    const postCoords =
-      rep.lat != null && rep.lng != null ? { lat: rep.lat, lng: rep.lng } : latLngFromRow(detailPost);
-    placeSheetReturnTabRef.current = null;
-    setActiveTab("map");
-    if (postCoords && mapRef.current) {
-      mapRef.current.setCenter(new window.kakao.maps.LatLng(postCoords.lat, postCoords.lng));
-      mapRef.current.setLevel(4);
-      const detailRef = placeRefFromFeedPost(detailPost);
-      const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, detailRef);
-      setSelectedPlace({
-        place_name: rep.placeName,
-        category_name: rep.category,
-        road_address_name: rep.address,
-        address_name: rep.address,
-        phone: "",
-        place_url: "",
-        y: String(postCoords.lat),
-        x: String(postCoords.lng),
-        _feedPosts: relatedPosts,
-        _placeRef: detailRef,
-      });
-      setMapExpanded(true);
-      setDetailPostId(null);
-      return;
-    }
-
-    if (mapRef.current && geocoderRef.current) {
-      geocoderRef.current.addressSearch(rep.address, (result: any[], sv: string) => {
-        if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
-        const geocodedLat = parseFloat(result[0].y);
-        const geocodedLng = parseFloat(result[0].x);
-        mapRef.current.setCenter(new window.kakao.maps.LatLng(geocodedLat, geocodedLng));
-        mapRef.current.setLevel(4);
-        const detailRef = {
-          ...placeRefFromFeedPost(detailPost),
-          ...(Number.isFinite(geocodedLat) && Number.isFinite(geocodedLng)
-            ? { lat: geocodedLat, lng: geocodedLng }
-            : {}),
+    const place: Place = matchedPlace
+      ? {
+          ...matchedPlace,
+          ...(postCoords ? { lat: postCoords.lat, lng: postCoords.lng } : {}),
+        }
+      : {
+          id: `curation-map-${postId}`,
+          name,
+          address: addr,
+          category: (CATEGORY_MAIN_ORDER.includes(rep.category as Category)
+            ? rep.category
+            : "맛집") as Category,
+          ...(postCoords ? { lat: postCoords.lat, lng: postCoords.lng } : {}),
         };
-        const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, detailRef);
-        new window.kakao.maps.services.Places().keywordSearch(rep.placeName, (data: any[], st: string) => {
-          const base =
-            st === window.kakao.maps.services.Status.OK && data[0]
-              ? data[0]
-              : {
-                  place_name: rep.placeName,
-                  category_name: rep.category,
-                  road_address_name: rep.address,
-                  phone: "",
-                  place_url: "",
-                };
-          setSelectedPlace({ ...base, _feedPosts: relatedPosts, _placeRef: detailRef });
-          setMapExpanded(true);
-        });
-      });
+    if (postCoords) {
+      savedPlaceCoordsRef.current[place.id] = postCoords;
     }
+    console.log("[PindMap:curation→map] calling handleSavedPlaceClick", {
+      matched: !!matchedPlace,
+      placeId: place.id,
+    });
     setDetailPostId(null);
+    handleSavedPlaceClick(place, { returnTo });
   };
 
   const openMapFullscreen = useCallback(() => {
@@ -8018,7 +8033,7 @@ function HomePageContent() {
     const runSavedPlaceMarkerClick = (place: Place, markerLat: number, markerLng: number) => {
       const clickToken = Date.now();
       selectedPlaceTokenRef.current = clickToken;
-      placeSheetReturnTabRef.current = null;
+      placeSheetReturnRef.current = null;
       const relatedPosts = getRelatedPostsForPlaceSheet(
         feedPostsRef.current,
         placeRefFromPlace(place, markerLat, markerLng),
@@ -13807,7 +13822,7 @@ function HomePageContent() {
               onToggleSave={() => { void togglePlaceSheetSave(selectedPlace as PlaceSheetData); }}
               onAddToList={() => openAddToListFromPlaceSheet(selectedPlace as PlaceSheetData)}
               onCurationClick={(postId, photoIndex) => {
-                placeSheetReturnTabRef.current = null;
+                placeSheetReturnRef.current = null;
                 openPlaceCurationFromSheet(selectedPlace as PlaceSheetData, postId, photoIndex);
                 setSelectedPlace(null);
               }}
