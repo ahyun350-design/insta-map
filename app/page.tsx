@@ -15253,7 +15253,7 @@ function HomePageContent() {
               position: "fixed",
               inset: 0,
               zIndex: 100001,
-              background: "rgba(0,0,0,0.35)",
+              background: "transparent",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -15275,6 +15275,7 @@ function HomePageContent() {
                 borderRadius: 16,
                 padding: "24px 20px",
                 boxSizing: "border-box",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
               }}
               onClick={(e) => e.stopPropagation()}
             >

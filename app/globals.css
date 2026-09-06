@@ -4069,7 +4069,7 @@ select:focus-visible {
 .myListsConfirmOverlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4084,6 +4084,7 @@ select:focus-visible {
   border-radius: 14px;
   padding: 20px;
   box-sizing: border-box;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
 }
 
 .myListsConfirmTitle {
