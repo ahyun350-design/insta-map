@@ -1939,6 +1939,7 @@ function HomePageContent() {
   hiddenIdsRef.current = hiddenIds;
   const activeTabRef = useRef<TabId>(activeTab);
   activeTabRef.current = activeTab;
+  const savedNearAutoTriedRef = useRef(false);
 
   const requestSavedNearLocation = useCallback(async (): Promise<boolean> => {
     if (activeTabRef.current !== "saved") return false;
@@ -1980,16 +1981,15 @@ function HomePageContent() {
 
   const handleSavedPlacesSortChange = useCallback(
     (sort: SavedPlacesSort) => {
-      if (activeTabRef.current !== "saved") return;
+      // 정렬 변경은 저장 탭 UI에서만 호출됨 — activeTabRef 가드 금지.
+      // 위치 요청(geolocation)만 requestSavedNearLocation 내부에서 가드.
       if (sort === "near") {
-        void (async () => {
-          if (activeTabRef.current !== "saved") return;
-          const ok = await requestSavedNearLocation();
-          if (!ok) return;
-          if (activeTabRef.current !== "saved") return;
-          setSavedPlacesSort("near");
-          writeSavedPlacesSort("near");
-        })();
+        // 위치 성공 여부와 무관하게 정렬은 near 로 전환.
+        // 실패 시 savedPlacesListModel 의 near_need_location 안내로 처리.
+        setSavedPlacesSort("near");
+        writeSavedPlacesSort("near");
+        savedNearAutoTriedRef.current = true;
+        void requestSavedNearLocation();
         return;
       }
       setSavedNearDenied(false);
@@ -2147,7 +2147,6 @@ function HomePageContent() {
     });
   }, [savedSelectedIds, showToast]);
 
-  const savedNearAutoTriedRef = useRef(false);
   useEffect(() => {
     if (savedPlacesSort !== "near") {
       savedNearAutoTriedRef.current = false;
