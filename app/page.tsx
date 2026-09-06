@@ -13395,17 +13395,17 @@ function HomePageContent() {
                 <button
                   type="button"
                   role="menuitem"
-                  onClick={() => openAddToListForSavedPlace(place)}
+                  data-testid="saved-memo-open"
+                  onClick={() => openPlaceMemoForSavedPlace(place)}
                 >
-                  목록에 추가
+                  {place.memo?.trim() ? "메모 수정" : "메모"}
                 </button>
                 <button
                   type="button"
                   role="menuitem"
-                  data-testid="saved-memo-open"
-                  onClick={() => openPlaceMemoForSavedPlace(place)}
+                  onClick={() => openAddToListForSavedPlace(place)}
                 >
-                  메모
+                  목록에 추가
                 </button>
                 <button
                   type="button"
@@ -13468,15 +13468,15 @@ function HomePageContent() {
                 {namePrefix ? `${namePrefix} ` : ""}
                 {place.name}
               </p>
-              <p className="savedMeta">
-                {place.address}
-                {metaExtra ? ` · ${metaExtra}` : ""}
-              </p>
               {place.memo?.trim() ? (
                 <p className="savedMemo" data-testid="saved-item-memo">
                   ✎ {place.memo.trim()}
                 </p>
               ) : null}
+              <p className="savedMeta">
+                {place.address}
+                {metaExtra ? ` · ${metaExtra}` : ""}
+              </p>
             </div>
             {renderSavedItemActions(place)}
           </article>

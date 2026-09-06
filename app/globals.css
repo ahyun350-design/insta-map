@@ -3453,12 +3453,13 @@ body {
   top: calc(100% + 4px);
   right: 0;
   z-index: 40;
-  min-width: 132px;
+  min-width: 0;
+  width: max-content;
   background: #fff;
   border: 0.5px solid #ebe8e0;
-  border-radius: 10px;
-  box-shadow: 0 8px 20px rgba(26, 42, 122, 0.12);
-  padding: 4px;
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(26, 42, 122, 0.1);
+  padding: 2px;
 }
 
 .savedItemMoreMenu button {
@@ -3467,12 +3468,13 @@ body {
   border: none;
   background: transparent;
   text-align: left;
-  padding: 10px 12px;
-  font-size: 13px;
+  padding: 6px 10px;
+  font-size: 12px;
   color: #333;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   font-family: inherit;
+  white-space: nowrap;
 }
 
 .savedItemMoreMenu button:hover {
@@ -3989,18 +3991,22 @@ body {
   font-family: 'Playfair Display', serif;
 }
 
-.savedMeta {
+.savedMemo {
   margin: 3px 0 0;
-  font-size: 11px;
-  color: var(--gray-600);
-  letter-spacing: 0.2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f2937;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.savedMemo {
+.savedMeta {
   margin: 2px 0 0;
-  font-size: 11px;
-  color: #4b5568;
-  line-height: 1.3;
+  font-size: 10px;
+  color: #9ca3af;
+  letter-spacing: 0.2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
