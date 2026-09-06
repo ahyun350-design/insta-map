@@ -161,6 +161,9 @@ export function PlaceDetailSheet({
             <span className="placeDetailSheetValue">{place.road_address_name}</span>
           </div>
         )}
+        {memo?.trim() ? (
+          <p className="placeDetailSheetMemo">✎ {memo.trim()}</p>
+        ) : null}
         {place.phone && (
           <div className="placeDetailSheetRow placeDetailSheetRowCenter">
             <span className="placeDetailSheetLabel">전화</span>
@@ -175,12 +178,6 @@ export function PlaceDetailSheet({
           </a>
         )}
 
-        {memo?.trim() ? (
-          <p className="placeDetailSheetMemo">
-            {memo.trim()}
-          </p>
-        ) : null}
-
         {onExpandMap && (
           <button
             type="button"
@@ -192,24 +189,27 @@ export function PlaceDetailSheet({
           </button>
         )}
 
-        {onAddToList && (
-          <button
-            type="button"
-            className="placeDetailSheetAddToListBtn"
-            onClick={onAddToList}
-          >
-            목록에 추가
-          </button>
-        )}
-
-        {onEditMemo && (
-          <button
-            type="button"
-            className="placeDetailSheetMemoBtn"
-            onClick={onEditMemo}
-          >
-            {memo?.trim() ? "메모 수정" : "메모 추가"}
-          </button>
+        {(onAddToList || onEditMemo) && (
+          <div className="placeDetailSheetActionRow">
+            {onAddToList && (
+              <button
+                type="button"
+                className="placeDetailSheetAddToListBtn"
+                onClick={onAddToList}
+              >
+                목록에 추가
+              </button>
+            )}
+            {onEditMemo && (
+              <button
+                type="button"
+                className="placeDetailSheetMemoBtn"
+                onClick={onEditMemo}
+              >
+                {memo?.trim() ? "메모 수정" : "메모 추가"}
+              </button>
+            )}
+          </div>
         )}
 
         {showDirections && (

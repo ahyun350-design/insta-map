@@ -13423,7 +13423,12 @@ function HomePageContent() {
         );
       };
 
-      const renderFlatItem = (place: Place, metaExtra?: string, accent?: string) => {
+      const renderFlatItem = (
+        place: Place,
+        metaExtra?: string,
+        accent?: string,
+        namePrefix?: string,
+      ) => {
         const color = accent ?? CATEGORY_COLORS[place.category];
         const selected = savedSelectedIds.has(place.id);
         return (
@@ -13459,14 +13464,17 @@ function HomePageContent() {
               }}
             />
             <div className="savedBody">
-              <p className="savedName">{place.name}</p>
+              <p className="savedName">
+                {namePrefix ? `${namePrefix} ` : ""}
+                {place.name}
+              </p>
               <p className="savedMeta">
                 {place.address}
                 {metaExtra ? ` · ${metaExtra}` : ""}
               </p>
               {place.memo?.trim() ? (
                 <p className="savedMemo" data-testid="saved-item-memo">
-                  {place.memo.trim()}
+                  ✎ {place.memo.trim()}
                 </p>
               ) : null}
             </div>
@@ -13550,7 +13558,9 @@ function HomePageContent() {
           {model.items.map(({ place, meters, hasCoords }) =>
             renderFlatItem(
               place,
-              `${hasCoords ? formatSavedPlaceDistanceM(meters) : "거리 정보 없음"} · ${place.category}`,
+              hasCoords ? formatSavedPlaceDistanceM(meters) : "거리 정보 없음",
+              undefined,
+              CATEGORY_PIN[place.category]?.emoji,
             ),
           )}
         </div>
