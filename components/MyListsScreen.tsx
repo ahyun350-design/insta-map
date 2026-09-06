@@ -73,6 +73,9 @@ export function MyListsScreen({
   const hasListsRef = useRef(false);
   const listsFetchedAtRef = useRef(0);
   const detailBodyRef = useRef<HTMLDivElement | null>(null);
+  /** 지도에서 보기 등으로 잠시 닫힐 때 스크롤·상세 복원용 */
+  const detailScrollTopRef = useRef(0);
+  const preserveDetailOnHideRef = useRef(false);
 
   const LISTS_TTL_MS = 30_000;
 
@@ -144,19 +147,57 @@ export function MyListsScreen({
 
   useEffect(() => {
     if (!open) {
-      setDetailList(null);
-      setPlaces([]);
-      setEditingTitle(false);
-      setConfirmDelete(false);
-      setDeletingList(false);
-      setRemovingPlaceId(null);
-      setDetailSearchQuery("");
+      if (!preserveDetailOnHideRef.current) {
+        setDetailList(null);
+        setPlaces([]);
+        setEditingTitle(false);
+        setConfirmDelete(false);
+        setDeletingList(false);
+        setRemovingPlaceId(null);
+        setDetailSearchQuery("");
+        detailScrollTopRef.current = 0;
+      }
+      preserveDetailOnHideRef.current = false;
       setMenuPlaceId(null);
       setMenuClosing(false);
       return;
     }
     void loadLists({ silent: hasListsRef.current });
+    const scrollTop = detailScrollTopRef.current;
+    if (scrollTop > 0) {
+      requestAnimationFrame(() => {
+        if (detailBodyRef.current) {
+          detailBodyRef.current.scrollTop = scrollTop;
+        }
+      });
+    }
   }, [open, loadLists]);
+
+  const handleClose = useCallback(() => {
+    preserveDetailOnHideRef.current = false;
+    detailScrollTopRef.current = 0;
+    setDetailList(null);
+    setPlaces([]);
+    setEditingTitle(false);
+    setConfirmDelete(false);
+    setDeletingList(false);
+    setRemovingPlaceId(null);
+    setDetailSearchQuery("");
+    setMenuPlaceId(null);
+    setMenuClosing(false);
+    onClose();
+  }, [onClose]);
+
+  const handleViewOnMap = useCallback(
+    (place: PlaceListPlace) => {
+      detailScrollTopRef.current = detailBodyRef.current?.scrollTop ?? 0;
+      preserveDetailOnHideRef.current = true;
+      setMenuPlaceId(null);
+      setMenuClosing(false);
+      onViewOnMap(place);
+    },
+    [onViewOnMap],
+  );
 
   useEffect(() => {
     if (!menuPlaceId) return;
@@ -395,8 +436,7 @@ export function MyListsScreen({
                   type="button"
                   className="savedPlaceActionSheetItem"
                   onClick={() => {
-                    closeMenu();
-                    onViewOnMap(menuPlace);
+                    handleViewOnMap(menuPlace);
                   }}
                 >
                   지도에서 보기
@@ -484,7 +524,7 @@ export function MyListsScreen({
           </>
         ) : (
           <>
-            <button type="button" className="myListsHeaderBtn" onClick={onClose} aria-label="닫기">
+            <button type="button" className="myListsHeaderBtn" onClick={handleClose} aria-label="닫기">
               ←
             </button>
             <p className="myListsHeaderTitle">내 목록</p>
@@ -581,13 +621,14 @@ export function MyListsScreen({
                       >
                         ⠿
                       </button>
+                      <span
+                        className="myListsDetailColorBar"
+                        style={{ background: color }}
+                        aria-hidden
+                      />
                       <button
                         type="button"
                         className="myListsDetailMain"
-                        style={{
-                          borderLeft: `3px solid ${color}`,
-                          paddingLeft: 12,
-                        }}
                         onClick={() => onOpenPlace(place)}
                         disabled={removing}
                       >

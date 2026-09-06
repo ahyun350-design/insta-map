@@ -6630,8 +6630,9 @@ function HomePageContent() {
     }
   };
 
-  // 저장 목록·내 목록 장소 클릭 → 컴팩트 시트 (origin=saved|list면 탭 유지; 큐레이션은 지도 탭)
-  // returnTo: SAVED → saved, 내 목록 → list, 큐레이션 상세 → curation(시트 닫으면 상세 복귀)
+  // 저장 목록·내 목록 장소 클릭 → 컴팩트 시트
+  // returnTo: 시트 닫기 시 복귀처 (saved|list|curation). null이면 복귀 없음.
+  // switchToMap: true면 지도 탭으로 전환(⋯「지도에서 보기」). 행 탭은 false — 탭 유지.
   const handleSavedPlaceClick = (
     place: Place,
     opts?: {
@@ -6640,24 +6641,30 @@ function HomePageContent() {
         | { type: "list" }
         | { type: "curation"; postId: string; fromTab?: TabId }
         | null;
+      switchToMap?: boolean;
     },
   ) => {
     const returnTo =
       opts?.returnTo === undefined ? { type: "saved" as const } : opts.returnTo;
+    const switchToMap = opts?.switchToMap === true;
     console.log("[PindMap:placeSheet] handleSavedPlaceClick", {
       placeId: place.id,
       name: place.name,
       lat: place.lat,
       lng: place.lng,
       returnTo,
+      switchToMap,
       hasMap: !!mapRef.current,
     });
     placeSheetReturnRef.current = returnTo;
     // 컴팩트 시트는 !mapExpanded 일 때만 보임
     setMapExpanded(false);
     setSelectedMapPlace(place);
-    // 저장·내 목록에서 연 경우 지도 탭으로 전환하지 않음 — 시트만 오버레이
-    if (returnTo?.type !== "saved" && returnTo?.type !== "list") {
+    // 행 탭(saved/list): 탭 유지. 지도에서 보기·큐레이션: 지도 탭.
+    if (
+      switchToMap ||
+      (returnTo?.type !== "saved" && returnTo?.type !== "list")
+    ) {
       setActiveTab("map");
     }
     const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
@@ -6703,6 +6710,7 @@ function HomePageContent() {
       return;
     }
     if (returnTo?.type === "list") {
+      setActiveTab("saved");
       setShowMyListsScreen(true);
       return;
     }
@@ -15091,7 +15099,7 @@ function HomePageContent() {
                       ? { memo: place.memo }
                       : {}),
                 },
-                { returnTo: null },
+                { returnTo: { type: "list" }, switchToMap: true },
               );
             }}
             onOpenMemo={(place) => {
@@ -15186,8 +15194,11 @@ function HomePageContent() {
                       onClick={() => {
                         setSavedPlaceMenuId(null);
                         setSavedPlaceMenuClosing(false);
-                        // 지도 탭 전환 + 중심 이동 + 시트 (저장/목록 복귀 없음)
-                        handleSavedPlaceClick(menuPlace, { returnTo: null });
+                        // 지도 탭 전환 + 중심 — 닫으면 저장 탭 복귀
+                        handleSavedPlaceClick(menuPlace, {
+                          returnTo: { type: "saved" },
+                          switchToMap: true,
+                        });
                       }}
                     >
                       지도에서 보기

@@ -3520,6 +3520,7 @@ select:focus-visible {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  align-self: center;
 }
 
 .savedItemMoreBtn {
@@ -4018,7 +4019,7 @@ select:focus-visible {
 
 .myListsDetailItem {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 12px;
   padding: 14px 0;
   border-bottom: 0.5px solid var(--border);
@@ -4045,6 +4046,15 @@ select:focus-visible {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   flex-shrink: 0;
+  align-self: center;
+}
+
+.myListsDetailColorBar {
+  width: 3px;
+  flex-shrink: 0;
+  align-self: stretch;
+  border-radius: 1px;
+  display: block;
 }
 
 .myListsDetailMain {
@@ -4061,6 +4071,7 @@ select:focus-visible {
   font-family: inherit;
   text-align: left;
   box-sizing: border-box;
+  align-self: center;
 }
 
 .myListsDetailDot {
