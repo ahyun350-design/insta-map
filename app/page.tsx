@@ -1026,10 +1026,8 @@ function extractRegion(address: string): string {
 }
 
 type SavedPlacesSort = "region" | "near" | "category";
-type SavedCategoryFilter = "all" | Category;
 
 const SAVED_PLACES_SORT_KEY = "pindmap_saved_places_sort";
-const SAVED_CATEGORY_FILTER_KEY = "pindmap_saved_category_filter";
 const SAVED_PLACES_SORT_OPTIONS: { id: SavedPlacesSort; label: string }[] = [
   { id: "region", label: "지역순" },
   { id: "near", label: "가까운 순" },
@@ -1038,17 +1036,6 @@ const SAVED_PLACES_SORT_OPTIONS: { id: SavedPlacesSort; label: string }[] = [
 
 function isSavedPlacesSort(value: string | null): value is SavedPlacesSort {
   return value === "region" || value === "near" || value === "category";
-}
-
-function isSavedCategoryFilter(value: string | null): value is Category {
-  return (
-    value === "맛집" ||
-    value === "카페" ||
-    value === "쇼핑" ||
-    value === "숙소" ||
-    value === "놀거리" ||
-    value === "여행지"
-  );
 }
 
 function readSavedPlacesSort(): SavedPlacesSort {
@@ -1070,28 +1057,6 @@ function writeSavedPlacesSort(sort: SavedPlacesSort): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(SAVED_PLACES_SORT_KEY, sort);
-  } catch {
-    /* ignore */
-  }
-}
-
-function readSavedCategoryFilter(): SavedCategoryFilter {
-  if (typeof window === "undefined") return "all";
-  try {
-    const raw = window.localStorage.getItem(SAVED_CATEGORY_FILTER_KEY);
-    if (raw === "all" || raw == null) return "all";
-    if (isSavedCategoryFilter(raw)) return raw;
-    window.localStorage.setItem(SAVED_CATEGORY_FILTER_KEY, "all");
-  } catch {
-    /* ignore */
-  }
-  return "all";
-}
-
-function writeSavedCategoryFilter(filter: SavedCategoryFilter): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(SAVED_CATEGORY_FILTER_KEY, filter);
   } catch {
     /* ignore */
   }
@@ -1728,9 +1693,6 @@ function HomePageContent() {
   directionsChosenRef.current = directionsChosen;
   const [savedSearchQuery, setSavedSearchQuery] = useState("");
   const [savedPlacesSort, setSavedPlacesSort] = useState<SavedPlacesSort>(() => readSavedPlacesSort());
-  const [savedCategoryFilter, setSavedCategoryFilter] = useState<SavedCategoryFilter>(
-    () => readSavedCategoryFilter(),
-  );
   const [savedSortMenuOpen, setSavedSortMenuOpen] = useState(false);
   const savedSortMenuRef = useRef<HTMLDivElement | null>(null);
   const [savedNearOrigin, setSavedNearOrigin] = useState<{ lat: number; lng: number } | null>(null);
@@ -2087,22 +2049,6 @@ function HomePageContent() {
     },
     [requestSavedNearLocation],
   );
-
-  const handleSavedCategoryFilterChange = useCallback((next: SavedCategoryFilter) => {
-    setSavedCategoryFilter(next);
-    writeSavedCategoryFilter(next);
-  }, []);
-
-  useEffect(() => {
-    if (savedCategoryFilter === "all") return;
-    // savedPlaces 가 아직 비어 있으면(부트스트랩 전) 복원값을 "없음"으로 오판하지 않음
-    if (savedPlaces.length === 0) return;
-    const stillExists = savedPlaces.some((p) => p.category === savedCategoryFilter);
-    if (!stillExists) {
-      setSavedCategoryFilter("all");
-      writeSavedCategoryFilter("all");
-    }
-  }, [savedPlaces, savedCategoryFilter]);
 
   useEffect(() => {
     if (activeTab !== "saved" || !savedSortMenuOpen) return;
@@ -10694,18 +10640,7 @@ function HomePageContent() {
     if (searchFiltered.length === 0) {
       return { kind: "empty_search" as const, query: savedSearchQuery };
     }
-    // 카테고리 칩 필터는 가까운 순에서만 적용 (상태값은 다른 정렬에서도 유지)
-    const applyCategoryFilter =
-      savedPlacesSort === "near" && savedCategoryFilter !== "all";
-    const filtered = applyCategoryFilter
-      ? searchFiltered.filter((p) => p.category === savedCategoryFilter)
-      : searchFiltered;
-    if (filtered.length === 0) {
-      return {
-        kind: "empty_category" as const,
-        category: savedCategoryFilter as Category,
-      };
-    }
+    const filtered = searchFiltered;
 
     if (savedPlacesSort === "region") {
       const regions = new Map<string, Place[]>();
@@ -10740,7 +10675,7 @@ function HomePageContent() {
       };
     }
 
-    // near
+    // near — 카테고리 그룹, 그룹 안·그룹 간 모두 거리 기준
     const origin = savedNearOrigin ?? myLocationLatLngRef.current;
     if (!origin) {
       return {
@@ -10760,31 +10695,36 @@ function HomePageContent() {
         : Number.POSITIVE_INFINITY;
       return { place, meters, hasCoords };
     });
-    withDist.sort((a, b) => {
-      if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
-      if (a.meters !== b.meters) return a.meters - b.meters;
-      return a.place.name.localeCompare(b.place.name, "ko");
-    });
-    return { kind: "near" as const, items: withDist };
+    const groups = CATEGORY_MAIN_ORDER.map((cat) => {
+      const items = withDist
+        .filter((x) => x.place.category === cat)
+        .sort((a, b) => {
+          if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
+          if (a.meters !== b.meters) return a.meters - b.meters;
+          return a.place.name.localeCompare(b.place.name, "ko");
+        });
+      const nearestMeters = items.reduce(
+        (min, x) => (x.meters < min ? x.meters : min),
+        Number.POSITIVE_INFINITY,
+      );
+      return { cat, items, nearestMeters };
+    })
+      .filter((g) => g.items.length > 0)
+      .sort((a, b) => {
+        if (a.nearestMeters !== b.nearestMeters) return a.nearestMeters - b.nearestMeters;
+        return (
+          CATEGORY_MAIN_ORDER.indexOf(a.cat) - CATEGORY_MAIN_ORDER.indexOf(b.cat)
+        );
+      });
+    return { kind: "near" as const, groups };
   }, [
     savedPlaces,
     savedSearchQuery,
-    savedCategoryFilter,
     savedPlacesSort,
     savedNearOrigin,
     savedNearLocating,
     savedNearDenied,
   ]);
-
-  const savedCategoryChipItems = useMemo(() => {
-    const counts = new Map<Category, number>();
-    for (const place of savedPlaces) {
-      counts.set(place.category, (counts.get(place.category) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ko"))
-      .map(([cat, count]) => ({ cat, count }));
-  }, [savedPlaces]);
 
   // 홈 피드 무한 스크롤
   useEffect(() => {
@@ -14300,43 +14240,6 @@ function HomePageContent() {
             </button>
           )}
         </div>
-        {savedPlacesSort === "near" && savedPlaces.length > 0 && (
-          <div
-            className="savedCategoryChips"
-            data-testid="saved-category-chips"
-            role="tablist"
-            aria-label="카테고리 필터"
-          >
-            <button
-              type="button"
-              role="tab"
-              data-testid="saved-category-chip"
-              aria-selected={savedCategoryFilter === "all"}
-              className={`savedCategoryChip${savedCategoryFilter === "all" ? " savedCategoryChipSelected" : ""}`}
-              onClick={() => handleSavedCategoryFilterChange("all")}
-            >
-              전체
-            </button>
-            {savedCategoryChipItems.map(({ cat, count }) => {
-              const selected = savedCategoryFilter === cat;
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  role="tab"
-                  data-testid="saved-category-chip"
-                  aria-selected={selected}
-                  className={`savedCategoryChip${selected ? " savedCategoryChipSelected" : ""}`}
-                  onClick={() =>
-                    handleSavedCategoryFilterChange(selected ? "all" : cat)
-                  }
-                >
-                  {CATEGORY_PIN[cat].emoji} {cat} {count}
-                </button>
-              );
-            })}
-          </div>
-        )}
       </>
     )}
     {savedSelectMode && savedPlaces.length > 0 && (
@@ -14539,14 +14442,6 @@ function HomePageContent() {
         return <p className="emptyText" style={{ textAlign: "center" }}>"{model.query}"에 해당하는 장소가 없어요.</p>;
       }
 
-      if (model.kind === "empty_category") {
-        return (
-          <p className="emptyText" style={{ textAlign: "center" }}>
-            이 카테고리에 저장한 장소가 없어요
-          </p>
-        );
-      }
-
       // ── 지역순 (기본): 지역 > 카테고리 > 장소 ──
       if (model.kind === "region") {
         return model.regions.map(({ region, regionPlaces, categories }) => (
@@ -14586,7 +14481,7 @@ function HomePageContent() {
         ));
       }
 
-      // ── 가까운 순 (평면) ──
+      // ── 가까운 순: 카테고리 그룹 (그룹 간·그룹 내 거리순) ──
       if (model.kind === "near_need_location") {
         return (
           <p className="emptyText" style={{ textAlign: "center" }}>
@@ -14611,18 +14506,27 @@ function HomePageContent() {
         );
       }
 
-      return (
-        <div style={{ marginBottom: "16px" }}>
-          {model.items.map(({ place, meters, hasCoords }) =>
-            renderFlatItem(
-              place,
-              hasCoords ? formatSavedPlaceDistanceM(meters) : "거리 정보 없음",
-              undefined,
-              CATEGORY_PIN[place.category]?.emoji,
-            ),
-          )}
-        </div>
-      );
+      if (model.kind === "near") {
+        return model.groups.map(({ cat, items }) => (
+          <div key={cat} style={{ marginBottom: "28px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", padding: "0 4px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
+              <span style={{ fontSize: "16px" }}>{CATEGORY_PIN[cat].emoji}</span>
+              <span style={{ fontSize: "14px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
+              <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{items.length}</span>
+            </div>
+            {items.map(({ place, meters, hasCoords }) =>
+              renderFlatItem(
+                place,
+                hasCoords ? formatSavedPlaceDistanceM(meters) : "거리 정보 없음",
+                CATEGORY_COLORS[cat],
+                CATEGORY_PIN[place.category]?.emoji,
+              ),
+            )}
+          </div>
+        ));
+      }
+
+      return null;
     })()}
   </div>
   </div>

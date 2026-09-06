@@ -99,7 +99,6 @@ export function MyListsScreen({
   const [detailSearchQuery, setDetailSearchQuery] = useState("");
   const [detailSort, setDetailSort] = useState<ListSort>("custom");
   const [detailSortMenuOpen, setDetailSortMenuOpen] = useState(false);
-  const [detailCategoryFilter, setDetailCategoryFilter] = useState<"all" | Category>("all");
   const [nearOrigin, setNearOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const [nearLocating, setNearLocating] = useState(false);
   const [nearDenied, setNearDenied] = useState(false);
@@ -173,7 +172,6 @@ export function MyListsScreen({
       setDetailSearchQuery("");
       setDetailSort("custom");
       setDetailSortMenuOpen(false);
-      setDetailCategoryFilter("all");
       setMenuPlaceId(null);
       setDetailLoading(true);
       const { data, error } = await fetchListPlaces(list.id);
@@ -200,7 +198,6 @@ export function MyListsScreen({
         setDetailSearchQuery("");
         setDetailSort("custom");
         setDetailSortMenuOpen(false);
-        setDetailCategoryFilter("all");
         detailScrollTopRef.current = 0;
       }
       preserveDetailOnHideRef.current = false;
@@ -231,7 +228,6 @@ export function MyListsScreen({
     setDetailSearchQuery("");
     setDetailSort("custom");
     setDetailSortMenuOpen(false);
-    setDetailCategoryFilter("all");
     setMenuPlaceId(null);
     setMenuClosing(false);
     onClose();
@@ -302,17 +298,6 @@ export function MyListsScreen({
     [nearOrigin, requestNearOrigin],
   );
 
-  const categoryChipItems = useMemo(() => {
-    const counts = new Map<Category, number>();
-    for (const place of places) {
-      const cat = place.category as Category;
-      counts.set(cat, (counts.get(cat) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ko"))
-      .map(([cat, count]) => ({ cat, count }));
-  }, [places]);
-
   const listPlacesModel = useMemo(() => {
     const q = detailSearchQuery.trim().toLowerCase();
     const searchFiltered = q
@@ -328,14 +313,7 @@ export function MyListsScreen({
     if (searchFiltered.length === 0) {
       return { kind: "empty_search" as const };
     }
-
-    const applyCategory = detailSort === "near" && detailCategoryFilter !== "all";
-    const filtered = applyCategory
-      ? searchFiltered.filter((p) => p.category === detailCategoryFilter)
-      : searchFiltered;
-    if (filtered.length === 0) {
-      return { kind: "empty_category" as const };
-    }
+    const filtered = searchFiltered;
 
     if (detailSort === "custom") {
       return { kind: "custom" as const, places: filtered };
@@ -374,7 +352,7 @@ export function MyListsScreen({
       };
     }
 
-    // near
+    // near — 카테고리 그룹, 그룹 안·그룹 간 거리순
     if (!nearOrigin) {
       return {
         kind: "near_need_location" as const,
@@ -393,26 +371,35 @@ export function MyListsScreen({
         : Number.POSITIVE_INFINITY;
       return { place, meters, hasCoords };
     });
-    withDist.sort((a, b) => {
-      if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
-      if (a.meters !== b.meters) return a.meters - b.meters;
-      return a.place.name.localeCompare(b.place.name, "ko");
-    });
-    return { kind: "near" as const, items: withDist };
+    const groups = LIST_CATEGORY_ORDER.map((cat) => {
+      const items = withDist
+        .filter((x) => x.place.category === cat)
+        .sort((a, b) => {
+          if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
+          if (a.meters !== b.meters) return a.meters - b.meters;
+          return a.place.name.localeCompare(b.place.name, "ko");
+        });
+      const nearestMeters = items.reduce(
+        (min, x) => (x.meters < min ? x.meters : min),
+        Number.POSITIVE_INFINITY,
+      );
+      return { cat, items, nearestMeters };
+    })
+      .filter((g) => g.items.length > 0)
+      .sort((a, b) => {
+        if (a.nearestMeters !== b.nearestMeters) return a.nearestMeters - b.nearestMeters;
+        return LIST_CATEGORY_ORDER.indexOf(a.cat) - LIST_CATEGORY_ORDER.indexOf(b.cat);
+      });
+    return { kind: "near" as const, groups };
   }, [
     places,
     detailSearchQuery,
     detailSort,
-    detailCategoryFilter,
     nearOrigin,
     nearLocating,
     nearDenied,
     resolveMemo,
   ]);
-
-  const handleCategoryFilterChange = useCallback((next: "all" | Category) => {
-    setDetailCategoryFilter((prev) => (prev === next && next !== "all" ? "all" : next));
-  }, []);
 
   useEffect(() => {
     if (!detailSortMenuOpen) return;
@@ -670,7 +657,6 @@ export function MyListsScreen({
                 setDetailSearchQuery("");
                 setDetailSort("custom");
                 setDetailSortMenuOpen(false);
-                setDetailCategoryFilter("all");
                 setMenuPlaceId(null);
               }}
             >
@@ -832,41 +818,6 @@ export function MyListsScreen({
                 )}
               </div>
             </div>
-            {detailSort === "near" && places.length > 0 && (
-              <div
-                className="savedCategoryChips"
-                data-testid="list-category-chips"
-                role="tablist"
-                aria-label="카테고리 필터"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  data-testid="list-category-chip"
-                  aria-selected={detailCategoryFilter === "all"}
-                  className={`savedCategoryChip${detailCategoryFilter === "all" ? " savedCategoryChipSelected" : ""}`}
-                  onClick={() => handleCategoryFilterChange("all")}
-                >
-                  전체
-                </button>
-                {categoryChipItems.map(({ cat, count }) => {
-                  const selected = detailCategoryFilter === cat;
-                  return (
-                    <button
-                      key={cat}
-                      type="button"
-                      role="tab"
-                      data-testid="list-category-chip"
-                      aria-selected={selected}
-                      className={`savedCategoryChip${selected ? " savedCategoryChipSelected" : ""}`}
-                      onClick={() => handleCategoryFilterChange(selected ? "all" : cat)}
-                    >
-                      {categoryPin[cat]?.emoji ?? "📍"} {cat} {count}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
             {(() => {
               const model = listPlacesModel;
               const renderRow = (
@@ -954,11 +905,6 @@ export function MyListsScreen({
 
               if (model.kind === "empty_search") {
                 return <p className="myListsEmptyHint">검색 결과가 없어요</p>;
-              }
-              if (model.kind === "empty_category") {
-                return (
-                  <p className="myListsEmptyHint">이 카테고리에 담은 장소가 없어요</p>
-                );
               }
               if (model.kind === "near_need_location") {
                 return (
@@ -1107,14 +1053,48 @@ export function MyListsScreen({
 
               // near
               return (
-                <ul className={listClass}>
-                  {model.items.map(({ place, meters, hasCoords }) =>
-                    renderRow(
-                      place,
-                      hasCoords ? formatListDistanceM(meters) : "거리 정보 없음",
-                    ),
-                  )}
-                </ul>
+                <div>
+                  {model.groups.map(({ cat, items }) => (
+                    <div key={cat} style={{ marginBottom: 28 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 14,
+                          padding: "0 4px",
+                          borderBottom: "1px solid #eee",
+                          paddingBottom: 10,
+                        }}
+                      >
+                        <span style={{ fontSize: 16 }}>
+                          {categoryPin[cat]?.emoji ?? "📍"}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 600,
+                            color: categoryColors[cat],
+                            letterSpacing: "0.5px",
+                          }}
+                        >
+                          {cat}
+                        </span>
+                        <span style={{ fontSize: 11, color: "#bbb", marginLeft: 4 }}>
+                          {items.length}
+                        </span>
+                      </div>
+                      <ul className={listClass}>
+                        {items.map(({ place, meters, hasCoords }) =>
+                          renderRow(
+                            place,
+                            hasCoords ? formatListDistanceM(meters) : "거리 정보 없음",
+                          ),
+                        )}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
               );
             })()}
           </>

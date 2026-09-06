@@ -3255,53 +3255,6 @@ select:focus-visible {
   flex-wrap: wrap;
 }
 
-.savedCategoryChips {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 16px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  padding: 0 0 2px;
-}
-
-.savedCategoryChips::-webkit-scrollbar {
-  display: none;
-}
-
-.savedCategoryChip {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: none;
-  background: #f0eee8;
-  color: #555555;
-  border-radius: 999px;
-  padding: 7px 14px;
-  font-size: 12px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.savedCategoryChip:active {
-  background: #e8e5dc;
-}
-
-.savedCategoryChipSelected {
-  background: #1a2a7a;
-  color: #fff;
-}
-
-.savedCategoryChipSelected:active {
-  background: #15225f;
-}
-
 .savedMyListsPill {
   display: inline-flex;
   align-items: center;
@@ -4093,10 +4046,6 @@ select:focus-visible {
   position: relative;
   flex-shrink: 0;
   margin: 0 0 10px;
-}
-
-.myListsBody .savedCategoryChips {
-  margin: 0 0 12px;
 }
 
 .myListsDetailSortRow {
