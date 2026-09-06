@@ -35,6 +35,11 @@ import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay, EXTRACT_EMPTY_RESULT_RAW } from "@/components/ExtractLoadingOverlay";
 import { mapExtractErrorToUserMessage } from "@/lib/extractUserError";
 import { toUserMessage } from "@/lib/userErrorMessage";
+import {
+  fetchListPlaces,
+  fetchMyLists,
+  type PlaceListSummary,
+} from "@/lib/placeLists";
 
 const ADMIN_USER_ID = "63772749-e01b-4396-a41c-c17a4d3acfe6";
 const ADMIN_STATUS_CARD_OPEN_KEY = "pindmap_admin_status_card_open";
@@ -272,6 +277,7 @@ const CATEGORY_MAIN_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소",
 const CATEGORY_COURSE_MODAL_ORDER: Category[] = ["카페", "맛집", "쇼핑", "숙소", "놀거리", "여행지"];
 /** 현재 위치 기반 코스 추천 반경 (km) */
 const COURSE_WALK_RADIUS_KM = 1.5;
+type CoursePlaceSource = "nearby" | "all" | "list";
 const DEFAULT_AVOID_CONSECUTIVE_CATEGORIES: Category[] = ["카페", "맛집"];
 
 /** 카카오/검색 `category_name` 기반 자동 카테고리 */
@@ -1747,6 +1753,18 @@ function HomePageContent() {
     놀거리: 0,
     여행지: 0,
   });
+  const [courseSource, setCourseSource] = useState<CoursePlaceSource>("nearby");
+  const [courseCandidateQuery, setCourseCandidateQuery] = useState("");
+  /** 소스와 무관하게 유지되는 선택 — id → Place 스냅샷 */
+  const [courseSelectedById, setCourseSelectedById] = useState<Map<string, Place>>(
+    () => new Map(),
+  );
+  const [courseMyLists, setCourseMyLists] = useState<PlaceListSummary[]>([]);
+  const [courseMyListsLoading, setCourseMyListsLoading] = useState(false);
+  const [courseActiveListId, setCourseActiveListId] = useState<string | null>(null);
+  const [courseActiveListTitle, setCourseActiveListTitle] = useState("");
+  const [courseListPlaces, setCourseListPlaces] = useState<Place[]>([]);
+  const [courseListPlacesLoading, setCourseListPlacesLoading] = useState(false);
 
   /** 클립보드 배너를 무시하고 다른 UI로 넘어가면 자동 숨김 (세션 「안 함」은 아님) */
   useEffect(() => {
@@ -3504,31 +3522,69 @@ function HomePageContent() {
       : "정확한 장소를 파악하고 있어요"
     : "";
   const analyzingSubText = isAnalyzing ? "잠시 후 핀이 추가될 거예요" : "";
-  const courseRegionKeyword = courseOriginAddress.trim();
-  const courseBasePlaces = useMemo(() => {
-    if (courseOriginMode === "manual" && courseRegionKeyword) {
-      return savedPlaces.filter((p) => p.address.includes(courseRegionKeyword));
-    }
-    if (courseOriginMode === "current" && courseCurrentLocation) {
-      return savedPlaces.filter((p) => {
-        const coord = coursePlaceCoords[p.id];
-        if (!coord) return false;
-        return getDistance(courseCurrentLocation.lat, courseCurrentLocation.lng, coord.lat, coord.lng) <= COURSE_WALK_RADIUS_KM;
-      });
-    }
-    return savedPlaces;
-  }, [courseOriginMode, courseRegionKeyword, savedPlaces, courseCurrentLocation, coursePlaceCoords]);
-  const courseAvailableByCategory = useMemo(
-    () => ({
-      카페: courseBasePlaces.filter((p) => p.category === "카페").length,
-      맛집: courseBasePlaces.filter((p) => p.category === "맛집").length,
-      쇼핑: courseBasePlaces.filter((p) => p.category === "쇼핑").length,
-      숙소: courseBasePlaces.filter((p) => p.category === "숙소").length,
-      놀거리: courseBasePlaces.filter((p) => p.category === "놀거리").length,
-      여행지: courseBasePlaces.filter((p) => p.category === "여행지").length,
-    }),
-    [courseBasePlaces],
-  );
+  /** 주변(1.5km) 후보 — COURSE_WALK_RADIUS_KM 유지 */
+  const courseNearbyPlaces = useMemo(() => {
+    if (!courseCurrentLocation) return [] as Place[];
+    return savedPlaces.filter((p) => {
+      const coord =
+        (typeof p.lat === "number" &&
+        typeof p.lng === "number" &&
+        Number.isFinite(p.lat) &&
+        Number.isFinite(p.lng)
+          ? { lat: p.lat, lng: p.lng }
+          : null) ?? coursePlaceCoords[p.id] ?? null;
+      if (!coord) return false;
+      return (
+        getDistance(
+          courseCurrentLocation.lat,
+          courseCurrentLocation.lng,
+          coord.lat,
+          coord.lng,
+        ) <= COURSE_WALK_RADIUS_KM
+      );
+    });
+  }, [savedPlaces, courseCurrentLocation, coursePlaceCoords]);
+
+  /** 소스별 후보 (검색 전). 선택 상태는 여기와 분리되어 소스 전환 시 유지됨. */
+  const courseSourcePlaces = useMemo(() => {
+    if (courseSource === "all") return savedPlaces;
+    if (courseSource === "list") return courseListPlaces;
+    // nearby — 직접 입력 모드는 주소 키워드로 좁힌 전체를 주변 대용으로 쓰지 않음.
+    // 출발지 「직접 입력」은 동선 origin 용이며, 후보 소스는 세그먼트가 담당.
+    return courseNearbyPlaces;
+  }, [courseSource, savedPlaces, courseListPlaces, courseNearbyPlaces]);
+
+  const courseFilteredCandidates = useMemo(() => {
+    const q = courseCandidateQuery.trim().toLowerCase();
+    if (!q) return courseSourcePlaces;
+    return courseSourcePlaces.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.address.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q) ||
+        (typeof p.memo === "string" && p.memo.toLowerCase().includes(q)),
+    );
+  }, [courseSourcePlaces, courseCandidateQuery]);
+
+  const resetCourseCreatePicker = useCallback(() => {
+    setCourseSource("nearby");
+    setCourseCandidateQuery("");
+    setCourseSelectedById(new Map());
+    setCourseActiveListId(null);
+    setCourseActiveListTitle("");
+    setCourseListPlaces([]);
+    setCourseMyLists([]);
+    setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
+  }, []);
+
+  const toggleCoursePlaceSelect = useCallback((place: Place) => {
+    setCourseSelectedById((prev) => {
+      const next = new Map(prev);
+      if (next.has(place.id)) next.delete(place.id);
+      else next.set(place.id, place);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!showCourseModal || courseOriginMode !== "current") return;
@@ -3548,8 +3604,13 @@ function HomePageContent() {
   }, [showCourseModal, courseOriginMode]);
 
   useEffect(() => {
-    if (!showCourseModal || courseOriginMode !== "current" || !geocoderRef.current || savedPlaces.length === 0) return;
-    const missing = savedPlaces.filter((p) => !coursePlaceCoords[p.id]);
+    if (!showCourseModal || !geocoderRef.current || savedPlaces.length === 0) return;
+    const missing = savedPlaces.filter((p) => {
+      if (typeof p.lat === "number" && typeof p.lng === "number" && Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
+        return false;
+      }
+      return !coursePlaceCoords[p.id];
+    });
     if (missing.length === 0) return;
     let cancelled = false;
     Promise.all(
@@ -3578,7 +3639,78 @@ function HomePageContent() {
     return () => {
       cancelled = true;
     };
-  }, [showCourseModal, courseOriginMode, savedPlaces, coursePlaceCoords]);
+  }, [showCourseModal, savedPlaces, coursePlaceCoords]);
+
+  useEffect(() => {
+    if (!showCourseModal || courseSource !== "list") return;
+    const uid = userIdRef.current;
+    if (!uid) return;
+    let cancelled = false;
+    setCourseMyListsLoading(true);
+    void fetchMyLists(uid).then(({ data, error }) => {
+      if (cancelled) return;
+      setCourseMyListsLoading(false);
+      if (error) {
+        showToast(error, "error");
+        setCourseMyLists([]);
+        return;
+      }
+      setCourseMyLists(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showCourseModal, courseSource, showToast]);
+
+  useEffect(() => {
+    if (!showCourseModal || courseSource !== "list" || !courseActiveListId) {
+      return;
+    }
+    let cancelled = false;
+    setCourseListPlacesLoading(true);
+    void fetchListPlaces(courseActiveListId).then(({ data, error }) => {
+      if (cancelled) return;
+      setCourseListPlacesLoading(false);
+      if (error) {
+        showToast(error, "error");
+        setCourseListPlaces([]);
+        return;
+      }
+      const mapped: Place[] = data.map((p) => {
+        const fromSaved = savedPlacesRef.current.find((s) => s.id === p.id);
+        return {
+          id: p.id,
+          name: p.name,
+          address: p.address,
+          category: (CATEGORY_MAIN_ORDER.includes(p.category as Category)
+            ? p.category
+            : "맛집") as Category,
+          ...(typeof p.lat === "number" && Number.isFinite(p.lat) ? { lat: p.lat } : {}),
+          ...(typeof p.lng === "number" && Number.isFinite(p.lng) ? { lng: p.lng } : {}),
+          ...(p.created_at ? { created_at: p.created_at } : {}),
+          ...(fromSaved?.memo !== undefined ? { memo: fromSaved.memo } : {}),
+        };
+      });
+      setCourseListPlaces(mapped);
+      setCoursePlaceCoords((prev) => {
+        const next = { ...prev };
+        for (const p of mapped) {
+          if (
+            typeof p.lat === "number" &&
+            typeof p.lng === "number" &&
+            Number.isFinite(p.lat) &&
+            Number.isFinite(p.lng)
+          ) {
+            next[p.id] = { lat: p.lat, lng: p.lng };
+          }
+        }
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showCourseModal, courseSource, courseActiveListId, showToast]);
 
   useEffect(() => {
     if (viewingSavedCourseIdRef.current) return;
@@ -5231,6 +5363,7 @@ function HomePageContent() {
     setViewedCourseUserId(null);
     viewingSavedCourseIdRef.current = null;
     returnToCourseSheetRef.current = false;
+    resetCourseCreatePicker();
   };
 
   const ensureCourseLoaded = useCallback(async (courseId: string): Promise<SavedCourse | null> => {
@@ -7221,15 +7354,15 @@ function HomePageContent() {
     }
   };
 
-  // 코스 만들기 실행
+  // 코스 만들기 실행 — 사용자가 고른 장소로 동선만 재배열 (저장/공유 경로 동일)
   const generateCourse = async () => {
     if (!geocoderRef.current) {
       showToast("지도가 아직 준비되지 않았어요. 지도 탭을 한 번 열어주세요.", "info");
       return;
     }
-    const totalCount = CATEGORY_COURSE_MODAL_ORDER.reduce((sum, c) => sum + courseCounts[c], 0);
-    if (totalCount === 0) {
-      showToast("최소 한 개 이상 선택해주세요", "info");
+    const selectedPlaces = Array.from(courseSelectedById.values());
+    if (selectedPlaces.length === 0) {
+      showToast("장소를 한 곳 이상 골라주세요", "info");
       return;
     }
     const perfScreen = "course:generate";
@@ -7263,13 +7396,20 @@ function HomePageContent() {
         });
       }
 
-      // 2. savedPlaces 각 장소의 좌표 조회 (주소 → 위경도)
+      // 2. 선택한 장소 좌표 조회
       const placesWithCoords: CoursePlace[] = [];
       await Promise.all(
-        courseBasePlaces.map(
+        selectedPlaces.map(
           (place) =>
             new Promise<void>((resolve) => {
-              const cached = coursePlaceCoords[place.id];
+              const own =
+                typeof place.lat === "number" &&
+                typeof place.lng === "number" &&
+                Number.isFinite(place.lat) &&
+                Number.isFinite(place.lng)
+                  ? { lat: place.lat, lng: place.lng }
+                  : null;
+              const cached = own ?? coursePlaceCoords[place.id] ?? null;
               if (cached) {
                 placesWithCoords.push({ ...place, lat: cached.lat, lng: cached.lng });
                 resolve();
@@ -7287,60 +7427,19 @@ function HomePageContent() {
                 }
                 resolve();
               });
-            })
-        )
+            }),
+        ),
       );
 
-      // 3. 카테고리별로 분류
-      const candidates: Record<Category, CoursePlace[]> = {
-        카페: placesWithCoords.filter((p) => p.category === "카페"),
-        맛집: placesWithCoords.filter((p) => p.category === "맛집"),
-        쇼핑: placesWithCoords.filter((p) => p.category === "쇼핑"),
-        숙소: placesWithCoords.filter((p) => p.category === "숙소"),
-        놀거리: placesWithCoords.filter((p) => p.category === "놀거리"),
-        여행지: placesWithCoords.filter((p) => p.category === "여행지"),
-      };
-
-      // 4. 요청한 개수가 가능한지 체크 (쇼핑은 중복 OK라고 했지만, 일단 같은 장소 2번은 X 정책으로 갔으니 후보가 부족하면 가능한 만큼만)
-      const adjustedCounts: Record<Category, number> = {
-        카페: Math.min(courseCounts.카페, candidates.카페.length),
-        맛집: Math.min(courseCounts.맛집, candidates.맛집.length),
-        쇼핑: Math.min(courseCounts.쇼핑, candidates.쇼핑.length),
-        숙소: Math.min(courseCounts.숙소, candidates.숙소.length),
-        놀거리: Math.min(courseCounts.놀거리, candidates.놀거리.length),
-        여행지: Math.min(courseCounts.여행지, candidates.여행지.length),
-      };
-
-      if (courseOriginMode === "manual" && courseRegionKeyword) {
-        const labels: Record<Category, string> = {
-          카페: "카페",
-          맛집: "맛집",
-          쇼핑: "쇼핑",
-          숙소: "숙소",
-          놀거리: "놀거리",
-          여행지: "여행지",
-        };
-        CATEGORY_COURSE_MODAL_ORDER.forEach((cat) => {
-          if (courseCounts[cat] > adjustedCounts[cat]) {
-            showToast(`${courseRegionKeyword}에 ${labels[cat]}가 ${adjustedCounts[cat]}개뿐이에요`, "info");
-          }
-        });
+      if (placesWithCoords.length === 0) {
+        showToast("선택한 장소의 위치를 찾지 못했어요", "info");
+        return;
       }
 
-      const selectedPools: Record<Category, CoursePlace[]> = {
-        카페: shufflePick(candidates.카페, adjustedCounts.카페),
-        맛집: shufflePick(candidates.맛집, adjustedCounts.맛집),
-        쇼핑: shufflePick(candidates.쇼핑, adjustedCounts.쇼핑),
-        숙소: shufflePick(candidates.숙소, adjustedCounts.숙소),
-        놀거리: shufflePick(candidates.놀거리, adjustedCounts.놀거리),
-        여행지: shufflePick(candidates.여행지, adjustedCounts.여행지),
-      };
-      const mergedCandidates: CoursePlace[] = CATEGORY_COURSE_MODAL_ORDER.flatMap((c) => selectedPools[c]);
-
-      // 5. 알고리즘 실행
+      // 3. 출발지 기준 동선 정렬 (기존 buildCourse)
       const course = buildCourse(
         { lat: originLat, lng: originLng },
-        mergedCandidates,
+        placesWithCoords,
         { avoidConsecutiveCategories: ["카페", "맛집"] },
       );
 
@@ -7350,10 +7449,8 @@ function HomePageContent() {
       }
       setCourseResult(course);
 
-      // 부족했으면 안내
-      const requested = CATEGORY_COURSE_MODAL_ORDER.reduce((sum, c) => sum + courseCounts[c], 0);
-      if (course.length < requested) {
-        showToast(`저장된 장소가 부족해서 ${course.length}곳으로 코스를 만들었어요`, "info");
+      if (course.length < selectedPlaces.length) {
+        showToast(`위치가 있는 ${course.length}곳으로 코스를 만들었어요`, "info");
       }
     } catch (e) {
       showToast("코스를 만드는 중 오류가 발생했어요", "error");
@@ -11369,6 +11466,43 @@ function HomePageContent() {
                             <div className="courseModalSheetBody" style={isEditingCourseTitleInline ? { display: "none" } : undefined}>
                             {!courseResult && (
                               <>
+                                <div
+                                  className="courseSourceSegment"
+                                  role="tablist"
+                                  aria-label="장소 소스"
+                                >
+                                  {(
+                                    [
+                                      { id: "nearby" as const, label: "주변", testId: "course-source-nearby" },
+                                      { id: "all" as const, label: "전체", testId: "course-source-all" },
+                                      { id: "list" as const, label: "내 목록", testId: "course-source-list" },
+                                    ] as const
+                                  ).map((opt) => {
+                                    const selected = courseSource === opt.id;
+                                    return (
+                                      <button
+                                        key={opt.id}
+                                        type="button"
+                                        role="tab"
+                                        data-testid={opt.testId}
+                                        aria-selected={selected}
+                                        className={`courseSourceSegmentBtn${selected ? " courseSourceSegmentBtnActive" : ""}`}
+                                        onClick={() => {
+                                          setCourseSource(opt.id);
+                                          setCourseCandidateQuery("");
+                                          if (opt.id !== "list") {
+                                            setCourseActiveListId(null);
+                                            setCourseActiveListTitle("");
+                                            setCourseListPlaces([]);
+                                          }
+                                        }}
+                                      >
+                                        {opt.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+
                                 <div>
                                   <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "8px", marginTop: 0 }}>출발지 / 지역</p>
                                   <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
@@ -11383,56 +11517,223 @@ function HomePageContent() {
                                       {courseLocationLoading
                                         ? "📍 현재 위치를 확인하는 중..."
                                         : courseCurrentLocation
-                                          ? `📍 현재 위치 반경 ${COURSE_WALK_RADIUS_KM}km 이내 저장된 장소(${courseBasePlaces.length}곳)로 코스를 짤게요`
+                                          ? `📍 출발지: 현재 위치 · 동선은 이 기준으로 짜요`
                                           : `📍 위치 권한이 없거나 위치를 가져오지 못했어요. 「직접 입력」으로 동네·역 이름을 넣거나, 설정에서 위치 권한을 허용해 주세요.`}
                                     </p>
                                   )}
                                 </div>
-            
+
+                                {!(courseSource === "list" && !courseActiveListId) && (
+                                  <div style={{ position: "relative" }}>
+                                    <input
+                                      className="mapInput"
+                                      data-testid="course-candidate-search"
+                                      placeholder="🔍 장소명, 주소, 메모 검색"
+                                      value={courseCandidateQuery}
+                                      onChange={(e) => setCourseCandidateQuery(e.target.value)}
+                                      style={{ width: "100%", boxSizing: "border-box", paddingRight: courseCandidateQuery ? "32px" : undefined }}
+                                    />
+                                    {courseCandidateQuery && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setCourseCandidateQuery("")}
+                                        style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", color: "#bbb", fontSize: "16px", cursor: "pointer", padding: "0 4px" }}
+                                      >
+                                        ×
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+
                                 <div>
-                                  <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", marginBottom: "10px", marginTop: 0 }}>몇 곳을 방문할까요?</p>
-                                  {CATEGORY_COURSE_MODAL_ORDER.map((cat) => {
-                                    const available = courseAvailableByCategory[cat];
-                                    const max = available;
-                                    return (
-                                      <div key={cat} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 0", borderBottom: "0.5px solid #f5f5f5" }}>
-                                        <div style={{ flex: 1 }}>
-                                          <span style={{ fontSize: "14px", color: "#1a1a2e" }}>{CATEGORY_PIN[cat].emoji} {cat}</span>
-                                          <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "6px" }}>
-                                            {courseOriginMode === "manual" && courseRegionKeyword
-                                              ? `(${courseRegionKeyword}에 ${available}곳)`
-                                              : courseOriginMode === "current"
-                                                ? courseLocationLoading
-                                                  ? "(위치 확인 중…)"
-                                                  : courseCurrentLocation
-                                                    ? `(주변에 ${available}곳)`
-                                                    : `(위치 필요 · 저장 ${available}곳)`
-                                                : `(저장 ${available}곳)`}
-                                          </span>
-                                        </div>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                                          <button type="button" disabled={courseCounts[cat] === 0} onClick={() => setCourseCounts(prev => ({ ...prev, [cat]: Math.max(0, prev[cat] - 1) }))} style={{ width: "28px", height: "28px", borderRadius: "50%", border: "1px solid #ddd", background: "#fff", color: "#1a2a7a", fontSize: "14px", cursor: courseCounts[cat] === 0 ? "not-allowed" : "pointer", opacity: courseCounts[cat] === 0 ? 0.4 : 1 }}>−</button>
-                                          <span style={{ fontSize: "14px", color: "#1a2a7a", fontWeight: 600, minWidth: "20px", textAlign: "center" }}>{courseCounts[cat]}</span>
-                                          <button type="button" disabled={courseCounts[cat] >= max} onClick={() => setCourseCounts(prev => ({ ...prev, [cat]: Math.min(max, prev[cat] + 1) }))} style={{ width: "28px", height: "28px", borderRadius: "50%", border: "1px solid #ddd", background: "#fff", color: "#1a2a7a", fontSize: "14px", cursor: courseCounts[cat] >= max ? "not-allowed" : "pointer", opacity: courseCounts[cat] >= max ? 0.4 : 1 }}>＋</button>
-                                        </div>
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                                    <p style={{ fontSize: "11px", color: "#1a2a7a", letterSpacing: "1px", margin: 0 }}>
+                                      {courseSource === "list" && !courseActiveListId
+                                        ? "목록 고르기"
+                                        : courseSource === "list" && courseActiveListId
+                                          ? courseActiveListTitle || "목록 장소"
+                                          : "장소 고르기"}
+                                    </p>
+                                    <span style={{ fontSize: 11, color: "#888" }}>
+                                      {courseSelectedById.size}곳 선택
+                                    </span>
+                                  </div>
+
+                                  {courseSource === "list" && !courseActiveListId && (
+                                    courseMyListsLoading ? (
+                                      <p className="emptyText" style={{ textAlign: "center" }}>목록을 불러오는 중…</p>
+                                    ) : courseMyLists.length === 0 ? (
+                                      <p className="emptyText" style={{ textAlign: "center" }}>아직 만든 목록이 없어요</p>
+                                    ) : (
+                                      <div className="courseCandidateList">
+                                        {courseMyLists.map((list) => (
+                                          <button
+                                            key={list.id}
+                                            type="button"
+                                            className="courseCandidateListRow"
+                                            onClick={() => {
+                                              setCourseActiveListId(list.id);
+                                              setCourseActiveListTitle(list.title);
+                                              setCourseCandidateQuery("");
+                                            }}
+                                          >
+                                            <span className="courseCandidateListName">{list.title}</span>
+                                            <span className="courseCandidateListMeta">{list.place_count}곳</span>
+                                          </button>
+                                        ))}
                                       </div>
-                                    );
-                                  })}
+                                    )
+                                  )}
+
+                                  {courseSource === "list" && courseActiveListId && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCourseActiveListId(null);
+                                        setCourseActiveListTitle("");
+                                        setCourseListPlaces([]);
+                                        setCourseCandidateQuery("");
+                                      }}
+                                      style={{
+                                        border: "none",
+                                        background: "transparent",
+                                        color: "#1a2a7a",
+                                        fontSize: 12,
+                                        fontWeight: 600,
+                                        padding: "0 0 8px",
+                                        cursor: "pointer",
+                                        fontFamily: "inherit",
+                                      }}
+                                    >
+                                      ← 목록으로
+                                    </button>
+                                  )}
+
+                                  {courseSource === "nearby" && courseLocationLoading && (
+                                    <p className="emptyText" style={{ textAlign: "center" }}>
+                                      현재 위치를 확인하는 중…
+                                    </p>
+                                  )}
+
+                                  {courseSource === "nearby" && !courseLocationLoading && !courseCurrentLocation && (
+                                    <div className="courseCandidateEmpty">
+                                      <p>위치 권한이 없어 주변을 볼 수 없어요.</p>
+                                      <button
+                                        type="button"
+                                        className="courseCandidateEmptyBtn"
+                                        onClick={() => {
+                                          setCourseSource("all");
+                                          setCourseCandidateQuery("");
+                                        }}
+                                      >
+                                        전체에서 고르기
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {courseSource === "nearby" && !courseLocationLoading && !!courseCurrentLocation && courseNearbyPlaces.length === 0 && (
+                                    <div className="courseCandidateEmpty">
+                                      <p>주변에 저장된 장소가 없어요</p>
+                                      <button
+                                        type="button"
+                                        className="courseCandidateEmptyBtn"
+                                        onClick={() => {
+                                          setCourseSource("all");
+                                          setCourseCandidateQuery("");
+                                        }}
+                                      >
+                                        전체에서 고르기
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {((courseSource === "nearby" && !!courseCurrentLocation && courseNearbyPlaces.length > 0) ||
+                                    courseSource === "all" ||
+                                    (courseSource === "list" && !!courseActiveListId)) && (
+                                    courseListPlacesLoading && courseSource === "list" ? (
+                                      <p className="emptyText" style={{ textAlign: "center" }}>장소를 불러오는 중…</p>
+                                    ) : courseFilteredCandidates.length === 0 ? (
+                                      <p className="emptyText" style={{ textAlign: "center" }}>
+                                        {courseCandidateQuery.trim()
+                                          ? "검색 결과가 없어요"
+                                          : courseSource === "all"
+                                            ? "저장한 장소가 없어요"
+                                            : "이 목록에 장소가 없어요"}
+                                      </p>
+                                    ) : (
+                                      <div className="courseCandidateList">
+                                        {courseFilteredCandidates.map((place) => {
+                                          const selected = courseSelectedById.has(place.id);
+                                          const coord =
+                                            (typeof place.lat === "number" &&
+                                            typeof place.lng === "number" &&
+                                            Number.isFinite(place.lat) &&
+                                            Number.isFinite(place.lng)
+                                              ? { lat: place.lat, lng: place.lng }
+                                              : null) ?? coursePlaceCoords[place.id] ?? null;
+                                          const distLabel =
+                                            courseCurrentLocation && coord
+                                              ? formatSavedPlaceDistanceM(
+                                                  distanceMeters(
+                                                    courseCurrentLocation.lat,
+                                                    courseCurrentLocation.lng,
+                                                    coord.lat,
+                                                    coord.lng,
+                                                  ),
+                                                )
+                                              : null;
+                                          return (
+                                            <button
+                                              key={place.id}
+                                              type="button"
+                                              className={`courseCandidateRow${selected ? " courseCandidateRowSelected" : ""}`}
+                                              onClick={() => toggleCoursePlaceSelect(place)}
+                                            >
+                                              <span className="courseCandidateCheck" aria-hidden>
+                                                {selected ? "✓" : ""}
+                                              </span>
+                                              <span className="courseCandidateBody">
+                                                <span className="courseCandidateName">
+                                                  {CATEGORY_PIN[place.category]?.emoji ?? "📍"} {place.name}
+                                                </span>
+                                                <span className="courseCandidateMeta">
+                                                  {place.category}
+                                                  {distLabel ? ` · ${distLabel}` : ""}
+                                                  {place.address ? ` · ${place.address}` : ""}
+                                                </span>
+                                              </span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )
+                                  )}
                                 </div>
-            
-                                <button type="button" onClick={generateCourse} disabled={courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0)} style={{ width: "100%", padding: "14px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "14px", letterSpacing: "1px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0) ? 0.6 : 1 }}>
-                                  {courseLoading ? "코스를 짜는 중..." : "코스 만들기"}
+
+                                <button
+                                  type="button"
+                                  onClick={generateCourse}
+                                  disabled={courseLoading || courseSelectedById.size === 0}
+                                  style={{
+                                    width: "100%",
+                                    padding: "14px",
+                                    borderRadius: "8px",
+                                    border: "none",
+                                    background: "#1a2a7a",
+                                    color: "#fff",
+                                    fontSize: "14px",
+                                    letterSpacing: "1px",
+                                    cursor: courseLoading || courseSelectedById.size === 0 ? "wait" : "pointer",
+                                    fontFamily: "inherit",
+                                    opacity: courseLoading || courseSelectedById.size === 0 ? 0.6 : 1,
+                                  }}
+                                >
+                                  {courseLoading
+                                    ? "코스를 짜는 중..."
+                                    : courseSelectedById.size > 0
+                                      ? `${courseSelectedById.size}곳으로 코스 만들기`
+                                      : "코스 만들기"}
                                 </button>
-                                {courseOriginMode === "current" && !courseLocationLoading && !courseCurrentLocation && (
-                                  <p style={{ margin: 0, textAlign: "center", fontSize: "11px", color: "#999", lineHeight: 1.5 }}>
-                                    위치 권한이 없거나 위치를 가져오지 못했어요. 「직접 입력」으로 동네·역 이름을 넣거나, 설정에서 위치 권한을 허용해 주세요.
-                                  </p>
-                                )}
-                                {courseOriginMode === "current" && !courseLocationLoading && !!courseCurrentLocation && courseBasePlaces.length === 0 && (
-                                  <p style={{ margin: 0, textAlign: "center", fontSize: "11px", color: "#999", lineHeight: 1.5 }}>
-                                    반경 {COURSE_WALK_RADIUS_KM}km 안에 저장된 장소가 없어요. 「직접 입력」으로 다른 동네를 지정하거나, 지도·추출로 근처 장소를 저장한 뒤 다시 시도해 주세요.
-                                  </p>
-                                )}
                               </>
                             )}
             
@@ -13218,6 +13519,7 @@ function HomePageContent() {
         data-coach="course_create"
         onClick={() => {
           track("course_create_open");
+          resetCourseCreatePicker();
           setShowCourseModal(true);
           setCourseResult(null);
           viewingSavedCourseIdRef.current = null;
