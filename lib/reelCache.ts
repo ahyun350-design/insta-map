@@ -32,7 +32,6 @@ export function normalizeReelCacheUrl(url: string): string | null {
 export type ReelCacheRow = {
   instagram_url: string;
   status: ReelCacheStatus;
-  caption: string | null;
   claude_places: RawPlace[] | null;
   created_at: string;
 };
@@ -67,7 +66,7 @@ export async function readReelCache(
     ).toISOString();
     const { data, error } = await admin
       .from("reel_cache")
-      .select("instagram_url, status, caption, claude_places, created_at")
+      .select("instagram_url, status, claude_places, created_at")
       .eq("instagram_url", key)
       .gte("created_at", oldestOk)
       .maybeSingle();
@@ -80,15 +79,11 @@ export async function readReelCache(
     const status = parseStatus((data as { status?: unknown }).status);
     if (!isFresh(data.created_at, status)) return null;
 
-    const caption = typeof data.caption === "string" ? data.caption : null;
-
     if (status === "ok") {
-      if (!caption?.trim()) return null;
       if (!Array.isArray(data.claude_places)) return null;
       return {
         instagram_url: data.instagram_url,
         status,
-        caption,
         claude_places: data.claude_places as RawPlace[],
         created_at: data.created_at,
       };
@@ -98,7 +93,6 @@ export async function readReelCache(
     return {
       instagram_url: data.instagram_url,
       status,
-      caption,
       claude_places: Array.isArray(data.claude_places)
         ? (data.claude_places as RawPlace[])
         : null,
@@ -112,11 +106,12 @@ export async function readReelCache(
 
 export type WriteReelCacheInput = {
   status: ReelCacheStatus;
+  /** @deprecated 개인정보 — upsert에 포함하지 않음. 호출부 호환용으로만 유지 */
   caption?: string | null;
   claudePlaces?: RawPlace[] | null;
 };
 
-/** upsert. 실패해도 extract는 계속. */
+/** upsert. 실패해도 extract는 계속. caption 컬럼은 기록하지 않음. */
 export async function writeReelCache(
   admin: SupabaseClient,
   rawUrl: string,
@@ -129,7 +124,6 @@ export async function writeReelCache(
       {
         instagram_url: key,
         status: input.status,
-        caption: input.caption ?? null,
         claude_places: input.claudePlaces ?? null,
         created_at: new Date().toISOString(),
       },
