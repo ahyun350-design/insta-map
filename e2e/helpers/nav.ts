@@ -125,6 +125,32 @@ export async function dismissSavedOverlays(page: Page): Promise<void> {
     await page.locator(".savedSortTrigger").click({ force: true }).catch(() => null);
     await expect(sortMenu).toBeHidden({ timeout: 3_000 }).catch(() => null);
   }
+
+  // 내 목록 전체 화면 — 상세면 ← 로 목록으로 나간 뒤 닫기
+  const myLists = page.locator(".myListsScreen");
+  if (await myLists.isVisible().catch(() => false)) {
+    const actionSheet = page.locator(".listDetailActionSheet");
+    if (await actionSheet.isVisible().catch(() => false)) {
+      await actionSheet.getByRole("button", { name: "취소" }).click({ force: true }).catch(() => null);
+      await expect(actionSheet).toBeHidden({ timeout: 3_000 }).catch(() => null);
+    }
+    // 상세 헤더는 aria-label 없이 "←" 텍스트만 있음 → 목록으로 복귀 후 닫기
+    for (let i = 0; i < 2; i++) {
+      if (!(await myLists.isVisible().catch(() => false))) break;
+      const close = myLists.getByRole("button", { name: "닫기" });
+      if (await close.isVisible().catch(() => false)) {
+        await close.click({ force: true }).catch(() => null);
+        break;
+      }
+      const back = myLists.locator(".myListsHeaderBtn").first();
+      if (await back.isVisible().catch(() => false)) {
+        await back.click({ force: true }).catch(() => null);
+      } else {
+        break;
+      }
+    }
+    await expect(myLists).toBeHidden({ timeout: 5_000 }).catch(() => null);
+  }
 }
 
 export function savedMyListsButton(page: Page): Locator {

@@ -235,13 +235,38 @@ test("production smoke — major tabs (continue on failure)", async ({
       timeout: 15_000,
     });
 
-    const detailNames = myLists.locator(".myListsDetailName");
+    // 이름 클래스는 SAVED 와 동일하게 `.savedName` (구 `.myListsDetailName`)
+    const detailNames = myLists.locator(".myListsDetailItem .savedName");
     const beforeCount = await detailNames.count();
     expect(beforeCount).toBeGreaterThan(0);
 
+    // 검색 UI 스모크 (필터 시 드래그 비활성 → 끝나면 비움)
+    const search = myLists.getByTestId("list-detail-search");
+    await expect(search).toBeVisible();
+    const firstPlaceName = (await detailNames.nth(0).innerText()).trim();
+    await search.fill("__no_match_e2e__");
+    await expect(myLists.getByText("검색 결과가 없어요")).toBeVisible({ timeout: 5_000 });
+    await search.fill("");
+    await expect(myLists.locator(".myListsDetailItem").first()).toBeVisible({
+      timeout: 5_000,
+    });
+
+    // ⋯ → 목록에서 빼기 (장소 2개 이상일 때만 하나 제거)
+    if (beforeCount >= 2) {
+      await safeClick(myLists.getByTestId("list-item-menu").first());
+      const actionSheet = page.locator(".listDetailActionSheet");
+      await expect(actionSheet).toBeVisible({ timeout: 5_000 });
+      await safeClick(actionSheet.getByRole("button", { name: "목록에서 빼기" }));
+      await expect(detailNames).toHaveCount(beforeCount - 1, { timeout: 15_000 });
+    } else {
+      // eslint-disable-next-line no-console
+      console.log("  (info) 목록 장소 1개 — 목록에서 빼기 스킵");
+    }
+
+    const afterRemoveCount = await detailNames.count();
     const handles = myLists.locator(".myListsDragHandle");
-    if ((await handles.count()) >= 2) {
-      const firstName = (await detailNames.nth(0).innerText()).trim();
+    if (afterRemoveCount >= 2 && (await handles.count()) >= 2) {
+      const nameBefore = (await detailNames.nth(0).innerText()).trim();
       const box0 = await handles.nth(0).boundingBox();
       const box1 = await handles.nth(1).boundingBox();
       if (box0 && box1) {
@@ -253,9 +278,11 @@ test("production smoke — major tabs (continue on failure)", async ({
         await page.mouse.up();
         await page.waitForTimeout(1000);
         const afterFirst = (await detailNames.nth(0).innerText()).trim();
-        expect(await detailNames.count()).toBe(beforeCount);
+        expect(await detailNames.count()).toBe(afterRemoveCount);
         // eslint-disable-next-line no-console
-        console.log(`  (info) reorder: before=${firstName} afterFirst=${afterFirst}`);
+        console.log(
+          `  (info) reorder: before=${nameBefore} afterFirst=${afterFirst} (seed=${firstPlaceName})`,
+        );
       }
     } else {
       // eslint-disable-next-line no-console
@@ -267,11 +294,14 @@ test("production smoke — major tabs (continue on failure)", async ({
     await safeClick(myLists.locator(".myListsConfirmDelete"));
     await expect(myLists.getByText(listTitle)).toHaveCount(0, { timeout: 15_000 });
 
+    // 목록 화면을 확실히 닫아야 5번 MY 탭 클릭이 .myListsBody 에 가로막히지 않음
     await safeClick(myLists.getByRole("button", { name: "닫기" }));
+    await expect(myLists).toBeHidden({ timeout: 10_000 });
   });
 
   // ── 5. MY ─────────────────────────────────────────────────
   await runner.step("5. MY 탭 — 게시 수 / 그리드 / 스크롤", async () => {
+    await dismissSavedOverlays(page);
     await gotoTab(page, "my");
     const postStat = page.getByRole("button").filter({ hasText: "게시" }).first();
     await expect(postStat).toBeVisible({ timeout: 20_000 });
