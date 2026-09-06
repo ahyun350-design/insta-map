@@ -3,10 +3,12 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   deleteList,
   fetchListPlaces,
@@ -25,8 +27,11 @@ type Props = {
   userId: string;
   categoryColors: Record<Category, string>;
   categoryPin: Record<Category, { emoji: string }>;
+  /** savedPlaces 기준 메모 — 낙관적 갱신 반영 */
+  memoByPlaceId?: Record<string, string | null | undefined>;
   onClose: () => void;
   onOpenPlace: (place: PlaceListPlace) => void;
+  onOpenMemo: (place: PlaceListPlace) => void;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
 };
 
@@ -35,8 +40,10 @@ export function MyListsScreen({
   userId,
   categoryColors,
   categoryPin,
+  memoByPlaceId,
   onClose,
   onOpenPlace,
+  onOpenMemo,
   showToast,
 }: Props) {
   const [lists, setLists] = useState<PlaceListSummary[]>([]);
@@ -51,6 +58,9 @@ export function MyListsScreen({
   const [deletingList, setDeletingList] = useState(false);
   const [reordering, setReordering] = useState(false);
   const [removingPlaceId, setRemovingPlaceId] = useState<string | null>(null);
+  const [detailSearchQuery, setDetailSearchQuery] = useState("");
+  const [menuPlaceId, setMenuPlaceId] = useState<string | null>(null);
+  const [menuClosing, setMenuClosing] = useState(false);
 
   const placesRef = useRef(places);
   placesRef.current = places;
@@ -58,8 +68,22 @@ export function MyListsScreen({
   listIdRef.current = detailList?.id ?? null;
   const hasListsRef = useRef(false);
   const listsFetchedAtRef = useRef(0);
+  const detailBodyRef = useRef<HTMLDivElement | null>(null);
 
   const LISTS_TTL_MS = 30_000;
+
+  const resolveMemo = useCallback(
+    (place: PlaceListPlace): string | null => {
+      if (memoByPlaceId && Object.prototype.hasOwnProperty.call(memoByPlaceId, place.id)) {
+        const v = memoByPlaceId[place.id];
+        if (typeof v === "string" && v.trim()) return v.trim();
+        return null;
+      }
+      if (typeof place.memo === "string" && place.memo.trim()) return place.memo.trim();
+      return null;
+    },
+    [memoByPlaceId],
+  );
 
   const loadLists = useCallback(
     async (opts?: { silent?: boolean; force?: boolean }) => {
@@ -99,6 +123,8 @@ export function MyListsScreen({
       setTitleDraft(list.title);
       setEditingTitle(false);
       setConfirmDelete(false);
+      setDetailSearchQuery("");
+      setMenuPlaceId(null);
       setDetailLoading(true);
       const { data, error } = await fetchListPlaces(list.id);
       setDetailLoading(false);
@@ -120,18 +146,57 @@ export function MyListsScreen({
       setConfirmDelete(false);
       setDeletingList(false);
       setRemovingPlaceId(null);
+      setDetailSearchQuery("");
+      setMenuPlaceId(null);
+      setMenuClosing(false);
       return;
     }
     void loadLists({ silent: hasListsRef.current });
   }, [open, loadLists]);
 
+  useEffect(() => {
+    if (!menuPlaceId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuClosing(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuPlaceId]);
+
+  useEffect(() => {
+    if (!menuClosing) return;
+    const t = window.setTimeout(() => {
+      setMenuPlaceId(null);
+      setMenuClosing(false);
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [menuClosing]);
+
+  const searchActive = detailSearchQuery.trim().length > 0;
+
+  const filteredPlaces = useMemo(() => {
+    const q = detailSearchQuery.trim().toLowerCase();
+    if (!q) return places;
+    return places.filter((place) => {
+      const memo = resolveMemo(place) ?? "";
+      return (
+        place.name.toLowerCase().includes(q) ||
+        place.address.toLowerCase().includes(q) ||
+        memo.toLowerCase().includes(q)
+      );
+    });
+  }, [places, detailSearchQuery, resolveMemo]);
+
   if (!open) return null;
+
+  const closeMenu = () => {
+    if (menuPlaceId) setMenuClosing(true);
+  };
 
   const commitReorder = async (next: PlaceListPlace[]) => {
     const listId = listIdRef.current;
     if (!listId) return;
     const prev = placesRef.current;
-    // 순서 변경: 이미 드래그 중·커밋 시 즉시 반영
     setPlaces(next);
     setReordering(true);
     const { error } = await reorderListPlaces(
@@ -159,7 +224,7 @@ export function MyListsScreen({
   const onDragHandlePointerDown = (index: number, e: ReactPointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (reordering) return;
+    if (reordering || searchActive) return;
     const handle = e.currentTarget;
     handle.setPointerCapture(e.pointerId);
     const initial = placesRef.current.slice();
@@ -169,7 +234,7 @@ export function MyListsScreen({
 
     const onMove = (ev: PointerEvent) => {
       const dy = ev.clientY - startY;
-      const rowHeight = 64;
+      const rowHeight = 72;
       const delta = Math.round(dy / rowHeight);
       const target = Math.max(0, Math.min(working.length - 1, index + delta));
       if (target === currentIndex) return;
@@ -266,6 +331,8 @@ export function MyListsScreen({
     const prevCount = detailList.place_count;
 
     setRemovingPlaceId(placeId);
+    setMenuPlaceId(null);
+    setMenuClosing(false);
     setPlaces((p) => p.filter((x) => x.id !== placeId));
     setDetailList((d) =>
       d ? { ...d, place_count: Math.max(0, d.place_count - 1) } : d,
@@ -291,6 +358,66 @@ export function MyListsScreen({
   };
 
   const showListLoading = loading && lists.length === 0;
+  const menuPlace = menuPlaceId ? places.find((p) => p.id === menuPlaceId) ?? null : null;
+  const menuMemo = menuPlace ? resolveMemo(menuPlace) : null;
+
+  const actionSheet =
+    menuPlace && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            className={`savedPlaceActionSheetRoot listDetailActionSheet${menuClosing ? " isClosing" : ""}`}
+            role="presentation"
+            onClick={closeMenu}
+          >
+            <div
+              className="savedPlaceActionSheetStack"
+              role="dialog"
+              aria-label={`${menuPlace.name} 메뉴`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="savedPlaceActionSheetCard">
+                <p className="savedPlaceActionSheetTitle">{menuPlace.name}</p>
+                <button
+                  type="button"
+                  className="savedPlaceActionSheetItem"
+                  onClick={() => {
+                    closeMenu();
+                    onOpenMemo(menuPlace);
+                  }}
+                >
+                  {menuMemo ? "메모 수정" : "메모"}
+                </button>
+                <button
+                  type="button"
+                  className="savedPlaceActionSheetItem"
+                  onClick={() => {
+                    closeMenu();
+                    onOpenPlace(menuPlace);
+                  }}
+                >
+                  지도에서 보기
+                </button>
+                <button
+                  type="button"
+                  className="savedPlaceActionSheetItem savedPlaceActionSheetItemDanger"
+                  disabled={!!removingPlaceId || reordering}
+                  onClick={() => void handleRemovePlace(menuPlace.id)}
+                >
+                  {removingPlaceId === menuPlace.id ? "빼는 중…" : "목록에서 빼기"}
+                </button>
+              </div>
+              <button
+                type="button"
+                className="savedPlaceActionSheetCancel"
+                onClick={closeMenu}
+              >
+                취소
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
 
   return (
     <div className="myListsScreen" role="dialog" aria-label="내 목록">
@@ -301,11 +428,12 @@ export function MyListsScreen({
               type="button"
               className="myListsHeaderBtn"
               onClick={() => {
-                // 로컬 place_count 이미 동기화됨 — 전체 재조회 없이 목록으로
                 setDetailList(null);
                 setPlaces([]);
                 setConfirmDelete(false);
                 setEditingTitle(false);
+                setDetailSearchQuery("");
+                setMenuPlaceId(null);
               }}
             >
               ←
@@ -361,7 +489,7 @@ export function MyListsScreen({
         )}
       </header>
 
-      <div className="myListsBody">
+      <div className="myListsBody" ref={detailBodyRef}>
         {!detailList ? (
           showListLoading ? (
             <p className="myListsEmptyHint">불러오는 중…</p>
@@ -394,56 +522,110 @@ export function MyListsScreen({
             <p className="myListsEmptyDesc">저장한 장소에서 「목록에 추가」로 담아보세요</p>
           </div>
         ) : (
-          <ul className={`myListsDetailList${reordering ? " myListsDetailListBusy" : ""}`}>
-            {places.map((place, index) => {
-              const cat = place.category as Category;
-              const color = categoryColors[cat] ?? "#1a2a7a";
-              const emoji = categoryPin[cat]?.emoji ?? "📍";
-              const removing = removingPlaceId === place.id;
-              return (
-                <li
-                  key={place.id}
-                  className={`myListsDetailItem${removing ? " myListsDetailItemBusy" : ""}`}
+          <>
+            <div className="myListsDetailSearchWrap">
+              <input
+                type="search"
+                className="myListsDetailSearch"
+                data-testid="list-detail-search"
+                value={detailSearchQuery}
+                onChange={(e) => setDetailSearchQuery(e.target.value)}
+                placeholder="장소·주소·메모 검색"
+                enterKeyHint="search"
+                autoCapitalize="none"
+                autoCorrect="off"
+              />
+              {detailSearchQuery.trim() ? (
+                <button
+                  type="button"
+                  className="myListsDetailSearchClear"
+                  aria-label="검색 지우기"
+                  onClick={() => setDetailSearchQuery("")}
                 >
-                  <button
-                    type="button"
-                    className="myListsDragHandle"
-                    aria-label="순서 변경"
-                    disabled={reordering || !!removingPlaceId}
-                    onPointerDown={(e) => onDragHandlePointerDown(index, e)}
-                  >
-                    ⠿
-                  </button>
-                  <button
-                    type="button"
-                    className="myListsDetailMain"
-                    onClick={() => onOpenPlace(place)}
-                    disabled={removing}
-                  >
-                    <span
-                      className="myListsDetailDot"
-                      style={{ background: color }}
-                      aria-hidden
-                    />
-                    <span className="myListsDetailText">
-                      <span className="myListsDetailName">{place.name}</span>
-                      <span className="myListsDetailMeta">
-                        {emoji} {place.category} · {place.address}
-                      </span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="myListsRemoveBtn"
-                    disabled={!!removingPlaceId || reordering}
-                    onClick={() => void handleRemovePlace(place.id)}
-                  >
-                    {removing ? "…" : "빼기"}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                  ×
+                </button>
+              ) : null}
+            </div>
+            {filteredPlaces.length === 0 ? (
+              <p className="myListsEmptyHint">검색 결과가 없어요</p>
+            ) : (
+              <ul
+                className={`myListsDetailList${reordering ? " myListsDetailListBusy" : ""}${
+                  searchActive ? " myListsDetailListFiltered" : ""
+                }`}
+              >
+                {filteredPlaces.map((place) => {
+                  const fullIndex = places.findIndex((p) => p.id === place.id);
+                  const cat = place.category as Category;
+                  const color = categoryColors[cat] ?? "#1a2a7a";
+                  const emoji = categoryPin[cat]?.emoji ?? "📍";
+                  const removing = removingPlaceId === place.id;
+                  const memo = resolveMemo(place);
+                  return (
+                    <li
+                      key={place.id}
+                      className={`myListsDetailItem${removing ? " myListsDetailItemBusy" : ""}`}
+                    >
+                      <button
+                        type="button"
+                        className="myListsDragHandle"
+                        aria-label="순서 변경"
+                        disabled={reordering || !!removingPlaceId || searchActive || fullIndex < 0}
+                        onPointerDown={(e) => {
+                          if (searchActive || fullIndex < 0) return;
+                          onDragHandlePointerDown(fullIndex, e);
+                        }}
+                      >
+                        ⠿
+                      </button>
+                      <button
+                        type="button"
+                        className="myListsDetailMain"
+                        onClick={() => onOpenPlace(place)}
+                        disabled={removing}
+                      >
+                        <span
+                          className="myListsDetailDot"
+                          style={{ background: color }}
+                          aria-hidden
+                        />
+                        <span className="myListsDetailText">
+                          <span className="myListsDetailName">{place.name}</span>
+                          {memo ? (
+                            <span className="myListsDetailMemo" data-testid="list-item-memo">
+                              ✎ {memo}
+                            </span>
+                          ) : null}
+                          <span className="myListsDetailMeta">
+                            {emoji} {place.category} · {place.address}
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="myListsMoreBtn"
+                        data-testid="list-item-menu"
+                        aria-label="더보기"
+                        aria-expanded={menuPlaceId === place.id}
+                        disabled={removing}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (menuPlaceId === place.id) {
+                            closeMenu();
+                            return;
+                          }
+                          setMenuClosing(false);
+                          setMenuPlaceId(place.id);
+                        }}
+                      >
+                        ⋯
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </>
         )}
       </div>
 
@@ -475,6 +657,7 @@ export function MyListsScreen({
           </div>
         </div>
       )}
+      {actionSheet}
     </div>
   );
 }

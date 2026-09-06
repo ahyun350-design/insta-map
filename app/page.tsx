@@ -1851,7 +1851,10 @@ function HomePageContent() {
   const extractSoftTimeoutNotifiedRef = useRef<Set<string>>(new Set());
   /** PlaceDetailSheet(compact overlay) 닫을 때 복귀 대상 */
   const placeSheetReturnRef = useRef<
-    { type: "saved" } | { type: "curation"; postId: string; fromTab?: TabId } | null
+    | { type: "saved" }
+    | { type: "list" }
+    | { type: "curation"; postId: string; fromTab?: TabId }
+    | null
   >(null);
   const detailOpenPerfRef = useRef<{ postId: string; t: number } | null>(null);
   const detailOpenLoggedRef = useRef<string | null>(null);
@@ -6627,13 +6630,14 @@ function HomePageContent() {
     }
   };
 
-  // 저장 목록 장소 클릭 → 컴팩트 시트 (origin=saved면 탭 유지; 큐레이션은 지도 탭)
-  // returnTo: SAVED/내 목록 → saved, 큐레이션 상세 → curation(시트 닫으면 상세 복귀)
+  // 저장 목록·내 목록 장소 클릭 → 컴팩트 시트 (origin=saved|list면 탭 유지; 큐레이션은 지도 탭)
+  // returnTo: SAVED → saved, 내 목록 → list, 큐레이션 상세 → curation(시트 닫으면 상세 복귀)
   const handleSavedPlaceClick = (
     place: Place,
     opts?: {
       returnTo?:
         | { type: "saved" }
+        | { type: "list" }
         | { type: "curation"; postId: string; fromTab?: TabId }
         | null;
     },
@@ -6652,8 +6656,8 @@ function HomePageContent() {
     // 컴팩트 시트는 !mapExpanded 일 때만 보임
     setMapExpanded(false);
     setSelectedMapPlace(place);
-    // 저장 탭에서 연 경우 지도 탭으로 전환하지 않음 — 시트만 오버레이
-    if (returnTo?.type !== "saved") {
+    // 저장·내 목록에서 연 경우 지도 탭으로 전환하지 않음 — 시트만 오버레이
+    if (returnTo?.type !== "saved" && returnTo?.type !== "list") {
       setActiveTab("map");
     }
     const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
@@ -6686,7 +6690,7 @@ function HomePageContent() {
     })();
   };
 
-  /** 컴팩트 PlaceDetailSheet 닫기 — 열었던 곳(SAVED / 큐레이션 상세)으로 복귀 */
+  /** 컴팩트 PlaceDetailSheet 닫기 — 열었던 곳(SAVED / 내 목록 / 큐레이션 상세)으로 복귀 */
   const closeCompactPlaceSheet = useCallback(() => {
     const returnTo = placeSheetReturnRef.current;
     placeSheetReturnRef.current = null;
@@ -6696,6 +6700,10 @@ function HomePageContent() {
     setDirectionsInfo(null);
     if (returnTo?.type === "saved") {
       setActiveTab("saved");
+      return;
+    }
+    if (returnTo?.type === "list") {
+      setShowMyListsScreen(true);
       return;
     }
     if (returnTo?.type === "curation" && returnTo.postId) {
@@ -15041,11 +15049,33 @@ function HomePageContent() {
             userId={user.id}
             categoryColors={CATEGORY_COLORS}
             categoryPin={CATEGORY_PIN}
+            memoByPlaceId={Object.fromEntries(
+              savedPlaces.map((p) => [p.id, p.memo ?? null] as const),
+            )}
             onClose={() => setShowMyListsScreen(false)}
             onOpenPlace={(place) => {
-              setShowMyListsScreen(false);
               const fromSaved = savedPlacesRef.current.find((p) => p.id === place.id);
-              handleSavedPlaceClick({
+              handleSavedPlaceClick(
+                {
+                  id: place.id,
+                  name: place.name,
+                  address: place.address,
+                  category: place.category as Category,
+                  ...(typeof place.lat === "number" ? { lat: place.lat } : {}),
+                  ...(typeof place.lng === "number" ? { lng: place.lng } : {}),
+                  ...(place.created_at ? { created_at: place.created_at } : {}),
+                  ...(fromSaved?.memo !== undefined
+                    ? { memo: fromSaved.memo }
+                    : place.memo !== undefined
+                      ? { memo: place.memo }
+                      : {}),
+                },
+                { returnTo: { type: "list" } },
+              );
+            }}
+            onOpenMemo={(place) => {
+              const fromSaved = savedPlacesRef.current.find((p) => p.id === place.id);
+              openPlaceMemoForSavedPlace({
                 id: place.id,
                 name: place.name,
                 address: place.address,
@@ -15053,7 +15083,12 @@ function HomePageContent() {
                 ...(typeof place.lat === "number" ? { lat: place.lat } : {}),
                 ...(typeof place.lng === "number" ? { lng: place.lng } : {}),
                 ...(place.created_at ? { created_at: place.created_at } : {}),
-                ...(fromSaved?.memo !== undefined ? { memo: fromSaved.memo } : {}),
+                memo:
+                  fromSaved?.memo !== undefined
+                    ? fromSaved.memo
+                    : typeof place.memo === "string"
+                      ? place.memo
+                      : null,
               });
             }}
             showToast={showToast}

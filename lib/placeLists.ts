@@ -18,6 +18,7 @@ export type PlaceListPlace = {
   lat?: number;
   lng?: number;
   created_at?: string;
+  memo?: string | null;
   sort_order: number;
 };
 
@@ -140,7 +141,7 @@ export async function fetchListPlaces(
   const { data, error } = await supabase
     .from("place_list_items")
     .select(
-      "sort_order, places ( id, name, address, category, lat, lng, created_at )",
+      "sort_order, places ( id, name, address, category, lat, lng, created_at, memo )",
     )
     .eq("list_id", listId)
     .order("sort_order", { ascending: true });
@@ -169,6 +170,11 @@ export async function fetchListPlaces(
       ...(Number.isFinite(lat) ? { lat } : {}),
       ...(Number.isFinite(lng) ? { lng } : {}),
       ...(typeof raw.created_at === "string" ? { created_at: raw.created_at } : {}),
+      ...(typeof raw.memo === "string"
+        ? { memo: raw.memo }
+        : raw.memo === null
+          ? { memo: null }
+          : {}),
       sort_order: typeof r.sort_order === "number" ? r.sort_order : places.length,
     });
   }

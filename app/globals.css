@@ -1897,7 +1897,7 @@ select:focus-visible {
 .placeDetailSheetBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 100001;
+  z-index: 100045;
   background: rgba(0, 0, 0, 0.4);
 }
 
@@ -1919,7 +1919,7 @@ select:focus-visible {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 100002;
+  z-index: 100046;
 }
 
 .placeDetailSheetEmbedded {
@@ -3628,6 +3628,18 @@ select:focus-visible {
   background: #f3f1ea;
 }
 
+.savedPlaceActionSheetItemDanger {
+  color: #e07070;
+}
+
+.savedPlaceActionSheetItemDanger:active {
+  background: #fdf2f2;
+}
+
+.listDetailActionSheet.savedPlaceActionSheetRoot {
+  z-index: 100055;
+}
+
 .savedPlaceActionSheetCancel {
   display: block;
   width: 100%;
@@ -4006,7 +4018,7 @@ select:focus-visible {
 
 .myListsDetailItem {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 10px 0;
   border-bottom: 0.5px solid #efefef;
@@ -4032,13 +4044,14 @@ select:focus-visible {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .myListsDetailMain {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   border: none;
   background: transparent;
@@ -4053,6 +4066,7 @@ select:focus-visible {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-top: 6px;
 }
 
 .myListsDetailText {
@@ -4070,12 +4084,76 @@ select:focus-visible {
   white-space: nowrap;
 }
 
-.myListsDetailMeta {
-  font-size: 11px;
-  color: #888;
+.myListsDetailMemo {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f2937;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.myListsDetailMeta {
+  font-size: 10px;
+  color: #9ca3af;
+  letter-spacing: 0.2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.myListsMoreBtn {
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 20px;
+  line-height: 1;
+  padding: 8px 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+  margin-top: 2px;
+}
+
+.myListsDetailSearchWrap {
+  position: relative;
+  flex-shrink: 0;
+  margin: 0 0 10px;
+}
+
+.myListsDetailSearch {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #e8e8ec;
+  border-radius: 10px;
+  padding: 10px 36px 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #1a1a2e;
+  background: #fafafa;
+  outline: none;
+}
+
+.myListsDetailSearchClear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 18px;
+  line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.myListsDetailListFiltered .myListsDragHandle {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .myListsRemoveBtn {
