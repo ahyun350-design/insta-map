@@ -25,13 +25,28 @@ type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여�
 type ListSort = "custom" | "region" | "near" | "category";
 
 const LIST_SORT_OPTIONS: { id: ListSort; label: string }[] = [
-  { id: "custom", label: "내 순서" },
   { id: "region", label: "지역순" },
   { id: "near", label: "가까운 순" },
   { id: "category", label: "카테고리순" },
+  { id: "custom", label: "내 순서" },
 ];
 
 const LIST_CATEGORY_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"];
+
+const LIST_DISTANCE_BANDS: { id: string; label: string; maxMeters: number }[] = [
+  { id: "500m", label: "500m 이내", maxMeters: 500 },
+  { id: "1km", label: "1km 이내", maxMeters: 1000 },
+  { id: "5km", label: "5km 이내", maxMeters: 5000 },
+  { id: "10km", label: "10km 이내", maxMeters: 10000 },
+  { id: "beyond", label: "그 이상", maxMeters: Number.POSITIVE_INFINITY },
+];
+
+function listDistanceBandId(meters: number): string {
+  for (const band of LIST_DISTANCE_BANDS) {
+    if (meters <= band.maxMeters) return band.id;
+  }
+  return "beyond";
+}
 
 function extractListRegion(address: string): string {
   if (!address) return "기타";
@@ -97,7 +112,7 @@ export function MyListsScreen({
   const [reordering, setReordering] = useState(false);
   const [removingPlaceId, setRemovingPlaceId] = useState<string | null>(null);
   const [detailSearchQuery, setDetailSearchQuery] = useState("");
-  const [detailSort, setDetailSort] = useState<ListSort>("custom");
+  const [detailSort, setDetailSort] = useState<ListSort>("region");
   const [detailSortMenuOpen, setDetailSortMenuOpen] = useState(false);
   const [nearOrigin, setNearOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const [nearLocating, setNearLocating] = useState(false);
@@ -170,7 +185,7 @@ export function MyListsScreen({
       setEditingTitle(false);
       setConfirmDelete(false);
       setDetailSearchQuery("");
-      setDetailSort("custom");
+      setDetailSort("region");
       setDetailSortMenuOpen(false);
       setMenuPlaceId(null);
       setDetailLoading(true);
@@ -196,7 +211,7 @@ export function MyListsScreen({
         setDeletingList(false);
         setRemovingPlaceId(null);
         setDetailSearchQuery("");
-        setDetailSort("custom");
+        setDetailSort("region");
         setDetailSortMenuOpen(false);
         detailScrollTopRef.current = 0;
       }
@@ -226,7 +241,7 @@ export function MyListsScreen({
     setDeletingList(false);
     setRemovingPlaceId(null);
     setDetailSearchQuery("");
-    setDetailSort("custom");
+    setDetailSort("region");
     setDetailSortMenuOpen(false);
     setMenuPlaceId(null);
     setMenuClosing(false);
@@ -352,7 +367,7 @@ export function MyListsScreen({
       };
     }
 
-    // near — 카테고리 그룹, 그룹 안·그룹 간 거리순
+    // near — 거리 구간 그룹, 그룹 안 거리순
     if (!nearOrigin) {
       return {
         kind: "near_need_location" as const,
@@ -371,25 +386,16 @@ export function MyListsScreen({
         : Number.POSITIVE_INFINITY;
       return { place, meters, hasCoords };
     });
-    const groups = LIST_CATEGORY_ORDER.map((cat) => {
+    const groups = LIST_DISTANCE_BANDS.map((band) => {
       const items = withDist
-        .filter((x) => x.place.category === cat)
+        .filter((x) => listDistanceBandId(x.meters) === band.id)
         .sort((a, b) => {
           if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
           if (a.meters !== b.meters) return a.meters - b.meters;
           return a.place.name.localeCompare(b.place.name, "ko");
         });
-      const nearestMeters = items.reduce(
-        (min, x) => (x.meters < min ? x.meters : min),
-        Number.POSITIVE_INFINITY,
-      );
-      return { cat, items, nearestMeters };
-    })
-      .filter((g) => g.items.length > 0)
-      .sort((a, b) => {
-        if (a.nearestMeters !== b.nearestMeters) return a.nearestMeters - b.nearestMeters;
-        return LIST_CATEGORY_ORDER.indexOf(a.cat) - LIST_CATEGORY_ORDER.indexOf(b.cat);
-      });
+      return { id: band.id, label: band.label, items };
+    }).filter((g) => g.items.length > 0);
     return { kind: "near" as const, groups };
   }, [
     places,
@@ -655,7 +661,7 @@ export function MyListsScreen({
                 setConfirmDelete(false);
                 setEditingTitle(false);
                 setDetailSearchQuery("");
-                setDetailSort("custom");
+                setDetailSort("region");
                 setDetailSortMenuOpen(false);
                 setMenuPlaceId(null);
               }}
@@ -783,7 +789,7 @@ export function MyListsScreen({
                     setDetailSortMenuOpen((o) => !o);
                   }}
                 >
-                  {LIST_SORT_OPTIONS.find((o) => o.id === detailSort)?.label ?? "내 순서"}
+                  {LIST_SORT_OPTIONS.find((o) => o.id === detailSort)?.label ?? "지역순"}
                   <span aria-hidden>▾</span>
                 </button>
                 {detailSortMenuOpen && (
@@ -823,6 +829,7 @@ export function MyListsScreen({
               const renderRow = (
                 place: PlaceListPlace,
                 metaExtra?: string,
+                namePrefix?: string,
               ) => {
                 const fullIndex = places.findIndex((p) => p.id === place.id);
                 const cat = place.category as Category;
@@ -863,15 +870,19 @@ export function MyListsScreen({
                         aria-hidden
                       />
                       <span className="myListsDetailText">
-                        <span className="savedName">{place.name}</span>
+                        <span className="savedName">
+                          {namePrefix ? `${namePrefix} ` : ""}
+                          {place.name}
+                        </span>
                         {memo ? (
                           <span className="savedMemo" data-testid="list-item-memo">
                             ✎ {memo}
                           </span>
                         ) : null}
                         <span className="savedMeta">
-                          {place.category} · {place.address}
-                          {metaExtra ? ` · ${metaExtra}` : ""}
+                          {namePrefix
+                            ? `${place.address}${metaExtra ? ` · ${metaExtra}` : ""}`
+                            : `${place.category} · ${place.address}${metaExtra ? ` · ${metaExtra}` : ""}`}
                         </span>
                       </span>
                     </button>
@@ -1051,11 +1062,11 @@ export function MyListsScreen({
                 );
               }
 
-              // near
+              // near — 거리 구간 그룹
               return (
                 <div>
-                  {model.groups.map(({ cat, items }) => (
-                    <div key={cat} style={{ marginBottom: 28 }}>
+                  {model.groups.map(({ id, label, items }) => (
+                    <div key={id} style={{ marginBottom: 28 }}>
                       <div
                         style={{
                           display: "flex",
@@ -1067,18 +1078,16 @@ export function MyListsScreen({
                           paddingBottom: 10,
                         }}
                       >
-                        <span style={{ fontSize: 16 }}>
-                          {categoryPin[cat]?.emoji ?? "📍"}
-                        </span>
+                        <span style={{ fontSize: 16 }}>📍</span>
                         <span
                           style={{
                             fontSize: 14,
                             fontWeight: 600,
-                            color: categoryColors[cat],
+                            color: "#1a2a7a",
                             letterSpacing: "0.5px",
                           }}
                         >
-                          {cat}
+                          {label}
                         </span>
                         <span style={{ fontSize: 11, color: "#bbb", marginLeft: 4 }}>
                           {items.length}
@@ -1089,6 +1098,7 @@ export function MyListsScreen({
                           renderRow(
                             place,
                             hasCoords ? formatListDistanceM(meters) : "거리 정보 없음",
+                            categoryPin[place.category as Category]?.emoji,
                           ),
                         )}
                       </ul>

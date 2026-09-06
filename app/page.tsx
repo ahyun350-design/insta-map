@@ -1071,6 +1071,21 @@ function formatSavedPlaceDistanceM(meters: number): string {
   return `${(meters / 1000).toFixed(1)}km`;
 }
 
+const SAVED_DISTANCE_BANDS: { id: string; label: string; maxMeters: number }[] = [
+  { id: "500m", label: "500m 이내", maxMeters: 500 },
+  { id: "1km", label: "1km 이내", maxMeters: 1000 },
+  { id: "5km", label: "5km 이내", maxMeters: 5000 },
+  { id: "10km", label: "10km 이내", maxMeters: 10000 },
+  { id: "beyond", label: "그 이상", maxMeters: Number.POSITIVE_INFINITY },
+];
+
+function savedDistanceBandId(meters: number): string {
+  for (const band of SAVED_DISTANCE_BANDS) {
+    if (meters <= band.maxMeters) return band.id;
+  }
+  return "beyond";
+}
+
 // 두 좌표 사이의 직선거리 (km) - Haversine 공식
 function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // 지구 반지름 (km)
@@ -10675,7 +10690,7 @@ function HomePageContent() {
       };
     }
 
-    // near — 카테고리 그룹, 그룹 안·그룹 간 모두 거리 기준
+    // near — 거리 구간 그룹, 그룹 안 거리순
     const origin = savedNearOrigin ?? myLocationLatLngRef.current;
     if (!origin) {
       return {
@@ -10695,27 +10710,16 @@ function HomePageContent() {
         : Number.POSITIVE_INFINITY;
       return { place, meters, hasCoords };
     });
-    const groups = CATEGORY_MAIN_ORDER.map((cat) => {
+    const groups = SAVED_DISTANCE_BANDS.map((band) => {
       const items = withDist
-        .filter((x) => x.place.category === cat)
+        .filter((x) => savedDistanceBandId(x.meters) === band.id)
         .sort((a, b) => {
           if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
           if (a.meters !== b.meters) return a.meters - b.meters;
           return a.place.name.localeCompare(b.place.name, "ko");
         });
-      const nearestMeters = items.reduce(
-        (min, x) => (x.meters < min ? x.meters : min),
-        Number.POSITIVE_INFINITY,
-      );
-      return { cat, items, nearestMeters };
-    })
-      .filter((g) => g.items.length > 0)
-      .sort((a, b) => {
-        if (a.nearestMeters !== b.nearestMeters) return a.nearestMeters - b.nearestMeters;
-        return (
-          CATEGORY_MAIN_ORDER.indexOf(a.cat) - CATEGORY_MAIN_ORDER.indexOf(b.cat)
-        );
-      });
+      return { id: band.id, label: band.label, items };
+    }).filter((g) => g.items.length > 0);
     return { kind: "near" as const, groups };
   }, [
     savedPlaces,
@@ -14481,7 +14485,7 @@ function HomePageContent() {
         ));
       }
 
-      // ── 가까운 순: 카테고리 그룹 (그룹 간·그룹 내 거리순) ──
+      // ── 가까운 순: 거리 구간 그룹 ──
       if (model.kind === "near_need_location") {
         return (
           <p className="emptyText" style={{ textAlign: "center" }}>
@@ -14507,18 +14511,18 @@ function HomePageContent() {
       }
 
       if (model.kind === "near") {
-        return model.groups.map(({ cat, items }) => (
-          <div key={cat} style={{ marginBottom: "28px" }}>
+        return model.groups.map(({ id, label, items }) => (
+          <div key={id} style={{ marginBottom: "28px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px", padding: "0 4px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
-              <span style={{ fontSize: "16px" }}>{CATEGORY_PIN[cat].emoji}</span>
-              <span style={{ fontSize: "14px", fontWeight: 600, color: CATEGORY_COLORS[cat], letterSpacing: "0.5px" }}>{cat}</span>
+              <span style={{ fontSize: "16px" }}>📍</span>
+              <span style={{ fontSize: "14px", fontWeight: 600, color: "#1a2a7a", letterSpacing: "0.5px" }}>{label}</span>
               <span style={{ fontSize: "11px", color: "#bbb", marginLeft: "4px" }}>{items.length}</span>
             </div>
             {items.map(({ place, meters, hasCoords }) =>
               renderFlatItem(
                 place,
                 hasCoords ? formatSavedPlaceDistanceM(meters) : "거리 정보 없음",
-                CATEGORY_COLORS[cat],
+                CATEGORY_COLORS[place.category],
                 CATEGORY_PIN[place.category]?.emoji,
               ),
             )}
