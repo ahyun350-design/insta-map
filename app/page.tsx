@@ -89,7 +89,12 @@ function truncateCourseLabelName(name: string, max = 16): string {
 
 type AdminStatusPayload = {
   today: { attempts: number; success: number; failed: number };
-  last7Days: { attempts: number; successRate: number };
+  last7Days: {
+    attempts: number;
+    successRate: number;
+    success?: number;
+    failed?: number;
+  };
   lastSuccessAt: string | null;
   stuckJobs: number;
   recentFailures: Array<{ error_message: string | null; at: string | null }>;
@@ -10597,7 +10602,10 @@ function HomePageContent() {
         if (!session?.access_token) return;
         const res = await fetch("/api/admin/status", {
           method: "GET",
-          headers: { Authorization: `Bearer ${session.access_token}` },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Cache-Control": "no-cache",
+          },
           cache: "no-store",
         });
         if (!res.ok) {
@@ -10617,6 +10625,35 @@ function HomePageContent() {
       cancelled = true;
     };
   }, [activeTab, user?.id]);
+
+  const refreshAdminStatus = useCallback(async () => {
+    if (!user?.id || user.id !== ADMIN_USER_ID) return;
+    setAdminStatusLoading(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+      const res = await fetch(`/api/admin/status?t=${Date.now()}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Cache-Control": "no-cache",
+        },
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        console.error("[PindMap:admin] status refresh failed", res.status);
+        return;
+      }
+      const data = (await res.json()) as AdminStatusPayload;
+      setAdminStatus(data);
+    } catch (e) {
+      console.error("[PindMap:admin] status refresh error", e);
+    } finally {
+      setAdminStatusLoading(false);
+    }
+  }, [user?.id]);
 
   /** 관리자: 앱 오픈 시 7일 간격 DB cleanup (백그라운드, 실패 무시) */
   useEffect(() => {
@@ -14320,6 +14357,7 @@ function HomePageContent() {
                             setAdminCardOpen((v) => {
                               const next = !v;
                               writeAdminStatusCardOpen(next);
+                              if (next) void refreshAdminStatus();
                               return next;
                             });
                           }}
@@ -14404,7 +14442,14 @@ function HomePageContent() {
                                     `성공 ${adminStatus.today.success} / 실패 ${adminStatus.today.failed}`,
                                     alertNoSuccess,
                                   )}
-                                  {row("7일 성공률", `${adminStatus.last7Days.successRate}%`, alertRate)}
+                                  {row(
+                                    "7일 성공률",
+                                    typeof adminStatus.last7Days.success === "number" &&
+                                      typeof adminStatus.last7Days.failed === "number"
+                                      ? `${adminStatus.last7Days.successRate}% (성공 ${adminStatus.last7Days.success} / 실패 ${adminStatus.last7Days.failed})`
+                                      : `${adminStatus.last7Days.successRate}%`,
+                                    alertRate,
+                                  )}
                                   {row(
                                     "마지막 성공",
                                     formatAdminHoursAgo(adminStatus.lastSuccessAt),

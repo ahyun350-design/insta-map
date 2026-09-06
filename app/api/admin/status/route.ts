@@ -176,26 +176,36 @@ export async function GET(req: Request) {
         null,
     }));
 
-    return NextResponse.json({
-      today: {
-        attempts: todayAttempts,
-        success: todaySuccess,
-        failed: todayFailed,
+    return NextResponse.json(
+      {
+        today: {
+          attempts: todayAttempts,
+          success: todaySuccess,
+          failed: todayFailed,
+        },
+        last7Days: {
+          attempts: weekAttempts,
+          success: weekSuccess,
+          failed: weekFailed,
+          successRate,
+        },
+        lastSuccessAt,
+        stuckJobs: stuckRes.count ?? 0,
+        recentFailures,
+        signups: {
+          today: todayUsersRes.count ?? 0,
+          total: totalUsersRes.count ?? 0,
+        },
+        activeUsers7d,
+        userEventsTotal: userEventsCountRes.count ?? 0,
       },
-      last7Days: {
-        attempts: weekAttempts,
-        successRate,
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+          Pragma: "no-cache",
+        },
       },
-      lastSuccessAt,
-      stuckJobs: stuckRes.count ?? 0,
-      recentFailures,
-      signups: {
-        today: todayUsersRes.count ?? 0,
-        total: totalUsersRes.count ?? 0,
-      },
-      activeUsers7d,
-      userEventsTotal: userEventsCountRes.count ?? 0,
-    });
+    );
   } catch (error) {
     console.error("[admin/status]", error);
     return NextResponse.json({ error: "status_failed" }, { status: 500 });
