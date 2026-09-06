@@ -104,9 +104,13 @@ export async function GET(req: Request) {
     const weekAgo = daysAgoIso(7, now);
     const stuckBefore = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
 
+    // NOTE: select().gte()로 행을 받아 JS에서 count하면 PostgREST 기본 max(1000)에
+    // 잘려 7일 성공률이 왜곡됨. 반드시 count:exact + head로 집계할 것.
     const [
-      todayJobsRes,
-      weekJobsRes,
+      todaySuccessRes,
+      todayFailedRes,
+      weekSuccessRes,
+      weekFailedRes,
       lastSuccessRes,
       stuckRes,
       recentFailRes,
@@ -115,8 +119,26 @@ export async function GET(req: Request) {
       activeUsers7d,
       userEventsCountRes,
     ] = await Promise.all([
-      admin.from("extract_jobs").select("id, status").gte("created_at", todayStart),
-      admin.from("extract_jobs").select("id, status").gte("created_at", weekAgo),
+      admin
+        .from("extract_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "completed")
+        .gte("created_at", todayStart),
+      admin
+        .from("extract_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "failed")
+        .gte("created_at", todayStart),
+      admin
+        .from("extract_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "completed")
+        .gte("created_at", weekAgo),
+      admin
+        .from("extract_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "failed")
+        .gte("created_at", weekAgo),
       admin
         .from("extract_jobs")
         .select("completed_at, updated_at")
@@ -140,8 +162,10 @@ export async function GET(req: Request) {
       admin.from("user_events").select("id", { count: "exact", head: true }),
     ]);
 
-    if (todayJobsRes.error) throw todayJobsRes.error;
-    if (weekJobsRes.error) throw weekJobsRes.error;
+    if (todaySuccessRes.error) throw todaySuccessRes.error;
+    if (todayFailedRes.error) throw todayFailedRes.error;
+    if (weekSuccessRes.error) throw weekSuccessRes.error;
+    if (weekFailedRes.error) throw weekFailedRes.error;
     if (lastSuccessRes.error) throw lastSuccessRes.error;
     if (stuckRes.error) throw stuckRes.error;
     if (recentFailRes.error) throw recentFailRes.error;
@@ -149,15 +173,13 @@ export async function GET(req: Request) {
     if (totalUsersRes.error) throw totalUsersRes.error;
     if (userEventsCountRes.error) throw userEventsCountRes.error;
 
-    const todayRows = todayJobsRes.data ?? [];
-    const todayAttempts = todayRows.length;
-    const todaySuccess = todayRows.filter((r) => r.status === "completed").length;
-    const todayFailed = todayRows.filter((r) => r.status === "failed").length;
+    const todaySuccess = todaySuccessRes.count ?? 0;
+    const todayFailed = todayFailedRes.count ?? 0;
+    const todayAttempts = todaySuccess + todayFailed;
 
-    const weekRows = weekJobsRes.data ?? [];
-    const weekSuccess = weekRows.filter((r) => r.status === "completed").length;
-    const weekFailed = weekRows.filter((r) => r.status === "failed").length;
-    // 성공률 = completed / (completed + failed). pending·processing·그 외는 분모에서 제외.
+    const weekSuccess = weekSuccessRes.count ?? 0;
+    const weekFailed = weekFailedRes.count ?? 0;
+    // 성공률 = completed / (completed + failed). 오늘 추출과 동일 정의.
     const weekDecided = weekSuccess + weekFailed;
     const successRate =
       weekDecided === 0 ? 0 : Math.round((weekSuccess / weekDecided) * 1000) / 10;

@@ -14444,10 +14444,7 @@ function HomePageContent() {
                                   )}
                                   {row(
                                     "7일 성공률",
-                                    typeof adminStatus.last7Days.success === "number" &&
-                                      typeof adminStatus.last7Days.failed === "number"
-                                      ? `${adminStatus.last7Days.successRate}% (성공 ${adminStatus.last7Days.success} / 실패 ${adminStatus.last7Days.failed})`
-                                      : `${adminStatus.last7Days.successRate}%`,
+                                    `${adminStatus.last7Days.successRate}% (성공 ${adminStatus.last7Days.success ?? 0} / 실패 ${adminStatus.last7Days.failed ?? 0})`,
                                     alertRate,
                                   )}
                                   {row(
