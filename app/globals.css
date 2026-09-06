@@ -4048,8 +4048,22 @@ select:focus-visible {
   margin: 0 0 10px;
 }
 
+.myListsDetailChrome {
+  flex-shrink: 0;
+  padding: 8px 16px 0;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 5;
+}
+
 .myListsDetailSortRow {
   margin: 0 0 12px;
+  position: relative;
+  z-index: 6;
+}
+
+.myListsSortMenu {
+  min-width: 188px;
 }
 
 .myListsDetailSearch {
@@ -4078,11 +4092,6 @@ select:focus-visible {
   padding: 6px 8px;
   cursor: pointer;
   font-family: inherit;
-}
-
-.myListsDetailListFiltered .myListsDragHandle {
-  opacity: 0.35;
-  cursor: not-allowed;
 }
 
 .myListsRemoveBtn {

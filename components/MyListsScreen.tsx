@@ -28,7 +28,7 @@ const LIST_SORT_OPTIONS: { id: ListSort; label: string }[] = [
   { id: "region", label: "지역순" },
   { id: "near", label: "가까운 순" },
   { id: "category", label: "카테고리순" },
-  { id: "custom", label: "내 순서" },
+  { id: "custom", label: "내 순서 (직접 정렬)" },
 ];
 
 const LIST_CATEGORY_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"];
@@ -127,6 +127,7 @@ export function MyListsScreen({
   const hasListsRef = useRef(false);
   const listsFetchedAtRef = useRef(0);
   const detailBodyRef = useRef<HTMLDivElement | null>(null);
+  const detailSortMenuRef = useRef<HTMLDivElement | null>(null);
   /** 지도에서 보기 등으로 잠시 닫힐 때 스크롤·상세 복원용 */
   const detailScrollTopRef = useRef(0);
   const preserveDetailOnHideRef = useRef(false);
@@ -409,11 +410,20 @@ export function MyListsScreen({
 
   useEffect(() => {
     if (!detailSortMenuOpen) return;
-    const onDoc = () => setDetailSortMenuOpen(false);
-    window.setTimeout(() => {
-      window.addEventListener("click", onDoc);
-    }, 0);
-    return () => window.removeEventListener("click", onDoc);
+    const onPointerDown = (event: PointerEvent) => {
+      if (!detailSortMenuRef.current?.contains(event.target as Node)) {
+        setDetailSortMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDetailSortMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
   }, [detailSortMenuOpen]);
 
   if (!open) return null;
@@ -719,6 +729,95 @@ export function MyListsScreen({
         )}
       </header>
 
+      {detailList && !detailLoading && places.length > 0 ? (
+        <div className="myListsDetailChrome">
+          <div className="myListsDetailSearchWrap">
+            <input
+              type="search"
+              className="myListsDetailSearch"
+              data-testid="list-detail-search"
+              value={detailSearchQuery}
+              onChange={(e) => setDetailSearchQuery(e.target.value)}
+              placeholder="장소·주소·메모 검색"
+              enterKeyHint="search"
+              autoCapitalize="none"
+              autoCorrect="off"
+            />
+            {detailSearchQuery.trim() ? (
+              <button
+                type="button"
+                className="myListsDetailSearchClear"
+                aria-label="검색 지우기"
+                onClick={() => setDetailSearchQuery("")}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+          <div className="savedSortRow myListsDetailSortRow">
+            <div
+              ref={detailSortMenuRef}
+              className={`savedSortDropdown${detailSortMenuOpen ? " savedSortDropdownOpen" : ""}`}
+            >
+              <button
+                type="button"
+                className="savedSortTrigger"
+                data-testid="list-sort-trigger"
+                aria-haspopup="listbox"
+                aria-expanded={detailSortMenuOpen}
+                aria-controls="list-sort-listbox"
+                onClick={() => setDetailSortMenuOpen((o) => !o)}
+              >
+                <span>
+                  {LIST_SORT_OPTIONS.find((o) => o.id === detailSort)?.label ?? "지역순"}
+                </span>
+                <svg className="savedSortChevron" viewBox="0 0 12 12" aria-hidden="true">
+                  <path
+                    d="M2.5 4.25L6 7.75L9.5 4.25"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              {detailSortMenuOpen && (
+                <ul
+                  id="list-sort-listbox"
+                  className="savedSortMenu myListsSortMenu"
+                  data-testid="list-sort-menu"
+                  role="listbox"
+                  aria-label="정렬 옵션"
+                >
+                  {LIST_SORT_OPTIONS.map((opt) => {
+                    const selected = detailSort === opt.id;
+                    return (
+                      <li key={opt.id} role="presentation">
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          className={`savedSortOption${selected ? " savedSortOptionActive" : ""}`}
+                          onClick={() => handleListSortChange(opt.id)}
+                        >
+                          <span>{opt.label}</span>
+                          {selected && (
+                            <span className="savedSortOptionCheck" aria-hidden>
+                              ✓
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="myListsBody" ref={detailBodyRef}>
         {!detailList ? (
           showListLoading ? (
@@ -753,77 +852,6 @@ export function MyListsScreen({
           </div>
         ) : (
           <>
-            <div className="myListsDetailSearchWrap">
-              <input
-                type="search"
-                className="myListsDetailSearch"
-                data-testid="list-detail-search"
-                value={detailSearchQuery}
-                onChange={(e) => setDetailSearchQuery(e.target.value)}
-                placeholder="장소·주소·메모 검색"
-                enterKeyHint="search"
-                autoCapitalize="none"
-                autoCorrect="off"
-              />
-              {detailSearchQuery.trim() ? (
-                <button
-                  type="button"
-                  className="myListsDetailSearchClear"
-                  aria-label="검색 지우기"
-                  onClick={() => setDetailSearchQuery("")}
-                >
-                  ×
-                </button>
-              ) : null}
-            </div>
-            <div className="savedSortRow myListsDetailSortRow">
-              <div className="savedSortWrap">
-                <button
-                  type="button"
-                  className="savedSortTrigger"
-                  data-testid="list-sort-trigger"
-                  aria-haspopup="listbox"
-                  aria-expanded={detailSortMenuOpen}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDetailSortMenuOpen((o) => !o);
-                  }}
-                >
-                  {LIST_SORT_OPTIONS.find((o) => o.id === detailSort)?.label ?? "지역순"}
-                  <span aria-hidden>▾</span>
-                </button>
-                {detailSortMenuOpen && (
-                  <ul
-                    className="savedSortMenu"
-                    data-testid="list-sort-menu"
-                    role="listbox"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {LIST_SORT_OPTIONS.map((opt) => {
-                      const selected = detailSort === opt.id;
-                      return (
-                        <li key={opt.id} role="presentation">
-                          <button
-                            type="button"
-                            role="option"
-                            aria-selected={selected}
-                            className={`savedSortOption${selected ? " savedSortOptionActive" : ""}`}
-                            onClick={() => handleListSortChange(opt.id)}
-                          >
-                            <span>{opt.label}</span>
-                            {selected && (
-                              <span className="savedSortOptionCheck" aria-hidden>
-                                ✓
-                              </span>
-                            )}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            </div>
             {(() => {
               const model = listPlacesModel;
               const renderRow = (
@@ -839,20 +867,24 @@ export function MyListsScreen({
                 return (
                   <li
                     key={place.id}
-                    className={`myListsDetailItem${removing ? " myListsDetailItemBusy" : ""}`}
+                    className={`myListsDetailItem${removing ? " myListsDetailItemBusy" : ""}${
+                      !dragEnabled ? " myListsDetailItemNoDrag" : ""
+                    }`}
                   >
-                    <button
-                      type="button"
-                      className="myListsDragHandle"
-                      aria-label="순서 변경"
-                      disabled={reordering || !!removingPlaceId || !dragEnabled || fullIndex < 0}
-                      onPointerDown={(e) => {
-                        if (!dragEnabled || fullIndex < 0) return;
-                        onDragHandlePointerDown(fullIndex, e);
-                      }}
-                    >
-                      ⠿
-                    </button>
+                    {dragEnabled ? (
+                      <button
+                        type="button"
+                        className="myListsDragHandle"
+                        aria-label="순서 변경"
+                        disabled={reordering || !!removingPlaceId || fullIndex < 0}
+                        onPointerDown={(e) => {
+                          if (fullIndex < 0) return;
+                          onDragHandlePointerDown(fullIndex, e);
+                        }}
+                      >
+                        ⠿
+                      </button>
+                    ) : null}
                     <span
                       className="myListsDetailColorBar"
                       style={{ background: color }}
@@ -941,9 +973,7 @@ export function MyListsScreen({
                 );
               }
 
-              const listClass = `myListsDetailList${reordering ? " myListsDetailListBusy" : ""}${
-                !dragEnabled ? " myListsDetailListFiltered" : ""
-              }`;
+              const listClass = `myListsDetailList${reordering ? " myListsDetailListBusy" : ""}`;
 
               if (model.kind === "custom") {
                 return (
