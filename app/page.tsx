@@ -170,6 +170,7 @@ import { FeedPostMedia } from "@/components/FeedPostCard";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import { AddToListSheet } from "@/components/AddToListSheet";
+import { PlaceMemoSheet } from "@/components/PlaceMemoSheet";
 import { MyListsScreen } from "@/components/MyListsScreen";
 import { CourseMapDesignOverlay } from "@/components/CourseMapDesignOverlay";
 import {
@@ -309,6 +310,7 @@ type Place = {
   lat?: number;
   lng?: number;
   created_at?: string;
+  memo?: string | null;
 };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
 
@@ -475,9 +477,12 @@ function mapPlaceRow(p: {
   lat?: unknown;
   lng?: unknown;
   created_at?: unknown;
+  memo?: unknown;
 }): Place {
   const coords = latLngFromRow(p);
   const createdAt = typeof p.created_at === "string" && p.created_at.trim() ? p.created_at.trim() : undefined;
+  const memoRaw = typeof p.memo === "string" ? p.memo.trim() : p.memo === null ? null : undefined;
+  const memo = memoRaw === undefined ? undefined : memoRaw ? memoRaw : null;
   return {
     id: p.id,
     name: p.name,
@@ -485,6 +490,7 @@ function mapPlaceRow(p: {
     category: p.category as Category,
     ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
     ...(createdAt ? { created_at: createdAt } : {}),
+    ...(memo !== undefined ? { memo } : {}),
   };
 }
 
@@ -1677,6 +1683,11 @@ function HomePageContent() {
     placeIds: string[];
     placeName?: string;
   } | null>(null);
+  const [placeMemoTarget, setPlaceMemoTarget] = useState<{
+    placeId: string;
+    placeName: string;
+    memo: string | null;
+  } | null>(null);
   const [savedPlaceMenuId, setSavedPlaceMenuId] = useState<string | null>(null);
   const savedPlaceMenuRef = useRef<HTMLDivElement | null>(null);
   const [savedSelectMode, setSavedSelectMode] = useState(false);
@@ -2017,6 +2028,36 @@ function HomePageContent() {
       }
       setSavedPlaceMenuId(null);
       setAddToListTarget({ placeIds: [place.id], placeName: place.name });
+    },
+    [showToast],
+  );
+
+  const applyPlaceMemoLocal = useCallback((placeId: string, nextMemo: string | null) => {
+    setSavedPlaces((prev) => {
+      const next = prev.map((p) =>
+        p.id === placeId ? { ...p, memo: nextMemo } : p,
+      );
+      savedPlacesRef.current = next;
+      const uid = userIdRef.current;
+      if (uid) void writeCachedPlaces(uid, next);
+      return next;
+    });
+  }, []);
+
+  const openPlaceMemoForSavedPlace = useCallback(
+    (place: Place) => {
+      if (!userIdRef.current) {
+        showToast("로그인 후 이용해주세요", "info");
+        return;
+      }
+      setSavedPlaceMenuId(null);
+      const memo =
+        typeof place.memo === "string" && place.memo.trim() ? place.memo.trim() : null;
+      setPlaceMemoTarget({
+        placeId: place.id,
+        placeName: place.name,
+        memo,
+      });
     },
     [showToast],
   );
@@ -3253,6 +3294,18 @@ function HomePageContent() {
     [resolveSavedMatch, openAddToListForSavedPlace, showToast],
   );
 
+  const openPlaceMemoFromPlaceSheet = useCallback(
+    (placeData: PlaceSheetData) => {
+      const match = resolveSavedMatch(placeData);
+      if (!match) {
+        showToast("저장한 장소에만 메모를 남길 수 있어요", "info");
+        return;
+      }
+      openPlaceMemoForSavedPlace(match);
+    },
+    [resolveSavedMatch, openPlaceMemoForSavedPlace, showToast],
+  );
+
   const canSubmit = useMemo(() => instagramUrl.trim().length > 0 && !isSubmitting, [instagramUrl, isSubmitting]);
   const postImagesAllUploaded = postImages.length > 0 && postImages.every((img) => img.status === "uploaded");
   const canPost =
@@ -3873,6 +3926,7 @@ function HomePageContent() {
                 lat: p.lat,
                 lng: p.lng,
                 created_at: p.created_at,
+                memo: p.memo,
               }),
             );
             asPlaces.forEach((place) => {
@@ -9972,7 +10026,8 @@ function HomePageContent() {
           (p) =>
             p.name.toLowerCase().includes(q) ||
             p.address.toLowerCase().includes(q) ||
-            p.category.toLowerCase().includes(q),
+            p.category.toLowerCase().includes(q) ||
+            (typeof p.memo === "string" && p.memo.toLowerCase().includes(q)),
         )
       : savedPlaces;
     if (filtered.length === 0) {
@@ -10582,15 +10637,21 @@ function HomePageContent() {
   const renderPlaceCard = () => {
     if (!selectedPlace) return null;
     const placeData = selectedPlace as PlaceSheetData;
+    const savedMatch = resolveSavedMatch(selectedPlace);
+    const savedMemo =
+      typeof savedMatch?.memo === "string" && savedMatch.memo.trim()
+        ? savedMatch.memo.trim()
+        : null;
     return (
       <PlaceDetailSheet
         place={placeData}
-        isSaved={!!resolveSavedMatch(selectedPlace)}
+        isSaved={!!savedMatch}
         layout="embedded"
         showDirections={!!(selectedPlace.y && selectedPlace.x)}
         directionsMode={directionsMode}
         directionsLoading={directionsLoading}
         directionsInfo={directionsInfo}
+        memo={savedMemo}
         onClose={() => {
           setSelectedPlace(null);
           setSelectedMapPlace(null);
@@ -10607,6 +10668,7 @@ function HomePageContent() {
           });
         }}
         onAddToList={() => openAddToListFromPlaceSheet(placeData)}
+        onEditMemo={savedMatch ? () => openPlaceMemoForSavedPlace(savedMatch) : undefined}
         onCurationClick={(postId, photoIndex) => {
           openPlaceCurationFromSheet(placeData, postId, photoIndex);
           setSelectedPlace(null);
@@ -13340,6 +13402,14 @@ function HomePageContent() {
                 <button
                   type="button"
                   role="menuitem"
+                  data-testid="saved-memo-open"
+                  onClick={() => openPlaceMemoForSavedPlace(place)}
+                >
+                  메모
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
                   onClick={() => {
                     setSavedPlaceMenuId(null);
                     handleSavedPlaceClick(place);
@@ -13394,6 +13464,11 @@ function HomePageContent() {
                 {place.address}
                 {metaExtra ? ` · ${metaExtra}` : ""}
               </p>
+              {place.memo?.trim() ? (
+                <p className="savedMemo" data-testid="saved-item-memo">
+                  {place.memo.trim()}
+                </p>
+              ) : null}
             </div>
             {renderSavedItemActions(place)}
           </article>
@@ -14060,11 +14135,20 @@ function HomePageContent() {
               directionsMode={directionsMode}
               directionsLoading={directionsLoading}
               directionsInfo={directionsInfo}
+              memo={(() => {
+                const m = resolveSavedMatch(selectedPlace)?.memo;
+                return typeof m === "string" && m.trim() ? m.trim() : null;
+              })()}
               onClose={() => {
                 closeCompactPlaceSheet();
               }}
               onToggleSave={() => { void togglePlaceSheetSave(selectedPlace as PlaceSheetData); }}
               onAddToList={() => openAddToListFromPlaceSheet(selectedPlace as PlaceSheetData)}
+              onEditMemo={
+                resolveSavedMatch(selectedPlace)
+                  ? () => openPlaceMemoFromPlaceSheet(selectedPlace as PlaceSheetData)
+                  : undefined
+              }
               onCurationClick={(postId, photoIndex) => {
                 placeSheetReturnRef.current = null;
                 openPlaceCurationFromSheet(selectedPlace as PlaceSheetData, postId, photoIndex);
@@ -14103,9 +14187,18 @@ function HomePageContent() {
                 place={homePlaceSheet}
                 isSaved={!!resolveSavedMatch(homePlaceSheet)}
                 layout="overlay"
+                memo={(() => {
+                  const m = resolveSavedMatch(homePlaceSheet)?.memo;
+                  return typeof m === "string" && m.trim() ? m.trim() : null;
+                })()}
                 onClose={() => setHomePlaceSheet(null)}
                 onToggleSave={() => { void togglePlaceSheetSave(homePlaceSheet); }}
                 onAddToList={() => openAddToListFromPlaceSheet(homePlaceSheet)}
+                onEditMemo={
+                  resolveSavedMatch(homePlaceSheet)
+                    ? () => openPlaceMemoFromPlaceSheet(homePlaceSheet)
+                    : undefined
+                }
                 onCurationClick={(postId, photoIndex) => {
                   setHomePlaceSheet(null);
                   openPlaceCurationFromSheet(homePlaceSheet, postId, photoIndex);
@@ -14134,6 +14227,7 @@ function HomePageContent() {
             onClose={() => setShowMyListsScreen(false)}
             onOpenPlace={(place) => {
               setShowMyListsScreen(false);
+              const fromSaved = savedPlacesRef.current.find((p) => p.id === place.id);
               handleSavedPlaceClick({
                 id: place.id,
                 name: place.name,
@@ -14142,6 +14236,7 @@ function HomePageContent() {
                 ...(typeof place.lat === "number" ? { lat: place.lat } : {}),
                 ...(typeof place.lng === "number" ? { lng: place.lng } : {}),
                 ...(place.created_at ? { created_at: place.created_at } : {}),
+                ...(fromSaved?.memo !== undefined ? { memo: fromSaved.memo } : {}),
               });
             }}
             showToast={showToast}
@@ -14157,6 +14252,23 @@ function HomePageContent() {
             onClose={() => setAddToListTarget(null)}
             onChanged={() => {
               if (savedSelectMode) exitSavedSelectMode();
+            }}
+            showToast={showToast}
+          />
+        )}
+        {user?.id && placeMemoTarget && (
+          <PlaceMemoSheet
+            open
+            placeId={placeMemoTarget.placeId}
+            placeName={placeMemoTarget.placeName}
+            initialMemo={placeMemoTarget.memo}
+            keyboardHeight={keyboardHeight}
+            onClose={() => setPlaceMemoTarget(null)}
+            onOptimisticSave={(placeId, nextMemo) => {
+              applyPlaceMemoLocal(placeId, nextMemo);
+            }}
+            onRollback={(placeId, prevMemo) => {
+              applyPlaceMemoLocal(placeId, prevMemo);
             }}
             showToast={showToast}
           />

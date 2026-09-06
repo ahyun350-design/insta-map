@@ -11,6 +11,7 @@ export type CachedPlace = {
   lat?: number;
   lng?: number;
   created_at?: string;
+  memo?: string | null;
 };
 
 export type CachedPlacesPayload = {
@@ -93,6 +94,12 @@ function parsePlace(raw: unknown): CachedPlace | null {
   if (typeof o.created_at === "string" && o.created_at.trim()) {
     place.created_at = o.created_at.trim();
   }
+  if (typeof o.memo === "string") {
+    const m = o.memo.trim();
+    place.memo = m ? m : null;
+  } else if (o.memo === null) {
+    place.memo = null;
+  }
   return place;
 }
 
@@ -125,6 +132,11 @@ export async function writeCachedPlaces(userId: string, places: CachedPlace[]): 
       ...(typeof p.created_at === "string" && p.created_at.trim()
         ? { created_at: p.created_at.trim() }
         : {}),
+      ...(typeof p.memo === "string" && p.memo.trim()
+        ? { memo: p.memo.trim() }
+        : p.memo === null
+          ? { memo: null }
+          : {}),
     })),
   };
   await prefsSet(CACHE_PLACES_KEY, JSON.stringify(payload));
@@ -159,7 +171,7 @@ export function placesCacheFingerprint(places: ReadonlyArray<CachedPlace>): stri
   return places
     .map(
       (p) =>
-        `${p.id}\t${p.name}\t${p.address}\t${p.category}\t${p.lat ?? ""}\t${p.lng ?? ""}\t${p.created_at ?? ""}`,
+        `${p.id}\t${p.name}\t${p.address}\t${p.category}\t${p.lat ?? ""}\t${p.lng ?? ""}\t${p.created_at ?? ""}\t${p.memo ?? ""}`,
     )
     .sort()
     .join("\n");

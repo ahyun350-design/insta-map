@@ -19,6 +19,10 @@ type Props = {
   onToggleSave: () => void;
   /** 저장한 장소를 내 목록에 담기 */
   onAddToList?: () => void;
+  /** 저장한 장소 개인 메모 편집 */
+  onEditMemo?: () => void;
+  /** 저장된 메모 표시용 */
+  memo?: string | null;
   onCurationClick: (postId: string, photoIndex?: number) => void;
   onImageLightbox: (url: string) => void;
   timeAgoLabel: (createdAt: string) => string;
@@ -101,6 +105,8 @@ export function PlaceDetailSheet({
   onClose,
   onToggleSave,
   onAddToList,
+  onEditMemo,
+  memo,
   onCurationClick,
   onImageLightbox,
   timeAgoLabel,
@@ -169,6 +175,12 @@ export function PlaceDetailSheet({
           </a>
         )}
 
+        {memo?.trim() ? (
+          <p className="placeDetailSheetMemo">
+            {memo.trim()}
+          </p>
+        ) : null}
+
         {onExpandMap && (
           <button
             type="button"
@@ -187,6 +199,16 @@ export function PlaceDetailSheet({
             onClick={onAddToList}
           >
             목록에 추가
+          </button>
+        )}
+
+        {onEditMemo && (
+          <button
+            type="button"
+            className="placeDetailSheetMemoBtn"
+            onClick={onEditMemo}
+          >
+            {memo?.trim() ? "메모 수정" : "메모 추가"}
           </button>
         )}
 
