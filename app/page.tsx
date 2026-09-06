@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense, type ClipboardEvent as ReactClipboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -115,8 +115,7 @@ import {
 import { useInAppNotifications } from "@/lib/useInAppNotifications";
 import { resolveUnauthenticatedPath } from "@/lib/onboarding";
 import { track } from "@/lib/track";
-import { cleanInstagramUrl } from "@/lib/instagramUrl";
-import { useClipboardInstagramSuggest } from "@/lib/useClipboardInstagramSuggest";
+import { cleanInstagramUrl, findInstagramPostUrlInText } from "@/lib/instagramUrl";
 import { maybeRunAdminCleanup, readAdminLastCleanupAt } from "@/lib/adminCleanup";
 import FeedSkeleton from "@/components/FeedSkeleton";
 import EmptyState from "@/components/EmptyState";
@@ -1588,19 +1587,6 @@ function HomePageContent() {
   const [expandedMapPinsTick, setExpandedMapPinsTick] = useState(0);
   const [showJobsModal, setShowJobsModal] = useState(false);
   const [activeJobs, setActiveJobs] = useState<ActiveExtractJob[]>([]);
-  const clipboardActiveUrls = useMemo(
-    () => activeJobs.map((j) => j.instagramUrl),
-    [activeJobs],
-  );
-  const {
-    suggestedUrl: clipboardSuggestedUrl,
-    dismiss: dismissClipboardSuggest,
-    accept: acceptClipboardSuggest,
-    clearBanner: clearClipboardBanner,
-  } = useClipboardInstagramSuggest({
-    userId: user?.id,
-    activeInstagramUrls: clipboardActiveUrls,
-  });
   const [showExtractOverlay, setShowExtractOverlay] = useState(false);
   const [extractOverlayComplete, setExtractOverlayComplete] = useState(false);
   const [extractOverlayError, setExtractOverlayError] = useState<string | null>(null);
@@ -1770,28 +1756,15 @@ function HomePageContent() {
   /** 결과의 다시 뽑기 — auto면 카운트 재추출, manual이면 선택 유지 재배치 */
   const [courseResultFromMode, setCourseResultFromMode] = useState<"auto" | "manual" | null>(null);
 
-  /** 클립보드 배너를 무시하고 다른 UI로 넘어가면 자동 숨김 (세션 「안 함」은 아님) */
-  useEffect(() => {
-    clearClipboardBanner();
-  }, [
-    activeTab,
-    mapExpanded,
-    selectedPlace,
-    showExtractOverlay,
-    detailPostId,
-    showCourseModal,
-    clearClipboardBanner,
-  ]);
   const [courseOriginMode, setCourseOriginMode] = useState<"current" | "manual">("current");
   const [courseOriginAddress, setCourseOriginAddress] = useState("");
   const [courseLoading, setCourseLoading] = useState(false);
   const [courseResult, setCourseResult] = useState<CoursePlace[] | null>(null);
   const [showCourseRoute, setShowCourseRoute] = useState(false);
-  /** 관리자 코스맵 실험 — 카카오 마커 대신 HTML 오버레이에 그릴 경로 */
+  /** 코스 경로 좌표(세그먼트 포커스/패딩용) — 네온/다크 HTML 오버레이 실험은 비활성 */
   const [courseDesignPath, setCourseDesignPath] = useState<LatLng[] | null>(null);
   const courseMapDesignActiveRef = useRef(false);
-  courseMapDesignActiveRef.current =
-    showCourseRoute && userIdRef.current === ADMIN_USER_ID;
+  courseMapDesignActiveRef.current = false;
   const [courseNavigation, setCourseNavigation] = useState<CourseWalkNavigation | null>(null);
   const [courseNavSegmentIndex, setCourseNavSegmentIndex] = useState<number | null>(null);
   const [courseNavFocusMode, setCourseNavFocusMode] = useState(false);
@@ -3151,16 +3124,6 @@ function HomePageContent() {
     if (!isNativeMapAvailable()) return;
 
     if (mapExpanded) {
-      // 관리자 코스 실험: 웹 딤 오버레이를 써야 하므로 네이티브 자동 present 금지
-      // (showCourseOnMap에서 네이티브를 스킵해도, 여기 effect가 다시 네이티브를 띄우고 있었음)
-      if (showCourseRoute && userIdRef.current === ADMIN_USER_ID) {
-        logAdminCourseMap(
-          userIdRef.current,
-          "mapExpanded effect: SKIP native auto-open (admin course design)",
-          { showCourseRoute, mapExpanded },
-        );
-        return;
-      }
       if (fullscreenAutoOpenedRef.current) return;
       fullscreenAutoOpenedRef.current = true;
       logAdminCourseMap(userIdRef.current, "mapExpanded effect: opening native fullscreen");
@@ -7649,7 +7612,8 @@ function HomePageContent() {
     track("course_map_view");
     const uid = userIdRef.current;
     const nativeAvail = isNativeMapAvailable();
-    const useAdminCourseMapDesign = uid === ADMIN_USER_ID;
+    // 네온/다크 코스맵 실험 비활성 — 관리자도 일반 사용자와 동일 경로
+    const useAdminCourseMapDesign = false;
     logAdminCourseMap(uid, "showCourseOnMap", {
       uid,
       uidLen: uid.length,
@@ -7670,9 +7634,8 @@ function HomePageContent() {
     fullscreenCourseNavigationRef.current = null;
     setCourseDesignPath(null);
     setActiveTab("map");
-    // 관리자 실험: iOS도 네이티브 대신 웹 전체화면 지도
     if (nativeAvail && !useAdminCourseMapDesign) {
-      logAdminCourseMap(uid, "showCourseOnMap → native branch (non-admin)");
+      logAdminCourseMap(uid, "showCourseOnMap → native branch");
       fullscreenCourseRef.current = [...courseResult];
       setMapExpanded(true);
       return;
@@ -7710,7 +7673,8 @@ function HomePageContent() {
     courseLabelOverlaysRef.current.forEach((o) => o.setMap(null));
     courseLabelOverlaysRef.current = [];
 
-    const useAdminCourseMapDesign = uid === ADMIN_USER_ID;
+    // 네온/다크 HTML 오버레이 분기 비활성 — 기본 카카오 마커·폴리라인만 사용
+    const useAdminCourseMapDesign = false;
     logAdminCourseMap(uid, "drawCourseRoute start", {
       useAdminCourseMapDesign,
       courseCount: courseResult.length,
@@ -7999,10 +7963,19 @@ function HomePageContent() {
     }
   };
 
-  const handleClipboardBannerAccept = () => {
-    const url = acceptClipboardSuggest();
-    if (url) void handleAddFromInstagram(url);
-  };
+  const handleInstagramUrlPaste = useCallback((e: ReactClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData?.getData("text")?.trim() ?? "";
+    if (!text) return;
+    const found = findInstagramPostUrlInText(text);
+    if (!found) return;
+    let domain = "instagram.com";
+    try {
+      domain = new URL(found).hostname.replace(/^www\./i, "");
+    } catch {
+      /* keep default */
+    }
+    track("link_pasted", { domain });
+  }, []);
 
   const uploadPostImageToServer = async (file: File, accessToken: string): Promise<string> => {
     devLog("[handleImageUpload] 원본", {
@@ -9960,7 +9933,8 @@ function HomePageContent() {
 
   useEffect(() => {
     const uid = userIdRef.current;
-    const adminCourse = showCourseRoute && uid === ADMIN_USER_ID;
+    // 관리자 코스 웹 포털 강제 생성 비활성 — 네이티브 가능 시 웹 맵 미생성
+    const adminCourse = false;
     const shouldCreateWebMap = mapExpanded && (!isNativeMapAvailable() || adminCourse);
 
     if (!shouldCreateWebMap || !mapExpandedRef.current || kakaoStatus !== "ready" || !isKakaoMapsApiReady()) {
@@ -10175,9 +10149,8 @@ function HomePageContent() {
 
   useEffect(() => {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
-    // 관리자 코스 디자인 오버레이: 저장 장소 카테고리 핀 전부 숨김 (코랄 핀만)
-    const hideSavedPinsForAdminCourse =
-      showCourseRoute && userIdRef.current === ADMIN_USER_ID;
+    // 네온/다크 코스맵 실험 비활성 — 저장 핀 숨김 없음
+    const hideSavedPinsForAdminCourse = false;
     if (hideSavedPinsForAdminCourse) {
       expandedMarkersRef.current.forEach((m) => {
         try {
@@ -13316,7 +13289,7 @@ function HomePageContent() {
                         릴스로 장소 추가하기
                       </button>
                       <p className="mapReelExpandHint">
-                        인스타 릴스 링크를 붙여넣으면 지도에 핀이 찍혀요
+                        인스타에서 링크를 복사한 뒤 여기에 붙여넣어 주세요
                       </p>
                     </>
                   ) : (
@@ -13333,9 +13306,10 @@ function HomePageContent() {
                           <input
                             ref={instagramUrlInputRef}
                             className="mapInputReel"
-                            placeholder="릴스·게시물 링크 붙여넣기"
+                            placeholder="인스타에서 링크를 복사한 뒤 여기에 붙여넣어 주세요"
                             value={instagramUrl}
                             onChange={(e) => setInstagramUrl(e.target.value)}
+                            onPaste={handleInstagramUrlPaste}
                           />
                           <button
                             className="mapReelSubmitBtn"
@@ -13355,26 +13329,6 @@ function HomePageContent() {
                         닫기
                       </button>
                     </>
-                  )}
-                  {clipboardSuggestedUrl && (
-                    <div className="clipboardInstagramBanner" role="status">
-                      <p className="clipboardInstagramBannerText">인스타 링크를 복사하셨네요</p>
-                      <button
-                        type="button"
-                        className="clipboardInstagramBannerSave"
-                        onClick={handleClipboardBannerAccept}
-                      >
-                        저장하기
-                      </button>
-                      <button
-                        type="button"
-                        className="clipboardInstagramBannerClose"
-                        aria-label="안 함"
-                        onClick={dismissClipboardSuggest}
-                      >
-                        안 함
-                      </button>
-                    </div>
                   )}
                 </div>
               </div>
@@ -13430,9 +13384,8 @@ function HomePageContent() {
               {kakaoStatus === "error" && <p className="emptyText">카카오맵 로딩에 실패했습니다.</p>}
               {(() => {
                 const nativeAvail = isNativeMapAvailable();
-                const adminCourseWebPortal =
-                  showCourseRoute &&
-                  (user?.id === ADMIN_USER_ID || userIdRef.current === ADMIN_USER_ID);
+                // 네온/다크 코스맵용 웹 포털 강제 비활성
+                const adminCourseWebPortal = false;
                 const showWebExpandedPortal =
                   mapExpanded &&
                   (!nativeAvail || adminCourseWebPortal) &&
@@ -13604,14 +13557,8 @@ function HomePageContent() {
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
                       <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
                       {(() => {
-                        const canMountAdminOverlay =
-                          !!showCourseRoute &&
-                          user?.id === ADMIN_USER_ID &&
-                          !!courseResult &&
-                          courseResult.length > 0 &&
-                          mapExpanded &&
-                          expandedMapPinsTick > 0 &&
-                          !!expandedMapRef.current;
+                        // 네온/다크 CourseMapDesignOverlay 비활성 — 기본 지도 스타일만
+                        const canMountAdminOverlay = false;
                         if (user?.id === ADMIN_USER_ID && showCourseRoute) {
                           logAdminCourseMap(user.id, "render gate", {
                             showCourseRoute,
@@ -13715,9 +13662,7 @@ function HomePageContent() {
                           onNextSegment={handleCourseNavNextSegment}
                           onToggleFocusMode={handleCourseNavToggleFocusMode}
                           onShowFullRoute={handleCourseNavShowFullRoute}
-                          darkTone={
-                            user?.id === ADMIN_USER_ID || userIdRef.current === ADMIN_USER_ID
-                          }
+                          darkTone={false}
                           showTurnByTurn={
                             user?.id === ADMIN_USER_ID || userIdRef.current === ADMIN_USER_ID
                           }
@@ -13788,7 +13733,7 @@ function HomePageContent() {
                     <EmptyState
                       icon=""
                       title="아직 핀이 없어요"
-                      description="인스타그램 릴스나 게시물 URL을 붙여넣으면 지도에 자동으로 핀이 찍혀요"
+                      description="인스타에서 링크를 복사한 뒤 붙여넣으면 지도에 핀이 찍혀요"
                       action={{
                         label: "릴스 붙여넣기",
                         onClick: () => {

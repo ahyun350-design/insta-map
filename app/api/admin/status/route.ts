@@ -155,10 +155,13 @@ export async function GET(req: Request) {
     const todayFailed = todayRows.filter((r) => r.status === "failed").length;
 
     const weekRows = weekJobsRes.data ?? [];
-    const weekAttempts = weekRows.length;
     const weekSuccess = weekRows.filter((r) => r.status === "completed").length;
+    const weekFailed = weekRows.filter((r) => r.status === "failed").length;
+    // 성공률 = completed / (completed + failed). pending·processing·그 외는 분모에서 제외.
+    const weekDecided = weekSuccess + weekFailed;
     const successRate =
-      weekAttempts === 0 ? 0 : Math.round((weekSuccess / weekAttempts) * 1000) / 10;
+      weekDecided === 0 ? 0 : Math.round((weekSuccess / weekDecided) * 1000) / 10;
+    const weekAttempts = weekDecided;
 
     const lastRow = lastSuccessRes.data?.[0] as
       | { completed_at?: string | null; updated_at?: string | null }

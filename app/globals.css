@@ -48,6 +48,18 @@ body {
   color: var(--black);
 }
 
+/* 포커스 링 — iOS 기본 파란 대신 앱 브랜드 남색 (#1a2a7a) */
+input:focus,
+textarea:focus,
+select:focus,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid #1a2a7a;
+  outline-offset: 1px;
+  border-color: #1a2a7a;
+}
+
 /* ── 레이아웃 ── */
 .mobileRoot {
   min-height: 100vh;
@@ -699,6 +711,8 @@ body {
 }
 
 .curationFormField:focus {
+  outline: 2px solid #1a2a7a;
+  outline-offset: 1px;
   border-color: #1a2a7a;
   background: #fff;
 }
@@ -2806,9 +2820,11 @@ body {
 }
 
 .screenMapTab .mapInputReel:focus {
-  outline: none;
+  outline: 2px solid #1a2a7a;
+  outline-offset: 1px;
   background: #fff;
-  box-shadow: 0 0 0 1.5px rgba(26, 42, 122, 0.15);
+  box-shadow: none;
+  border-color: #1a2a7a;
 }
 
 .screenMapTab .mapReelSubmitBtn {
@@ -3044,7 +3060,9 @@ body {
 }
 
 .mapInput:focus {
-  border-color: var(--navy);
+  outline: 2px solid #1a2a7a;
+  outline-offset: 1px;
+  border-color: #1a2a7a;
 }
 
 /* 프로필 편집 바텀시트 입력 */
@@ -3066,7 +3084,10 @@ body {
 }
 
 .profileEditField:focus {
-  box-shadow: inset 0 0 0 1px #d4d4d4;
+  outline: 2px solid #1a2a7a;
+  outline-offset: 1px;
+  border-color: #1a2a7a;
+  box-shadow: none;
 }
 
 .profileEditBioField {
@@ -4152,6 +4173,12 @@ body {
   min-height: 56px;
 }
 
+.placeMemoSheetInput:focus {
+  outline: 2px solid #1a2a7a;
+  outline-offset: 1px;
+  border-color: #1a2a7a;
+}
+
 .placeMemoSheetCounter {
   margin: 6px 0 0;
   font-size: 11px;
@@ -4730,7 +4757,8 @@ body {
 }
 
 .courseShareModalSearch:focus {
-  outline: none;
+  outline: 2px solid #1a2a7a;
+  outline-offset: 1px;
   border-color: #1a2a7a;
   background: #fff;
 }
