@@ -1863,6 +1863,16 @@ function HomePageContent() {
     | { type: "curation"; postId: string; fromTab?: TabId }
     | null
   >(null);
+  /** 장소 시트 → 큐레이션 상세 후 닫을 때 시트 복원 */
+  const placeSheetResumeAfterDetailRef = useRef<{
+    place: PlaceSheetData;
+    returnTo:
+      | { type: "saved" }
+      | { type: "list" }
+      | { type: "curation"; postId: string; fromTab?: TabId }
+      | null;
+  } | null>(null);
+  const homePlaceSheetResumeRef = useRef<PlaceSheetData | null>(null);
   const detailOpenPerfRef = useRef<{ postId: string; t: number } | null>(null);
   const detailOpenLoggedRef = useRef<string | null>(null);
   const pollInFlightRef = useRef<Set<string>>(new Set());
@@ -3502,7 +3512,12 @@ function HomePageContent() {
 
   /** 장소 시트 _feedPosts(관련 큐레이션) → 목록/단건. 1개면 상세, 2개+면 목록 */
   const openPlaceCurationFromSheet = useCallback(
-    (place: PlaceSheetData, clickedPostId: string, photoIndex?: number) => {
+    (
+      place: PlaceSheetData,
+      clickedPostId: string,
+      photoIndex?: number,
+      opts?: { forceDetail?: boolean },
+    ) => {
       const sheetPosts = place._feedPosts ?? [];
       const feedSnapshot = feedPostsRef.current;
       const resolved: FeedPost[] = [];
@@ -3524,19 +3539,31 @@ function HomePageContent() {
         if (one) resolved.push(one);
       }
 
+      const openSingleDetail = (id: string, post: FeedPost | undefined) => {
+        const placeRef = place._placeRef ?? placeRefFromPlaceSheet(place);
+        const idx =
+          typeof photoIndex === "number" && Number.isFinite(photoIndex)
+            ? Math.max(0, Math.floor(photoIndex))
+            : post
+              ? getFirstMatchingPhotoIndex(post, placeRef)
+              : 0;
+        setDetailEntryPhotoIndex(idx);
+        setDetailPostId(id);
+      };
+
+      if (opts?.forceDetail && clickedPostId) {
+        const post =
+          resolved.find((p) => p.id === clickedPostId) ??
+          feedSnapshot.find((p) => p.id === clickedPostId);
+        openSingleDetail(clickedPostId, post);
+        return;
+      }
+
       if (resolved.length <= 1) {
         const id = resolved[0]?.id || clickedPostId;
         if (id) {
           const post = resolved[0] ?? feedSnapshot.find((p) => p.id === id);
-          const placeRef = place._placeRef ?? placeRefFromPlaceSheet(place);
-          const idx =
-            typeof photoIndex === "number" && Number.isFinite(photoIndex)
-              ? Math.max(0, Math.floor(photoIndex))
-              : post
-                ? getFirstMatchingPhotoIndex(post, placeRef)
-                : 0;
-          setDetailEntryPhotoIndex(idx);
-          setDetailPostId(id);
+          openSingleDetail(id, post);
         }
         return;
       }
@@ -3566,6 +3593,8 @@ function HomePageContent() {
     if (returnToFullscreenMapAfterDetailRef.current) {
       returnToFullscreenMapAfterDetailRef.current = false;
       fullscreenRestorePendingRef.current = true;
+      placeSheetResumeAfterDetailRef.current = null;
+      homePlaceSheetResumeRef.current = null;
       setDetailPostId(null);
       setScrollToComment(false);
       setDetailReturnTo(null);
@@ -3573,6 +3602,37 @@ function HomePageContent() {
       setMapExpanded(true);
       return;
     }
+
+    const sheetResume = placeSheetResumeAfterDetailRef.current;
+    if (sheetResume) {
+      placeSheetResumeAfterDetailRef.current = null;
+      setScrollToComment(false);
+      setDetailReturnTo(null);
+      setDetailPostId(null);
+      placeSheetReturnRef.current = sheetResume.returnTo;
+      setSelectedPlace(sheetResume.place);
+      const returnTo = sheetResume.returnTo;
+      if (returnTo?.type === "saved") {
+        setActiveTab("saved");
+      } else if (returnTo?.type === "list") {
+        setActiveTab("saved");
+        setShowMyListsScreen(true);
+      } else {
+        setActiveTab("map");
+      }
+      return;
+    }
+
+    const homeResume = homePlaceSheetResumeRef.current;
+    if (homeResume) {
+      homePlaceSheetResumeRef.current = null;
+      setScrollToComment(false);
+      setDetailReturnTo(null);
+      setDetailPostId(null);
+      setHomePlaceSheet(homeResume);
+      return;
+    }
+
     const ret = detailReturnTo;
     setScrollToComment(false);
     setDetailReturnTo(null);
@@ -11327,8 +11387,12 @@ function HomePageContent() {
         }}
         onAddToList={() => openAddToListFromPlaceSheet(placeData)}
         onEditMemo={savedMatch ? () => openPlaceMemoForSavedPlace(savedMatch) : undefined}
-        onCurationClick={(postId, photoIndex) => {
-          openPlaceCurationFromSheet(placeData, postId, photoIndex);
+        onCurationClick={(postId, photoIndex, opts) => {
+          placeSheetResumeAfterDetailRef.current = {
+            place: placeData,
+            returnTo: placeSheetReturnRef.current,
+          };
+          openPlaceCurationFromSheet(placeData, postId, photoIndex, opts);
           setSelectedPlace(null);
           setMapExpanded(false);
         }}
@@ -15158,10 +15222,17 @@ function HomePageContent() {
                   ? () => openPlaceMemoFromPlaceSheet(selectedPlace as PlaceSheetData)
                   : undefined
               }
-              onCurationClick={(postId, photoIndex) => {
-                placeSheetReturnRef.current = null;
-                clearFocusPlaceMarker();
-                openPlaceCurationFromSheet(selectedPlace as PlaceSheetData, postId, photoIndex);
+              onCurationClick={(postId, photoIndex, opts) => {
+                placeSheetResumeAfterDetailRef.current = {
+                  place: selectedPlace as PlaceSheetData,
+                  returnTo: placeSheetReturnRef.current,
+                };
+                openPlaceCurationFromSheet(
+                  selectedPlace as PlaceSheetData,
+                  postId,
+                  photoIndex,
+                  opts,
+                );
                 setSelectedPlace(null);
               }}
               onImageLightbox={setLightboxImg}
@@ -15209,9 +15280,10 @@ function HomePageContent() {
                     ? () => openPlaceMemoFromPlaceSheet(homePlaceSheet)
                     : undefined
                 }
-                onCurationClick={(postId, photoIndex) => {
+                onCurationClick={(postId, photoIndex, opts) => {
+                  homePlaceSheetResumeRef.current = homePlaceSheet;
                   setHomePlaceSheet(null);
-                  openPlaceCurationFromSheet(homePlaceSheet, postId, photoIndex);
+                  openPlaceCurationFromSheet(homePlaceSheet, postId, photoIndex, opts);
                 }}
                 onImageLightbox={setLightboxImg}
                 timeAgoLabel={timeAgo}

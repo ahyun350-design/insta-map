@@ -2,7 +2,10 @@
 
 import { useCallback, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
-import { getFirstMatchingPhotoIndex, getRelatedPostImagesForPlace } from "@/lib/photoPlaceTag";
+import {
+  getFirstMatchingPhotoIndex,
+  getRelatedPostImageEntriesForPlace,
+} from "@/lib/photoPlaceTag";
 import { placeRefFromPlaceSheet, type PlaceSheetData, type PlaceSheetFeedPost } from "@/lib/placeSheet";
 
 type DirectionsMode = "car" | "walk";
@@ -23,7 +26,12 @@ type Props = {
   onEditMemo?: () => void;
   /** 저장된 메모 표시용 */
   memo?: string | null;
-  onCurationClick: (postId: string, photoIndex?: number) => void;
+  onCurationClick: (
+    postId: string,
+    photoIndex?: number,
+    opts?: { forceDetail?: boolean },
+  ) => void;
+  /** 다른 화면(피드 등) 확대용 — 시트 큐레이션 이미지는 사용하지 않음 */
   onImageLightbox: (url: string) => void;
   timeAgoLabel: (createdAt: string) => string;
   onOpenAppleMaps?: () => void;
@@ -35,15 +43,15 @@ type Props = {
 };
 
 function PlaceDetailCurationImages({
-  images,
-  onImageLightbox,
+  entries,
+  onImageSelect,
 }: {
-  images: string[];
-  onImageLightbox: (url: string) => void;
+  entries: { src: string; photoIndex: number }[];
+  onImageSelect: (photoIndex: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
-  const multi = images.length > 1;
+  const multi = entries.length > 1;
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -51,19 +59,19 @@ function PlaceDetailCurationImages({
     setActiveIndex(Math.round(el.scrollLeft / el.clientWidth));
   }, []);
 
-  if (images.length === 0) return null;
+  if (entries.length === 0) return null;
 
   if (!multi) {
     return (
       <div className="placeDetailSheetCurationImages" onClick={(e) => e.stopPropagation()}>
         <img
-          src={images[0]}
+          src={entries[0].src}
           alt=""
           loading="lazy"
           decoding="async"
           onClick={(ev) => {
             ev.stopPropagation();
-            onImageLightbox(images[0]);
+            onImageSelect(entries[0].photoIndex);
           }}
         />
       </div>
@@ -73,22 +81,22 @@ function PlaceDetailCurationImages({
   return (
     <div onClick={(e) => e.stopPropagation()}>
       <div ref={scrollRef} className="placeDetailSheetCurationCarousel" onScroll={onScroll}>
-        {images.map((img, i) => (
+        {entries.map((entry) => (
           <img
-            key={`${img}-${i}`}
-            src={img}
+            key={`${entry.src}-${entry.photoIndex}`}
+            src={entry.src}
             alt=""
             className="placeDetailSheetCurationCarouselImg"
             decoding="async"
             onClick={(ev) => {
               ev.stopPropagation();
-              onImageLightbox(img);
+              onImageSelect(entry.photoIndex);
             }}
           />
         ))}
       </div>
       <p className="placeDetailSheetCurationPage" aria-hidden>
-        {activeIndex + 1}/{images.length}
+        {activeIndex + 1}/{entries.length}
       </p>
     </div>
   );
@@ -108,7 +116,7 @@ export function PlaceDetailSheet({
   onEditMemo,
   memo,
   onCurationClick,
-  onImageLightbox,
+  onImageLightbox: _onImageLightbox,
   timeAgoLabel,
   onOpenAppleMaps,
   onExpandMap,
@@ -118,6 +126,7 @@ export function PlaceDetailSheet({
 }: Props) {
   const relatedPosts: PlaceSheetFeedPost[] = place._feedPosts ?? [];
   const placeRef = placeRefFromPlaceSheet(place);
+  void _onImageLightbox;
   const heartFill = isSaved ? "#e53935" : "none";
   const heartStroke = isSaved ? "#e53935" : "#1a2a7a";
   const lat = parseFloat(String(place.y ?? ""));
@@ -275,7 +284,7 @@ export function PlaceDetailSheet({
         <div className="placeDetailSheetCurations">
           <p className="placeDetailSheetCurationsTitle">큐레이션 {relatedPosts.length}</p>
           {relatedPosts.map((post) => {
-            const displayImages = getRelatedPostImagesForPlace(post, placeRef);
+            const entries = getRelatedPostImageEntriesForPlace(post, placeRef);
             return (
               <button
                 key={post.id}
@@ -289,7 +298,12 @@ export function PlaceDetailSheet({
                   <span className="placeDetailSheetCurationTime">{timeAgoLabel(post.createdAt)}</span>
                 </div>
                 <p className="placeDetailSheetCurationTitle">{post.title || post.placeName}</p>
-                <PlaceDetailCurationImages images={displayImages} onImageLightbox={onImageLightbox} />
+                <PlaceDetailCurationImages
+                  entries={entries}
+                  onImageSelect={(photoIndex) =>
+                    onCurationClick(post.id, photoIndex, { forceDetail: true })
+                  }
+                />
                 <p className="placeDetailSheetCurationComment">{post.comment}</p>
                 <div className="placeDetailSheetCurationStats">
                   <span style={{ color: post.liked_by_me ? "#e05555" : "#ccc" }}>♥ {post.likes_count}</span>

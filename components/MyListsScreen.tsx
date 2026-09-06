@@ -22,6 +22,40 @@ import {
 
 type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 
+type ListSort = "custom" | "region" | "near" | "category";
+
+const LIST_SORT_OPTIONS: { id: ListSort; label: string }[] = [
+  { id: "custom", label: "내 순서" },
+  { id: "region", label: "지역순" },
+  { id: "near", label: "가까운 순" },
+  { id: "category", label: "카테고리순" },
+];
+
+const LIST_CATEGORY_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"];
+
+function extractListRegion(address: string): string {
+  if (!address) return "기타";
+  const parts = address.trim().split(/\s+/);
+  if (parts.length >= 2) return `${parts[0]} ${parts[1]}`;
+  return parts[0] || "기타";
+}
+
+function listDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatListDistanceM(meters: number): string {
+  if (meters < 1000) return `${Math.round(meters)}m`;
+  return `${(meters / 1000).toFixed(1)}km`;
+}
+
 type Props = {
   open: boolean;
   userId: string;
@@ -63,7 +97,12 @@ export function MyListsScreen({
   const [reordering, setReordering] = useState(false);
   const [removingPlaceId, setRemovingPlaceId] = useState<string | null>(null);
   const [detailSearchQuery, setDetailSearchQuery] = useState("");
+  const [detailSort, setDetailSort] = useState<ListSort>("custom");
+  const [detailSortMenuOpen, setDetailSortMenuOpen] = useState(false);
   const [detailCategoryFilter, setDetailCategoryFilter] = useState<"all" | Category>("all");
+  const [nearOrigin, setNearOrigin] = useState<{ lat: number; lng: number } | null>(null);
+  const [nearLocating, setNearLocating] = useState(false);
+  const [nearDenied, setNearDenied] = useState(false);
   const [menuPlaceId, setMenuPlaceId] = useState<string | null>(null);
   const [menuClosing, setMenuClosing] = useState(false);
 
@@ -132,6 +171,8 @@ export function MyListsScreen({
       setEditingTitle(false);
       setConfirmDelete(false);
       setDetailSearchQuery("");
+      setDetailSort("custom");
+      setDetailSortMenuOpen(false);
       setDetailCategoryFilter("all");
       setMenuPlaceId(null);
       setDetailLoading(true);
@@ -157,6 +198,8 @@ export function MyListsScreen({
         setDeletingList(false);
         setRemovingPlaceId(null);
         setDetailSearchQuery("");
+        setDetailSort("custom");
+        setDetailSortMenuOpen(false);
         setDetailCategoryFilter("all");
         detailScrollTopRef.current = 0;
       }
@@ -186,6 +229,8 @@ export function MyListsScreen({
     setDeletingList(false);
     setRemovingPlaceId(null);
     setDetailSearchQuery("");
+    setDetailSort("custom");
+    setDetailSortMenuOpen(false);
     setDetailCategoryFilter("all");
     setMenuPlaceId(null);
     setMenuClosing(false);
@@ -222,8 +267,40 @@ export function MyListsScreen({
   }, [menuClosing]);
 
   const searchActive = detailSearchQuery.trim().length > 0;
-  const categoryFilterActive = detailCategoryFilter !== "all";
-  const listFilterActive = searchActive || categoryFilterActive;
+  const dragEnabled = detailSort === "custom" && !searchActive;
+
+  const requestNearOrigin = useCallback(() => {
+    if (!navigator.geolocation) {
+      setNearDenied(true);
+      setNearLocating(false);
+      return;
+    }
+    setNearLocating(true);
+    setNearDenied(false);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setNearOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setNearLocating(false);
+        setNearDenied(false);
+      },
+      () => {
+        setNearLocating(false);
+        setNearDenied(true);
+      },
+      { enableHighAccuracy: true, timeout: 12_000 },
+    );
+  }, []);
+
+  const handleListSortChange = useCallback(
+    (next: ListSort) => {
+      setDetailSort(next);
+      setDetailSortMenuOpen(false);
+      if (next === "near" && !nearOrigin) {
+        requestNearOrigin();
+      }
+    },
+    [nearOrigin, requestNearOrigin],
+  );
 
   const categoryChipItems = useMemo(() => {
     const counts = new Map<Category, number>();
@@ -236,25 +313,115 @@ export function MyListsScreen({
       .map(([cat, count]) => ({ cat, count }));
   }, [places]);
 
-  const filteredPlaces = useMemo(() => {
+  const listPlacesModel = useMemo(() => {
     const q = detailSearchQuery.trim().toLowerCase();
-    return places.filter((place) => {
-      if (detailCategoryFilter !== "all" && place.category !== detailCategoryFilter) {
-        return false;
-      }
-      if (!q) return true;
-      const memo = resolveMemo(place) ?? "";
-      return (
-        place.name.toLowerCase().includes(q) ||
-        place.address.toLowerCase().includes(q) ||
-        memo.toLowerCase().includes(q)
+    const searchFiltered = q
+      ? places.filter((place) => {
+          const memo = resolveMemo(place) ?? "";
+          return (
+            place.name.toLowerCase().includes(q) ||
+            place.address.toLowerCase().includes(q) ||
+            memo.toLowerCase().includes(q)
+          );
+        })
+      : places;
+    if (searchFiltered.length === 0) {
+      return { kind: "empty_search" as const };
+    }
+
+    const applyCategory = detailSort === "near" && detailCategoryFilter !== "all";
+    const filtered = applyCategory
+      ? searchFiltered.filter((p) => p.category === detailCategoryFilter)
+      : searchFiltered;
+    if (filtered.length === 0) {
+      return { kind: "empty_category" as const };
+    }
+
+    if (detailSort === "custom") {
+      return { kind: "custom" as const, places: filtered };
+    }
+
+    if (detailSort === "region") {
+      const regions = new Map<string, PlaceListPlace[]>();
+      filtered.forEach((p) => {
+        const region = extractListRegion(p.address);
+        if (!regions.has(region)) regions.set(region, []);
+        regions.get(region)!.push(p);
+      });
+      const sorted = Array.from(regions.entries()).sort((a, b) =>
+        a[0].localeCompare(b[0], "ko"),
       );
+      return {
+        kind: "region" as const,
+        regions: sorted.map(([region, regionPlaces]) => ({
+          region,
+          regionPlaces,
+          categories: LIST_CATEGORY_ORDER.map((cat) => ({
+            cat,
+            places: regionPlaces.filter((p) => p.category === cat),
+          })).filter((g) => g.places.length > 0),
+        })),
+      };
+    }
+
+    if (detailSort === "category") {
+      return {
+        kind: "category" as const,
+        groups: LIST_CATEGORY_ORDER.map((cat) => ({
+          cat,
+          places: filtered.filter((p) => p.category === cat),
+        })).filter((g) => g.places.length > 0),
+      };
+    }
+
+    // near
+    if (!nearOrigin) {
+      return {
+        kind: "near_need_location" as const,
+        locating: nearLocating,
+        denied: nearDenied,
+      };
+    }
+    const withDist = filtered.map((place) => {
+      const hasCoords =
+        typeof place.lat === "number" &&
+        Number.isFinite(place.lat) &&
+        typeof place.lng === "number" &&
+        Number.isFinite(place.lng);
+      const meters = hasCoords
+        ? listDistanceMeters(nearOrigin.lat, nearOrigin.lng, place.lat!, place.lng!)
+        : Number.POSITIVE_INFINITY;
+      return { place, meters, hasCoords };
     });
-  }, [places, detailSearchQuery, detailCategoryFilter, resolveMemo]);
+    withDist.sort((a, b) => {
+      if (a.hasCoords !== b.hasCoords) return a.hasCoords ? -1 : 1;
+      if (a.meters !== b.meters) return a.meters - b.meters;
+      return a.place.name.localeCompare(b.place.name, "ko");
+    });
+    return { kind: "near" as const, items: withDist };
+  }, [
+    places,
+    detailSearchQuery,
+    detailSort,
+    detailCategoryFilter,
+    nearOrigin,
+    nearLocating,
+    nearDenied,
+    resolveMemo,
+  ]);
 
   const handleCategoryFilterChange = useCallback((next: "all" | Category) => {
     setDetailCategoryFilter((prev) => (prev === next && next !== "all" ? "all" : next));
   }, []);
+
+  useEffect(() => {
+    if (!detailSortMenuOpen) return;
+    const onDoc = () => setDetailSortMenuOpen(false);
+    window.setTimeout(() => {
+      window.addEventListener("click", onDoc);
+    }, 0);
+    return () => window.removeEventListener("click", onDoc);
+  }, [detailSortMenuOpen]);
 
   if (!open) return null;
 
@@ -293,7 +460,7 @@ export function MyListsScreen({
   const onDragHandlePointerDown = (index: number, e: ReactPointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (reordering || listFilterActive) return;
+    if (reordering || !dragEnabled) return;
     const handle = e.currentTarget;
     handle.setPointerCapture(e.pointerId);
     const initial = placesRef.current.slice();
@@ -501,6 +668,9 @@ export function MyListsScreen({
                 setConfirmDelete(false);
                 setEditingTitle(false);
                 setDetailSearchQuery("");
+                setDetailSort("custom");
+                setDetailSortMenuOpen(false);
+                setDetailCategoryFilter("all");
                 setMenuPlaceId(null);
               }}
             >
@@ -614,133 +784,339 @@ export function MyListsScreen({
                 </button>
               ) : null}
             </div>
-            <div
-              className="savedCategoryChips"
-              data-testid="list-category-chips"
-              role="tablist"
-              aria-label="카테고리 필터"
-            >
-              <button
-                type="button"
-                role="tab"
-                data-testid="list-category-chip"
-                aria-selected={detailCategoryFilter === "all"}
-                className={`savedCategoryChip${detailCategoryFilter === "all" ? " savedCategoryChipSelected" : ""}`}
-                onClick={() => handleCategoryFilterChange("all")}
-              >
-                전체
-              </button>
-              {categoryChipItems.map(({ cat, count }) => {
-                const selected = detailCategoryFilter === cat;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    role="tab"
-                    data-testid="list-category-chip"
-                    aria-selected={selected}
-                    className={`savedCategoryChip${selected ? " savedCategoryChipSelected" : ""}`}
-                    onClick={() => handleCategoryFilterChange(selected ? "all" : cat)}
+            <div className="savedSortRow myListsDetailSortRow">
+              <div className="savedSortWrap">
+                <button
+                  type="button"
+                  className="savedSortTrigger"
+                  data-testid="list-sort-trigger"
+                  aria-haspopup="listbox"
+                  aria-expanded={detailSortMenuOpen}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDetailSortMenuOpen((o) => !o);
+                  }}
+                >
+                  {LIST_SORT_OPTIONS.find((o) => o.id === detailSort)?.label ?? "내 순서"}
+                  <span aria-hidden>▾</span>
+                </button>
+                {detailSortMenuOpen && (
+                  <ul
+                    className="savedSortMenu"
+                    data-testid="list-sort-menu"
+                    role="listbox"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    {categoryPin[cat]?.emoji ?? "📍"} {cat} {count}
-                  </button>
-                );
-              })}
+                    {LIST_SORT_OPTIONS.map((opt) => {
+                      const selected = detailSort === opt.id;
+                      return (
+                        <li key={opt.id} role="presentation">
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            className={`savedSortOption${selected ? " savedSortOptionActive" : ""}`}
+                            onClick={() => handleListSortChange(opt.id)}
+                          >
+                            <span>{opt.label}</span>
+                            {selected && (
+                              <span className="savedSortOptionCheck" aria-hidden>
+                                ✓
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
             </div>
-            {filteredPlaces.length === 0 ? (
-              <p className="myListsEmptyHint">
-                {searchActive
-                  ? "검색 결과가 없어요"
-                  : categoryFilterActive
-                    ? "이 카테고리에 담은 장소가 없어요"
-                    : "검색 결과가 없어요"}
-              </p>
-            ) : (
-              <ul
-                className={`myListsDetailList${reordering ? " myListsDetailListBusy" : ""}${
-                  listFilterActive ? " myListsDetailListFiltered" : ""
-                }`}
+            {detailSort === "near" && places.length > 0 && (
+              <div
+                className="savedCategoryChips"
+                data-testid="list-category-chips"
+                role="tablist"
+                aria-label="카테고리 필터"
               >
-                {filteredPlaces.map((place) => {
-                  const fullIndex = places.findIndex((p) => p.id === place.id);
-                  const cat = place.category as Category;
-                  const color = categoryColors[cat] ?? "#1a2a7a";
-                  const removing = removingPlaceId === place.id;
-                  const memo = resolveMemo(place);
+                <button
+                  type="button"
+                  role="tab"
+                  data-testid="list-category-chip"
+                  aria-selected={detailCategoryFilter === "all"}
+                  className={`savedCategoryChip${detailCategoryFilter === "all" ? " savedCategoryChipSelected" : ""}`}
+                  onClick={() => handleCategoryFilterChange("all")}
+                >
+                  전체
+                </button>
+                {categoryChipItems.map(({ cat, count }) => {
+                  const selected = detailCategoryFilter === cat;
                   return (
-                    <li
-                      key={place.id}
-                      className={`myListsDetailItem${removing ? " myListsDetailItemBusy" : ""}`}
+                    <button
+                      key={cat}
+                      type="button"
+                      role="tab"
+                      data-testid="list-category-chip"
+                      aria-selected={selected}
+                      className={`savedCategoryChip${selected ? " savedCategoryChipSelected" : ""}`}
+                      onClick={() => handleCategoryFilterChange(selected ? "all" : cat)}
                     >
-                      <button
-                        type="button"
-                        className="myListsDragHandle"
-                        aria-label="순서 변경"
-                        disabled={reordering || !!removingPlaceId || listFilterActive || fullIndex < 0}
-                        onPointerDown={(e) => {
-                          if (listFilterActive || fullIndex < 0) return;
-                          onDragHandlePointerDown(fullIndex, e);
-                        }}
-                      >
-                        ⠿
-                      </button>
+                      {categoryPin[cat]?.emoji ?? "📍"} {cat} {count}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {(() => {
+              const model = listPlacesModel;
+              const renderRow = (
+                place: PlaceListPlace,
+                metaExtra?: string,
+              ) => {
+                const fullIndex = places.findIndex((p) => p.id === place.id);
+                const cat = place.category as Category;
+                const color = categoryColors[cat] ?? "#1a2a7a";
+                const removing = removingPlaceId === place.id;
+                const memo = resolveMemo(place);
+                return (
+                  <li
+                    key={place.id}
+                    className={`myListsDetailItem${removing ? " myListsDetailItemBusy" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="myListsDragHandle"
+                      aria-label="순서 변경"
+                      disabled={reordering || !!removingPlaceId || !dragEnabled || fullIndex < 0}
+                      onPointerDown={(e) => {
+                        if (!dragEnabled || fullIndex < 0) return;
+                        onDragHandlePointerDown(fullIndex, e);
+                      }}
+                    >
+                      ⠿
+                    </button>
+                    <span
+                      className="myListsDetailColorBar"
+                      style={{ background: color }}
+                      aria-hidden
+                    />
+                    <button
+                      type="button"
+                      className="myListsDetailMain"
+                      onClick={() => onOpenPlace(place)}
+                      disabled={removing}
+                    >
                       <span
-                        className="myListsDetailColorBar"
+                        className="myListsDetailDot"
                         style={{ background: color }}
                         aria-hidden
                       />
+                      <span className="myListsDetailText">
+                        <span className="savedName">{place.name}</span>
+                        {memo ? (
+                          <span className="savedMemo" data-testid="list-item-memo">
+                            ✎ {memo}
+                          </span>
+                        ) : null}
+                        <span className="savedMeta">
+                          {place.category} · {place.address}
+                          {metaExtra ? ` · ${metaExtra}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                    <div
+                      className="savedItemActions"
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
                       <button
                         type="button"
-                        className="myListsDetailMain"
-                        onClick={() => onOpenPlace(place)}
+                        className="savedItemMoreBtn"
+                        data-testid="list-item-menu"
+                        aria-label="더보기"
+                        aria-expanded={menuPlaceId === place.id}
                         disabled={removing}
+                        onClick={() => {
+                          if (menuPlaceId === place.id) {
+                            closeMenu();
+                            return;
+                          }
+                          setMenuClosing(false);
+                          setMenuPlaceId(place.id);
+                        }}
                       >
-                        <span
-                          className="myListsDetailDot"
-                          style={{ background: color }}
-                          aria-hidden
-                        />
-                        <span className="myListsDetailText">
-                          <span className="savedName">{place.name}</span>
-                          {memo ? (
-                            <span className="savedMemo" data-testid="list-item-memo">
-                              ✎ {memo}
-                            </span>
-                          ) : null}
-                          <span className="savedMeta">
-                            {place.category} · {place.address}
-                          </span>
-                        </span>
+                        ⋯
                       </button>
-                      <div
-                        className="savedItemActions"
-                        onClick={(e) => e.stopPropagation()}
-                        onPointerDown={(e) => e.stopPropagation()}
-                      >
+                    </div>
+                  </li>
+                );
+              };
+
+              if (model.kind === "empty_search") {
+                return <p className="myListsEmptyHint">검색 결과가 없어요</p>;
+              }
+              if (model.kind === "empty_category") {
+                return (
+                  <p className="myListsEmptyHint">이 카테고리에 담은 장소가 없어요</p>
+                );
+              }
+              if (model.kind === "near_need_location") {
+                return (
+                  <p className="myListsEmptyHint">
+                    {model.locating
+                      ? "현재 위치를 확인하는 중이에요…"
+                      : model.denied
+                        ? "위치 권한이 꺼져 있어요. 설정에서 허용한 뒤 다시 시도해주세요."
+                        : "가까운 순으로 보려면 위치 권한이 필요해요."}
+                    {!model.locating && (
+                      <>
+                        {" "}
                         <button
                           type="button"
-                          className="savedItemMoreBtn"
-                          data-testid="list-item-menu"
-                          aria-label="더보기"
-                          aria-expanded={menuPlaceId === place.id}
-                          disabled={removing}
-                          onClick={() => {
-                            if (menuPlaceId === place.id) {
-                              closeMenu();
-                              return;
-                            }
-                            setMenuClosing(false);
-                            setMenuPlaceId(place.id);
+                          className="savedSortRetryBtn"
+                          onClick={() => requestNearOrigin()}
+                        >
+                          다시 시도
+                        </button>
+                      </>
+                    )}
+                  </p>
+                );
+              }
+
+              const listClass = `myListsDetailList${reordering ? " myListsDetailListBusy" : ""}${
+                !dragEnabled ? " myListsDetailListFiltered" : ""
+              }`;
+
+              if (model.kind === "custom") {
+                return (
+                  <ul className={listClass}>{model.places.map((p) => renderRow(p))}</ul>
+                );
+              }
+
+              if (model.kind === "region") {
+                return (
+                  <div>
+                    {model.regions.map(({ region, regionPlaces, categories }) => (
+                      <div key={region} style={{ marginBottom: 28 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            marginBottom: 14,
+                            padding: "0 4px",
+                            borderBottom: "1px solid #eee",
+                            paddingBottom: 10,
                           }}
                         >
-                          ⋯
-                        </button>
+                          <span style={{ fontSize: 16 }}>📍</span>
+                          <span
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 600,
+                              color: "#1a2a7a",
+                              letterSpacing: "0.5px",
+                            }}
+                          >
+                            {region}
+                          </span>
+                          <span style={{ fontSize: 11, color: "#bbb", marginLeft: 4 }}>
+                            {regionPlaces.length}
+                          </span>
+                        </div>
+                        {categories.map(({ cat, places: catPlaces }) => (
+                          <div key={cat} style={{ marginBottom: 16, paddingLeft: 8 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                marginBottom: 8,
+                              }}
+                            >
+                              <span style={{ fontSize: 13 }}>
+                                {categoryPin[cat]?.emoji ?? "📍"}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: categoryColors[cat],
+                                  letterSpacing: "0.5px",
+                                }}
+                              >
+                                {cat}
+                              </span>
+                              <span style={{ fontSize: 10, color: "#bbb" }}>
+                                {catPlaces.length}
+                              </span>
+                            </div>
+                            <ul className={listClass}>
+                              {catPlaces.map((p) => renderRow(p))}
+                            </ul>
+                          </div>
+                        ))}
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                    ))}
+                  </div>
+                );
+              }
+
+              if (model.kind === "category") {
+                return (
+                  <div>
+                    {model.groups.map(({ cat, places: catPlaces }) => (
+                      <div key={cat} style={{ marginBottom: 28 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            marginBottom: 14,
+                            padding: "0 4px",
+                            borderBottom: "1px solid #eee",
+                            paddingBottom: 10,
+                          }}
+                        >
+                          <span style={{ fontSize: 16 }}>
+                            {categoryPin[cat]?.emoji ?? "📍"}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 600,
+                              color: categoryColors[cat],
+                              letterSpacing: "0.5px",
+                            }}
+                          >
+                            {cat}
+                          </span>
+                          <span style={{ fontSize: 11, color: "#bbb", marginLeft: 4 }}>
+                            {catPlaces.length}
+                          </span>
+                        </div>
+                        <ul className={listClass}>
+                          {catPlaces.map((p) => renderRow(p))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }
+
+              // near
+              return (
+                <ul className={listClass}>
+                  {model.items.map(({ place, meters, hasCoords }) =>
+                    renderRow(
+                      place,
+                      hasCoords ? formatListDistanceM(meters) : "거리 정보 없음",
+                    ),
+                  )}
+                </ul>
+              );
+            })()}
           </>
         )}
       </div>

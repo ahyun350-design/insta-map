@@ -209,14 +209,30 @@ export function getRelatedPostImagesForPlace(
   post: Pick<FeedPost, "images" | "photoPlaceTags">,
   placeRef: PlaceRefForPhotoTagMatch,
 ): string[] {
+  return getRelatedPostImageEntriesForPlace(post, placeRef).map((e) => e.src);
+}
+
+/** URL + 원본 images[] 인덱스 — 시트 이미지 탭 → 상세 캐러셀 슬라이드용 */
+export function getRelatedPostImageEntriesForPlace(
+  post: Pick<FeedPost, "images" | "photoPlaceTags">,
+  placeRef: PlaceRefForPhotoTagMatch,
+): { src: string; photoIndex: number }[] {
   const indices = getMatchingPhotoIndices(post, placeRef);
   if (indices.length === 0) {
-    return hasPhotoPlaceTags(post) ? [] : post.images;
+    if (hasPhotoPlaceTags(post)) return [];
+    return (post.images ?? [])
+      .map((src, photoIndex) =>
+        typeof src === "string" && src.length > 0 ? { src, photoIndex } : null,
+      )
+      .filter((e): e is { src: string; photoIndex: number } => e != null);
   }
   return [...indices]
     .sort((a, b) => a - b)
-    .map((i) => post.images[i])
-    .filter((src): src is string => typeof src === "string" && src.length > 0);
+    .map((photoIndex) => {
+      const src = post.images[photoIndex];
+      return typeof src === "string" && src.length > 0 ? { src, photoIndex } : null;
+    })
+    .filter((e): e is { src: string; photoIndex: number } => e != null);
 }
 
 export function placeRefToRelatedAnchor(ref: PlaceRefForPhotoTagMatch): RelatedPostsAnchor {
