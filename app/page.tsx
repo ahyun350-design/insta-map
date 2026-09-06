@@ -2006,6 +2006,8 @@ function HomePageContent() {
 
   useEffect(() => {
     if (savedCategoryFilter === "all") return;
+    // savedPlaces 가 아직 비어 있으면(부트스트랩 전) 복원값을 "없음"으로 오판하지 않음
+    if (savedPlaces.length === 0) return;
     const stillExists = savedPlaces.some((p) => p.category === savedCategoryFilter);
     if (!stillExists) {
       setSavedCategoryFilter("all");
@@ -10102,10 +10104,12 @@ function HomePageContent() {
     if (searchFiltered.length === 0) {
       return { kind: "empty_search" as const, query: savedSearchQuery };
     }
-    const filtered =
-      savedCategoryFilter === "all"
-        ? searchFiltered
-        : searchFiltered.filter((p) => p.category === savedCategoryFilter);
+    // 카테고리 칩 필터는 가까운 순에서만 적용 (상태값은 다른 정렬에서도 유지)
+    const applyCategoryFilter =
+      savedPlacesSort === "near" && savedCategoryFilter !== "all";
+    const filtered = applyCategoryFilter
+      ? searchFiltered.filter((p) => p.category === savedCategoryFilter)
+      : searchFiltered;
     if (filtered.length === 0) {
       return {
         kind: "empty_category" as const,
@@ -13353,7 +13357,7 @@ function HomePageContent() {
             </button>
           )}
         </div>
-        {savedPlaces.length > 0 && (
+        {savedPlacesSort === "near" && savedPlaces.length > 0 && (
           <div
             className="savedCategoryChips"
             data-testid="saved-category-chips"
