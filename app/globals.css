@@ -41,6 +41,30 @@
   box-sizing: border-box;
 }
 
+/* 전역: 텍스트 드래그·길게 눌러 복사 방지 (입력란·메시지 말풍선은 예외) */
+html,
+body,
+#__next {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* 채팅 말풍선 본문 (인라인 style whiteSpace:pre-wrap) — 링크·주소 복사 허용 */
+.messagesChatShell [style*="pre-wrap"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
 body {
   margin: 0;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
