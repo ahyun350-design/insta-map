@@ -1779,6 +1779,7 @@ function HomePageContent() {
   const drawCourseRouteRetryRef = useRef(0);
   const courseTitleOriginalRef = useRef("");
   const courseTitleInlineInputRef = useRef<HTMLInputElement>(null);
+  const courseTitleInlineEditRef = useRef<HTMLDivElement>(null);
   const pollAttemptsRef = useRef<Record<string, number>>({});
   const extractPollStartRef = useRef<Record<string, number>>({});
   const pollLastAtRef = useRef<Record<string, number>>({});
@@ -3480,7 +3481,7 @@ function HomePageContent() {
   useEffect(() => {
     if (!isEditingCourseTitleInline || keyboardHeight <= 0) return;
     const t = window.setTimeout(() => {
-      courseTitleInlineInputRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      courseTitleInlineEditRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }, 80);
     return () => window.clearTimeout(t);
   }, [isEditingCourseTitleInline, keyboardHeight]);
@@ -11081,7 +11082,7 @@ function HomePageContent() {
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 {savedCourseId ? (
                                   isEditingCourseTitleInline && !isReadOnlyCourse ? (
-                                    <div>
+                                    <div ref={courseTitleInlineEditRef}>
                                       <input
                                         ref={courseTitleInlineInputRef}
                                         className="profileEditField"
@@ -11210,7 +11211,7 @@ function HomePageContent() {
                               </button>
                             </div>
 
-                            <div className="courseModalSheetBody">
+                            <div className="courseModalSheetBody" style={isEditingCourseTitleInline ? { display: "none" } : undefined}>
                             {!courseResult && (
                               <>
                                 <div>
@@ -11223,12 +11224,12 @@ function HomePageContent() {
                                     <input className="mapInput" placeholder="예: 성수역, 망원동" value={courseOriginAddress} onChange={(e) => setCourseOriginAddress(e.target.value)} style={{ width: "100%", boxSizing: "border-box" }} />
                                   )}
                                   {courseOriginMode === "current" && (
-                                    <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888" }}>
+                                    <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#888", lineHeight: 1.5 }}>
                                       {courseLocationLoading
                                         ? "📍 현재 위치를 확인하는 중..."
                                         : courseCurrentLocation
-                                          ? `📍 현재 위치 반경 ${COURSE_WALK_RADIUS_KM}km 이내 장소(${courseBasePlaces.length}곳)로 코스를 짤게요`
-                                          : `📍 위치 권한을 허용하면 반경 ${COURSE_WALK_RADIUS_KM}km 이내 장소로 코스를 짤 수 있어요`}
+                                          ? `📍 현재 위치 반경 ${COURSE_WALK_RADIUS_KM}km 이내 저장된 장소(${courseBasePlaces.length}곳)로 코스를 짤게요`
+                                          : `📍 위치 권한이 없거나 위치를 가져오지 못했어요. 「직접 입력」으로 동네·역 이름을 넣거나, 설정에서 위치 권한을 허용해 주세요.`}
                                     </p>
                                   )}
                                 </div>
@@ -11246,7 +11247,11 @@ function HomePageContent() {
                                             {courseOriginMode === "manual" && courseRegionKeyword
                                               ? `(${courseRegionKeyword}에 ${available}곳)`
                                               : courseOriginMode === "current"
-                                                ? `(주변에 ${available}곳)`
+                                                ? courseLocationLoading
+                                                  ? "(위치 확인 중…)"
+                                                  : courseCurrentLocation
+                                                    ? `(주변에 ${available}곳)`
+                                                    : `(위치 필요 · 저장 ${available}곳)`
                                                 : `(저장 ${available}곳)`}
                                           </span>
                                         </div>
@@ -11263,8 +11268,15 @@ function HomePageContent() {
                                 <button type="button" onClick={generateCourse} disabled={courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0)} style={{ width: "100%", padding: "14px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "14px", letterSpacing: "1px", cursor: courseLoading ? "wait" : "pointer", fontFamily: "inherit", opacity: courseLoading || (courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0) ? 0.6 : 1 }}>
                                   {courseLoading ? "코스를 짜는 중..." : "코스 만들기"}
                                 </button>
-                                {courseOriginMode === "current" && !courseLocationLoading && courseBasePlaces.length === 0 && (
-                                  <p style={{ margin: 0, textAlign: "center", fontSize: "11px", color: "#999" }}>주변에 저장된 장소가 없어요. 다른 방식으로 시도해보세요</p>
+                                {courseOriginMode === "current" && !courseLocationLoading && !courseCurrentLocation && (
+                                  <p style={{ margin: 0, textAlign: "center", fontSize: "11px", color: "#999", lineHeight: 1.5 }}>
+                                    위치 권한이 없거나 위치를 가져오지 못했어요. 「직접 입력」으로 동네·역 이름을 넣거나, 설정에서 위치 권한을 허용해 주세요.
+                                  </p>
+                                )}
+                                {courseOriginMode === "current" && !courseLocationLoading && !!courseCurrentLocation && courseBasePlaces.length === 0 && (
+                                  <p style={{ margin: 0, textAlign: "center", fontSize: "11px", color: "#999", lineHeight: 1.5 }}>
+                                    반경 {COURSE_WALK_RADIUS_KM}km 안에 저장된 장소가 없어요. 「직접 입력」으로 다른 동네를 지정하거나, 지도·추출로 근처 장소를 저장한 뒤 다시 시도해 주세요.
+                                  </p>
                                 )}
                               </>
                             )}

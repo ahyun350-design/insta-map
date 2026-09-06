@@ -4132,7 +4132,7 @@ body {
   padding-right: max(20px, env(safe-area-inset-right, 0px));
 }
 
-/* 코스 모달 bottom sheet — 상태바/노치 아래로 헤더·닫기 버튼 */
+/* 코스 모달 bottom sheet — 하단 고정 시트(상단은 화면 중간이므로 safe-area-top 불필요) */
 .courseModalBackdrop {
   position: fixed;
   inset: 0;
@@ -4161,7 +4161,7 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
-  padding: calc(24px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) 12px max(20px, env(safe-area-inset-left, 0px));
+  padding: 16px max(20px, env(safe-area-inset-right, 0px)) 12px max(20px, env(safe-area-inset-left, 0px));
   background: #fff;
   border-bottom: 0.5px solid #f0f0f0;
   box-sizing: border-box;
@@ -4175,7 +4175,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 16px max(20px, env(safe-area-inset-right, 0px)) calc(40px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+  padding: 16px max(20px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
   box-sizing: border-box;
 }
 
