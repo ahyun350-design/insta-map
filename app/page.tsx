@@ -18,6 +18,12 @@ import {
   writeCachedPlaces,
   type CachedMapView,
 } from "@/lib/homeBootstrapCache";
+import {
+  clearHomeSessionSnapshot,
+  mergeFeedPageIntoSnapshot,
+  readHomeSessionSnapshotForBoot,
+  saveHomeSessionSnapshot,
+} from "@/lib/homeSessionSnapshot";
 import { fetchChatRoomList } from "@/lib/fetchChatRoomList";
 import {
   getGeocodeCacheSync,
@@ -1403,6 +1409,7 @@ function HomePageContent() {
   const handleLogoutClick = async () => {
     if (!confirm("정말 로그아웃하시겠어요?")) return;
     try {
+      clearHomeSessionSnapshot(userIdRef.current || undefined);
       await clearHomeBootstrapCache();
       await logout();
     } catch (err) {
@@ -1524,11 +1531,16 @@ function HomePageContent() {
   const [deleteAccountPhraseInput, setDeleteAccountPhraseInput] = useState("");
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const { showToast } = useToast();
+  const [homeSessionBoot] = useState(() => readHomeSessionSnapshotForBoot());
+  const homeSessionRestoredRef = useRef(!!homeSessionBoot);
+  const homeSessionScrollTopRef = useRef(homeSessionBoot?.feedScrollTop ?? 0);
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     const tab = searchParams?.get("tab");
     if (tab === "home") return "home";
     if (tab === "messages") return "messages";
     if (tab === "mypage" || searchParams?.get("from") === "mypage") return "mypage";
+    // URL에 tab 없으면 스냅샷 activeTab 우선 (시스템 제스처 back 등)
+    if (homeSessionBoot?.activeTab) return homeSessionBoot.activeTab;
     // 프로필→상세 진입 시 밑바닥이 map 으로 떨어지지 않게
     if (searchParams?.get("from") === "profile") return "home";
     return "map";
@@ -1536,7 +1548,7 @@ function HomePageContent() {
   const [instagramUrl, setInstagramUrl] = useState("");
   const instagramUrlInputRef = useRef<HTMLInputElement | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<Place[]>([]);
-  const [feedPosts, setFeedPosts] = useState<FeedPost[]>([]);
+  const [feedPosts, setFeedPosts] = useState<FeedPost[]>(() => homeSessionBoot?.feedPosts ?? []);
   /** 마이페이지 「게시」전용 — 전역 feedPosts 와 분리 */
   const [myMypagePosts, setMyMypagePosts] = useState<FeedPost[]>([]);
   const [myMypagePostsCount, setMyMypagePostsCount] = useState(0);
@@ -1547,12 +1559,12 @@ function HomePageContent() {
   const mypageTabScrollRef = useRef<HTMLDivElement | null>(null);
   const mypagePostsLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const MYPAGE_POSTS_PAGE_SIZE = 30;
-  const [feedHasMore, setFeedHasMore] = useState(true);
+  const [feedHasMore, setFeedHasMore] = useState(() => homeSessionBoot?.feedHasMore ?? true);
   const [feedLoadingMore, setFeedLoadingMore] = useState(false);
   const [detailCommentsLoading, setDetailCommentsLoading] = useState(false);
-  const feedNextOffsetRef = useRef(0);
+  const feedNextOffsetRef = useRef(homeSessionBoot?.feedNextOffset ?? 0);
   const feedLoadMoreInFlightRef = useRef(false);
-  const feedHasMoreRef = useRef(true);
+  const feedHasMoreRef = useRef(homeSessionBoot?.feedHasMore ?? true);
   const homeFeedScrollRef = useRef<HTMLDivElement | null>(null);
   const feedLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const myLikedPostIdsRef = useRef<Set<string>>(new Set());
@@ -1635,8 +1647,12 @@ function HomePageContent() {
   const [editingPost, setEditingPost] = useState<FeedPost | null>(null);
   const [editComment, setEditComment] = useState("");
   const [showPostModal, setShowPostModal] = useState(false);
-  const [selectedCompanionTag, setSelectedCompanionTag] = useState<CompanionTagFilter>("all");
-  const [selectedHomeCategory, setSelectedHomeCategory] = useState<HomeCategoryFilter>("all");
+  const [selectedCompanionTag, setSelectedCompanionTag] = useState<CompanionTagFilter>(
+    () => homeSessionBoot?.selectedCompanionTag ?? "all",
+  );
+  const [selectedHomeCategory, setSelectedHomeCategory] = useState<HomeCategoryFilter>(
+    () => homeSessionBoot?.selectedHomeCategory ?? "all",
+  );
   const [homeSearchQuery, setHomeSearchQuery] = useState("");
   const [debouncedHomeSearchQuery, setDebouncedHomeSearchQuery] = useState("");
   const [isHomeSearchOpen, setIsHomeSearchOpen] = useState(false);
@@ -1666,7 +1682,7 @@ function HomePageContent() {
       });
     };
   }, []);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !homeSessionRestoredRef.current);
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
   const chatRoomsRef = useRef<ChatRoom[]>([]);
   chatRoomsRef.current = chatRooms;
@@ -1939,7 +1955,57 @@ function HomePageContent() {
   hiddenIdsRef.current = hiddenIds;
   const activeTabRef = useRef<TabId>(activeTab);
   activeTabRef.current = activeTab;
+  const selectedCompanionTagRef = useRef(selectedCompanionTag);
+  selectedCompanionTagRef.current = selectedCompanionTag;
+  const selectedHomeCategoryRef = useRef(selectedHomeCategory);
+  selectedHomeCategoryRef.current = selectedHomeCategory;
   const savedNearAutoTriedRef = useRef(false);
+
+  const persistHomeSessionSnapshot = useCallback(() => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    saveHomeSessionSnapshot({
+      userId: uid,
+      feedPosts: feedPostsRef.current,
+      feedNextOffset: feedNextOffsetRef.current,
+      feedHasMore: feedHasMoreRef.current,
+      feedScrollTop:
+        homeFeedScrollRef.current?.scrollTop ?? homeSessionScrollTopRef.current,
+      selectedCompanionTag: selectedCompanionTagRef.current,
+      selectedHomeCategory: selectedHomeCategoryRef.current,
+      activeTab: activeTabRef.current,
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      persistHomeSessionSnapshot();
+    };
+  }, [persistHomeSessionSnapshot]);
+
+  useLayoutEffect(() => {
+    const top = homeSessionScrollTopRef.current;
+    if (!homeSessionRestoredRef.current || top <= 0) return;
+    if (activeTab !== "home") return;
+    const el = homeFeedScrollRef.current;
+    if (!el) return;
+    el.scrollTop = top;
+  }, [activeTab, feedPosts.length]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (homeSessionBoot && homeSessionBoot.userId !== user.id) {
+      clearHomeSessionSnapshot(homeSessionBoot.userId);
+      homeSessionRestoredRef.current = false;
+      setFeedPosts([]);
+      feedNextOffsetRef.current = 0;
+      feedHasMoreRef.current = true;
+      setFeedHasMore(true);
+      setSelectedCompanionTag("all");
+      setSelectedHomeCategory("all");
+      setLoading(true);
+    }
+  }, [user?.id, homeSessionBoot]);
 
   const requestSavedNearLocation = useCallback(async (): Promise<boolean> => {
     if (activeTabRef.current !== "saved") return false;
@@ -3968,8 +4034,8 @@ function HomePageContent() {
       /* ignore */
     }
     devLog("[PindMap:home] 로딩 시작", { isRetry, warmCache: bootstrapCacheHitRef.current });
-    // 캐시로 이미 그린 경우 스켈레톤/스피너를 다시 띄우지 않음
-    if (!bootstrapCacheHitRef.current) {
+    // 캐시·세션 스냅샷으로 이미 그린 경우 스켈레톤/스피너를 다시 띄우지 않음
+    if (!bootstrapCacheHitRef.current && !homeSessionRestoredRef.current) {
       setLoading(true);
     }
     setHomeLoadError(null);
@@ -4018,15 +4084,29 @@ function HomePageContent() {
         const rawPosts: FeedPost[] = postsRes.data.map((p: any) =>
           parseFeedPostFromRow(p, { likedByMe: myLikedSet.has(p.id) }),
         );
-        feedNextOffsetRef.current = rawPosts.length;
-        const hasMore = rawPosts.length >= FEED_PAGE_SIZE;
-        feedHasMoreRef.current = hasMore;
-        setFeedHasMore(hasMore);
-        setFeedPosts(hydrateFeedPostsWithAvatars(rawPosts));
-        void prefetchAvatarsForFeedPosts(rawPosts).then(() => {
-          setFeedPosts((prev) => hydrateFeedPostsWithAvatars(prev));
-        });
-      } else {
+        const hydratedPage = hydrateFeedPostsWithAvatars(rawPosts);
+        if (homeSessionRestoredRef.current && feedPostsRef.current.length > 0) {
+          // 스냅샷 복원: 1페이지 silent merge — 이후 페이지 유지
+          setFeedPosts((prev) => mergeFeedPageIntoSnapshot(prev, hydratedPage));
+          feedNextOffsetRef.current = Math.max(feedNextOffsetRef.current, rawPosts.length);
+          if (rawPosts.length < FEED_PAGE_SIZE) {
+            feedHasMoreRef.current = false;
+            setFeedHasMore(false);
+          }
+          void prefetchAvatarsForFeedPosts(rawPosts).then(() => {
+            setFeedPosts((prev) => hydrateFeedPostsWithAvatars(prev));
+          });
+        } else {
+          feedNextOffsetRef.current = rawPosts.length;
+          const hasMore = rawPosts.length >= FEED_PAGE_SIZE;
+          feedHasMoreRef.current = hasMore;
+          setFeedHasMore(hasMore);
+          setFeedPosts(hydratedPage);
+          void prefetchAvatarsForFeedPosts(rawPosts).then(() => {
+            setFeedPosts((prev) => hydrateFeedPostsWithAvatars(prev));
+          });
+        }
+      } else if (!homeSessionRestoredRef.current) {
         feedNextOffsetRef.current = 0;
         feedHasMoreRef.current = false;
         setFeedHasMore(false);
@@ -5034,6 +5114,7 @@ function HomePageContent() {
     if (error) {
       return { error: error.message };
     }
+    clearHomeSessionSnapshot(uid || undefined);
     setFeedPosts((prev) => [post, ...prev]);
     return { error: null };
   };
@@ -5745,6 +5826,7 @@ function HomePageContent() {
     const deleted =
       feedPosts.find((p) => p.id === id) ?? myMypagePosts.find((p) => p.id === id);
     await supabase.from("feed_posts").delete().eq("id", id);
+    clearHomeSessionSnapshot(user?.id);
     setFeedPosts((prev) => prev.filter((p) => p.id !== id));
     setMyMypagePosts((prev) => prev.filter((p) => p.id !== id));
     setOpenMenuId(null);
@@ -10497,16 +10579,18 @@ function HomePageContent() {
 
   const handleHomeFeedProfileSelect = useCallback(
     (username: string) => {
+      persistHomeSessionSnapshot();
       router.push(`/profile/${encodeURIComponent(username)}?from=feed`);
     },
-    [router],
+    [router, persistHomeSessionSnapshot],
   );
 
   const handleHomeSearchProfileSelect = useCallback(
     (username: string) => {
+      persistHomeSessionSnapshot();
       router.push(`/profile/${encodeURIComponent(username)}?from=search`);
     },
-    [router],
+    [router, persistHomeSessionSnapshot],
   );
 
   const handleMypagePostGridSelect = useCallback((postId: string) => {
@@ -12389,11 +12473,12 @@ function HomePageContent() {
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", padding: "12px 20px 0" }}>
               <button
                 type="button"
-                onClick={() =>
+                onClick={() => {
+                  persistHomeSessionSnapshot();
                   router.push(
                     `/profile/${encodeURIComponent(detailPost.user)}?from=detail&postId=${encodeURIComponent(detailPost.id)}`,
-                  )
-                }
+                  );
+                }}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -12545,11 +12630,12 @@ function HomePageContent() {
                 <div key={c.id} style={{ display: "flex", gap: "10px", marginBottom: "14px", alignItems: "flex-start" }}>
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      persistHomeSessionSnapshot();
                       router.push(
                         `/profile/${encodeURIComponent(c.user)}?from=detail&postId=${encodeURIComponent(detailPost.id)}`,
-                      )
-                    }
+                      );
+                    }}
                     style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, flexShrink: 0 }}
                   >
                     <ProfileAvatar avatarUrl={c.avatarUrl} username={c.user} size={30} fontSize={12} />
@@ -12558,11 +12644,12 @@ function HomePageContent() {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          persistHomeSessionSnapshot();
                           router.push(
                             `/profile/${encodeURIComponent(c.user)}?from=detail&postId=${encodeURIComponent(detailPost.id)}`,
-                          )
-                        }
+                          );
+                        }}
                         style={{ fontSize: "12px", fontWeight: 600, color: "#1a1a2e", border: "none", background: "transparent", cursor: "pointer", padding: 0 }}
                       >
                         {c.user}
@@ -15166,7 +15253,7 @@ function HomePageContent() {
               position: "fixed",
               inset: 0,
               zIndex: 100001,
-              background: "rgba(0,0,0,0.45)",
+              background: "rgba(0,0,0,0.35)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
