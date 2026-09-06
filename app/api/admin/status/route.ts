@@ -22,38 +22,48 @@ function daysAgoIso(days: number, now = new Date()): string {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
+const PAGE_SIZE = 1000;
+
+/** PostgREST 기본 1000행 상한을 넘어 컬럼 값을 모두 읽어 Set에 합친다. */
+async function collectColumnIdsPaged(
+  admin: ReturnType<typeof getSupabaseAdmin>,
+  table: "places" | "courses" | "messages" | "likes",
+  column: "user_id" | "sender_id",
+  sinceIso: string,
+  into: Set<string>,
+): Promise<void> {
+  let from = 0;
+  for (;;) {
+    const { data, error } = await admin
+      .from(table)
+      .select(column)
+      .gte("created_at", sinceIso)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) {
+      console.error(`[admin/status] ${table} active page`, error);
+      return;
+    }
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const v = row[column];
+      if (typeof v === "string" && v) into.add(v);
+    }
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+}
+
 async function collectDistinctUserIds(
   admin: ReturnType<typeof getSupabaseAdmin>,
   sinceIso: string,
 ): Promise<number> {
   const ids = new Set<string>();
-
-  const pushIds = (rows: Array<Record<string, unknown>> | null, key: string) => {
-    for (const row of rows ?? []) {
-      const v = row[key];
-      if (typeof v === "string" && v) ids.add(v);
-    }
-  };
-
-  const [places, courses, messages, likes] = await Promise.all([
-    admin.from("places").select("user_id").gte("created_at", sinceIso),
-    admin.from("courses").select("user_id").gte("created_at", sinceIso),
-    admin.from("messages").select("sender_id").gte("created_at", sinceIso),
-    admin.from("likes").select("user_id").gte("created_at", sinceIso),
+  await Promise.all([
+    collectColumnIdsPaged(admin, "places", "user_id", sinceIso, ids),
+    collectColumnIdsPaged(admin, "courses", "user_id", sinceIso, ids),
+    collectColumnIdsPaged(admin, "messages", "sender_id", sinceIso, ids),
+    collectColumnIdsPaged(admin, "likes", "user_id", sinceIso, ids),
   ]);
-
-  if (places.error) console.error("[admin/status] places active", places.error);
-  else pushIds(places.data as Array<Record<string, unknown>> | null, "user_id");
-
-  if (courses.error) console.error("[admin/status] courses active", courses.error);
-  else pushIds(courses.data as Array<Record<string, unknown>> | null, "user_id");
-
-  if (messages.error) console.error("[admin/status] messages active", messages.error);
-  else pushIds(messages.data as Array<Record<string, unknown>> | null, "sender_id");
-
-  if (likes.error) console.error("[admin/status] likes active", likes.error);
-  else pushIds(likes.data as Array<Record<string, unknown>> | null, "user_id");
-
   return ids.size;
 }
 
