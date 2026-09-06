@@ -155,15 +155,15 @@ export function PlaceDetailSheet({
       </div>
 
       <div className="placeDetailSheetBody">
+        {memo?.trim() ? (
+          <p className="placeDetailSheetMemo">✎ {memo.trim()}</p>
+        ) : null}
         {place.road_address_name && (
           <div className="placeDetailSheetRow">
             <span className="placeDetailSheetLabel">주소</span>
             <span className="placeDetailSheetValue">{place.road_address_name}</span>
           </div>
         )}
-        {memo?.trim() ? (
-          <p className="placeDetailSheetMemo">✎ {memo.trim()}</p>
-        ) : null}
         {place.phone && (
           <div className="placeDetailSheetRow placeDetailSheetRowCenter">
             <span className="placeDetailSheetLabel">전화</span>

@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
+  buildKakaoQueryFallbacks,
   extractPlacesByClaude,
+  formatKakaoUnresolvedErrorMessage,
   normalizeCategory,
   Place,
   RawPlace,
   scrapeInstagramCaption,
-  searchKakaoPlace,
+  searchKakaoPlaceWithDiag,
 } from "@/app/api/extract/_shared";
 import { resolvePlaceCategoryFromKakao } from "@/lib/kakaoCategory";
 import { maskCaption } from "@/lib/maskCaption";
@@ -149,17 +151,14 @@ type ResolvedPlace = {
   lng: number;
 };
 
-function formatExtractFailCode(code: string, names: string[]): string {
-  const joined = names.slice(0, 8).join(",");
-  return joined ? `${code}|${joined}` : code;
-}
-
-/** resolved === 0 원인 코드 (카카오 미스 장소명 포함) */
-function buildZeroResolvedErrorMessage(candidateNames: string[]): string {
-  if (candidateNames.length === 0) {
+/** resolved === 0 원인 코드 (카카오 미스 장소명 + 시도 stage 진단) */
+function buildZeroResolvedErrorMessage(
+  misses: ReadonlyArray<{ name: string; tried: number; stages: string[] }>,
+): string {
+  if (misses.length === 0) {
     return "no_places_in_caption";
   }
-  return formatExtractFailCode("kakao_unresolved", candidateNames);
+  return formatKakaoUnresolvedErrorMessage(misses);
 }
 
 function buildPlaces(resolved: ResolvedPlace[]): Place[] {
@@ -292,11 +291,20 @@ export async function POST(req: Request) {
     await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
     const kakaoT0 = Date.now();
     const resolved: ResolvedPlace[] = [];
+    const kakaoMissDiags: { name: string; tried: number; stages: string[] }[] = [];
 
     await Promise.all(
       candidates.map(async (item) => {
-        const kakaoResult = await searchKakaoPlace(item.name, item.hint, undefined, "");
-        if (!kakaoResult) return;
+        const { lookup: kakaoResult, tried, stages } = await searchKakaoPlaceWithDiag(
+          item.name,
+          item.hint,
+          undefined,
+          "",
+        );
+        if (!kakaoResult) {
+          kakaoMissDiags.push({ name: item.name, tried, stages });
+          return;
+        }
         resolved.push({
           name: item.name,
           category: resolvePlaceCategoryFromKakao(
@@ -321,7 +329,7 @@ export async function POST(req: Request) {
     await saveJobDiagnostics(jobId, { kakao_misses: diagKakaoMisses });
 
     if (resolved.length === 0) {
-      throw new Error(buildZeroResolvedErrorMessage(candidateNames));
+      throw new Error(buildZeroResolvedErrorMessage(kakaoMissDiags));
     }
 
     const dbT0 = Date.now();
@@ -366,7 +374,20 @@ export async function POST(req: Request) {
     }
 
     if (places.length === 0) {
-      throw new Error(buildZeroResolvedErrorMessage(candidateNames));
+      throw new Error(
+        buildZeroResolvedErrorMessage(
+          kakaoMissDiags.length > 0
+            ? kakaoMissDiags
+            : candidateNames.map((name) => {
+                const planned = buildKakaoQueryFallbacks(name);
+                return {
+                  name,
+                  tried: planned.length,
+                  stages: planned.map((q) => q.stage),
+                };
+              }),
+        ),
+      );
     }
 
     const rows = uniqueResolved.map((p) => ({

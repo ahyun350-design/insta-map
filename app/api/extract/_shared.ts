@@ -77,14 +77,47 @@ export type SearchKakaoPlaceOptions = {
   deadlineMs?: number;
 };
 
-const KAKAO_SEARCH_MAX_ATTEMPTS = 4;
+const KAKAO_SEARCH_MAX_ATTEMPTS = 6;
+
+/** 괄호·대괄호·전각 괄호와 그 안 내용 제거 */
+function stripOuterParens(text: string): string {
+  return text
+    .replace(/[\(\[（][^\)\]）]*[\)\]）]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** 괄호 안 내용만 추출 (영문 병기 등) */
+function extractParenInners(text: string): string[] {
+  const out: string[] = [];
+  const re = /[\(\[（]([^\)\]）]*)[\)\]）]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const inner = (m[1] ?? "").trim();
+    if (inner) out.push(inner);
+  }
+  return out;
+}
+
+/** & · , / + 기준 앞부분만 */
+function separatorPrefix(text: string): string | null {
+  const seps = ["&", "·", ",", "/", "+"] as const;
+  let cut = -1;
+  for (const sep of seps) {
+    const i = text.indexOf(sep);
+    if (i > 0 && (cut < 0 || i < cut)) cut = i;
+  }
+  if (cut <= 0) return null;
+  const prefix = text.slice(0, cut).trim();
+  return prefix || null;
+}
 
 /**
  * 메뉴·수식어가 붙은 상호명 폴백 후보.
- * 원본 → 마지막 어절 제거(최대 3회) → 첫 어절 단독. 최대 4개.
- * 첫 어절이 1글자면 first_token 단계는 건너뜀.
+ * original → 괄호 제거/괄호안 → 구분자 앞부분 → first_token → drop_last_1..3
+ * 최대 6개. 첫 어절이 1글자면 first_token 단계는 건너뜀.
  */
-function buildKakaoQueryFallbacks(name: string): { query: string; stage: string }[] {
+export function buildKakaoQueryFallbacks(name: string): { query: string; stage: string }[] {
   const trimmed = name.trim();
   if (!trimmed) return [];
 
@@ -100,43 +133,84 @@ function buildKakaoQueryFallbacks(name: string): { query: string; stage: string 
 
   push(trimmed, "original");
 
+  // a) 괄호/병기 — original 바로 다음
+  const stripped = stripOuterParens(trimmed);
+  if (stripped && stripped !== trimmed) {
+    push(stripped, "paren_strip");
+  }
+  for (const inner of extractParenInners(trimmed)) {
+    push(inner, "paren_inner");
+  }
+
+  // b) 구분자 앞부분 — drop_last 보다 앞
+  const sepPref = separatorPrefix(trimmed);
+  if (sepPref && sepPref !== trimmed) {
+    push(sepPref, "sep_prefix");
+  }
+
+  // first_token — drop_last 보다 앞 (한도에 밀리지 않게)
+  const first = tokens[0];
+  if (first && first.length >= 2) {
+    push(first, "first_token");
+  }
+
   let current = tokens.slice();
   for (let n = 1; n <= 3 && current.length > 1; n += 1) {
     current = current.slice(0, -1);
     push(current.join(" "), `drop_last_${n}`);
   }
 
-  const first = tokens[0];
-  if (first && first.length >= 2) {
-    push(first, "first_token");
-  }
-
   return out;
 }
 
+/** kakao_unresolved error_message 진단 포맷 (장소명·시도 단계만, 캡션 금지) */
+export function formatKakaoUnresolvedErrorMessage(
+  entries: ReadonlyArray<{ name: string; tried: number; stages: string[] }>,
+): string {
+  const parts = entries
+    .map((e) => {
+      const name = e.name.trim();
+      if (!name) return null;
+      const stages = e.stages.filter(Boolean).join(",");
+      return `${name}|tried=${e.tried}|stages=${stages}`;
+    })
+    .filter((p): p is string => !!p)
+    .slice(0, 8);
+  if (parts.length === 0) return "kakao_unresolved";
+  return `kakao_unresolved|${parts.join(";")}`;
+}
+
+export type SearchKakaoPlaceDiag = {
+  lookup: KakaoPlaceLookup | null;
+  tried: number;
+  stages: string[];
+};
+
 /**
- * 카카오 키워드 검색 — 0건이면 어절 폴백 순차 재시도(최대 4회).
+ * 카카오 키워드 검색 — 0건이면 어절 폴백 순차 재시도(최대 6회).
  * size=15. hint가 있으면 주소 포함 후보 우선, 없으면 "hint + 상호명" 재검색, 그래도 없으면 documents[0].
  * @param hint Claude가 뽑은 동네/역/구명 (주소 매칭·재검색에 사용).
  * @param _region 호환용(현재 미사용).
  * @param _caption 호환용(미사용).
  */
-export async function searchKakaoPlace(
+export async function searchKakaoPlaceWithDiag(
   name: string,
   hint: string = "",
   _region?: string,
   _caption: string = "",
   options?: SearchKakaoPlaceOptions,
-): Promise<KakaoPlaceLookup | null> {
+): Promise<SearchKakaoPlaceDiag> {
+  const empty: SearchKakaoPlaceDiag = { lookup: null, tried: 0, stages: [] };
   const kakaoKey = process.env.KAKAO_REST_API_KEY;
-  if (!kakaoKey) return null;
+  if (!kakaoKey) return empty;
 
   const trimmed = name.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return empty;
   const hintTrimmed = hint.trim();
 
   const deadlineMs = options?.deadlineMs;
   const queries = buildKakaoQueryFallbacks(trimmed);
+  const attemptedStages: string[] = [];
 
   type Doc = {
     place_name?: string;
@@ -304,8 +378,9 @@ export async function searchKakaoPlace(
         hit: false,
         reason: "deadline",
       });
-      return null;
+      return { lookup: null, tried: attemptedStages.length, stages: attemptedStages };
     }
+    attemptedStages.push(item.stage);
     const docs = await fetchDocuments(item.query, i, item.stage);
     if (docs == null) continue;
     if (docs.length === 0) {
@@ -318,9 +393,22 @@ export async function searchKakaoPlace(
       continue;
     }
     const picked = await pickFromDocuments(docs, item.query, i, item.stage);
-    if (picked) return picked;
+    if (picked) {
+      return { lookup: picked, tried: attemptedStages.length, stages: attemptedStages };
+    }
   }
-  return null;
+  return { lookup: null, tried: attemptedStages.length, stages: attemptedStages };
+}
+
+export async function searchKakaoPlace(
+  name: string,
+  hint: string = "",
+  _region?: string,
+  _caption: string = "",
+  options?: SearchKakaoPlaceOptions,
+): Promise<KakaoPlaceLookup | null> {
+  const { lookup } = await searchKakaoPlaceWithDiag(name, hint, _region, _caption, options);
+  return lookup;
 }
 
 export async function scrapeInstagramCaption(url: string): Promise<string> {

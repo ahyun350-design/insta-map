@@ -1003,8 +1003,10 @@ function extractRegion(address: string): string {
 }
 
 type SavedPlacesSort = "region" | "near" | "category";
+type SavedCategoryFilter = "all" | Category;
 
 const SAVED_PLACES_SORT_KEY = "pindmap_saved_places_sort";
+const SAVED_CATEGORY_FILTER_KEY = "pindmap_saved_category_filter";
 const SAVED_PLACES_SORT_OPTIONS: { id: SavedPlacesSort; label: string }[] = [
   { id: "region", label: "지역순" },
   { id: "near", label: "가까운 순" },
@@ -1013,6 +1015,17 @@ const SAVED_PLACES_SORT_OPTIONS: { id: SavedPlacesSort; label: string }[] = [
 
 function isSavedPlacesSort(value: string | null): value is SavedPlacesSort {
   return value === "region" || value === "near" || value === "category";
+}
+
+function isSavedCategoryFilter(value: string | null): value is Category {
+  return (
+    value === "맛집" ||
+    value === "카페" ||
+    value === "쇼핑" ||
+    value === "숙소" ||
+    value === "놀거리" ||
+    value === "여행지"
+  );
 }
 
 function readSavedPlacesSort(): SavedPlacesSort {
@@ -1034,6 +1047,28 @@ function writeSavedPlacesSort(sort: SavedPlacesSort): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(SAVED_PLACES_SORT_KEY, sort);
+  } catch {
+    /* ignore */
+  }
+}
+
+function readSavedCategoryFilter(): SavedCategoryFilter {
+  if (typeof window === "undefined") return "all";
+  try {
+    const raw = window.localStorage.getItem(SAVED_CATEGORY_FILTER_KEY);
+    if (raw === "all" || raw == null) return "all";
+    if (isSavedCategoryFilter(raw)) return raw;
+    window.localStorage.setItem(SAVED_CATEGORY_FILTER_KEY, "all");
+  } catch {
+    /* ignore */
+  }
+  return "all";
+}
+
+function writeSavedCategoryFilter(filter: SavedCategoryFilter): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SAVED_CATEGORY_FILTER_KEY, filter);
   } catch {
     /* ignore */
   }
@@ -1673,6 +1708,9 @@ function HomePageContent() {
   directionsChosenRef.current = directionsChosen;
   const [savedSearchQuery, setSavedSearchQuery] = useState("");
   const [savedPlacesSort, setSavedPlacesSort] = useState<SavedPlacesSort>(() => readSavedPlacesSort());
+  const [savedCategoryFilter, setSavedCategoryFilter] = useState<SavedCategoryFilter>(
+    () => readSavedCategoryFilter(),
+  );
   const [savedSortMenuOpen, setSavedSortMenuOpen] = useState(false);
   const savedSortMenuRef = useRef<HTMLDivElement | null>(null);
   const [savedNearOrigin, setSavedNearOrigin] = useState<{ lat: number; lng: number } | null>(null);
@@ -1689,7 +1727,7 @@ function HomePageContent() {
     memo: string | null;
   } | null>(null);
   const [savedPlaceMenuId, setSavedPlaceMenuId] = useState<string | null>(null);
-  const savedPlaceMenuRef = useRef<HTMLDivElement | null>(null);
+  const [savedPlaceMenuClosing, setSavedPlaceMenuClosing] = useState(false);
   const [savedSelectMode, setSavedSelectMode] = useState(false);
   const [savedSelectedIds, setSavedSelectedIds] = useState<Set<string>>(() => new Set());
   const [savedBulkDeleteConfirm, setSavedBulkDeleteConfirm] = useState(false);
@@ -1961,6 +1999,20 @@ function HomePageContent() {
     [requestSavedNearLocation],
   );
 
+  const handleSavedCategoryFilterChange = useCallback((next: SavedCategoryFilter) => {
+    setSavedCategoryFilter(next);
+    writeSavedCategoryFilter(next);
+  }, []);
+
+  useEffect(() => {
+    if (savedCategoryFilter === "all") return;
+    const stillExists = savedPlaces.some((p) => p.category === savedCategoryFilter);
+    if (!stillExists) {
+      setSavedCategoryFilter("all");
+      writeSavedCategoryFilter("all");
+    }
+  }, [savedPlaces, savedCategoryFilter]);
+
   useEffect(() => {
     if (activeTab !== "saved" || !savedSortMenuOpen) return;
     const onPointerDown = (event: PointerEvent) => {
@@ -1983,16 +2035,25 @@ function HomePageContent() {
     if (activeTab !== "saved") setSavedSortMenuOpen(false);
   }, [activeTab]);
 
+  const closeSavedPlaceMenu = useCallback((opts?: { immediate?: boolean }) => {
+    if (!savedPlaceMenuId) return;
+    if (opts?.immediate) {
+      setSavedPlaceMenuId(null);
+      setSavedPlaceMenuClosing(false);
+      return;
+    }
+    if (savedPlaceMenuClosing) return;
+    setSavedPlaceMenuClosing(true);
+  }, [savedPlaceMenuId, savedPlaceMenuClosing]);
+
   useEffect(() => {
-    if (activeTab !== "saved" || !savedPlaceMenuId) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!savedPlaceMenuRef.current?.contains(event.target as Node)) {
-        setSavedPlaceMenuId(null);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [activeTab, savedPlaceMenuId]);
+    if (!savedPlaceMenuClosing) return;
+    const timer = window.setTimeout(() => {
+      setSavedPlaceMenuId(null);
+      setSavedPlaceMenuClosing(false);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [savedPlaceMenuClosing]);
 
   const clearSavedLongPress = useCallback(() => {
     if (savedLongPressTimerRef.current != null) {
@@ -2006,6 +2067,7 @@ function HomePageContent() {
     if (activeTab !== "saved") {
       clearSavedLongPress();
       setSavedPlaceMenuId(null);
+      setSavedPlaceMenuClosing(false);
       setSavedSelectMode(false);
       setSavedSelectedIds(new Set());
       setSavedBulkDeleteConfirm(false);
@@ -2017,6 +2079,7 @@ function HomePageContent() {
     setSavedSelectMode(false);
     setSavedSelectedIds(new Set());
     setSavedPlaceMenuId(null);
+    setSavedPlaceMenuClosing(false);
     setSavedBulkDeleteConfirm(false);
   }, [clearSavedLongPress]);
 
@@ -2027,6 +2090,7 @@ function HomePageContent() {
         return;
       }
       setSavedPlaceMenuId(null);
+      setSavedPlaceMenuClosing(false);
       setAddToListTarget({ placeIds: [place.id], placeName: place.name });
     },
     [showToast],
@@ -2051,6 +2115,7 @@ function HomePageContent() {
         return;
       }
       setSavedPlaceMenuId(null);
+      setSavedPlaceMenuClosing(false);
       const memo =
         typeof place.memo === "string" && place.memo.trim() ? place.memo.trim() : null;
       setPlaceMemoTarget({
@@ -6243,7 +6308,7 @@ function HomePageContent() {
     }
   };
 
-  // 저장 목록 장소 클릭 → 지도 탭 + 컴팩트 맵 이동 + 시트 (전체화면 X)
+  // 저장 목록 장소 클릭 → 컴팩트 시트 (origin=saved면 탭 유지; 큐레이션은 지도 탭)
   // returnTo: SAVED/내 목록 → saved, 큐레이션 상세 → curation(시트 닫으면 상세 복귀)
   const handleSavedPlaceClick = (
     place: Place,
@@ -6254,20 +6319,24 @@ function HomePageContent() {
         | null;
     },
   ) => {
+    const returnTo =
+      opts?.returnTo === undefined ? { type: "saved" as const } : opts.returnTo;
     console.log("[PindMap:placeSheet] handleSavedPlaceClick", {
       placeId: place.id,
       name: place.name,
       lat: place.lat,
       lng: place.lng,
-      returnTo: opts?.returnTo === undefined ? { type: "saved" } : opts.returnTo,
+      returnTo,
       hasMap: !!mapRef.current,
     });
-    placeSheetReturnRef.current =
-      opts?.returnTo === undefined ? { type: "saved" } : opts.returnTo;
+    placeSheetReturnRef.current = returnTo;
     // 컴팩트 시트는 !mapExpanded 일 때만 보임
     setMapExpanded(false);
     setSelectedMapPlace(place);
-    setActiveTab("map");
+    // 저장 탭에서 연 경우 지도 탭으로 전환하지 않음 — 시트만 오버레이
+    if (returnTo?.type !== "saved") {
+      setActiveTab("map");
+    }
     const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
     const stored = latLngFromRow(place) ?? savedPlaceCoordsRef.current[place.id] ?? null;
     if (stored && mapRef.current) {
@@ -10021,7 +10090,7 @@ function HomePageContent() {
       return { kind: "idle" as const };
     }
     const q = savedSearchQuery.trim().toLowerCase();
-    const filtered = q
+    const searchFiltered = q
       ? savedPlaces.filter(
           (p) =>
             p.name.toLowerCase().includes(q) ||
@@ -10030,8 +10099,18 @@ function HomePageContent() {
             (typeof p.memo === "string" && p.memo.toLowerCase().includes(q)),
         )
       : savedPlaces;
-    if (filtered.length === 0) {
+    if (searchFiltered.length === 0) {
       return { kind: "empty_search" as const, query: savedSearchQuery };
+    }
+    const filtered =
+      savedCategoryFilter === "all"
+        ? searchFiltered
+        : searchFiltered.filter((p) => p.category === savedCategoryFilter);
+    if (filtered.length === 0) {
+      return {
+        kind: "empty_category" as const,
+        category: savedCategoryFilter as Category,
+      };
     }
 
     if (savedPlacesSort === "region") {
@@ -10096,11 +10175,22 @@ function HomePageContent() {
   }, [
     savedPlaces,
     savedSearchQuery,
+    savedCategoryFilter,
     savedPlacesSort,
     savedNearOrigin,
     savedNearLocating,
     savedNearDenied,
   ]);
+
+  const savedCategoryChipItems = useMemo(() => {
+    const counts = new Map<Category, number>();
+    for (const place of savedPlaces) {
+      counts.set(place.category, (counts.get(place.category) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ko"))
+      .map(([cat, count]) => ({ cat, count }));
+  }, [savedPlaces]);
 
   // 홈 피드 무한 스크롤
   useEffect(() => {
@@ -13263,6 +13353,43 @@ function HomePageContent() {
             </button>
           )}
         </div>
+        {savedPlaces.length > 0 && (
+          <div
+            className="savedCategoryChips"
+            data-testid="saved-category-chips"
+            role="tablist"
+            aria-label="카테고리 필터"
+          >
+            <button
+              type="button"
+              role="tab"
+              data-testid="saved-category-chip"
+              aria-selected={savedCategoryFilter === "all"}
+              className={`savedCategoryChip${savedCategoryFilter === "all" ? " savedCategoryChipSelected" : ""}`}
+              onClick={() => handleSavedCategoryFilterChange("all")}
+            >
+              전체
+            </button>
+            {savedCategoryChipItems.map(({ cat, count }) => {
+              const selected = savedCategoryFilter === cat;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  role="tab"
+                  data-testid="saved-category-chip"
+                  aria-selected={selected}
+                  className={`savedCategoryChip${selected ? " savedCategoryChipSelected" : ""}`}
+                  onClick={() =>
+                    handleSavedCategoryFilterChange(selected ? "all" : cat)
+                  }
+                >
+                  {CATEGORY_PIN[cat].emoji} {cat} {count}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </>
     )}
     {savedSelectMode && savedPlaces.length > 0 && (
@@ -13344,6 +13471,7 @@ function HomePageContent() {
             savedLongPressStartRef.current = null;
             savedSuppressClickRef.current = true;
             setSavedPlaceMenuId(null);
+            setSavedPlaceMenuClosing(false);
             setSavedSelectMode(true);
             setSavedSelectedIds(new Set([place.id]));
           }, 500);
@@ -13375,7 +13503,6 @@ function HomePageContent() {
         return (
           <div
             className="savedItemActions"
-            ref={savedPlaceMenuId === place.id ? savedPlaceMenuRef : undefined}
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -13384,41 +13511,17 @@ function HomePageContent() {
               className="savedItemMoreBtn"
               aria-label="더보기"
               aria-expanded={savedPlaceMenuId === place.id}
-              onClick={() =>
-                setSavedPlaceMenuId((id) => (id === place.id ? null : place.id))
-              }
+              onClick={() => {
+                if (savedPlaceMenuId === place.id) {
+                  closeSavedPlaceMenu();
+                  return;
+                }
+                setSavedPlaceMenuClosing(false);
+                setSavedPlaceMenuId(place.id);
+              }}
             >
               ⋯
             </button>
-            {savedPlaceMenuId === place.id && (
-              <div className="savedItemMoreMenu" role="menu">
-                <button
-                  type="button"
-                  role="menuitem"
-                  data-testid="saved-memo-open"
-                  onClick={() => openPlaceMemoForSavedPlace(place)}
-                >
-                  {place.memo?.trim() ? "메모 수정" : "메모"}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => openAddToListForSavedPlace(place)}
-                >
-                  목록에 추가
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setSavedPlaceMenuId(null);
-                    handleSavedPlaceClick(place);
-                  }}
-                >
-                  지도에서 보기
-                </button>
-              </div>
-            )}
           </div>
         );
       };
@@ -13487,6 +13590,14 @@ function HomePageContent() {
 
       if (model.kind === "empty_search") {
         return <p className="emptyText" style={{ textAlign: "center" }}>"{model.query}"에 해당하는 장소가 없어요.</p>;
+      }
+
+      if (model.kind === "empty_category") {
+        return (
+          <p className="emptyText" style={{ textAlign: "center" }}>
+            이 카테고리에 저장한 장소가 없어요
+          </p>
+        );
       }
 
       // ── 지역순 (기본): 지역 > 카테고리 > 장소 ──
@@ -14283,6 +14394,64 @@ function HomePageContent() {
             showToast={showToast}
           />
         )}
+        {savedPlaceMenuId &&
+          (() => {
+            const menuPlace =
+              savedPlaces.find((p) => p.id === savedPlaceMenuId) ?? null;
+            if (!menuPlace) return null;
+            return createPortal(
+              <div
+                className={`savedPlaceActionSheetRoot${savedPlaceMenuClosing ? " isClosing" : ""}`}
+                role="presentation"
+                onClick={() => closeSavedPlaceMenu()}
+              >
+                <div
+                  className="savedPlaceActionSheetStack"
+                  role="dialog"
+                  aria-label={`${menuPlace.name} 메뉴`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="savedPlaceActionSheetCard">
+                    <p className="savedPlaceActionSheetTitle">{menuPlace.name}</p>
+                    <button
+                      type="button"
+                      className="savedPlaceActionSheetItem"
+                      data-testid="saved-memo-open"
+                      onClick={() => openPlaceMemoForSavedPlace(menuPlace)}
+                    >
+                      {menuPlace.memo?.trim() ? "메모 수정" : "메모"}
+                    </button>
+                    <button
+                      type="button"
+                      className="savedPlaceActionSheetItem"
+                      onClick={() => openAddToListForSavedPlace(menuPlace)}
+                    >
+                      목록에 추가
+                    </button>
+                    <button
+                      type="button"
+                      className="savedPlaceActionSheetItem"
+                      onClick={() => {
+                        setSavedPlaceMenuId(null);
+                        setSavedPlaceMenuClosing(false);
+                        handleSavedPlaceClick(menuPlace);
+                      }}
+                    >
+                      지도에서 보기
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="savedPlaceActionSheetCancel"
+                    onClick={() => closeSavedPlaceMenu()}
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>,
+              document.body,
+            );
+          })()}
         {/* Stable file input outside portal — matches Step1Photos / profile avatar (no capture) */}
         <input
           ref={courseInviteImageInputRef}
