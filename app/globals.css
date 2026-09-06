@@ -4095,6 +4095,10 @@ select:focus-visible {
   margin: 0 0 10px;
 }
 
+.myListsBody .savedCategoryChips {
+  margin: 0 0 12px;
+}
+
 .myListsDetailSearch {
   width: 100%;
   box-sizing: border-box;

@@ -63,6 +63,7 @@ export function MyListsScreen({
   const [reordering, setReordering] = useState(false);
   const [removingPlaceId, setRemovingPlaceId] = useState<string | null>(null);
   const [detailSearchQuery, setDetailSearchQuery] = useState("");
+  const [detailCategoryFilter, setDetailCategoryFilter] = useState<"all" | Category>("all");
   const [menuPlaceId, setMenuPlaceId] = useState<string | null>(null);
   const [menuClosing, setMenuClosing] = useState(false);
 
@@ -131,6 +132,7 @@ export function MyListsScreen({
       setEditingTitle(false);
       setConfirmDelete(false);
       setDetailSearchQuery("");
+      setDetailCategoryFilter("all");
       setMenuPlaceId(null);
       setDetailLoading(true);
       const { data, error } = await fetchListPlaces(list.id);
@@ -155,6 +157,7 @@ export function MyListsScreen({
         setDeletingList(false);
         setRemovingPlaceId(null);
         setDetailSearchQuery("");
+        setDetailCategoryFilter("all");
         detailScrollTopRef.current = 0;
       }
       preserveDetailOnHideRef.current = false;
@@ -183,6 +186,7 @@ export function MyListsScreen({
     setDeletingList(false);
     setRemovingPlaceId(null);
     setDetailSearchQuery("");
+    setDetailCategoryFilter("all");
     setMenuPlaceId(null);
     setMenuClosing(false);
     onClose();
@@ -218,11 +222,27 @@ export function MyListsScreen({
   }, [menuClosing]);
 
   const searchActive = detailSearchQuery.trim().length > 0;
+  const categoryFilterActive = detailCategoryFilter !== "all";
+  const listFilterActive = searchActive || categoryFilterActive;
+
+  const categoryChipItems = useMemo(() => {
+    const counts = new Map<Category, number>();
+    for (const place of places) {
+      const cat = place.category as Category;
+      counts.set(cat, (counts.get(cat) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ko"))
+      .map(([cat, count]) => ({ cat, count }));
+  }, [places]);
 
   const filteredPlaces = useMemo(() => {
     const q = detailSearchQuery.trim().toLowerCase();
-    if (!q) return places;
     return places.filter((place) => {
+      if (detailCategoryFilter !== "all" && place.category !== detailCategoryFilter) {
+        return false;
+      }
+      if (!q) return true;
       const memo = resolveMemo(place) ?? "";
       return (
         place.name.toLowerCase().includes(q) ||
@@ -230,7 +250,11 @@ export function MyListsScreen({
         memo.toLowerCase().includes(q)
       );
     });
-  }, [places, detailSearchQuery, resolveMemo]);
+  }, [places, detailSearchQuery, detailCategoryFilter, resolveMemo]);
+
+  const handleCategoryFilterChange = useCallback((next: "all" | Category) => {
+    setDetailCategoryFilter((prev) => (prev === next && next !== "all" ? "all" : next));
+  }, []);
 
   if (!open) return null;
 
@@ -269,7 +293,7 @@ export function MyListsScreen({
   const onDragHandlePointerDown = (index: number, e: ReactPointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (reordering || searchActive) return;
+    if (reordering || listFilterActive) return;
     const handle = e.currentTarget;
     handle.setPointerCapture(e.pointerId);
     const initial = placesRef.current.slice();
@@ -590,12 +614,51 @@ export function MyListsScreen({
                 </button>
               ) : null}
             </div>
+            <div
+              className="savedCategoryChips"
+              data-testid="list-category-chips"
+              role="tablist"
+              aria-label="카테고리 필터"
+            >
+              <button
+                type="button"
+                role="tab"
+                data-testid="list-category-chip"
+                aria-selected={detailCategoryFilter === "all"}
+                className={`savedCategoryChip${detailCategoryFilter === "all" ? " savedCategoryChipSelected" : ""}`}
+                onClick={() => handleCategoryFilterChange("all")}
+              >
+                전체
+              </button>
+              {categoryChipItems.map(({ cat, count }) => {
+                const selected = detailCategoryFilter === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    role="tab"
+                    data-testid="list-category-chip"
+                    aria-selected={selected}
+                    className={`savedCategoryChip${selected ? " savedCategoryChipSelected" : ""}`}
+                    onClick={() => handleCategoryFilterChange(selected ? "all" : cat)}
+                  >
+                    {categoryPin[cat]?.emoji ?? "📍"} {cat} {count}
+                  </button>
+                );
+              })}
+            </div>
             {filteredPlaces.length === 0 ? (
-              <p className="myListsEmptyHint">검색 결과가 없어요</p>
+              <p className="myListsEmptyHint">
+                {searchActive
+                  ? "검색 결과가 없어요"
+                  : categoryFilterActive
+                    ? "이 카테고리에 담은 장소가 없어요"
+                    : "검색 결과가 없어요"}
+              </p>
             ) : (
               <ul
                 className={`myListsDetailList${reordering ? " myListsDetailListBusy" : ""}${
-                  searchActive ? " myListsDetailListFiltered" : ""
+                  listFilterActive ? " myListsDetailListFiltered" : ""
                 }`}
               >
                 {filteredPlaces.map((place) => {
@@ -613,9 +676,9 @@ export function MyListsScreen({
                         type="button"
                         className="myListsDragHandle"
                         aria-label="순서 변경"
-                        disabled={reordering || !!removingPlaceId || searchActive || fullIndex < 0}
+                        disabled={reordering || !!removingPlaceId || listFilterActive || fullIndex < 0}
                         onPointerDown={(e) => {
-                          if (searchActive || fullIndex < 0) return;
+                          if (listFilterActive || fullIndex < 0) return;
                           onDragHandlePointerDown(fullIndex, e);
                         }}
                       >

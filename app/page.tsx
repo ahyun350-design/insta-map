@@ -992,6 +992,13 @@ function makeMarkerImage(category: Category) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${color}" stroke="${stroke}" stroke-width="1"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
+/** 「지도에서 보기」 임시 강조 핀 — 저장 핀(36×44)보다 큼 + 네이비 외곽 */
+function makeFocusMarkerImage(category: Category) {
+  const { color, emoji } = CATEGORY_PIN[category];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58"><path d="M24 1C11.3 1 1 11.3 1 24c0 17.5 23 33 23 33s23-15.5 23-33C47 11.3 36.7 1 24 1z" fill="${color}" stroke="#1a2a7a" stroke-width="2.5"/><circle cx="24" cy="24" r="15" fill="white" opacity="0.95"/><text x="24" y="30" text-anchor="middle" font-size="16">${emoji}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+const FOCUS_PLACE_MARKER_ID = "focus-place";
 function makeMyLocationImage() {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#1a2a7a" stroke="white" stroke-width="2.5"/><circle cx="12" cy="12" r="4" fill="white"/></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -1912,6 +1919,9 @@ function HomePageContent() {
   /** 확장 지도 직접 검색 시 Location bias — addMyLocation 성공 시 저장, 없으면 지도 center */
   const myLocationLatLngRef = useRef<{ lat: number; lng: number } | null>(null);
   const myLocationMarkerRef = useRef<{ main: any | null; expanded: any | null }>({ main: null, expanded: null });
+  /** 「지도에서 보기」 임시 강조 핀 (저장 핀과 별도 — addPlacePins 미사용) */
+  const focusPlaceMarkerRef = useRef<{ main: any | null; expanded: any | null }>({ main: null, expanded: null });
+  const focusPlaceCoordsRef = useRef<{ lat: number; lng: number; category: Category } | null>(null);
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
@@ -3098,6 +3108,24 @@ function HomePageContent() {
 
       await waitForFullscreenNativeMapReady();
 
+      const focusAtPresent = focusPlaceCoordsRef.current;
+      if (focusAtPresent) {
+        void updateFullscreenNativeMarkers(
+          {
+            markers: [
+              {
+                id: FOCUS_PLACE_MARKER_ID,
+                lat: focusAtPresent.lat,
+                lng: focusAtPresent.lng,
+                category: focusAtPresent.category,
+              },
+            ],
+            clearPrefix: "focus-",
+          },
+          { silent: true },
+        );
+      }
+
       if (isFullscreenCourseMode && courseRoutePath.length >= 2) {
         const courseSessionId = ++fullscreenCourseRouteSessionRef.current;
         const courseMarkersForRoute = initialMarkers.map((marker) => ({ ...marker })) as FullscreenSearchMarkerSnapshot[];
@@ -3171,7 +3199,22 @@ function HomePageContent() {
             }
 
             void updateFullscreenNativeMarkers(
-              { markers: [...accumulatedMarkers] },
+              {
+                markers: (() => {
+                  const focus = focusPlaceCoordsRef.current;
+                  if (!focus) return [...accumulatedMarkers];
+                  const without = accumulatedMarkers.filter((m) => m.id !== FOCUS_PLACE_MARKER_ID);
+                  return [
+                    ...without,
+                    {
+                      id: FOCUS_PLACE_MARKER_ID,
+                      lat: focus.lat,
+                      lng: focus.lng,
+                      category: focus.category,
+                    },
+                  ];
+                })(),
+              },
               { silent: true },
             ).catch((err) => {
               console.warn("[fullscreen] updateFullscreenNativeMarkers failed", err);
@@ -6630,6 +6673,91 @@ function HomePageContent() {
     }
   };
 
+  const clearFocusPlaceMarker = useCallback(() => {
+    focusPlaceCoordsRef.current = null;
+    (["main", "expanded"] as const).forEach((scope) => {
+      const marker = focusPlaceMarkerRef.current[scope];
+      if (!marker) return;
+      try {
+        marker.setMap(null);
+      } catch {
+        /* noop */
+      }
+      focusPlaceMarkerRef.current[scope] = null;
+    });
+    void clearNativeMarkers("focus-");
+    if (mapExpandedLiveRef.current && isNativeMapAvailable()) {
+      void updateFullscreenNativeMarkers(
+        { markers: [], clearPrefix: "focus-" },
+        { silent: true },
+      );
+    }
+  }, []);
+
+  const applyFocusPlaceMarkerOnMap = useCallback(
+    (map: any, scope: "main" | "expanded", lat: number, lng: number, category: Category) => {
+      if (!map || !window.kakao?.maps) return;
+      const existing = focusPlaceMarkerRef.current[scope];
+      if (existing) {
+        try {
+          existing.setMap(null);
+        } catch {
+          /* noop */
+        }
+        focusPlaceMarkerRef.current[scope] = null;
+      }
+      try {
+        const marker = new window.kakao.maps.Marker({
+          position: new window.kakao.maps.LatLng(lat, lng),
+          image: new window.kakao.maps.MarkerImage(
+            makeFocusMarkerImage(category),
+            new window.kakao.maps.Size(48, 58),
+            { offset: new window.kakao.maps.Point(24, 58) },
+          ),
+          zIndex: 10,
+        });
+        marker.setMap(map);
+        focusPlaceMarkerRef.current[scope] = marker;
+      } catch (err) {
+        console.error("[PindMap:focusPin] marker failed", err);
+      }
+    },
+    [],
+  );
+
+  const syncFocusPlaceMarkerToNative = useCallback(
+    (lat: number, lng: number, category: Category) => {
+      if (!isNativeMapAvailable()) return;
+      const payload = [
+        { id: FOCUS_PLACE_MARKER_ID, lat, lng, category },
+      ];
+      void clearNativeMarkers("focus-").then(() => addNativeMarkers(payload));
+      if (mapExpandedLiveRef.current) {
+        void updateFullscreenNativeMarkers(
+          { markers: payload, clearPrefix: "focus-" },
+          { silent: true },
+        );
+      }
+    },
+    [],
+  );
+
+  /** 저장 핀과 별도 임시 강조 마커 (미니맵 + 확장 웹 + 네이티브) */
+  const showFocusPlaceMarker = useCallback(
+    (lat: number, lng: number, category: Category) => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      focusPlaceCoordsRef.current = { lat, lng, category };
+      if (mapRef.current) {
+        applyFocusPlaceMarkerOnMap(mapRef.current, "main", lat, lng, category);
+      }
+      if (mapExpandedLiveRef.current && expandedMapRef.current) {
+        applyFocusPlaceMarkerOnMap(expandedMapRef.current, "expanded", lat, lng, category);
+      }
+      syncFocusPlaceMarkerToNative(lat, lng, category);
+    },
+    [applyFocusPlaceMarkerOnMap, syncFocusPlaceMarkerToNative],
+  );
+
   // 저장 목록·내 목록 장소 클릭 → 컴팩트 시트
   // returnTo: 시트 닫기 시 복귀처 (saved|list|curation). null이면 복귀 없음.
   // switchToMap: true면 지도 탭으로 전환(⋯「지도에서 보기」). 행 탭은 false — 탭 유지.
@@ -6669,14 +6797,26 @@ function HomePageContent() {
     }
     const relatedPosts = getRelatedPostsForPlaceSheet(feedPosts, placeRefFromPlace(place));
     const stored = latLngFromRow(place) ?? savedPlaceCoordsRef.current[place.id] ?? null;
+    const goingToMap =
+      switchToMap ||
+      (returnTo?.type !== "saved" && returnTo?.type !== "list");
+    if (!goingToMap) {
+      clearFocusPlaceMarker();
+    }
     if (stored && mapRef.current) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(stored.lat, stored.lng));
       mapRef.current.setLevel(4);
       savedPlaceCoordsRef.current[place.id] = stored;
+      if (goingToMap) {
+        showFocusPlaceMarker(stored.lat, stored.lng, place.category);
+      }
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
       return;
     }
     if (stored) {
+      if (goingToMap) {
+        showFocusPlaceMarker(stored.lat, stored.lng, place.category);
+      }
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
       return;
     }
@@ -6693,6 +6833,9 @@ function HomePageContent() {
         mapRef.current.setCenter(new window.kakao.maps.LatLng(coords.lat, coords.lng));
         mapRef.current.setLevel(4);
       }
+      if (goingToMap) {
+        showFocusPlaceMarker(coords.lat, coords.lng, place.category);
+      }
       setSelectedPlace(toSelectedFromSavedPlace({ ...place, ...coords }, relatedPosts, coords.lat, coords.lng));
     })();
   };
@@ -6701,6 +6844,7 @@ function HomePageContent() {
   const closeCompactPlaceSheet = useCallback(() => {
     const returnTo = placeSheetReturnRef.current;
     placeSheetReturnRef.current = null;
+    clearFocusPlaceMarker();
     setSelectedPlace(null);
     setSelectedMapPlace(null);
     setDirectionsChosen(false);
@@ -6718,7 +6862,7 @@ function HomePageContent() {
       if (returnTo.fromTab) setActiveTab(returnTo.fromTab);
       setDetailPostId(returnTo.postId);
     }
-  }, []);
+  }, [clearFocusPlaceMarker]);
 
   const resolveDirectionsOrigin = useCallback((): Promise<{ lat: number; lng: number } | null> => {
     const stored = myLocationLatLngRef.current;
@@ -6756,6 +6900,9 @@ function HomePageContent() {
         placePinByIdRef.current.set(`place-${saved.id}`, saved);
       }
       if (hasCoord) {
+        const cat = (placeData.category_name as Category) || "맛집";
+        const focusCat = CATEGORY_MAIN_ORDER.includes(cat) ? cat : "맛집";
+        showFocusPlaceMarker(lat, lng, focusCat);
         focusExpandedMapOnLatLng(lat, lng, 3);
         // 네이티브 present 진입 시 restore snapshot 으로 좌표 카메라 강제
         fullscreenRestorePendingRef.current = true;
@@ -6850,6 +6997,7 @@ function HomePageContent() {
       resolveDirectionsOrigin,
       resolveSavedMatch,
       runFullscreenNativeDirections,
+      showFocusPlaceMarker,
       showToast,
     ],
   );
@@ -10274,6 +10422,34 @@ function HomePageContent() {
       returnToCourseSheetRef.current = false;
     }
   }, [activeTab]);
+
+  /** 전체화면 진입 시 「지도에서 보기」 강조 핀을 확장/네이티브에 재적용 */
+  useEffect(() => {
+    const focus = focusPlaceCoordsRef.current;
+    if (!mapExpanded) {
+      const expandedMarker = focusPlaceMarkerRef.current.expanded;
+      if (expandedMarker) {
+        try {
+          expandedMarker.setMap(null);
+        } catch {
+          /* noop */
+        }
+        focusPlaceMarkerRef.current.expanded = null;
+      }
+      return;
+    }
+    if (!focus) return;
+    if (expandedMapRef.current) {
+      applyFocusPlaceMarkerOnMap(
+        expandedMapRef.current,
+        "expanded",
+        focus.lat,
+        focus.lng,
+        focus.category,
+      );
+    }
+    syncFocusPlaceMarkerToNative(focus.lat, focus.lng, focus.category);
+  }, [mapExpanded, applyFocusPlaceMarkerOnMap, syncFocusPlaceMarkerToNative]);
 
   useEffect(() => {
     if (!mapExpanded) {
@@ -14984,6 +15160,7 @@ function HomePageContent() {
               }
               onCurationClick={(postId, photoIndex) => {
                 placeSheetReturnRef.current = null;
+                clearFocusPlaceMarker();
                 openPlaceCurationFromSheet(selectedPlace as PlaceSheetData, postId, photoIndex);
                 setSelectedPlace(null);
               }}
