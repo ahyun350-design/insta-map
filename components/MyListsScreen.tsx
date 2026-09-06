@@ -30,7 +30,10 @@ type Props = {
   /** savedPlaces 기준 메모 — 낙관적 갱신 반영 */
   memoByPlaceId?: Record<string, string | null | undefined>;
   onClose: () => void;
+  /** 행 탭 — 장소 상세 시트 (목록 유지) */
   onOpenPlace: (place: PlaceListPlace) => void;
+  /** ⋯ → 지도에서 보기 — 지도 탭 이동 */
+  onViewOnMap: (place: PlaceListPlace) => void;
   onOpenMemo: (place: PlaceListPlace) => void;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
 };
@@ -43,6 +46,7 @@ export function MyListsScreen({
   memoByPlaceId,
   onClose,
   onOpenPlace,
+  onViewOnMap,
   onOpenMemo,
   showToast,
 }: Props) {
@@ -392,7 +396,7 @@ export function MyListsScreen({
                   className="savedPlaceActionSheetItem"
                   onClick={() => {
                     closeMenu();
-                    onOpenPlace(menuPlace);
+                    onViewOnMap(menuPlace);
                   }}
                 >
                   지도에서 보기
@@ -558,7 +562,6 @@ export function MyListsScreen({
                   const fullIndex = places.findIndex((p) => p.id === place.id);
                   const cat = place.category as Category;
                   const color = categoryColors[cat] ?? "#1a2a7a";
-                  const emoji = categoryPin[cat]?.emoji ?? "📍";
                   const removing = removingPlaceId === place.id;
                   const memo = resolveMemo(place);
                   return (
@@ -581,6 +584,10 @@ export function MyListsScreen({
                       <button
                         type="button"
                         className="myListsDetailMain"
+                        style={{
+                          borderLeft: `3px solid ${color}`,
+                          paddingLeft: 12,
+                        }}
                         onClick={() => onOpenPlace(place)}
                         disabled={removing}
                       >
@@ -590,36 +597,41 @@ export function MyListsScreen({
                           aria-hidden
                         />
                         <span className="myListsDetailText">
-                          <span className="myListsDetailName">{place.name}</span>
+                          <span className="savedName">{place.name}</span>
                           {memo ? (
-                            <span className="myListsDetailMemo" data-testid="list-item-memo">
+                            <span className="savedMemo" data-testid="list-item-memo">
                               ✎ {memo}
                             </span>
                           ) : null}
-                          <span className="myListsDetailMeta">
-                            {emoji} {place.category} · {place.address}
+                          <span className="savedMeta">
+                            {place.category} · {place.address}
                           </span>
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        className="myListsMoreBtn"
-                        data-testid="list-item-menu"
-                        aria-label="더보기"
-                        aria-expanded={menuPlaceId === place.id}
-                        disabled={removing}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (menuPlaceId === place.id) {
-                            closeMenu();
-                            return;
-                          }
-                          setMenuClosing(false);
-                          setMenuPlaceId(place.id);
-                        }}
+                      <div
+                        className="savedItemActions"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
                       >
-                        ⋯
-                      </button>
+                        <button
+                          type="button"
+                          className="savedItemMoreBtn"
+                          data-testid="list-item-menu"
+                          aria-label="더보기"
+                          aria-expanded={menuPlaceId === place.id}
+                          disabled={removing}
+                          onClick={() => {
+                            if (menuPlaceId === place.id) {
+                              closeMenu();
+                              return;
+                            }
+                            setMenuClosing(false);
+                            setMenuPlaceId(place.id);
+                          }}
+                        >
+                          ⋯
+                        </button>
+                      </div>
                     </li>
                   );
                 })}

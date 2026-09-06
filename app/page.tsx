@@ -15073,6 +15073,27 @@ function HomePageContent() {
                 { returnTo: { type: "list" } },
               );
             }}
+            onViewOnMap={(place) => {
+              const fromSaved = savedPlacesRef.current.find((p) => p.id === place.id);
+              setShowMyListsScreen(false);
+              handleSavedPlaceClick(
+                {
+                  id: place.id,
+                  name: place.name,
+                  address: place.address,
+                  category: place.category as Category,
+                  ...(typeof place.lat === "number" ? { lat: place.lat } : {}),
+                  ...(typeof place.lng === "number" ? { lng: place.lng } : {}),
+                  ...(place.created_at ? { created_at: place.created_at } : {}),
+                  ...(fromSaved?.memo !== undefined
+                    ? { memo: fromSaved.memo }
+                    : place.memo !== undefined
+                      ? { memo: place.memo }
+                      : {}),
+                },
+                { returnTo: null },
+              );
+            }}
             onOpenMemo={(place) => {
               const fromSaved = savedPlacesRef.current.find((p) => p.id === place.id);
               openPlaceMemoForSavedPlace({
@@ -15165,7 +15186,8 @@ function HomePageContent() {
                       onClick={() => {
                         setSavedPlaceMenuId(null);
                         setSavedPlaceMenuClosing(false);
-                        handleSavedPlaceClick(menuPlace);
+                        // 지도 탭 전환 + 중심 이동 + 시트 (저장/목록 복귀 없음)
+                        handleSavedPlaceClick(menuPlace, { returnTo: null });
                       }}
                     >
                       지도에서 보기

@@ -4018,10 +4018,11 @@ select:focus-visible {
 
 .myListsDetailItem {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 0;
-  border-bottom: 0.5px solid #efefef;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 0.5px solid var(--border);
+  background: transparent;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -4044,21 +4045,22 @@ select:focus-visible {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   flex-shrink: 0;
-  margin-top: 2px;
 }
 
 .myListsDetailMain {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   border: none;
   background: transparent;
   padding: 0;
+  margin: 0;
   cursor: pointer;
   font-family: inherit;
   text-align: left;
+  box-sizing: border-box;
 }
 
 .myListsDetailDot {
@@ -4066,55 +4068,14 @@ select:focus-visible {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-top: 6px;
+  display: inline-block;
 }
 
 .myListsDetailText {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.myListsDetailName {
-  font-size: 14px;
-  color: #1a1a2e;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.myListsDetailMemo {
-  font-size: 13px;
-  font-weight: 500;
-  color: #1f2937;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.myListsDetailMeta {
-  font-size: 10px;
-  color: #9ca3af;
-  letter-spacing: 0.2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.myListsMoreBtn {
-  border: none;
-  background: transparent;
-  color: #9ca3af;
-  font-size: 20px;
-  line-height: 1;
-  padding: 8px 6px;
-  cursor: pointer;
-  flex-shrink: 0;
-  font-family: inherit;
-  -webkit-tap-highlight-color: transparent;
-  margin-top: 2px;
 }
 
 .myListsDetailSearchWrap {
