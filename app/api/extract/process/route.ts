@@ -13,6 +13,16 @@ import {
 import { resolvePlaceCategoryFromKakao } from "@/lib/kakaoCategory";
 import { maskCaption } from "@/lib/maskCaption";
 import { readReelCache, writeReelCache, isNoCaptionScrapeError } from "@/lib/reelCache";
+import {
+  decidePoiAdoption,
+  formatPoiLowconfLog,
+  formatPoiResolvedLog,
+  searchPoi,
+  toPoiSearchResult,
+  type PoiSearchHit,
+} from "@/lib/poiSearch";
+import { formatPlaceSourceLog } from "@/lib/poiMatch";
+import { resolvePlaceViaPoi } from "@/lib/resolvePlaceViaPoi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,6 +69,16 @@ function toDiagCaption(raw: string): string {
   return truncateCaption(maskCaption(raw));
 }
 
+type PendingPlaceJson = {
+  name: string;
+  region: string | null;
+  hint: string;
+  category: Place["category"];
+  reason: "c" | "d";
+  top_score: number | null;
+  candidates: ReturnType<typeof toPoiSearchResult>[];
+};
+
 /** 진단 컬럼만 갱신 (status 변경 없음) — 중간 실패에도 부분 기록 유지 */
 async function saveJobDiagnostics(
   jobId: string,
@@ -66,6 +86,7 @@ async function saveJobDiagnostics(
     caption?: string | null;
     claude_places?: RawPlace[] | PlaceCandidateJson[] | null;
     kakao_misses?: string[] | null;
+    pending_places?: PendingPlaceJson[] | null;
   },
 ): Promise<void> {
   try {
@@ -88,8 +109,16 @@ async function saveJobDiagnostics(
 type PlaceCandidateJson = {
   name: string;
   hint: string;
+  region: string | null;
   category: Place["category"];
 };
+
+function parseRegion(raw: unknown): string | null {
+  if (raw == null) return null;
+  if (typeof raw !== "string") return null;
+  const t = raw.trim();
+  return t.length > 0 ? t : null;
+}
 
 async function updateJobProgress(jobId: string, progressStep: string) {
   const supabase = createServiceSupabase();
@@ -149,6 +178,8 @@ type ResolvedPlace = {
   address: string;
   lat: number;
   lng: number;
+  source: "kakao" | "poi";
+  poi_id?: number | null;
 };
 
 /** resolved === 0 원인 코드 (카카오 미스 장소명 + 시도 stage 진단) */
@@ -165,6 +196,36 @@ function buildPlaces(resolved: ResolvedPlace[]): Place[] {
   return resolved.map((p) => ({ name: p.name, category: p.category, address: p.address }));
 }
 
+function averageOrigin(
+  places: ReadonlyArray<{ lat: number; lng: number }>,
+): { lat: number; lng: number } | null {
+  if (places.length === 0) return null;
+  let lat = 0;
+  let lng = 0;
+  for (const p of places) {
+    lat += p.lat;
+    lng += p.lng;
+  }
+  return { lat: lat / places.length, lng: lng / places.length };
+}
+
+function resolvePoiCategory(
+  poiCategory: string | null,
+  claudeCategory: Place["category"],
+): Place["category"] {
+  if (
+    poiCategory === "맛집" ||
+    poiCategory === "카페" ||
+    poiCategory === "쇼핑" ||
+    poiCategory === "숙소" ||
+    poiCategory === "놀거리" ||
+    poiCategory === "여행지"
+  ) {
+    return poiCategory;
+  }
+  return claudeCategory;
+}
+
 export async function POST(req: Request) {
   const routeT0 = Date.now();
   let jobId = "";
@@ -172,6 +233,7 @@ export async function POST(req: Request) {
   let diagCaption: string | null = null;
   let diagClaudePlaces: RawPlace[] | PlaceCandidateJson[] | null = null;
   let diagKakaoMisses: string[] | null = null;
+  let diagPendingPlaces: PendingPlaceJson[] | null = null;
 
   try {
     const body = await req.json() as { jobId?: string };
@@ -261,15 +323,17 @@ export async function POST(req: Request) {
     type PlaceCandidate = {
       name: string;
       hint: string;
+      region: string | null;
       category: Place["category"];
     };
     const candidates: PlaceCandidate[] = [];
     for (const item of rawPlaces) {
       const name = typeof item.name === "string" ? item.name.trim() : "";
       const hint = typeof item.hint === "string" ? item.hint.trim() : "";
+      const region = parseRegion(item.region);
       const category = normalizeCategory(item.category);
       if (!name || !category) continue;
-      candidates.push({ name, hint, category });
+      candidates.push({ name, hint, region, category });
     }
     const candidateNames = candidates.map((c) => c.name);
 
@@ -287,11 +351,16 @@ export async function POST(req: Request) {
       claudePlaces: rawPlaces,
     });
 
-    // 카카오 장소별 병렬 검색 (폴백은 장소 내부 순차, 검증 없이 첫 결과 채택)
+    // 카카오 장소별 병렬 검색 → 성공 시 좌표를 origin 으로 poi 재해결
     await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
     const kakaoT0 = Date.now();
     const resolved: ResolvedPlace[] = [];
-    const kakaoMissDiags: { name: string; tried: number; stages: string[] }[] = [];
+    const kakaoMissDiags: {
+      name: string;
+      tried: number;
+      stages: string[];
+      candidate: PlaceCandidate;
+    }[] = [];
 
     await Promise.all(
       candidates.map(async (item) => {
@@ -302,19 +371,44 @@ export async function POST(req: Request) {
           "",
         );
         if (!kakaoResult) {
-          kakaoMissDiags.push({ name: item.name, tried, stages });
+          kakaoMissDiags.push({ name: item.name, tried, stages, candidate: item });
           return;
         }
+
+        const category = resolvePlaceCategoryFromKakao(
+          kakaoResult.category_group_code,
+          kakaoResult.category_name,
+          item.category,
+        );
+        // 이름은 항상 Claude 추출명 유지. 카카오 좌표는 origin 으로만 사용.
+        const poiResolved = await resolvePlaceViaPoi(supabase, {
+          placeName: item.name,
+          originLat: kakaoResult.lat,
+          originLng: kakaoResult.lng,
+        });
+        if (poiResolved.ok) {
+          console.log(formatPlaceSourceLog("poi", item.name));
+          resolved.push({
+            name: item.name,
+            category: resolvePoiCategory(poiResolved.match.poi.category ?? null, category),
+            address: poiResolved.address,
+            lat: poiResolved.lat,
+            lng: poiResolved.lng,
+            source: "poi",
+            poi_id: poiResolved.poiId,
+          });
+          return;
+        }
+
+        console.log(formatPlaceSourceLog("kakao", item.name));
         resolved.push({
           name: item.name,
-          category: resolvePlaceCategoryFromKakao(
-            kakaoResult.category_group_code,
-            kakaoResult.category_name,
-            item.category,
-          ),
+          category,
           address: kakaoResult.roadAddress || kakaoResult.address,
           lat: kakaoResult.lat,
           lng: kakaoResult.lng,
+          source: "kakao",
+          poi_id: null,
         });
       }),
     );
@@ -322,14 +416,119 @@ export async function POST(req: Request) {
     console.log(`[PindMap:perf] extract.process.kakao ${Date.now() - kakaoT0}ms`, {
       candidates: candidates.length,
       resolved: resolved.length,
+      misses: kakaoMissDiags.length,
+      poiAdopted: resolved.filter((r) => r.source === "poi").length,
+      kakaoKept: resolved.filter((r) => r.source === "kakao").length,
     });
 
+    // 카카오 실패 → POI 검색 폴백
+    const pendingPlaces: PendingPlaceJson[] = [];
+    const unresolvedAfterPoi: { name: string; tried: number; stages: string[] }[] = [];
+
+    if (kakaoMissDiags.length > 0) {
+      await updateJobProgress(jobId, "내부 장소 DB에서 찾는 중");
+      const poiT0 = Date.now();
+      const origin = averageOrigin(resolved);
+
+      await Promise.all(
+        kakaoMissDiags.map(async (miss) => {
+          const item = miss.candidate;
+          const hintRegion = item.region || item.hint || null;
+          const hits: PoiSearchHit[] = await searchPoi(supabase, {
+            q: item.name,
+            hint_region: hintRegion,
+            origin_lat: origin?.lat ?? null,
+            origin_lng: origin?.lng ?? null,
+            max_results: 5,
+          });
+          const decision = decidePoiAdoption(hits, {
+            hintRegion,
+            originLat: origin?.lat ?? null,
+            originLng: origin?.lng ?? null,
+          });
+
+          if (decision.kind === "adopt") {
+            const hit = decision.hit;
+            const address =
+              (hit.road_address || hit.jibun_address || "").trim() || item.name;
+            if (hit.lat == null || hit.lng == null) {
+              console.log(formatPoiLowconfLog(item.name, hit.score, "e"));
+              unresolvedAfterPoi.push({
+                name: miss.name,
+                tried: miss.tried,
+                stages: [...miss.stages, "poi"],
+              });
+              return;
+            }
+            console.log(formatPoiResolvedLog(item.name, hit.score, decision.rule));
+            console.log(formatPlaceSourceLog("poi", item.name));
+            resolved.push({
+              name: item.name,
+              category: resolvePoiCategory(hit.category, item.category),
+              address,
+              lat: hit.lat,
+              lng: hit.lng,
+              source: "poi",
+              poi_id: hit.id,
+            });
+            return;
+          }
+
+          if (decision.kind === "needs_confirm") {
+            console.log(
+              formatPoiLowconfLog(item.name, decision.top?.score ?? null, decision.reason),
+            );
+            pendingPlaces.push({
+              name: item.name,
+              region: item.region,
+              hint: item.hint,
+              category: item.category,
+              reason: decision.reason,
+              top_score: decision.top?.score ?? null,
+              candidates: decision.hits.map(toPoiSearchResult),
+            });
+            unresolvedAfterPoi.push({
+              name: miss.name,
+              tried: miss.tried,
+              stages: [...miss.stages, "poi_confirm"],
+            });
+            return;
+          }
+
+          console.log(
+            formatPoiLowconfLog(item.name, decision.top?.score ?? null, decision.reason),
+          );
+          unresolvedAfterPoi.push({
+            name: miss.name,
+            tried: miss.tried,
+            stages: [...miss.stages, "poi_miss"],
+          });
+        }),
+      );
+
+      console.log(`[PindMap:perf] extract.process.poi ${Date.now() - poiT0}ms`, {
+        misses: kakaoMissDiags.length,
+        pending: pendingPlaces.length,
+        resolvedTotal: resolved.length,
+      });
+    }
+
+    diagPendingPlaces = pendingPlaces;
     const resolvedNames = new Set(resolved.map((r) => r.name));
     diagKakaoMisses = candidateNames.filter((n) => !resolvedNames.has(n));
-    await saveJobDiagnostics(jobId, { kakao_misses: diagKakaoMisses });
+    await saveJobDiagnostics(jobId, {
+      kakao_misses: diagKakaoMisses,
+      pending_places: diagPendingPlaces,
+    });
 
     if (resolved.length === 0) {
-      throw new Error(buildZeroResolvedErrorMessage(kakaoMissDiags));
+      throw new Error(
+        buildZeroResolvedErrorMessage(
+          unresolvedAfterPoi.length > 0
+            ? unresolvedAfterPoi
+            : kakaoMissDiags.map(({ name, tried, stages }) => ({ name, tried, stages })),
+        ),
+      );
     }
 
     const dbT0 = Date.now();
@@ -363,6 +562,7 @@ export async function POST(req: Request) {
           caption: diagCaption,
           claude_places: diagClaudePlaces,
           kakao_misses: diagKakaoMisses,
+          pending_places: diagPendingPlaces,
           completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -376,28 +576,35 @@ export async function POST(req: Request) {
     if (places.length === 0) {
       throw new Error(
         buildZeroResolvedErrorMessage(
-          kakaoMissDiags.length > 0
-            ? kakaoMissDiags
-            : candidateNames.map((name) => {
-                const planned = buildKakaoQueryFallbacks(name);
-                return {
-                  name,
-                  tried: planned.length,
-                  stages: planned.map((q) => q.stage),
-                };
-              }),
+          unresolvedAfterPoi.length > 0
+            ? unresolvedAfterPoi
+            : kakaoMissDiags.length > 0
+              ? kakaoMissDiags.map(({ name, tried, stages }) => ({ name, tried, stages }))
+              : candidateNames.map((name) => {
+                  const planned = buildKakaoQueryFallbacks(name);
+                  return {
+                    name,
+                    tried: planned.length,
+                    stages: planned.map((q) => q.stage),
+                  };
+                }),
         ),
       );
     }
 
     const rows = uniqueResolved.map((p) => ({
-      id: typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id:
+        typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       user_id: job.user_id,
       name: p.name,
       address: p.address,
       category: p.category,
       lat: p.lat,
       lng: p.lng,
+      source: p.source,
+      poi_id: p.poi_id ?? null,
     }));
 
     const { error: insertErr } = await supabase.from("places").insert(rows);
@@ -410,6 +617,7 @@ export async function POST(req: Request) {
       category: r.category,
       lat: r.lat,
       lng: r.lng,
+      source: r.source,
     }));
 
     const { error: doneError } = await supabase
@@ -422,6 +630,7 @@ export async function POST(req: Request) {
         caption: diagCaption,
         claude_places: diagClaudePlaces,
         kakao_misses: diagKakaoMisses,
+        pending_places: diagPendingPlaces,
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
@@ -446,6 +655,7 @@ export async function POST(req: Request) {
             caption: diagCaption,
             claude_places: diagClaudePlaces,
             kakao_misses: diagKakaoMisses,
+            pending_places: diagPendingPlaces,
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);

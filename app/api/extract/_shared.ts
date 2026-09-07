@@ -4,7 +4,14 @@ export const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_APIFY_ACTOR_ID = "apify~instagram-post-scraper";
 export type ClaudeCategory = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
 export type Place = { name: string; address: string; category: ClaudeCategory };
-export type RawPlace = { name?: unknown; address?: unknown; category?: unknown; hint?: unknown };
+export type RawPlace = {
+  name?: unknown;
+  address?: unknown;
+  category?: unknown;
+  hint?: unknown;
+  /** 캡션에 명시된 지역만. 없으면 null/생략 (추측 금지) */
+  region?: unknown;
+};
 
 function sanitizeJsonLikeText(input: string): string {
   return input.replace(/```json|```/gi, "").replace(/[""]/g, '"').replace(/['']/g, "'").replace(/,\s*([}\]])/g, "$1").trim();
@@ -492,10 +499,13 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
   const prompt = [
     "아래 인스타그램 캡션에서 언급된 모든 장소를 추출하세요.",
     "장소가 여러 개면 모두 포함하고, 없으면 빈 배열을 반환하세요.",
-    '반드시 JSON 배열만 반환하세요. 형식: [{"name":"장소명","hint":"동네명또는역이름","category":"맛집|카페|쇼핑|숙소|놀거리|여행지"}]',
+    '반드시 JSON 배열만 반환하세요. 형식: [{"name":"장소명","hint":"동네명또는역이름","region":"캡션에명시된지역또는null","category":"맛집|카페|쇼핑|숙소|놀거리|여행지"}]',
     "hint는 반드시 캡션에 직접 언급된 동네명, 역이름, 구명 중 가장 구체적인 것 하나만 넣으세요.",
     "예: 망원동, 합정, 성수, 용산역 처럼 짧고 구체적인 지역명 하나만.",
     "절대로 서울, 한국 같은 넓은 지역명은 쓰지 마세요. 구체적인 동네명이 없으면 빈 문자열.",
+    'region은 캡션에 그 장소와 함께 명시된 지역명만 넣으세요. 예: "성수", "연남동", "강남역", "부산 서면".',
+    "캡션에 지역이 없으면 region은 null. 추측·추론·힌트 보강 금지. 없으면 반드시 null.",
+    "hint와 region이 같아도 됩니다. region만 없고 hint만 있으면 region은 null.",
     'category는 반드시 "맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지" 중 하나만 사용하세요.',
     "카테고리는 장소의 주된 목적(먹는 곳 / 사는 곳 / 노는 곳 / 자는 곳 / 보는 곳)을 기준으로 가장 가까운 것을 고르세요. 애매하다고 맛집·카페로 몰지 마세요.",
     "맛집: 식사 중심 음식점(밥·요리 파는 곳). 레스토랑, 식당, 술집, 바.",
@@ -523,7 +533,7 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
       max_tokens: 2000,
       temperature: 0,
       system:
-        'You must return only pure JSON array. Output format: [{"name":"...","hint":"...","category":"카페"}]. category must be exactly one of: 맛집, 카페, 쇼핑, 숙소, 놀거리, 여행지 (Korean strings). Do not include markdown, code fences, explanations, or any extra text.',
+        'You must return only pure JSON array. Output format: [{"name":"...","hint":"...","region":null,"category":"카페"}]. region is optional string or null (only if explicitly in caption). category must be exactly one of: 맛집, 카페, 쇼핑, 숙소, 놀거리, 여행지 (Korean strings). Do not include markdown, code fences, explanations, or any extra text.',
       messages: [{ role: "user", content: prompt }],
     }),
   });

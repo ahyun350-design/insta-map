@@ -107,6 +107,11 @@ type AdminStatusPayload = {
   signups: { today: number; total: number };
   activeUsers7d: number;
   userEventsTotal: number;
+  todayPlaces?: {
+    total: number;
+    poi: number;
+    poiRate: number | null;
+  };
 };
 
 function formatAdminHoursAgo(iso: string | null): string {
@@ -14692,6 +14697,15 @@ function HomePageContent() {
                                     "오늘 추출",
                                     `성공 ${adminStatus.today.success} / 실패 ${adminStatus.today.failed}`,
                                     alertNoSuccess,
+                                  )}
+                                  {row(
+                                    "오늘 저장 poi 비율",
+                                    adminStatus.todayPlaces
+                                      ? adminStatus.todayPlaces.total === 0
+                                        ? "오늘 저장 없음"
+                                        : `${adminStatus.todayPlaces.poiRate ?? 0}% (${adminStatus.todayPlaces.poi}/${adminStatus.todayPlaces.total})`
+                                      : "—",
+                                    false,
                                   )}
                                   {row(
                                     "7일 성공률",

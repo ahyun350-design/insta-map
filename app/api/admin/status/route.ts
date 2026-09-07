@@ -128,6 +128,8 @@ export async function GET(req: Request) {
       totalUsersRes,
       activeUsers7d,
       userEventsCountRes,
+      todayPlacesPoiRes,
+      todayPlacesTotalRes,
     ] = await Promise.all([
       admin
         .from("extract_jobs")
@@ -170,6 +172,15 @@ export async function GET(req: Request) {
       admin.from("users").select("id", { count: "exact", head: true }),
       collectDistinctUserIds(admin, weekAgo),
       admin.from("user_events").select("id", { count: "exact", head: true }),
+      admin
+        .from("places")
+        .select("id", { count: "exact", head: true })
+        .eq("source", "poi")
+        .gte("created_at", todayStart),
+      admin
+        .from("places")
+        .select("id", { count: "exact", head: true })
+        .gte("created_at", todayStart),
     ]);
 
     if (todaySuccessRes.error) throw todaySuccessRes.error;
@@ -182,6 +193,8 @@ export async function GET(req: Request) {
     if (todayUsersRes.error) throw todayUsersRes.error;
     if (totalUsersRes.error) throw totalUsersRes.error;
     if (userEventsCountRes.error) throw userEventsCountRes.error;
+    if (todayPlacesPoiRes.error) throw todayPlacesPoiRes.error;
+    if (todayPlacesTotalRes.error) throw todayPlacesTotalRes.error;
 
     const todaySuccess = todaySuccessRes.count ?? 0;
     const todayFailed = todayFailedRes.count ?? 0;
@@ -208,6 +221,13 @@ export async function GET(req: Request) {
         null,
     }));
 
+    const todayPlacesPoi = todayPlacesPoiRes.count ?? 0;
+    const todayPlacesTotal = todayPlacesTotalRes.count ?? 0;
+    const todayPlacesPoiRate =
+      todayPlacesTotal === 0
+        ? null
+        : Math.round((todayPlacesPoi / todayPlacesTotal) * 1000) / 10;
+
     return NextResponse.json(
       {
         today: {
@@ -230,6 +250,11 @@ export async function GET(req: Request) {
         },
         activeUsers7d,
         userEventsTotal: userEventsCountRes.count ?? 0,
+        todayPlaces: {
+          total: todayPlacesTotal,
+          poi: todayPlacesPoi,
+          poiRate: todayPlacesPoiRate,
+        },
       },
       {
         headers: {

@@ -299,6 +299,95 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(myLists).toBeHidden({ timeout: 10_000 });
   });
 
+  // ── 4e. SAVED places as map pins (compact + fullscreen) ───
+  await runner.step("4e. SAVED — 저장 핀 미니맵/전체지도", async () => {
+    await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
+    const savedItems = page.locator("article.savedItem");
+    if ((await savedItems.count()) === 0) {
+      throw new Error("저장된 장소가 없어 핀 렌더링을 확인할 수 없음");
+    }
+
+    // 저장 장소 핀은 MAP 탭 미니맵(compact) / 전체화면에 렌더됨
+    await gotoTab(page, "map");
+    const compactMap = page.locator(".kakaoMap.mapCompactMap");
+    await expect(compactMap).toBeVisible({ timeout: 45_000 });
+    await page.waitForTimeout(3000);
+    const compactLoading = page.locator(".mapCompactLoading");
+    if (await compactLoading.isVisible().catch(() => false)) {
+      await compactLoading.waitFor({ state: "hidden", timeout: 30_000 }).catch(() => null);
+    }
+
+    const compactPins = page.locator(
+      ".mapCompactWrap .kakaoMap img, .mapCompactWrap img[src*='marker'], .mapCompactWrap img[src*='pin']",
+    );
+    await expect
+      .poll(async () => compactPins.count(), { timeout: 30_000 })
+      .toBeGreaterThan(0);
+
+    await safeClick(page.locator(".mapCompactTapLayer"));
+    const expandedDialog = page.locator('[aria-label="전체 지도"]');
+    await expect(expandedDialog).toBeVisible({ timeout: 20_000 });
+    const expandedMap = expandedDialog.locator(".kakaoMap");
+    await expect(expandedMap).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(2500);
+
+    const expandedPins = expandedDialog.locator(
+      ".kakaoMap img, img[src*='marker'], img[src*='pin']",
+    );
+    await expect
+      .poll(async () => expandedPins.count(), { timeout: 30_000 })
+      .toBeGreaterThan(0);
+
+    // 닫기
+    await safeClick(expandedDialog.getByRole("button", { name: "전체 지도 닫기" }));
+    await expect(expandedDialog).toBeHidden({ timeout: 10_000 }).catch(async () => {
+      await page.keyboard.press("Escape");
+    });
+  });
+
+  // ── 4f. Place detail field integrity ──────────────────────
+  await runner.step("4f. SAVED — 장소 상세 필드 무결성", async () => {
+    await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
+    const items = page.locator("article.savedItem");
+    if ((await items.count()) === 0) {
+      throw new Error("저장된 장소가 없어 상세 무결성을 확인할 수 없음");
+    }
+    await safeClick(items.first());
+    const sheet = page.locator(".placeDetailSheet");
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+
+    const nameEl = sheet.locator(".placeDetailSheetName");
+    await expect(nameEl).toBeVisible();
+    const nameText = (await nameEl.innerText()).trim();
+    expect(nameText.length > 0, "상세 이름 비어 있음").toBeTruthy();
+
+    const addrEl = sheet.locator(".placeDetailSheetValue").first();
+    await expect(addrEl).toBeVisible();
+    const addrText = (await addrEl.innerText()).trim();
+    expect(addrText.length > 0, "상세 주소 비어 있음").toBeTruthy();
+
+    // 좌표 존재 = 길찾기 활성 또는 「지도 크게 보기」 활성
+    const noCoordsHint = sheet.getByText(/위치 정보가 없어 길찾기를/);
+    const hasNoCoords = await noCoordsHint.isVisible().catch(() => false);
+    expect(hasNoCoords, "좌표 없음 — 지도 렌더 불가").toBeFalsy();
+
+    const expandMapBtn = sheet.getByRole("button", { name: /지도 크게 보기/ });
+    if ((await expandMapBtn.count()) > 0) {
+      await expect(expandMapBtn.first()).toBeEnabled();
+    } else {
+      const carBtn = sheet.getByRole("button", { name: /자동차/ });
+      await expect(carBtn).toBeEnabled();
+    }
+
+    await safeClick(sheet.getByRole("button", { name: "닫기" }));
+    await expect(sheet).toBeHidden({ timeout: 10_000 }).catch(async () => {
+      await page.keyboard.press("Escape");
+    });
+    await dismissSavedOverlays(page);
+  });
+
   // ── 5. MY ─────────────────────────────────────────────────
   await runner.step("5. MY 탭 — 게시 수 / 그리드 / 스크롤", async () => {
     await dismissSavedOverlays(page);
