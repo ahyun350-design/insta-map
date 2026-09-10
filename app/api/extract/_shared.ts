@@ -496,7 +496,8 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("서버에 ANTHROPIC_API_KEY가 설정되지 않았습니다.");
 
-  const prompt = [
+  // 고정 지시문 (캡션 앞에 둠). Haiku 4.5 캐시 최소 4096토큰 미달(~1.6k)이라 cache_control 미적용.
+  const fixedInstructions = [
     "아래 인스타그램 캡션에서 언급된 모든 장소를 추출하세요.",
     "장소가 여러 개면 모두 포함하고, 없으면 빈 배열을 반환하세요.",
     '반드시 JSON 배열만 반환하세요. 형식: [{"name":"장소명","hint":"동네명또는역이름","region":"캡션에명시된지역또는null","category":"맛집|카페|쇼핑|숙소|놀거리|여행지"}]',
@@ -522,8 +523,19 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
     "확신이 없으면 넣지 않는다. 적게 뽑는 쪽이 낫다.",
     "카테고리는 그 장소의 주된 용도로 판단한다. 술집·바·전시·공연장은 카페가 아니다.",
     "",
-    `caption: ${caption}`,
+    "상호명이 아닌 일반명사·보통명사는 장소로 뽑지 마세요.",
+    "(예: 공원, 저수지, 모노레일, 우리집, 바다, 카페, 식당, 숙소)",
+    "장소 name에 일반명사만 단독으로 넣지 마세요. (name이 곧 '카페'·'공원'·'식당'이면 제외)",
+    '캡션에서 그 단어가 "고유한 가게·시설 이름"으로 쓰였는지 판단하세요.',
+    '"공원에서 산책했다" → 장소 아님',
+    '"○○공원에 갔다" / "오호리 공원"처럼 고유 수식·고유명이 있으면 → 장소 맞음',
+    "브랜드명만 있고 지점이 불명확한 경우도 뽑지 마세요.",
+    '("현대" 하나만 있으면 백화점인지 자동차인지 알 수 없음)',
+    "확신이 없으면 뽑지 마세요. 잘못된 핀보다 없는 게 낫습니다.",
+    "단, 여행 루트·리스트에 고유 지명·역·공원·해변이 고유명으로 나열되면 포함하세요.",
   ].join("\n");
+
+  const prompt = `${fixedInstructions}\n\ncaption: ${caption}`;
 
   const res = await fetch(CLAUDE_API_URL, {
     method: "POST",
