@@ -18,6 +18,8 @@ spike/v7-native-map/plugin/.swiftpm
 /blob-report/
 /playwright/.cache/
 /e2e/artifacts/
-localdata/
+/localdata/
 scripts/localdata/.venv/
 scripts/localdata/out/
+scripts/localdata/raw_b/
+scripts/localdata/.db_url

@@ -43,8 +43,28 @@ const INDUSTRY_PREFIXES = [...rules.industryPrefixes].sort(
 );
 const REGION_PREFIXES = new Set(rules.regionPrefixes);
 
+const ROUTING_PAIRS: Array<{ kw: string; source: string }> = Object.entries(
+  rules.facilityRouting ?? {},
+)
+  .flatMap(([source, kws]) =>
+    (kws as string[]).map((kw) => ({ kw, source })),
+  )
+  .sort((a, b) => b.kw.length - a.kw.length);
+
+const PARK_GENERIC_SUFFIXES = [...(rules.parkGenericSuffixes ?? [])].sort(
+  (a, b) => b.length - a.length,
+);
+const PARK_GENERIC_MAX_M = rules.parkGenericMaxM ?? 200;
+const ROUTING_CAPS = rules.facilityRoutingCaps ?? {
+  simGe90OrExact: 500,
+  sim70to90: 300,
+  contain: 300,
+};
+
 export const POI_MATCH_RADIUS_M = rules.radiusM;
 export const POI_MATCH_BBOX_DEG = rules.bboxDeg;
+export const POI_ROUTING_RADIUS_M = rules.facilityRoutingRadiusM ?? 500;
+export const POI_ROUTING_BBOX_DEG = rules.facilityRoutingBboxDeg ?? 0.006;
 
 export function normalizePoiName(raw: string): string {
   let s = (raw || "").trim();
@@ -98,9 +118,49 @@ export function containsNorm(a: string, b: string): boolean {
   return a.includes(b) || b.includes(a);
 }
 
-export function endsWithFacility(placeName: string): boolean {
-  const n = (placeName || "").replace(/\s+/g, "").trim();
+function compactPlaceName(placeName: string): string {
+  return (placeName || "").replace(/\s+/g, "").trim();
+}
+
+/** 시설 라우팅 접미 → poi.source (없으면 null = 일반 경로) */
+export function detectFacilityRoute(placeName: string): string | null {
+  const n = compactPlaceName(placeName);
+  if (!n) return null;
+  for (const { kw, source } of ROUTING_PAIRS) {
+    if (n.endsWith(kw)) return source;
+  }
+  return null;
+}
+
+/** park 일반명: 지정 접미 + 앞 수식어 1어절 이하 */
+export function isParkGenericName(placeName: string): boolean {
+  const raw = (placeName || "").replace(/\s+/g, " ").trim();
+  if (!raw) return false;
+  const compact = raw.replace(/\s+/g, "");
+  for (const suf of PARK_GENERIC_SUFFIXES) {
+    if (!compact.endsWith(suf)) continue;
+    const prefixC = compact.slice(0, -suf.length);
+    if (!prefixC) return true;
+    const tokens = raw.split(" ").filter(Boolean);
+    let built = "";
+    let nPrefix = 0;
+    for (const t of tokens) {
+      if (built === prefixC) break;
+      built += t.replace(/\s+/g, "");
+      nPrefix += 1;
+      if (built === prefixC) break;
+    }
+    if (built !== prefixC) nPrefix = 1;
+    return nPrefix <= 1;
+  }
+  return false;
+}
+
+/** 차단(B) 시설 접미. 라우팅(A)이면 false. */
+export function endsWithFacilityBlock(placeName: string): boolean {
+  const n = compactPlaceName(placeName);
   if (!n) return false;
+  if (detectFacilityRoute(placeName)) return false;
   for (const kw of FACILITY_SUFFIXES) {
     if (n.endsWith(kw)) return true;
   }
@@ -108,6 +168,11 @@ export function endsWithFacility(placeName: string): boolean {
     if (n.endsWith(kw)) return true;
   }
   return false;
+}
+
+/** @deprecated 하위호환 — 차단 시설만 True (라우팅은 False) */
+export function endsWithFacility(placeName: string): boolean {
+  return endsWithFacilityBlock(placeName);
 }
 
 export function franchisePrefixBlocked(
@@ -172,6 +237,18 @@ export function distanceCap(
   }
   if (reason === "contain") return rules.distanceCaps.contain;
   return rules.distanceCaps.strip;
+}
+
+export function routingDistanceCap(
+  reason: MatchReason,
+  sim: number,
+  exact: boolean,
+): number {
+  if (reason === "sim") {
+    if (exact || sim >= 90) return ROUTING_CAPS.simGe90OrExact;
+    return ROUTING_CAPS.sim70to90;
+  }
+  return ROUTING_CAPS.contain;
 }
 
 /** difflib.SequenceMatcher.ratio 호환 (Ratcliff/Obershelp) */
@@ -289,6 +366,32 @@ export function scoreCandidate(
   return null;
 }
 
+/** 라우팅: sim(≥70)/contain 만. strip·sim<70 불가. */
+export function scoreCandidateRouting(
+  placeName: string,
+  placeNorm: string,
+  poiName: string,
+  poiNorm: string,
+  simRaw: number,
+): MatchScore | null {
+  const exact = Boolean(placeNorm) && placeNorm === poiNorm;
+  if (simRaw >= 70 || exact) {
+    return {
+      score: exact ? Math.max(simRaw, 100) : simRaw,
+      reason: "sim",
+    };
+  }
+  if (containsNorm(placeNorm, poiNorm)) {
+    const shorter = Math.min(placeNorm.length, poiNorm.length);
+    const longer = Math.max(placeNorm.length, poiNorm.length) || 1;
+    return {
+      score: 70 + 30 * (shorter / longer),
+      reason: "contain",
+    };
+  }
+  return null;
+}
+
 export function applyFilters(
   placeName: string,
   placeNorm: string,
@@ -300,7 +403,7 @@ export function applyFilters(
 ): ExcludeReason | null {
   if (franchisePrefixBlocked(placeName, poiName)) return "franchise_prefix";
 
-  const facility = endsWithFacility(placeName);
+  const facility = endsWithFacilityBlock(placeName);
   const exact = Boolean(placeNorm) && placeNorm === poiNorm;
 
   if (facility) {
@@ -320,24 +423,75 @@ export function applyFilters(
   return null;
 }
 
-export function evaluateCandidate(c: MatchCandidate): MatchPick | null {
-  const scored = scoreCandidate(
-    c.placeName,
-    c.placeNorm,
-    c.poiName,
-    c.poiNorm,
-    c.simRaw,
-  );
+/** 라우팅 경로: franchise/facility 차단 없음. 넓은 거리 상한. */
+export function applyFiltersRouting(
+  placeName: string,
+  placeNorm: string,
+  poiName: string,
+  poiNorm: string,
+  score: number,
+  reason: MatchReason,
+  distM: number,
+): ExcludeReason | null {
+  if (reason !== "sim" && reason !== "contain") return "distance";
+  const exact = Boolean(placeNorm) && placeNorm === poiNorm;
+  if (
+    reason === "contain" &&
+    isReverseContain(placeNorm, poiNorm, placeName, poiName, distM)
+  ) {
+    return "reverse_contain";
+  }
+  let cap = routingDistanceCap(reason, score, exact);
+  if (
+    detectFacilityRoute(placeName) === "park" &&
+    isParkGenericName(placeName)
+  ) {
+    cap = Math.min(cap, PARK_GENERIC_MAX_M);
+  }
+  if (distM > cap) return "distance";
+  return null;
+}
+
+export function evaluateCandidate(
+  c: MatchCandidate,
+  opts?: { routing?: boolean },
+): MatchPick | null {
+  const routing = Boolean(opts?.routing);
+  const scored = routing
+    ? scoreCandidateRouting(
+        c.placeName,
+        c.placeNorm,
+        c.poiName,
+        c.poiNorm,
+        c.simRaw,
+      )
+    : scoreCandidate(
+        c.placeName,
+        c.placeNorm,
+        c.poiName,
+        c.poiNorm,
+        c.simRaw,
+      );
   if (!scored) return null;
-  const blocked = applyFilters(
-    c.placeName,
-    c.placeNorm,
-    c.poiName,
-    c.poiNorm,
-    scored.score,
-    scored.reason,
-    c.distM,
-  );
+  const blocked = routing
+    ? applyFiltersRouting(
+        c.placeName,
+        c.placeNorm,
+        c.poiName,
+        c.poiNorm,
+        scored.score,
+        scored.reason,
+        c.distM,
+      )
+    : applyFilters(
+        c.placeName,
+        c.placeNorm,
+        c.poiName,
+        c.poiNorm,
+        scored.score,
+        scored.reason,
+        c.distM,
+      );
   if (blocked) {
     return { ...scored, distM: c.distM, excluded: blocked };
   }
@@ -353,6 +507,7 @@ export type PoiRow = {
   road_address: string | null;
   jibun_address: string | null;
   category?: string | null;
+  source?: string | null;
 };
 
 export type PlacePoiMatch = {
@@ -367,17 +522,21 @@ export function pickBestPoiMatch(
   placeName: string,
   placeNorm: string,
   candidates: Array<PoiRow & { distM: number; simRaw: number }>,
+  opts?: { routing?: boolean },
 ): PlacePoiMatch | null {
   let best: PlacePoiMatch | null = null;
   for (const c of candidates) {
-    const pick = evaluateCandidate({
-      placeName,
-      placeNorm,
-      poiName: c.name,
-      poiNorm: c.name_norm || normalizePoiName(c.name),
-      simRaw: c.simRaw,
-      distM: c.distM,
-    });
+    const pick = evaluateCandidate(
+      {
+        placeName,
+        placeNorm,
+        poiName: c.name,
+        poiNorm: c.name_norm || normalizePoiName(c.name),
+        simRaw: c.simRaw,
+        distM: c.distM,
+      },
+      opts,
+    );
     if (!pick || pick.excluded) continue;
     if (
       !best ||

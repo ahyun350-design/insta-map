@@ -1,11 +1,15 @@
 /**
  * 카카오 origin(또는 힌트 좌표) 기준 인근 poi 재해결.
  * 매칭 규칙은 lib/poiMatch.ts (배치와 동일).
+ * 시설 키워드 → facilityRouting source 후보만, 넓은 거리 상한.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   POI_MATCH_BBOX_DEG,
   POI_MATCH_RADIUS_M,
+  POI_ROUTING_BBOX_DEG,
+  POI_ROUTING_RADIUS_M,
+  detectFacilityRoute,
   evaluateCandidate,
   haversineM,
   normalizePoiName,
@@ -51,11 +55,14 @@ async function fetchNearbyPois(
   supabase: SupabaseClient,
   originLat: number,
   originLng: number,
+  opts?: { bboxDeg: number; source?: string | null },
 ): Promise<PoiRow[]> {
-  const d = POI_MATCH_BBOX_DEG;
-  const { data, error } = await supabase
+  const d = opts?.bboxDeg ?? POI_MATCH_BBOX_DEG;
+  let q = supabase
     .from("poi")
-    .select("id, name, name_norm, lat, lng, road_address, jibun_address, category")
+    .select(
+      "id, name, name_norm, lat, lng, road_address, jibun_address, category, source",
+    )
     .not("lat", "is", null)
     .not("lng", "is", null)
     .gte("lat", originLat - d)
@@ -64,10 +71,17 @@ async function fetchNearbyPois(
     .lte("lng", originLng + d)
     .limit(250);
 
+  if (opts?.source) {
+    q = q.eq("source", opts.source);
+  }
+
+  const { data, error } = await q;
+
   if (error) {
     console.error("[resolvePlaceViaPoi] nearby query failed", {
       code: error.code,
       message: error.message,
+      source: opts?.source ?? null,
     });
     return [];
   }
@@ -90,6 +104,7 @@ async function fetchNearbyPois(
       road_address: typeof row.road_address === "string" ? row.road_address : null,
       jibun_address: typeof row.jibun_address === "string" ? row.jibun_address : null,
       category: typeof row.category === "string" ? row.category : null,
+      source: typeof row.source === "string" ? row.source : null,
     });
   }
   return out;
@@ -116,10 +131,16 @@ export async function resolvePlaceViaPoi(
     return { ok: false, reason: "norm_too_short", nearbyCount: 0 };
   }
 
+  const routeSource = detectFacilityRoute(placeName);
+  const routing = Boolean(routeSource);
+  const bboxDeg = routing ? POI_ROUTING_BBOX_DEG : POI_MATCH_BBOX_DEG;
+  const radiusM = routing ? POI_ROUTING_RADIUS_M : POI_MATCH_RADIUS_M;
+
   const nearby = await fetchNearbyPois(
     supabase,
     input.originLat,
     input.originLng,
+    { bboxDeg, source: routeSource },
   );
   const candidates = [];
   for (const p of nearby) {
@@ -129,7 +150,7 @@ export async function resolvePlaceViaPoi(
       p.lat,
       p.lng,
     );
-    if (distM > POI_MATCH_RADIUS_M) continue;
+    if (distM > radiusM) continue;
     const poiNorm = p.name_norm || normalizePoiName(p.name);
     candidates.push({
       ...p,
@@ -145,14 +166,17 @@ export async function resolvePlaceViaPoi(
   const excluded: Partial<Record<ExcludeReason, number>> = {};
   let scoredN = 0;
   for (const c of candidates) {
-    const pick = evaluateCandidate({
-      placeName,
-      placeNorm,
-      poiName: c.name,
-      poiNorm: c.name_norm || normalizePoiName(c.name),
-      simRaw: c.simRaw,
-      distM: c.distM,
-    });
+    const pick = evaluateCandidate(
+      {
+        placeName,
+        placeNorm,
+        poiName: c.name,
+        poiNorm: c.name_norm || normalizePoiName(c.name),
+        simRaw: c.simRaw,
+        distM: c.distM,
+      },
+      { routing },
+    );
     if (!pick) continue;
     scoredN += 1;
     if (pick.excluded) {
@@ -160,7 +184,7 @@ export async function resolvePlaceViaPoi(
     }
   }
 
-  const best = pickBestPoiMatch(placeName, placeNorm, candidates);
+  const best = pickBestPoiMatch(placeName, placeNorm, candidates, { routing });
   if (!best) {
     if (scoredN === 0) {
       return {
