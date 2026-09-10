@@ -22,7 +22,11 @@ import {
   type PoiSearchHit,
 } from "@/lib/poiSearch";
 import { formatPlaceSourceLog } from "@/lib/poiMatch";
-import { resolvePlaceViaPoi } from "@/lib/resolvePlaceViaPoi";
+import {
+  formatPlacePendingLog,
+  formatPoiReresolveMissLog,
+  resolvePlaceViaPoi,
+} from "@/lib/resolvePlaceViaPoi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -400,6 +404,14 @@ export async function POST(req: Request) {
           return;
         }
 
+        // B: 카카오 성공 → poi 재해결 실패 → kakao 좌표 유지
+        console.log(
+          formatPoiReresolveMissLog(
+            item.name,
+            poiResolved.reason,
+            poiResolved.excluded,
+          ),
+        );
         console.log(formatPlaceSourceLog("kakao", item.name));
         resolved.push({
           name: item.name,
@@ -478,6 +490,7 @@ export async function POST(req: Request) {
             console.log(
               formatPoiLowconfLog(item.name, decision.top?.score ?? null, decision.reason),
             );
+            console.log(formatPlacePendingLog(item.name, "poi_confirm"));
             pendingPlaces.push({
               name: item.name,
               region: item.region,
@@ -498,6 +511,7 @@ export async function POST(req: Request) {
           console.log(
             formatPoiLowconfLog(item.name, decision.top?.score ?? null, decision.reason),
           );
+          console.log(formatPlacePendingLog(item.name, "poi_miss"));
           unresolvedAfterPoi.push({
             name: miss.name,
             tried: miss.tried,

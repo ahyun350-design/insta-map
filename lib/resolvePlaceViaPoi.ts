@@ -6,10 +6,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   POI_MATCH_BBOX_DEG,
   POI_MATCH_RADIUS_M,
+  evaluateCandidate,
   haversineM,
   normalizePoiName,
   pickBestPoiMatch,
   roughNameSimilarity,
+  type ExcludeReason,
   type PlacePoiMatch,
   type PoiRow,
 } from "@/lib/poiMatch";
@@ -20,6 +22,15 @@ export type ResolveViaPoiInput = {
   originLng: number;
 };
 
+export type ResolveViaPoiFailReason =
+  | "empty_name"
+  | "bad_origin"
+  | "norm_too_short"
+  | "no_nearby"
+  | "no_score"
+  | "all_excluded"
+  | "no_address";
+
 export type ResolveViaPoiResult =
   | {
       ok: true;
@@ -29,7 +40,12 @@ export type ResolveViaPoiResult =
       lng: number;
       poiId: number;
     }
-  | { ok: false };
+  | {
+      ok: false;
+      reason: ResolveViaPoiFailReason;
+      nearbyCount: number;
+      excluded?: Partial<Record<ExcludeReason, number>>;
+    };
 
 async function fetchNearbyPois(
   supabase: SupabaseClient,
@@ -88,13 +104,17 @@ export async function resolvePlaceViaPoi(
   input: ResolveViaPoiInput,
 ): Promise<ResolveViaPoiResult> {
   const placeName = (input.placeName || "").trim();
-  if (!placeName) return { ok: false };
+  if (!placeName) {
+    return { ok: false, reason: "empty_name", nearbyCount: 0 };
+  }
   if (!Number.isFinite(input.originLat) || !Number.isFinite(input.originLng)) {
-    return { ok: false };
+    return { ok: false, reason: "bad_origin", nearbyCount: 0 };
   }
 
   const placeNorm = normalizePoiName(placeName);
-  if (placeNorm.length < 2) return { ok: false };
+  if (placeNorm.length < 2) {
+    return { ok: false, reason: "norm_too_short", nearbyCount: 0 };
+  }
 
   const nearby = await fetchNearbyPois(
     supabase,
@@ -118,15 +138,59 @@ export async function resolvePlaceViaPoi(
     });
   }
 
+  if (candidates.length === 0) {
+    return { ok: false, reason: "no_nearby", nearbyCount: 0 };
+  }
+
+  const excluded: Partial<Record<ExcludeReason, number>> = {};
+  let scoredN = 0;
+  for (const c of candidates) {
+    const pick = evaluateCandidate({
+      placeName,
+      placeNorm,
+      poiName: c.name,
+      poiNorm: c.name_norm || normalizePoiName(c.name),
+      simRaw: c.simRaw,
+      distM: c.distM,
+    });
+    if (!pick) continue;
+    scoredN += 1;
+    if (pick.excluded) {
+      excluded[pick.excluded] = (excluded[pick.excluded] || 0) + 1;
+    }
+  }
+
   const best = pickBestPoiMatch(placeName, placeNorm, candidates);
-  if (!best) return { ok: false };
+  if (!best) {
+    if (scoredN === 0) {
+      return {
+        ok: false,
+        reason: "no_score",
+        nearbyCount: candidates.length,
+        excluded,
+      };
+    }
+    return {
+      ok: false,
+      reason: "all_excluded",
+      nearbyCount: candidates.length,
+      excluded,
+    };
+  }
 
   const address = (
     best.poi.road_address ||
     best.poi.jibun_address ||
     ""
   ).trim();
-  if (!address) return { ok: false };
+  if (!address) {
+    return {
+      ok: false,
+      reason: "no_address",
+      nearbyCount: candidates.length,
+      excluded,
+    };
+  }
 
   return {
     ok: true,
@@ -136,4 +200,29 @@ export async function resolvePlaceViaPoi(
     lng: best.poi.lng,
     poiId: best.poi.id,
   };
+}
+
+/** B 경로: 카카오 성공 후 poi 재해결 실패 */
+export function formatPoiReresolveMissLog(
+  placeName: string,
+  reason: ResolveViaPoiFailReason,
+  excluded?: Partial<Record<ExcludeReason, number>>,
+): string {
+  const safe = (placeName || "").replace(/\|/g, "/").trim();
+  const excl =
+    excluded && Object.keys(excluded).length > 0
+      ? `|excluded=${Object.entries(excluded)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(",")}`
+      : "";
+  return `poi_reresolve_miss|${safe}|reason=${reason}${excl}`;
+}
+
+/** D 경로: 카카오 실패 + Phase3 폴백도 실패 → pending */
+export function formatPlacePendingLog(
+  placeName: string,
+  pendingReason: "poi_confirm" | "poi_miss",
+): string {
+  const safe = (placeName || "").replace(/\|/g, "/").trim();
+  return `place_source|pending|${safe}|${pendingReason}`;
 }
