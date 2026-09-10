@@ -107,6 +107,7 @@ type AdminStatusPayload = {
   signups: { today: number; total: number };
   activeUsers7d: number;
   userEventsTotal: number;
+  userEventsEstimated?: boolean;
   todayPlaces?: {
     total: number;
     poi: number;
@@ -14725,7 +14726,7 @@ function HomePageContent() {
                                   )}
                                   {row(
                                     "이벤트 로그",
-                                    `${adminStatus.userEventsTotal.toLocaleString("ko-KR")}건`,
+                                    `${adminStatus.userEventsEstimated ? "약 " : ""}${adminStatus.userEventsTotal.toLocaleString("ko-KR")}건`,
                                     false,
                                   )}
                                   {row(

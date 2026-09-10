@@ -114,6 +114,60 @@ def open_csv(path: Path):
     return path.open("r", encoding="cp949", errors="replace", newline="")
 
 
+def assign_localdata_keys(rows: list[dict]) -> list[str]:
+    """park 방식 복합키.
+    관리번호 유일 → 그대로
+    중복 → 관리번호|개방자치단체코드
+    그래도 충돌 → sha1(내용) (행번호 금지)
+    """
+    import hashlib
+    from collections import defaultdict
+
+    def sha1_32(payload: str) -> str:
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:32]
+
+    mgmt_counts: Counter[str] = Counter(
+        (r.get("_mgmt") or "").strip() for r in rows if (r.get("_mgmt") or "").strip()
+    )
+    provisional: list[str] = []
+    for r in rows:
+        m = (r.get("_mgmt") or "").strip()
+        org = (r.get("_org") or "").strip()
+        if not m:
+            provisional.append("")
+            continue
+        if mgmt_counts[m] > 1:
+            provisional.append(f"{m}|{org}")
+        else:
+            provisional.append(m)
+
+    keys: list[str] = [""] * len(rows)
+    groups: dict[str, list[int]] = defaultdict(list)
+    for i, k in enumerate(provisional):
+        if not k:
+            keys[i] = ""
+        else:
+            groups[k].append(i)
+    for k, idxs in groups.items():
+        if len(idxs) == 1:
+            keys[idxs[0]] = k
+            continue
+        for i in idxs:
+            r = rows[i]
+            payload = "|".join(
+                [
+                    k,
+                    (r.get("name") or "").strip(),
+                    (r.get("road_address") or "").strip(),
+                    (r.get("jibun_address") or "").strip(),
+                    r.get("lat") or "",
+                    r.get("lng") or "",
+                ]
+            )
+            keys[i] = sha1_32(payload)
+    return keys
+
+
 def prepare(limit: int | None = None) -> dict:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUT_DIR / "poi_load.csv"
@@ -147,7 +201,7 @@ def prepare(limit: int | None = None) -> dict:
     }
     t0 = time.time()
 
-    # (source, source_key) 중복 시 마지막 행 유지 (관광숙박업 원본에 중복 관리번호 존재)
+    # (source, source_key) 중복 시 마지막 행 유지
     ordered_keys: list[tuple[str, str]] = []
     rows_by_key: dict[tuple[str, str], dict] = {}
 
@@ -155,6 +209,10 @@ def prepare(limit: int | None = None) -> dict:
         path = LOCALDATA / spec["file"]
         if not path.exists():
             raise FileNotFoundError(path)
+
+        # hotel: 먼저 전부 모은 뒤 복합키 부여 (관리번호 단독 붕괴 방지)
+        buffered: list[dict] = []
+
         with open_csv(path) as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -163,6 +221,7 @@ def prepare(limit: int | None = None) -> dict:
                     continue
                 name = (row.get("사업장명") or "").strip()
                 key = (row.get("관리번호") or "").strip()
+                org = (row.get("개방자치단체코드") or "").strip()
                 if not name:
                     stats["skipped_empty_name"] += 1
                     continue
@@ -195,14 +254,10 @@ def prepare(limit: int | None = None) -> dict:
                 road = (row.get("도로명주소") or "").strip() or None
                 jibun = (row.get("지번주소") or "").strip() or None
 
-                sk = (spec["source"], key)
-                if sk not in rows_by_key:
-                    ordered_keys.append(sk)
-                else:
-                    stats["deduped"] = stats.get("deduped", 0) + 1
-                rows_by_key[sk] = {
+                item = {
+                    "_mgmt": key,
+                    "_org": org,
                     "source": spec["source"],
-                    "source_key": key,
                     "name": name,
                     "name_norm": norm,
                     "road_address": road or "",
@@ -213,8 +268,53 @@ def prepare(limit: int | None = None) -> dict:
                     "category": category,
                     "phone": phone or "",
                 }
-                if limit and len(ordered_keys) >= limit:
+                if spec["source"] == "localdata_hotel":
+                    buffered.append(item)
+                else:
+                    sk = (spec["source"], key)
+                    if sk not in rows_by_key:
+                        ordered_keys.append(sk)
+                    else:
+                        stats["deduped"] = stats.get("deduped", 0) + 1
+                    rows_by_key[sk] = {
+                        "source": item["source"],
+                        "source_key": key,
+                        "name": item["name"],
+                        "name_norm": item["name_norm"],
+                        "road_address": item["road_address"],
+                        "jibun_address": item["jibun_address"],
+                        "lat": item["lat"],
+                        "lng": item["lng"],
+                        "raw_category": item["raw_category"],
+                        "category": item["category"],
+                        "phone": item["phone"],
+                    }
+                if limit and len(ordered_keys) + len(buffered) >= limit:
                     break
+        if spec["source"] == "localdata_hotel" and buffered:
+            hotel_keys = assign_localdata_keys(buffered)
+            for item, hk in zip(buffered, hotel_keys):
+                if not hk:
+                    stats["skipped_empty_key"] += 1
+                    continue
+                sk = (spec["source"], hk)
+                if sk not in rows_by_key:
+                    ordered_keys.append(sk)
+                else:
+                    stats["deduped"] = stats.get("deduped", 0) + 1
+                rows_by_key[sk] = {
+                    "source": item["source"],
+                    "source_key": hk,
+                    "name": item["name"],
+                    "name_norm": item["name_norm"],
+                    "road_address": item["road_address"],
+                    "jibun_address": item["jibun_address"],
+                    "lat": item["lat"],
+                    "lng": item["lng"],
+                    "raw_category": item["raw_category"],
+                    "category": item["category"],
+                    "phone": item["phone"],
+                }
         if limit and len(ordered_keys) >= limit:
             break
 
