@@ -5,9 +5,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  POI_MATCH_BBOX_DEG,
   POI_MATCH_RADIUS_M,
-  POI_ROUTING_BBOX_DEG,
   POI_ROUTING_RADIUS_M,
   detectFacilityRoute,
   evaluateCandidate,
@@ -55,30 +53,20 @@ async function fetchNearbyPois(
   supabase: SupabaseClient,
   originLat: number,
   originLng: number,
-  opts?: { bboxDeg: number; source?: string | null },
+  opts?: { radiusM: number; source?: string | null; maxResults?: number },
 ): Promise<PoiRow[]> {
-  const d = opts?.bboxDeg ?? POI_MATCH_BBOX_DEG;
-  let q = supabase
-    .from("poi")
-    .select(
-      "id, name, name_norm, lat, lng, road_address, jibun_address, category, source",
-    )
-    .not("lat", "is", null)
-    .not("lng", "is", null)
-    .gte("lat", originLat - d)
-    .lte("lat", originLat + d)
-    .gte("lng", originLng - d)
-    .lte("lng", originLng + d)
-    .limit(250);
-
-  if (opts?.source) {
-    q = q.eq("source", opts.source);
-  }
-
-  const { data, error } = await q;
+  const radiusM = opts?.radiusM ?? POI_MATCH_RADIUS_M;
+  const maxResults = opts?.maxResults ?? 100;
+  const { data, error } = await supabase.rpc("nearby_poi", {
+    origin_lat: originLat,
+    origin_lng: originLng,
+    radius_m: radiusM,
+    max_results: maxResults,
+    filter_source: opts?.source ?? null,
+  });
 
   if (error) {
-    console.error("[resolvePlaceViaPoi] nearby query failed", {
+    console.error("[resolvePlaceViaPoi] nearby_poi rpc failed", {
       code: error.code,
       message: error.message,
       source: opts?.source ?? null,
@@ -88,23 +76,25 @@ async function fetchNearbyPois(
 
   const out: PoiRow[] = [];
   for (const row of data ?? []) {
-    const id = typeof row.id === "number" ? row.id : Number(row.id);
-    const name = typeof row.name === "string" ? row.name.trim() : "";
-    const lat = typeof row.lat === "number" ? row.lat : Number(row.lat);
-    const lng = typeof row.lng === "number" ? row.lng : Number(row.lng);
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const id = typeof r.id === "number" ? r.id : Number(r.id);
+    const name = typeof r.name === "string" ? r.name.trim() : "";
+    const lat = typeof r.lat === "number" ? r.lat : Number(r.lat);
+    const lng = typeof r.lng === "number" ? r.lng : Number(r.lng);
     if (!Number.isFinite(id) || !name || !Number.isFinite(lat) || !Number.isFinite(lng)) {
       continue;
     }
     out.push({
       id,
       name,
-      name_norm: typeof row.name_norm === "string" ? row.name_norm : null,
+      name_norm: typeof r.name_norm === "string" ? r.name_norm : null,
       lat,
       lng,
-      road_address: typeof row.road_address === "string" ? row.road_address : null,
-      jibun_address: typeof row.jibun_address === "string" ? row.jibun_address : null,
-      category: typeof row.category === "string" ? row.category : null,
-      source: typeof row.source === "string" ? row.source : null,
+      road_address: typeof r.road_address === "string" ? r.road_address : null,
+      jibun_address: typeof r.jibun_address === "string" ? r.jibun_address : null,
+      category: typeof r.category === "string" ? r.category : null,
+      source: typeof r.source === "string" ? r.source : null,
     });
   }
   return out;
@@ -133,14 +123,13 @@ export async function resolvePlaceViaPoi(
 
   const routeSource = detectFacilityRoute(placeName);
   const routing = Boolean(routeSource);
-  const bboxDeg = routing ? POI_ROUTING_BBOX_DEG : POI_MATCH_BBOX_DEG;
   const radiusM = routing ? POI_ROUTING_RADIUS_M : POI_MATCH_RADIUS_M;
 
   const nearby = await fetchNearbyPois(
     supabase,
     input.originLat,
     input.originLng,
-    { bboxDeg, source: routeSource },
+    { radiusM, source: routeSource, maxResults: 100 },
   );
   const candidates = [];
   for (const p of nearby) {
