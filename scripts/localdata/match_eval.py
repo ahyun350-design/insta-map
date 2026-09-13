@@ -336,6 +336,7 @@ def main() -> None:
     general_list = [m for m in matched_list if m["path"] == "general"]
     routing_list = [m for m in matched_list if m["path"] == "routing"]
     by_route_src = Counter(m.get("route_source") or m.get("poi_source") for m in routing_list)
+    by_poi_src = Counter(m.get("poi_source") or "?" for m in matched_list)
 
     unmatched_names = [
         (p.get("name") or "").strip()
@@ -345,10 +346,25 @@ def main() -> None:
     unmatched_n = len(unmatched_names)
 
     dists = sorted(m["dist_m"] for m in matched_list)
-    sample_routing = (
-        random.sample(routing_list, min(30, len(routing_list))) if routing_list else []
+    sample_matched = (
+        random.sample(matched_list, min(30, len(matched_list))) if matched_list else []
     )
-    top_routing = sorted(routing_list, key=lambda x: -x["dist_m"])[:30]
+    top_matched = sorted(matched_list, key=lambda x: -x["dist_m"])[:30]
+    c_sources = (
+        "localdata_bakery",
+        "localdata_instant",
+        "localdata_beauty",
+        "localdata_gym",
+    )
+    c_breakdown = {s: by_poi_src.get(s, 0) for s in c_sources}
+    beauty_gym = [
+        m
+        for m in matched_list
+        if m.get("poi_source") in ("localdata_beauty", "localdata_gym")
+    ]
+    sample_beauty_gym = (
+        random.sample(beauty_gym, min(20, len(beauty_gym))) if beauty_gym else []
+    )
     sample_unmatched = (
         random.sample(unmatched_names, min(50, len(unmatched_names)))
         if unmatched_names
@@ -366,6 +382,8 @@ def main() -> None:
             "routing": len(routing_list),
         },
         "routing_by_source": dict(by_route_src),
+        "matched_by_poi_source": dict(by_poi_src),
+        "matched_by_c_source": c_breakdown,
         "excluded": dict(excl_total),
         "unmatched": {"n": unmatched_n, "rate": rate(unmatched_n)},
         "dist_m": {
@@ -410,26 +428,38 @@ def main() -> None:
     print(
         f"(c) 경로별: 일반 업소 {len(general_list)} / 라우팅 {len(routing_list)}"
     )
-    print("(d) 라우팅 source별:")
+    print("(d) 매칭 poi source별:")
+    for src, n in sorted(by_poi_src.items(), key=lambda x: -x[1]):
+        print(f"  {src}: {n}")
+    print("    (C그룹 bakery/instant/beauty/gym):")
+    for src in c_sources:
+        print(f"      {src}: {c_breakdown[src]}")
+    print("    (routing 분해):")
     for src in ("park", "museum", "market", "library", "tourspot"):
-        print(f"  {src}: {by_route_src.get(src, 0)}")
+        print(f"      {src}: {by_route_src.get(src, 0)}")
     d = summary["dist_m"]
     print(
         f"(e) 이동거리 median={d['median']} p90={d['p90']} p99={d['p99']} max={d['max']}"
     )
-    print("(f) 라우팅 신규 매칭 무작위 30:")
-    for m in sample_routing:
+    print("(f) 신규 매칭 무작위 30:")
+    for m in sample_matched:
         print(
             f"  {m['place_name']} → {m['poi_name']} | {m.get('poi_source') or m.get('route_source')} "
             f"| {m['sim']} | {round(m['dist_m'], 1)}m"
         )
-    print("(g) 라우팅 거리 상위 30:")
-    for m in top_routing:
+    print("(g) 거리 상위 30:")
+    for m in top_matched:
         print(
             f"  {m['place_name']} → {m['poi_name']} | {m.get('poi_source') or m.get('route_source')} "
             f"| {m['sim']} | {round(m['dist_m'], 1)}m"
         )
-    print(f"(h) 미매칭 무작위 50 (전체 {unmatched_n}):")
+    print(f"(h) beauty/gym 매칭 무작위 20 (전체 {len(beauty_gym)}):")
+    for m in sample_beauty_gym:
+        print(
+            f"  {m['place_name']} → {m['poi_name']} | {m.get('poi_source')} "
+            f"| {m['sim']} | {round(m['dist_m'], 1)}m"
+        )
+    print(f"(i) 미매칭 무작위 50 (전체 {unmatched_n}):")
     for n in sample_unmatched:
         print(f"  - {n}")
     print(f"wrote {out_path} in {summary['elapsed_s']}s")

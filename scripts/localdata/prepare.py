@@ -20,7 +20,36 @@ from pyproj import CRS, Transformer
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCALDATA = ROOT / "localdata"
+RAW_C = Path(__file__).resolve().parent / "raw_c"
 OUT_DIR = Path(__file__).resolve().parent / "out"
+
+# C그룹: EPSG:5174 → 4326 (A그룹과 동일). B그룹(WGS84)과 혼동 금지.
+C_SOURCES = [
+    {
+        "file": "식품_제과점영업.csv",
+        "source": "localdata_bakery",
+        "category": "카페",  # 앱 칩 (kakao도 제과·베이커리→카페)
+        "raw_field": "업태구분명",
+    },
+    {
+        "file": "식품_즉석판매제조가공업.csv",
+        "source": "localdata_instant",
+        "category": "맛집",  # 앱 칩
+        "raw_field": "업태구분명",
+    },
+    {
+        "file": "생활_미용업.csv",
+        "source": "localdata_beauty",
+        "category": "쇼핑",  # 앱 칩 최근접 (뷰티 칩 없음)
+        "raw_field": "업태구분명",
+    },
+    {
+        "file": "생활_체력단련장업.csv",
+        "source": "localdata_gym",
+        "category": "놀거리",  # 앱 칩 최근접 (운동 칩 없음)
+        "raw_field": "업태구분명",
+    },
+]
 
 # EPSG:5174 — Korean 1985 / Modified Central Belt
 # 보정계수 없는 Bessel 중부원점 TM + 명시적 towgs84 (EPSG 레지스트리 정의)
@@ -360,6 +389,356 @@ def prepare(limit: int | None = None) -> dict:
     return summary
 
 
+def prepare_c(limit: int | None = None) -> dict:
+    """C그룹 4업종 → out/poi_c_load.csv. convert_xy·assign_localdata_keys·name_norm 재사용."""
+    # 매칭과 동일 정규화 (poi_match.normalize_poi_name)
+    try:
+        from poi_match import normalize_poi_name as _norm
+    except ImportError:
+        _norm = name_norm
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = OUT_DIR / "poi_c_load.csv"
+    fieldnames = [
+        "source",
+        "source_key",
+        "name",
+        "name_norm",
+        "road_address",
+        "jibun_address",
+        "lat",
+        "lng",
+        "raw_category",
+        "category",
+        "phone",
+    ]
+
+    report: dict = {
+        "out_path": str(out_path),
+        "category_mapping": {
+            "localdata_bakery": "카페 (앱 칩; 사용자안 베이커리→칩 매핑)",
+            "localdata_instant": "맛집 (앱 칩; 사용자안 간식→칩 매핑)",
+            "localdata_beauty": "쇼핑 (앱 칩 최근접; 사용자안 뷰티)",
+            "localdata_gym": "놀거리 (앱 칩 최근접; 사용자안 운동)",
+        },
+        "datasets": {},
+        "abort": False,
+        "abort_reasons": [],
+    }
+    all_rows: list[dict] = []
+    t0 = time.time()
+
+    for spec in C_SOURCES:
+        path = RAW_C / spec["file"]
+        if not path.exists():
+            raise FileNotFoundError(path)
+
+        raw_n = 0
+        open_n = 0
+        excl = Counter()
+        buffered: list[dict] = []
+        max_upd: str | None = None
+
+        with open_csv(path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                raw_n += 1
+                if limit and open_n >= limit:
+                    break
+                upd = (row.get("데이터갱신시점") or "").strip()
+                if upd and (max_upd is None or upd > max_upd):
+                    max_upd = upd
+
+                if (row.get("영업상태명") or "").strip() != "영업/정상":
+                    excl["not_open"] += 1
+                    continue
+                open_n += 1
+
+                name = (row.get("사업장명") or "").strip()
+                if not name:
+                    excl["empty_name"] += 1
+                    continue
+                norm = _norm(name)
+                if not norm:
+                    excl["empty_norm"] += 1
+                    continue
+
+                mgmt = (row.get("관리번호") or "").strip()
+                org = (row.get("개방자치단체코드") or "").strip()
+                if not mgmt:
+                    excl["empty_mgmt"] += 1
+                    continue
+
+                x_s = (row.get("좌표정보(X)") or "").strip()
+                y_s = (row.get("좌표정보(Y)") or "").strip()
+                if not x_s or not y_s:
+                    excl["null_xy"] += 1
+                    continue
+                try:
+                    float(x_s)
+                    float(y_s)
+                except ValueError:
+                    excl["xy_parse_fail"] += 1
+                    continue
+                # convert_xy 재사용 (EPSG:5174→4326 + 한국 bbox)
+                lat, lng = convert_xy(x_s, y_s)
+                if lat is None:
+                    excl["korea_out"] += 1
+                    continue
+
+                raw_cat = (row.get(spec["raw_field"]) or "").strip()
+                buffered.append(
+                    {
+                        "_mgmt": mgmt,
+                        "_org": org,
+                        "source": spec["source"],
+                        "name": name,
+                        "name_norm": norm,
+                        "road_address": (row.get("도로명주소") or "").strip(),
+                        "jibun_address": (row.get("지번주소") or "").strip(),
+                        "lat": f"{lat:.8f}",
+                        "lng": f"{lng:.8f}",
+                        "raw_category": raw_cat,
+                        "category": spec["category"],
+                        "phone": (row.get("전화번호") or "").strip(),
+                    }
+                )
+
+        # source_key: 관리번호 → |개방자치단체코드 → sha1 (행번호 금지)
+        # 중복 통계는 최종 후보(buffered) 기준
+        mgmt_counts = Counter(
+            (r.get("_mgmt") or "").strip()
+            for r in buffered
+            if (r.get("_mgmt") or "").strip()
+        )
+        dup_mgmt_n = sum(1 for m, c in mgmt_counts.items() if c > 1)
+        dup_mgmt_rows = sum(c for m, c in mgmt_counts.items() if c > 1)
+
+        keys = assign_localdata_keys(buffered)
+        # 해결 방식 분해
+        key_plain = key_org = key_sha = 0
+        for item, k in zip(buffered, keys):
+            m = item["_mgmt"]
+            org = item["_org"]
+            if k == m:
+                key_plain += 1
+            elif k == f"{m}|{org}":
+                key_org += 1
+            else:
+                key_sha += 1
+
+        by_key: dict[str, dict] = {}
+        ordered: list[str] = []
+        deduped = 0
+        empty_key = 0
+        for item, k in zip(buffered, keys):
+            if not k:
+                empty_key += 1
+                excl["empty_key"] += 1
+                continue
+            if k in by_key:
+                deduped += 1
+                continue
+            by_key[k] = {
+                "source": item["source"],
+                "source_key": k,
+                "name": item["name"],
+                "name_norm": item["name_norm"],
+                "road_address": item["road_address"],
+                "jibun_address": item["jibun_address"],
+                "lat": item["lat"],
+                "lng": item["lng"],
+                "raw_category": item["raw_category"],
+                "category": item["category"],
+                "phone": item["phone"],
+            }
+            ordered.append(k)
+
+        final_rows = [by_key[k] for k in ordered]
+        final_n = len(final_rows)
+        keep_rate = final_n / open_n if open_n else 0.0
+        # 한국 밖 비율은 영업정상 대비 (중단조건)
+        out_ratio = excl["korea_out"] / open_n if open_n else 0.0
+
+        ds = {
+            "file": spec["file"],
+            "csv_total": raw_n,
+            "open_ok": open_n,
+            "excluded": dict(excl),
+            "final": final_n,
+            "keep_rate_vs_open": round(keep_rate, 4),
+            "korea_out_ratio_vs_open": round(out_ratio, 4),
+            "max_data_updated": max_upd,
+            "category": spec["category"],
+            "key_stats": {
+                "mgmt_values_with_dup": dup_mgmt_n,
+                "rows_with_dup_mgmt": dup_mgmt_rows,
+                "keys_plain_mgmt": key_plain,
+                "keys_mgmt_org": key_org,
+                "keys_sha1": key_sha,
+                "deduped_after_key": deduped,
+                "empty_key": empty_key,
+            },
+        }
+        report["datasets"][spec["source"]] = ds
+        all_rows.extend(final_rows)
+
+        print(
+            f"[{spec['source']}] csv={raw_n} open={open_n} final={final_n} "
+            f"({keep_rate:.1%}) korea_out={excl['korea_out']}({out_ratio:.1%}) "
+            f"excl={dict(excl)} "
+            f"keys plain={key_plain} org={key_org} sha1={key_sha} dedup={deduped}",
+            flush=True,
+        )
+
+        if keep_rate < 0.90:
+            report["abort"] = True
+            report["abort_reasons"].append(
+                f"{spec['source']}: final/open={keep_rate:.1%} < 90%"
+            )
+        if out_ratio > 0.05:
+            report["abort"] = True
+            report["abort_reasons"].append(
+                f"{spec['source']}: korea_out/open={out_ratio:.1%} > 5%"
+            )
+
+    with out_path.open("w", encoding="utf-8", newline="") as out_f:
+        w = csv.DictWriter(out_f, fieldnames=fieldnames, lineterminator="\n")
+        w.writeheader()
+        for row in all_rows:
+            w.writerow(row)
+
+    report["rows_out"] = len(all_rows)
+    report["elapsed_s"] = round(time.time() - t0, 1)
+    (OUT_DIR / "poi_c_stats.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"wrote {out_path} rows={len(all_rows)} abort={report['abort']}", flush=True)
+    return report
+
+
+def load_c(conn, csv_path: Path) -> dict:
+    """C그룹만 INSERT. 다른 source 절대 변경 금지."""
+    t0 = time.time()
+    with conn.cursor() as cur:
+        cur.execute("SET statement_timeout = 0")
+        cur.execute(
+            "SELECT source, count(*) n FROM public.poi GROUP BY 1 ORDER BY 1"
+        )
+        before = {r[0]: r[1] for r in cur.fetchall()}
+
+        # constraint expand
+        cur.execute(
+            """
+            SELECT pg_get_constraintdef(oid)
+            FROM pg_constraint
+            WHERE conname = 'poi_source_check' AND conrelid = 'public.poi'::regclass
+            """
+        )
+        row = cur.fetchone()
+        ddl = row[0] if row else ""
+        needed = (
+            "localdata_bakery",
+            "localdata_instant",
+            "localdata_beauty",
+            "localdata_gym",
+        )
+        if not all(s in ddl for s in needed):
+            cur.execute("ALTER TABLE public.poi DROP CONSTRAINT IF EXISTS poi_source_check")
+            cur.execute(
+                """
+                ALTER TABLE public.poi ADD CONSTRAINT poi_source_check CHECK (
+                  source IN (
+                    'localdata_general', 'localdata_rest', 'localdata_hotel',
+                    'park', 'museum', 'market', 'library', 'tourspot',
+                    'localdata_bakery', 'localdata_instant',
+                    'localdata_beauty', 'localdata_gym'
+                  )
+                )
+                """
+            )
+            print("poi_source_check updated for C sources", flush=True)
+        else:
+            print("poi_source_check already allows C sources", flush=True)
+    conn.commit()
+
+    with conn.cursor() as cur:
+        cur.execute("SET statement_timeout = 0")
+        cur.execute(
+            """
+            CREATE TEMP TABLE poi_c_stage (
+              source text, source_key text, name text, name_norm text,
+              road_address text, jibun_address text,
+              lat double precision, lng double precision,
+              raw_category text, category text, phone text
+            ) ON COMMIT DROP
+            """
+        )
+        with csv_path.open("r", encoding="utf-8", newline="") as f:
+            cur.copy_expert(
+                """
+                COPY poi_c_stage (
+                  source, source_key, name, name_norm,
+                  road_address, jibun_address, lat, lng,
+                  raw_category, category, phone
+                ) FROM STDIN WITH (FORMAT csv, HEADER true, NULL '')
+                """,
+                f,
+            )
+        cur.execute("SELECT count(*) FROM poi_c_stage")
+        staged = cur.fetchone()[0]
+        print(f"staged={staged}, inserting…", flush=True)
+        cur.execute(
+            """
+            INSERT INTO public.poi (
+              source, source_key, name, name_norm,
+              road_address, jibun_address, lat, lng,
+              raw_category, category, phone
+            )
+            SELECT
+              source, source_key, name, name_norm,
+              NULLIF(road_address, ''), NULLIF(jibun_address, ''),
+              lat, lng,
+              NULLIF(raw_category, ''), NULLIF(category, ''),
+              NULLIF(phone, '')
+            FROM poi_c_stage
+            ON CONFLICT (source, source_key) DO NOTHING
+            """
+        )
+        inserted = cur.rowcount
+    conn.commit()
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT source, count(*) n FROM public.poi GROUP BY 1 ORDER BY 1"
+        )
+        after = {r[0]: r[1] for r in cur.fetchall()}
+
+    # other sources must not shrink/grow except new C sources
+    protected = {
+        k: v
+        for k, v in before.items()
+        if k
+        not in (
+            "localdata_bakery",
+            "localdata_instant",
+            "localdata_beauty",
+            "localdata_gym",
+        )
+    }
+    after_prot = {k: after.get(k, 0) for k in protected}
+    unchanged = protected == after_prot
+
+    return {
+        "staged": staged,
+        "inserted": inserted,
+        "before": before,
+        "after": after,
+        "other_sources_unchanged": unchanged,
+        "elapsed_s": round(time.time() - t0, 1),
+    }
+
+
 def validate_known_points() -> list[dict]:
     """조사에서 확보한 TM 좌표 → WGS84 변환 결과."""
     cases = [
@@ -393,14 +772,158 @@ def validate_known_points() -> list[dict]:
     return out
 
 
+def db_url() -> str:
+    p = Path(__file__).resolve().parent / ".db_url"
+    return p.read_text(encoding="utf-8").strip()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--validate-only", action="store_true")
+    ap.add_argument("--group", choices=["a", "c"], default="a")
+    ap.add_argument("--load", action="store_true", help="prepare 후 DB COPY (group=c)")
     args = ap.parse_args()
     if args.validate_only:
         print(json.dumps(validate_known_points(), ensure_ascii=False, indent=2))
         return
+
+    if args.group == "c":
+        print("=== prepare_c ===", flush=True)
+        report = prepare_c(limit=args.limit)
+        print(json.dumps({
+            "abort": report["abort"],
+            "abort_reasons": report["abort_reasons"],
+            "rows_out": report["rows_out"],
+            "category_mapping": report["category_mapping"],
+            "datasets": report["datasets"],
+            "elapsed_s": report["elapsed_s"],
+        }, ensure_ascii=False, indent=2))
+        if report["abort"]:
+            print("\n[중단] 적재하지 않음.", flush=True)
+            for r in report["abort_reasons"]:
+                print(f"  - {r}", flush=True)
+            sys.exit(2)
+        if not args.load:
+            return
+
+        # CSV sources must only be C
+        with (OUT_DIR / "poi_c_load.csv").open(encoding="utf-8", newline="") as f:
+            sources = {r["source"] for r in csv.DictReader(f)}
+        allowed = {
+            "localdata_bakery",
+            "localdata_instant",
+            "localdata_beauty",
+            "localdata_gym",
+        }
+        bad = sources - allowed
+        if bad:
+            print(f"ABORT: unexpected sources in CSV: {bad}", flush=True)
+            sys.exit(2)
+
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+
+        print("=== load_c ===", flush=True)
+        conn = psycopg2.connect(db_url(), connect_timeout=60)
+        try:
+            load_result = load_c(conn, OUT_DIR / "poi_c_load.csv")
+            if not load_result["other_sources_unchanged"]:
+                print("ABORT RISK: other source counts changed!", load_result, flush=True)
+                sys.exit(3)
+
+            samples: dict[str, list[dict]] = {}
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                for src in (
+                    "localdata_bakery",
+                    "localdata_instant",
+                    "localdata_beauty",
+                    "localdata_gym",
+                ):
+                    cur.execute(
+                        """
+                        SELECT name,
+                               COALESCE(road_address, jibun_address, '') AS addr,
+                               lat, lng
+                        FROM public.poi
+                        WHERE source = %s
+                        ORDER BY random()
+                        LIMIT 5
+                        """,
+                        (src,),
+                    )
+                    samples[src] = [dict(r) for r in cur.fetchall()]
+
+                cur.execute(
+                    """
+                    SELECT source, name,
+                           COALESCE(road_address, jibun_address, '') AS addr,
+                           lat, lng
+                    FROM public.poi
+                    WHERE name LIKE %s OR name_norm LIKE %s
+                    ORDER BY source, name
+                    LIMIT 20
+                    """,
+                    ("%성심당%", "%성심당%"),
+                )
+                sungsimdang = [dict(r) for r in cur.fetchall()]
+
+            with conn.cursor() as cur2:
+                cur2.execute(
+                    "SELECT source, count(*) n FROM public.poi GROUP BY 1 ORDER BY 1"
+                )
+                by_source = [(r[0], r[1]) for r in cur2.fetchall()]
+        finally:
+            conn.close()
+
+        final = {
+            "prepare": report,
+            "load": load_result,
+            "by_source": by_source,
+            "samples": samples,
+            "sungsimdang": sungsimdang,
+        }
+        (OUT_DIR / "poi_c_final_report.json").write_text(
+            json.dumps(final, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        print("\n========== FINAL ==========", flush=True)
+        for src, d in report["datasets"].items():
+            print(
+                f"{src}: csv={d['csv_total']} → open={d['open_ok']} → "
+                f"excl={d['excluded']} → final={d['final']} "
+                f"({d['keep_rate_vs_open']:.1%}) max_upd={d['max_data_updated']}",
+                flush=True,
+            )
+            print(f"  key_stats: {d['key_stats']}", flush=True)
+        print("\ncategory_mapping:", report["category_mapping"], flush=True)
+        print(
+            f"\nload staged={load_result['staged']} inserted={load_result['inserted']} "
+            f"other_unchanged={load_result['other_sources_unchanged']}",
+            flush=True,
+        )
+        print("\nby_source:", flush=True)
+        for s, n in by_source:
+            print(f"  {s}: {n}", flush=True)
+        print("\nsamples:", flush=True)
+        for src, rows in samples.items():
+            print(f"  [{src}]", flush=True)
+            for r in rows:
+                print(
+                    f"    {r['name']} | {r['addr']} | {r['lat']},{r['lng']}",
+                    flush=True,
+                )
+        print("\n성심당:", flush=True)
+        if not sungsimdang:
+            print("  (poi에 성심당 없음)", flush=True)
+        else:
+            for r in sungsimdang:
+                print(
+                    f"  [{r['source']}] {r['name']} | {r['addr']} | {r['lat']},{r['lng']}",
+                    flush=True,
+                )
+        return
+
     summary = prepare(limit=args.limit)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

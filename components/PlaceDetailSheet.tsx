@@ -34,7 +34,6 @@ type Props = {
   /** 다른 화면(피드 등) 확대용 — 시트 큐레이션 이미지는 사용하지 않음 */
   onImageLightbox: (url: string) => void;
   timeAgoLabel: (createdAt: string) => string;
-  onOpenAppleMaps?: () => void;
   /** 컴팩트 맵 위 시트에서 전체화면 지도로 확대 (좌표 우선) */
   onExpandMap?: () => void;
   onDirectionsModeChange?: (mode: DirectionsMode) => void;
@@ -118,7 +117,6 @@ export function PlaceDetailSheet({
   onCurationClick,
   onImageLightbox: _onImageLightbox,
   timeAgoLabel,
-  onOpenAppleMaps,
   onExpandMap,
   onDirectionsModeChange,
   onOpenTransit,
@@ -271,12 +269,6 @@ export function PlaceDetailSheet({
               </div>
             )}
           </div>
-        )}
-
-        {onOpenAppleMaps && (
-          <button type="button" className="placeDetailSheetAppleLink" onClick={onOpenAppleMaps}>
-            Apple 지도에서 열기
-          </button>
         )}
       </div>
 

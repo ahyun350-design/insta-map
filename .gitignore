@@ -23,3 +23,6 @@ scripts/localdata/.venv/
 scripts/localdata/out/
 scripts/localdata/raw_b/
 scripts/localdata/.db_url
+
+# LOCALDATA C-group raw CSVs (large)
+scripts/localdata/raw_c/

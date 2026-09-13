@@ -240,6 +240,12 @@ import {
   getCourseShareUrl,
   shareViaNavigatorShare,
 } from "@/lib/pindmapLinks";
+import {
+  deepLinkTelemetry,
+  parsePindmapDeepLink,
+} from "@/lib/pindmapDeepLink";
+import { App } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 import { parseFeedPostFromRow, feedCommentCount, isOwnFeedAuthor, FEED_PAGE_SIZE, FEED_POST_LIST_SELECT, FEED_POST_DETAIL_SELECT, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
 import {
   getDisplayPlaceForPhoto,
@@ -5191,48 +5197,6 @@ function HomePageContent() {
     setFeedPosts((prev) => [post, ...prev]);
     return { error: null };
   };
-  const openAppleMapsPlace = (placeName?: string, address?: string, latRaw?: string | number, lngRaw?: string | number) => {
-    const lat = Number(latRaw);
-    const lng = Number(lngRaw);
-    const hasCoord = Number.isFinite(lat) && Number.isFinite(lng);
-    const label = (placeName || address || "장소").trim();
-    const mapsSchemeUrl = hasCoord
-      ? `maps://?ll=${lat},${lng}&q=${encodeURIComponent(label)}`
-      : `maps://?q=${encodeURIComponent(label)}`;
-    const webUrl = hasCoord
-      ? `https://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(label)}`
-      : `https://maps.apple.com/?q=${encodeURIComponent(label)}`;
-    devLog("[PindMap:apple-maps] open place", { label, lat, lng, hasCoord, isIOSLike });
-    if (isIOSLike) {
-      window.location.href = mapsSchemeUrl;
-      window.setTimeout(() => {
-        window.open(webUrl, "_blank");
-      }, 700);
-      return;
-    }
-    window.open(webUrl, "_blank");
-  };
-
-  const openAppleMapsCourseRoute = () => {
-    if (!courseResult || courseResult.length === 0) return;
-    const coordChain = courseResult
-      .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
-      .map((p) => `${p.lat},${p.lng}`);
-    if (coordChain.length === 0) return;
-    const daddr = coordChain.join("+to:");
-    const mapsSchemeUrl = `maps://?daddr=${encodeURIComponent(daddr)}&dirflg=d`;
-    const webUrl = `https://maps.apple.com/?daddr=${encodeURIComponent(daddr)}&dirflg=d`;
-    devLog("[PindMap:apple-maps] open course route", { stops: coordChain.length, isIOSLike });
-    if (isIOSLike) {
-      window.location.href = mapsSchemeUrl;
-      window.setTimeout(() => {
-        window.open(webUrl, "_blank");
-      }, 700);
-      return;
-    }
-    window.open(webUrl, "_blank");
-  };
-
   /** 대중교통: 웹을 즉시 연다 (GPS 대기 금지). 앱 스킴은 보조 시도. */
   const openTransitInKakaoMap = (destName: string, destLat: number, destLng: number) => {
     console.log("[PindMap:transit] click", { destName, destLat, destLng, isIOSLike });
@@ -8254,6 +8218,110 @@ function HomePageContent() {
     }
     track("link_pasted", { domain });
   }, []);
+
+  const handleAddFromInstagramRef = useRef(handleAddFromInstagram);
+  handleAddFromInstagramRef.current = handleAddFromInstagram;
+  const handleSavedPlaceClickRef = useRef(handleSavedPlaceClick);
+  handleSavedPlaceClickRef.current = handleSavedPlaceClick;
+  const openSavedCourseRef = useRef(openSavedCourse);
+  openSavedCourseRef.current = openSavedCourse;
+  const ensureCourseLoadedRef = useRef(ensureCourseLoaded);
+  ensureCourseLoadedRef.current = ensureCourseLoaded;
+  const savedPlacesDeepLinkRef = useRef(savedPlaces);
+  savedPlacesDeepLinkRef.current = savedPlaces;
+  const pendingDeepLinkUrlRef = useRef<string | null>(null);
+  const deepLinkHandledLaunchRef = useRef(false);
+
+  const applyPindmapDeepLink = useCallback(async (rawUrl: string) => {
+    const action = parsePindmapDeepLink(rawUrl);
+    // Domain / kind only — never log full URL or ids
+    console.log("[PindMap:deeplink]", deepLinkTelemetry(action));
+
+    if (action.type === "home") {
+      setActiveTab("home");
+      return;
+    }
+
+    if (!userIdRef.current) {
+      pendingDeepLinkUrlRef.current = rawUrl;
+      return;
+    }
+
+    if (action.type === "extract") {
+      setActiveTab("home");
+      void handleAddFromInstagramRef.current(action.instagramUrl);
+      return;
+    }
+
+    if (action.type === "place") {
+      let place = savedPlacesDeepLinkRef.current.find((p) => p.id === action.placeId) ?? null;
+      if (!place) {
+        try {
+          const { data } = await supabase.from("places").select("*").eq("id", action.placeId).maybeSingle();
+          if (data) place = mapPlaceRow(data);
+        } catch {
+          place = null;
+        }
+      }
+      if (!place) {
+        setActiveTab("home");
+        return;
+      }
+      handleSavedPlaceClickRef.current(place, { switchToMap: true, returnTo: null });
+      return;
+    }
+
+    if (action.type === "course") {
+      const course = await ensureCourseLoadedRef.current(action.courseId);
+      if (!course) {
+        setActiveTab("home");
+        return;
+      }
+      openSavedCourseRef.current(course);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const pending = pendingDeepLinkUrlRef.current;
+    if (!pending) return;
+    pendingDeepLinkUrlRef.current = null;
+    void applyPindmapDeepLink(pending);
+  }, [user?.id, applyPindmapDeepLink]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let cancelled = false;
+    let listener: { remove: () => Promise<void> } | undefined;
+
+    const onUrl = (url: string) => {
+      if (cancelled || !url.trim()) return;
+      void applyPindmapDeepLink(url);
+    };
+
+    void App.addListener("appUrlOpen", (event) => {
+      if (event?.url) onUrl(event.url);
+    }).then((handle) => {
+      if (cancelled) {
+        void handle.remove();
+        return;
+      }
+      listener = handle;
+    });
+
+    void App.getLaunchUrl().then((result) => {
+      if (cancelled || deepLinkHandledLaunchRef.current) return;
+      const launchUrl = result?.url?.trim();
+      if (!launchUrl) return;
+      deepLinkHandledLaunchRef.current = true;
+      onUrl(launchUrl);
+    });
+
+    return () => {
+      cancelled = true;
+      void listener?.remove();
+    };
+  }, [applyPindmapDeepLink]);
 
   const uploadPostImageToServer = async (file: File, accessToken: string): Promise<string> => {
     devLog("[handleImageUpload] 원본", {
@@ -12483,13 +12551,6 @@ function HomePageContent() {
                                       </button>
                                     </div>
                                     <button type="button" onClick={showCourseOnMap} style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
-                                    <button
-                                      type="button"
-                                      onClick={openAppleMapsCourseRoute}
-                                      style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #d6ddf2", background: "#fff", color: "#1a2a7a", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}
-                                    >
-                                      🗺 Apple 지도에서 경로 보기
-                                    </button>
                                   </>
                                 )}
                               </>
@@ -15160,14 +15221,6 @@ function HomePageContent() {
               }}
               onImageLightbox={setLightboxImg}
               timeAgoLabel={timeAgo}
-              onOpenAppleMaps={() =>
-                openAppleMapsPlace(
-                  selectedPlace.place_name,
-                  selectedPlace.road_address_name || selectedPlace.address_name,
-                  selectedPlace.y,
-                  selectedPlace.x,
-                )
-              }
               onExpandMap={() =>
                 expandPlaceSheetToFullscreen(selectedPlace as PlaceSheetData, {
                   runDirections: directionsChosen,
@@ -15191,6 +15244,10 @@ function HomePageContent() {
                 place={homePlaceSheet}
                 isSaved={!!resolveSavedMatch(homePlaceSheet)}
                 layout="overlay"
+                showDirections
+                directionsMode={directionsMode}
+                directionsLoading={directionsLoading}
+                directionsInfo={directionsInfo}
                 memo={(() => {
                   const m = resolveSavedMatch(homePlaceSheet)?.memo;
                   return typeof m === "string" && m.trim() ? m.trim() : null;
@@ -15210,14 +15267,13 @@ function HomePageContent() {
                 }}
                 onImageLightbox={setLightboxImg}
                 timeAgoLabel={timeAgo}
-                onOpenAppleMaps={() =>
-                  openAppleMapsPlace(
-                    homePlaceSheet.place_name,
-                    homePlaceSheet.road_address_name || homePlaceSheet.address_name,
-                    homePlaceSheet.y,
-                    homePlaceSheet.x,
-                  )
-                }
+                onDirectionsModeChange={(mode) => {
+                  void startDirectionsFromPlaceSheet(homePlaceSheet, mode);
+                }}
+                onOpenTransit={() => {
+                  void startDirectionsFromPlaceSheet(homePlaceSheet, "transit");
+                }}
+                onClearRoute={clearRoute}
               />
             </>,
             document.body,
