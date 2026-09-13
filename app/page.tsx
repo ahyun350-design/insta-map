@@ -244,6 +244,7 @@ import {
   deepLinkTelemetry,
   parsePindmapDeepLink,
 } from "@/lib/pindmapDeepLink";
+import { consumePendingShareUrl } from "@/lib/pendingShare";
 import { App } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 import { parseFeedPostFromRow, feedCommentCount, isOwnFeedAuthor, FEED_PAGE_SIZE, FEED_POST_LIST_SELECT, FEED_POST_DETAIL_SELECT, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
@@ -8231,6 +8232,27 @@ function HomePageContent() {
   savedPlacesDeepLinkRef.current = savedPlaces;
   const pendingDeepLinkUrlRef = useRef<string | null>(null);
   const deepLinkHandledLaunchRef = useRef(false);
+  const recentShareExtractRef = useRef<{ url: string; at: number } | null>(null);
+
+  const startShareExtractOnce = useCallback((instagramUrl: string) => {
+    const cleaned = cleanInstagramUrl(instagramUrl);
+    if (!cleaned) return;
+    const prev = recentShareExtractRef.current;
+    if (prev && prev.url === cleaned && Date.now() - prev.at < 60_000) return;
+    recentShareExtractRef.current = { url: cleaned, at: Date.now() };
+    console.log("pending_share|extract_start");
+    setActiveTab("home");
+    void handleAddFromInstagramRef.current(cleaned);
+  }, []);
+
+  const consumeAppGroupShareAndExtract = useCallback(async () => {
+    if (!Capacitor.isNativePlatform()) return;
+    // Wait for session restore — calling before userId is set drops the share.
+    if (!userIdRef.current) return;
+    const outcome = await consumePendingShareUrl();
+    if (!outcome.url) return;
+    startShareExtractOnce(outcome.url);
+  }, [startShareExtractOnce]);
 
   const applyPindmapDeepLink = useCallback(async (rawUrl: string) => {
     const action = parsePindmapDeepLink(rawUrl);
@@ -8248,8 +8270,9 @@ function HomePageContent() {
     }
 
     if (action.type === "extract") {
-      setActiveTab("home");
-      void handleAddFromInstagramRef.current(action.instagramUrl);
+      // Clear App Group so resume handler cannot double-extract the same share.
+      void consumePendingShareUrl();
+      startShareExtractOnce(action.instagramUrl);
       return;
     }
 
@@ -8279,7 +8302,7 @@ function HomePageContent() {
       }
       openSavedCourseRef.current(course);
     }
-  }, []);
+  }, [startShareExtractOnce]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -8288,6 +8311,46 @@ function HomePageContent() {
     pendingDeepLinkUrlRef.current = null;
     void applyPindmapDeepLink(pending);
   }, [user?.id, applyPindmapDeepLink]);
+
+  // App Group pending share: after session restore (not merely first paint) + every foreground.
+  useEffect(() => {
+    if (!sessionChecked || userLoading) return;
+    if (!user?.id) return;
+    void consumeAppGroupShareAndExtract();
+  }, [sessionChecked, userLoading, user?.id, consumeAppGroupShareAndExtract]);
+
+  // One-shot: confirm native plugin is registered (Safari Web Inspector).
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const plugins = (
+      window as unknown as { Capacitor?: { Plugins?: Record<string, unknown> } }
+    ).Capacitor?.Plugins;
+    console.log("pending_share|plugin_registered", {
+      hasPindmapShare: !!plugins?.PindmapShare,
+      pluginNames: plugins ? Object.keys(plugins).filter((k) => /share/i.test(k)) : [],
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let cancelled = false;
+    let stateListener: { remove: () => Promise<void> } | undefined;
+    void App.addListener("appStateChange", (state) => {
+      if (cancelled || !state.isActive) return;
+      // Session may still be restoring on first activate — effect above retries when ready.
+      void consumeAppGroupShareAndExtract();
+    }).then((handle) => {
+      if (cancelled) {
+        void handle.remove();
+        return;
+      }
+      stateListener = handle;
+    });
+    return () => {
+      cancelled = true;
+      void stateListener?.remove();
+    };
+  }, [consumeAppGroupShareAndExtract]);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;

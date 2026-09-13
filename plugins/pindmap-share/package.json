@@ -1,0 +1,23 @@
+{
+  "name": "@pindmap/share",
+  "version": "0.0.1",
+  "description": "Read pending Instagram share URLs from App Group (Share Extension → main app)",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src/",
+    "ios/Sources/",
+    "Package.swift"
+  ],
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  },
+  "author": "PindMap",
+  "license": "UNLICENSED",
+  "private": true,
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  }
+}

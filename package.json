@@ -23,6 +23,7 @@
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/splash-screen": "^8.0.1",
     "@pindmap/native-map": "file:./spike/v7-native-map/plugin",
+    "@pindmap/share": "file:plugins/pindmap-share",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.104.1",
     "browser-image-compression": "^2.0.2",
