@@ -1,0 +1,81 @@
+# Daily auto rematch for places with source null|kakao.
+# Uses production POST /api/admin/rematch (same poiMatch rules as the app).
+#
+# Secrets required:
+#   REMATCH_SECRET  — must match Railway REMATCH_SECRET
+#   APP_URL         — e.g. https://pindmap.com  (no trailing slash)
+
+name: daily-rematch
+
+on:
+  schedule:
+    # 04:00 KST = 19:00 UTC (previous calendar day)
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+jobs:
+  rematch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Run rematch batches
+        env:
+          REMATCH_SECRET: ${{ secrets.REMATCH_SECRET }}
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${REMATCH_SECRET:-}" ]; then
+            echo "REMATCH_SECRET secret is missing"
+            exit 1
+          fi
+          if [ -z "${APP_URL:-}" ]; then
+            echo "APP_URL secret is missing"
+            exit 1
+          fi
+
+          BASE="${APP_URL%/}"
+          CURSOR=""
+          TOTAL_PROCESSED=0
+          TOTAL_MATCHED=0
+
+          for i in $(seq 1 20); do
+            echo "=== batch $i ==="
+            BODY="{}"
+            if [ -n "$CURSOR" ]; then
+              BODY=$(jq -cn --arg c "$CURSOR" '{cursor:$c}')
+            fi
+
+            HTTP_CODE=$(curl -sS -o /tmp/rematch.json -w "%{http_code}" \
+              -X POST "$BASE/api/admin/rematch" \
+              -H "Authorization: Bearer ${REMATCH_SECRET}" \
+              -H "Content-Type: application/json" \
+              -d "$BODY")
+
+            echo "http=$HTTP_CODE"
+            cat /tmp/rematch.json
+            echo
+
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "rematch batch failed with HTTP $HTTP_CODE"
+              exit 1
+            fi
+
+            PROCESSED=$(jq -r '.processed // 0' /tmp/rematch.json)
+            MATCHED=$(jq -r '.matched // 0' /tmp/rematch.json)
+            DONE=$(jq -r '.done // false' /tmp/rematch.json)
+            CURSOR=$(jq -r '.nextCursor // empty' /tmp/rematch.json)
+
+            TOTAL_PROCESSED=$((TOTAL_PROCESSED + PROCESSED))
+            TOTAL_MATCHED=$((TOTAL_MATCHED + MATCHED))
+
+            echo "batch processed=$PROCESSED matched=$MATCHED done=$DONE"
+
+            if [ "$DONE" = "true" ] || [ -z "$CURSOR" ]; then
+              echo "finished: total_processed=$TOTAL_PROCESSED total_matched=$TOTAL_MATCHED"
+              exit 0
+            fi
+          done
+
+          echo "stopped after 20 batches (cap 10,000 rows): total_processed=$TOTAL_PROCESSED total_matched=$TOTAL_MATCHED"
+          exit 0
