@@ -57,11 +57,19 @@ jobs:
             MAX_ATTEMPTS=3
             while [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; do
               ATTEMPT=$((ATTEMPT + 1))
+              # Do not append `|| echo 000` — curl already writes 000 on transport
+              # failure; appending would yield "000000" and skip the retry case.
+              set +e
               HTTP_CODE=$(curl -sS -o /tmp/rematch.json -w "%{http_code}" \
                 -X POST "$BASE/api/admin/rematch" \
                 -H "Authorization: Bearer ${REMATCH_SECRET}" \
                 -H "Content-Type: application/json" \
-                -d "$BODY" || echo "000")
+                -d "$BODY")
+              CURL_RC=$?
+              set -e
+              if [ "$CURL_RC" -ne 0 ] || [ -z "$HTTP_CODE" ]; then
+                HTTP_CODE="000"
+              fi
 
               echo "attempt=$ATTEMPT http=$HTTP_CODE"
               if [ -f /tmp/rematch.json ]; then
@@ -74,9 +82,9 @@ jobs:
                 break
               fi
 
-              # 5xx → retry same cursor (up to 2 retries = 3 attempts total)
+              # 5xx / network → retry same cursor (up to 2 retries = 3 attempts)
               case "$HTTP_CODE" in
-                5??|000)
+                5??|000|000*)
                   if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
                     echo "5xx/network failure — wait 30s then retry same cursor (attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS)"
                     sleep 30
