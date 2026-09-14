@@ -36,9 +36,12 @@ jobs:
           fi
 
           BASE="${APP_URL%/}"
+          # Fresh every Actions run — never resume a prior day's cursor.
+          # Within this run only: advance cursor across batches (kakao → null).
           CURSOR=""
           TOTAL_PROCESSED=0
           TOTAL_MATCHED=0
+          echo "=== run start: no cursor (kakao-first from the top) ==="
 
           for i in $(seq 1 40); do
             echo "=== batch $i ==="
