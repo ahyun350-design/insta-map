@@ -36,32 +36,61 @@ jobs:
           fi
 
           BASE="${APP_URL%/}"
+          BATCH_SIZE=150
+          MAX_BATCHES=130
           # Fresh every Actions run — never resume a prior day's cursor.
           # Within this run only: advance cursor across batches (kakao → null).
           CURSOR=""
           TOTAL_PROCESSED=0
           TOTAL_MATCHED=0
-          echo "=== run start: no cursor (kakao-first from the top) ==="
+          echo "=== run start: no cursor (kakao-first), batchSize=${BATCH_SIZE}, maxBatches=${MAX_BATCHES} ==="
 
-          for i in $(seq 1 40); do
+          for i in $(seq 1 "$MAX_BATCHES"); do
             echo "=== batch $i ==="
-            BODY="{}"
+            BODY=$(jq -cn --argjson bs "$BATCH_SIZE" '{batchSize:$bs}')
             if [ -n "$CURSOR" ]; then
-              BODY=$(jq -cn --arg c "$CURSOR" '{cursor:$c}')
+              BODY=$(jq -cn --arg c "$CURSOR" --argjson bs "$BATCH_SIZE" '{cursor:$c,batchSize:$bs}')
             fi
 
-            HTTP_CODE=$(curl -sS -o /tmp/rematch.json -w "%{http_code}" \
-              -X POST "$BASE/api/admin/rematch" \
-              -H "Authorization: Bearer ${REMATCH_SECRET}" \
-              -H "Content-Type: application/json" \
-              -d "$BODY")
+            HTTP_CODE=""
+            ATTEMPT=0
+            MAX_ATTEMPTS=3
+            while [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; do
+              ATTEMPT=$((ATTEMPT + 1))
+              HTTP_CODE=$(curl -sS -o /tmp/rematch.json -w "%{http_code}" \
+                -X POST "$BASE/api/admin/rematch" \
+                -H "Authorization: Bearer ${REMATCH_SECRET}" \
+                -H "Content-Type: application/json" \
+                -d "$BODY" || echo "000")
 
-            echo "http=$HTTP_CODE"
-            cat /tmp/rematch.json
-            echo
+              echo "attempt=$ATTEMPT http=$HTTP_CODE"
+              if [ -f /tmp/rematch.json ]; then
+                cat /tmp/rematch.json
+                echo
+              fi
+
+              # Success
+              if [ "$HTTP_CODE" = "200" ]; then
+                break
+              fi
+
+              # 5xx → retry same cursor (up to 2 retries = 3 attempts total)
+              case "$HTTP_CODE" in
+                5??|000)
+                  if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+                    echo "5xx/network failure — wait 30s then retry same cursor (attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS)"
+                    sleep 30
+                    continue
+                  fi
+                  ;;
+              esac
+
+              echo "rematch batch failed with HTTP $HTTP_CODE after $ATTEMPT attempt(s)"
+              exit 1
+            done
 
             if [ "$HTTP_CODE" != "200" ]; then
-              echo "rematch batch failed with HTTP $HTTP_CODE"
+              echo "rematch batch failed with HTTP $HTTP_CODE after $MAX_ATTEMPTS attempts"
               exit 1
             fi
 
@@ -85,5 +114,5 @@ jobs:
             fi
           done
 
-          echo "stopped after 40 batches (cap 20,000 rows): total_processed=$TOTAL_PROCESSED total_matched=$TOTAL_MATCHED"
+          echo "stopped after ${MAX_BATCHES} batches (cap ~$((BATCH_SIZE * MAX_BATCHES)) rows): total_processed=$TOTAL_PROCESSED total_matched=$TOTAL_MATCHED"
           exit 0

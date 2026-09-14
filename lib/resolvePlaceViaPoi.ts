@@ -33,6 +33,13 @@ export type ResolveViaPoiFailReason =
   | "all_excluded"
   | "no_address";
 
+export type ResolveViaPoiTiming = {
+  /** nearby_poi RPC wall time (includes network RTT to Supabase). */
+  rpcMs: number;
+  /** In-process poiMatch scoring / pickBest. */
+  matchMs: number;
+};
+
 export type ResolveViaPoiResult =
   | {
       ok: true;
@@ -41,12 +48,14 @@ export type ResolveViaPoiResult =
       lat: number;
       lng: number;
       poiId: number;
+      timing: ResolveViaPoiTiming;
     }
   | {
       ok: false;
       reason: ResolveViaPoiFailReason;
       nearbyCount: number;
       excluded?: Partial<Record<ExcludeReason, number>>;
+      timing?: ResolveViaPoiTiming;
     };
 
 async function fetchNearbyPois(
@@ -125,12 +134,16 @@ export async function resolvePlaceViaPoi(
   const routing = Boolean(routeSource);
   const radiusM = routing ? POI_ROUTING_RADIUS_M : POI_MATCH_RADIUS_M;
 
+  const tRpc = Date.now();
   const nearby = await fetchNearbyPois(
     supabase,
     input.originLat,
     input.originLng,
     { radiusM, source: routeSource, maxResults: 100 },
   );
+  const rpcMs = Date.now() - tRpc;
+
+  const tMatch = Date.now();
   const candidates = [];
   for (const p of nearby) {
     const distM = haversineM(
@@ -149,7 +162,12 @@ export async function resolvePlaceViaPoi(
   }
 
   if (candidates.length === 0) {
-    return { ok: false, reason: "no_nearby", nearbyCount: 0 };
+    return {
+      ok: false,
+      reason: "no_nearby",
+      nearbyCount: 0,
+      timing: { rpcMs, matchMs: Date.now() - tMatch },
+    };
   }
 
   const excluded: Partial<Record<ExcludeReason, number>> = {};
@@ -174,6 +192,9 @@ export async function resolvePlaceViaPoi(
   }
 
   const best = pickBestPoiMatch(placeName, placeNorm, candidates, { routing });
+  const matchMs = Date.now() - tMatch;
+  const timing = { rpcMs, matchMs };
+
   if (!best) {
     if (scoredN === 0) {
       return {
@@ -181,6 +202,7 @@ export async function resolvePlaceViaPoi(
         reason: "no_score",
         nearbyCount: candidates.length,
         excluded,
+        timing,
       };
     }
     return {
@@ -188,6 +210,7 @@ export async function resolvePlaceViaPoi(
       reason: "all_excluded",
       nearbyCount: candidates.length,
       excluded,
+      timing,
     };
   }
 
@@ -202,6 +225,7 @@ export async function resolvePlaceViaPoi(
       reason: "no_address",
       nearbyCount: candidates.length,
       excluded,
+      timing,
     };
   }
 
@@ -212,6 +236,7 @@ export async function resolvePlaceViaPoi(
     lat: best.poi.lat,
     lng: best.poi.lng,
     poiId: best.poi.id,
+    timing,
   };
 }
 
