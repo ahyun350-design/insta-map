@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { haversineM } from "@/lib/poiMatch";
 import { resolvePlaceViaPoi } from "@/lib/resolvePlaceViaPoi";
@@ -21,6 +22,8 @@ type PlaceRow = {
   poi_id: number | null;
 };
 
+type Phase = "kakao" | "null";
+
 function readSecret(req: Request): string | null {
   const dedicated = req.headers.get("x-rematch-secret")?.trim();
   if (dedicated) return dedicated;
@@ -33,6 +36,103 @@ function readSecret(req: Request): string | null {
 
 function safePlaceName(name: string): string {
   return (name || "").replace(/\|/g, "/").trim().slice(0, 80);
+}
+
+/** Cursor encodes phase so kakao is fully drained before null. */
+function parseCursor(raw: string | null): { phase: Phase; afterId: string | null } {
+  if (!raw) return { phase: "kakao", afterId: null };
+  if (raw.startsWith("k:")) {
+    const id = raw.slice(2).trim();
+    return { phase: "kakao", afterId: id || null };
+  }
+  if (raw.startsWith("n:")) {
+    const id = raw.slice(2).trim();
+    return { phase: "null", afterId: id || null };
+  }
+  // Legacy bare uuid → continue kakao phase
+  return { phase: "kakao", afterId: raw };
+}
+
+function encodeCursor(phase: Phase, id: string): string {
+  return `${phase === "kakao" ? "k" : "n"}:${id}`;
+}
+
+async function fetchBySource(
+  admin: SupabaseClient,
+  source: "kakao" | null,
+  afterId: string | null,
+  limit: number,
+): Promise<PlaceRow[]> {
+  if (limit <= 0) return [];
+
+  let query = admin
+    .from("places")
+    .select("id, name, lat, lng, address, source, poi_id")
+    .order("id", { ascending: true })
+    .limit(limit);
+
+  if (source === "kakao") {
+    query = query.eq("source", "kakao");
+  } else {
+    query = query.is("source", null);
+  }
+  if (afterId) {
+    query = query.gt("id", afterId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (data ?? []) as PlaceRow[];
+}
+
+/**
+ * Priority: kakao first (fresh saves), then source IS NULL (residuals).
+ * Fills one batch up to BATCH_LIMIT, spanning phases if needed.
+ */
+async function fetchPriorityBatch(
+  admin: SupabaseClient,
+  cursorRaw: string | null,
+): Promise<{ places: PlaceRow[]; nextCursor: string | null; done: boolean }> {
+  const { phase, afterId } = parseCursor(cursorRaw);
+  const places: PlaceRow[] = [];
+
+  if (phase === "kakao") {
+    const kakao = await fetchBySource(admin, "kakao", afterId, BATCH_LIMIT);
+    places.push(...kakao);
+    if (kakao.length === BATCH_LIMIT) {
+      return {
+        places,
+        nextCursor: encodeCursor("kakao", kakao[kakao.length - 1]!.id),
+        done: false,
+      };
+    }
+    // kakao exhausted — fill remainder from null in this same batch
+    const remaining = BATCH_LIMIT - places.length;
+    const nulls = await fetchBySource(admin, null, null, remaining);
+    places.push(...nulls);
+    if (nulls.length === remaining && remaining > 0) {
+      return {
+        places,
+        nextCursor: encodeCursor("null", nulls[nulls.length - 1]!.id),
+        done: false,
+      };
+    }
+    return { places, nextCursor: null, done: true };
+  }
+
+  // phase === null
+  const nulls = await fetchBySource(admin, null, afterId, BATCH_LIMIT);
+  places.push(...nulls);
+  if (nulls.length === BATCH_LIMIT) {
+    return {
+      places,
+      nextCursor: encodeCursor("null", nulls[nulls.length - 1]!.id),
+      done: false,
+    };
+  }
+  return { places, nextCursor: null, done: true };
 }
 
 /**
@@ -77,32 +177,30 @@ export async function POST(req: Request) {
     /* empty body is fine */
   }
 
-  let query = admin
-    .from("places")
-    .select("id, name, lat, lng, address, source, poi_id")
-    .or("source.is.null,source.eq.kakao")
-    .order("id", { ascending: true })
-    .limit(BATCH_LIMIT);
-
-  if (cursor) {
-    query = query.gt("id", cursor);
-  }
-
-  const { data: rows, error: fetchErr } = await query;
-  if (fetchErr) {
-    console.error("[admin/rematch] fetch failed", fetchErr.message);
+  let places: PlaceRow[];
+  let nextCursor: string | null;
+  let done: boolean;
+  try {
+    const batch = await fetchPriorityBatch(admin, cursor);
+    places = batch.places;
+    nextCursor = batch.nextCursor;
+    done = batch.done;
+  } catch (e) {
+    console.error("[admin/rematch] fetch failed", e);
     return NextResponse.json({ error: "fetch_failed" }, { status: 500 });
   }
 
-  const places = (rows ?? []) as PlaceRow[];
+  const phaseInfo = parseCursor(cursor);
   console.log(
-    `rematch_run|start|target=${places.length}${dryRun ? "|dryRun=1" : ""}`,
+    `rematch_run|start|target=${places.length}|phase=${phaseInfo.phase}${dryRun ? "|dryRun=1" : ""}`,
   );
 
   let matched = 0;
   let skipped = 0;
   let processed = 0;
 
+  // Sequential on purpose — each place is one nearby_poi RPC.
+  // Parallelism (e.g. 10) would multiply DB load; skipped to stay under Supabase limits.
   for (const place of places) {
     processed += 1;
     const placeName = safePlaceName(place.name || "");
@@ -168,10 +266,6 @@ export async function POST(req: Request) {
 
     matched += 1;
   }
-
-  const nextCursor =
-    places.length > 0 ? places[places.length - 1]!.id : null;
-  const done = places.length < BATCH_LIMIT;
 
   console.log(`rematch_run|done|processed=${processed}|matched=${matched}`);
 
