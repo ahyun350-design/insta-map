@@ -24,11 +24,8 @@ from poi_match import (
     RADIUS_M,
     ROUTING_BBOX_DEG,
     ROUTING_RADIUS_M,
-    apply_filters,
-    apply_filters_routing,
     detect_facility_route,
-    score_candidate,
-    score_candidate_routing,
+    evaluate_candidate_pair,
 )
 
 OUT = Path(__file__).resolve().parent / "out"
@@ -54,16 +51,23 @@ def percentile(sorted_vals: list[float], p: float) -> float | None:
     return sorted_vals[f] + (sorted_vals[c] - sorted_vals[f]) * (k - f)
 
 
-def fetch_source_null_places(conn) -> list[dict]:
+def fetch_places(conn, source_filter: str) -> list[dict]:
+    """source_filter: 'null' | 'kakao'"""
+    if source_filter == "kakao":
+        where = "source = 'kakao'"
+    elif source_filter == "null":
+        where = "source IS NULL"
+    else:
+        raise ValueError(f"unsupported source_filter={source_filter}")
     rows: list[dict] = []
     offset = 0
     while True:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """
+                f"""
                 SELECT id, name, lat, lng, address, category
                 FROM public.places
-                WHERE source IS NULL
+                WHERE {where}
                 ORDER BY id
                 LIMIT %s OFFSET %s
                 """,
@@ -168,32 +172,18 @@ def _pick_best(
 ) -> tuple[dict | None, Counter]:
     place_excl: Counter = Counter()
     picked = None
-    score_fn = score_candidate_routing if routing else score_candidate
-    filter_fn = apply_filters_routing if routing else apply_filters
     for c in cands:
-        scored = score_fn(
+        scored = evaluate_candidate_pair(
             c["place_name"] or "",
-            c["place_norm"] or "",
             c["poi_name"] or "",
-            c["poi_norm"] or "",
-            float(c["sim_raw"] or 0),
+            float(c["dist_m"]),
+            routing=routing,
         )
         if not scored:
+            # Count coarse exclusions via legacy path? Skip — attribution uses matched set.
             continue
         score, reason = scored
         dist_m = float(c["dist_m"])
-        blocked = filter_fn(
-            c["place_name"] or "",
-            c["place_norm"] or "",
-            c["poi_name"] or "",
-            c["poi_norm"] or "",
-            score,
-            reason,
-            dist_m,
-        )
-        if blocked:
-            place_excl[blocked] += 1
-            continue
         row = {
             "place_id": str(c["place_id"]),
             "place_name": c["place_name"],
@@ -240,10 +230,12 @@ def match_batch(conn, batch: list[dict]) -> tuple[dict[str, dict], Counter]:
         ]
 
     # --- general path ---
-    if general:
+    def run_general(places: list[dict], *, path_label: str) -> None:
+        if not places:
+            return
         rows = _fetch_candidates(
             conn,
-            values_of(general),
+            values_of(places),
             bbox=BBOX_DEG,
             radius=RADIUS_M,
             poi_source=None,
@@ -251,10 +243,13 @@ def match_batch(conn, batch: list[dict]) -> tuple[dict[str, dict], Counter]:
         by_place: dict[str, list[dict]] = {}
         for r in rows:
             by_place.setdefault(str(r["place_id"]), []).append(r)
-        for p in general:
+        for p in places:
             pid = str(p["id"])
+            if pid in best:
+                continue
             picked, place_excl = _pick_best(by_place.get(pid, []), routing=False)
             if picked:
+                picked["path"] = path_label
                 best[pid] = picked
             elif place_excl:
                 if place_excl["franchise_prefix"] > 0:
@@ -266,7 +261,10 @@ def match_batch(conn, batch: list[dict]) -> tuple[dict[str, dict], Counter]:
                 elif place_excl["distance"] > 0:
                     excl["distance"] += 1
 
-    # --- routing path ---
+    run_general(general, path_label="general")
+
+    # --- routing path (+ fallback to general on miss) ---
+    routing_misses: list[dict] = []
     for route_src, places in routing_groups.items():
         rows = _fetch_candidates(
             conn,
@@ -277,7 +275,7 @@ def match_batch(conn, batch: list[dict]) -> tuple[dict[str, dict], Counter]:
         )
         for r in rows:
             r["_route_source"] = route_src
-        by_place = {}
+        by_place: dict[str, list[dict]] = {}
         for r in rows:
             by_place.setdefault(str(r["place_id"]), []).append(r)
         for p in places:
@@ -287,28 +285,55 @@ def match_batch(conn, batch: list[dict]) -> tuple[dict[str, dict], Counter]:
                 picked["route_source"] = route_src
                 picked["path"] = "routing"
                 best[pid] = picked
-            elif place_excl:
-                if place_excl["reverse_contain"] > 0:
-                    excl["reverse_contain"] += 1
-                elif place_excl["distance"] > 0:
-                    excl["distance"] += 1
-                else:
-                    excl["routing_miss"] += 1
             else:
-                excl["routing_no_candidate"] += 1
+                routing_misses.append(p)
+                if place_excl:
+                    if place_excl["reverse_contain"] > 0:
+                        excl["reverse_contain"] += 1
+                    elif place_excl["distance"] > 0:
+                        excl["distance"] += 1
+                    else:
+                        excl["routing_miss"] += 1
+                else:
+                    excl["routing_no_candidate"] += 1
+
+    # [1] routing fallback → general (all sources)
+    if routing_misses:
+        before = set(best.keys())
+        run_general(routing_misses, path_label="routing_fallback")
+        for pid in best:
+            if pid not in before and best[pid].get("path") == "routing_fallback":
+                excl["routing_fallback_hit"] += 1
 
     return best, excl
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--source",
+        choices=("null", "kakao"),
+        default="null",
+        help="places.source filter (default: null)",
+    )
+    parser.add_argument(
+        "--out",
+        default="",
+        help="output json filename under out/ (default: match_eval.json)",
+    )
+    args = parser.parse_args()
+    out_name = args.out or "match_eval.json"
+
     OUT.mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
     print("connecting (readonly)…", flush=True)
     conn = psycopg2.connect(db_url(), connect_timeout=60)
     conn.set_session(readonly=True, autocommit=True)
 
-    print("loading places WHERE source IS NULL…", flush=True)
-    places = fetch_source_null_places(conn)
+    print(f"loading places WHERE source={args.source!r}…", flush=True)
+    places = fetch_places(conn, args.source)
     total = len(places)
     print(f"(a) targets: {total}", flush=True)
 
@@ -396,7 +421,7 @@ def main() -> None:
         "elapsed_s": round(time.perf_counter() - t0, 1),
     }
 
-    out_path = OUT / "match_eval.json"
+    out_path = OUT / out_name
     out_path.write_text(
         json.dumps(
             {

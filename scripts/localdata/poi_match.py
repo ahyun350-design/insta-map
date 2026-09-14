@@ -99,15 +99,231 @@ def compact_place_name(place_name: str) -> str:
     return re.sub(r"\s+", "", (place_name or "").strip())
 
 
+def starts_with_industry_prefix(place_name: str) -> bool:
+    n = compact_name(place_name)
+    if not n:
+        return False
+    for pref in INDUSTRY_PREFIXES:
+        p = pref.lower()
+        if n.startswith(p) and len(n) > len(p):
+            return True
+    return False
+
+
+def script_majority(raw: str) -> str | None:
+    hangul = 0
+    latin = 0
+    for ch in raw or "":
+        if "가" <= ch <= "힣" or "ㄱ" <= ch <= "ㅎ" or "ㅏ" <= ch <= "ㅣ":
+            hangul += 1
+        elif ("A" <= ch <= "Z") or ("a" <= ch <= "z"):
+            latin += 1
+    total = hangul + latin
+    if total == 0:
+        return None
+    if hangul > total / 2:
+        return "hangul"
+    if latin > total / 2:
+        return "latin"
+    return None
+
+
+_REGION_TAG_EXACT = frozenset(
+    {
+        "강남",
+        "성수",
+        "홍대",
+        "부산",
+        "서울",
+        "연남",
+        "합정",
+        "망원",
+        "이태원",
+        "한남",
+        "을지로",
+        "명동",
+        "잠실",
+        "여의도",
+        "종로",
+        "용산",
+        "대구",
+        "인천",
+        "광주",
+        "대전",
+        "울산",
+        "제주",
+        "서면",
+        "해운대",
+        "전포",
+        "건대",
+        "신촌",
+        "이대",
+        "압구정",
+        "청담",
+        "삼성",
+        "역삼",
+        "선릉",
+        "가로수길",
+        "북촌",
+        "서촌",
+        "익선",
+    }
+)
+
+_FACILITY_TAG_SUFFIXES = (
+    "몰",
+    "센터",
+    "타워",
+    "뮤지엄",
+    "미술관",
+    "박물관",
+    "시청",
+    "백화점",
+    "아울렛",
+    "터미널",
+)
+
+
+def is_paren_branch_tag(inside: str) -> bool:
+    t = re.sub(r"\s+", "", (inside or "").strip())
+    if not t:
+        return True
+    if t in ("본점", "지점", "직영점"):
+        return True
+    if t.endswith("점") and len(t) >= 2:
+        return True
+    if t in _REGION_TAG_EXACT:
+        return True
+    for suf in _FACILITY_TAG_SUFFIXES:
+        if t.endswith(suf) and len(t) > len(suf):
+            return True
+    return False
+
+
+def name_display_variants(raw: str) -> list[str]:
+    """full always; outside/inside only for cross-script aliases (not branch tags)."""
+    full = (raw or "").strip()
+    if not full:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(s: str) -> None:
+        t = s.strip()
+        if not t or t in seen:
+            return
+        seen.add(t)
+        out.append(t)
+
+    add(full)
+    insides: list[str] = []
+    for m in re.finditer(r"\(([^()]*)\)|（([^）]*)）", full):
+        insides.append((m.group(1) or m.group(2) or "").strip())
+    if not insides:
+        return out
+
+    outside = full
+    prev = None
+    while prev != outside:
+        prev = outside
+        outside = re.sub(r"\([^()]*\)", "", outside)
+        outside = re.sub(r"（[^）]*）", "", outside)
+    outside = outside.strip()
+    out_script = script_majority(outside)
+    for inn in insides:
+        if is_paren_branch_tag(inn):
+            continue
+        in_script = script_majority(inn)
+        if not out_script or not in_script or out_script == in_script:
+            continue
+        add(outside)
+        add(inn)
+    return out
+
+
 def detect_facility_route(place_name: str) -> str | None:
     """Place 이름이 라우팅 접미로 끝나면 대상 poi source 반환."""
+    if starts_with_industry_prefix(place_name):
+        return None
+    raw = re.sub(r"\s+", " ", (place_name or "").strip())
     n = compact_place_name(place_name)
     if not n:
         return None
+    tokens = raw.split() if raw else []
     for kw, src in _ROUTING_PAIRS:
+        if kw == "산":
+            if not tokens:
+                continue
+            last = tokens[-1]
+            if not re.fullmatch(r"[0-9A-Za-z가-힣]{1,8}산", last):
+                continue
+            earlier = [compact_name(t) for t in tokens[:-1]]
+            industry_hit = False
+            for t in earlier:
+                for pref in INDUSTRY_PREFIXES:
+                    p = pref.lower()
+                    if t == p or t.startswith(p):
+                        industry_hit = True
+                        break
+                if industry_hit:
+                    break
+            if industry_hit:
+                continue
+            return src
         if n.endswith(kw):
             return src
     return None
+
+
+def rough_name_similarity(a: str, b: str) -> float:
+    if not a and not b:
+        return 100.0
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 100.0
+    return SequenceMatcher(None, a, b).ratio() * 100.0
+
+
+def evaluate_candidate_pair(
+    place_name: str,
+    poi_name: str,
+    dist_m: float,
+    *,
+    routing: bool,
+) -> tuple[float, str] | None:
+    """Try all paren variants; return best non-excluded (score, reason) or None."""
+    place_vars = name_display_variants(place_name) or [place_name]
+    poi_vars = name_display_variants(poi_name) or [poi_name]
+    score_fn = score_candidate_routing if routing else score_candidate
+    filter_fn = apply_filters_routing if routing else apply_filters
+
+    best: tuple[float, str] | None = None
+    for place_var in place_vars:
+        for poi_var in poi_vars:
+            place_norm = normalize_poi_name(place_var)
+            poi_norm = normalize_poi_name(poi_var)
+            if len(place_norm) < 2 or len(poi_norm) < 2:
+                continue
+            sim_raw = rough_name_similarity(place_norm, poi_norm)
+            scored = score_fn(place_var, place_norm, poi_var, poi_norm, sim_raw)
+            if not scored:
+                continue
+            score, reason = scored
+            blocked = filter_fn(
+                place_name,
+                place_norm,
+                poi_name,
+                poi_norm,
+                score,
+                reason,
+                dist_m,
+            )
+            if blocked:
+                continue
+            if best is None or score > best[0]:
+                best = (score, reason)
+    return best
 
 
 def is_park_generic_name(place_name: str) -> bool:

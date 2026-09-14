@@ -1,7 +1,7 @@
 /**
  * 카카오 origin(또는 힌트 좌표) 기준 인근 poi 재해결.
  * 매칭 규칙은 lib/poiMatch.ts (배치와 동일).
- * 시설 키워드 → facilityRouting source 후보만, 넓은 거리 상한.
+ * 시설 키워드 → facilityRouting source 후보만, 실패 시 일반 경로 폴백.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -109,49 +109,16 @@ async function fetchNearbyPois(
   return out;
 }
 
-/**
- * placeName(Claude 이름) + origin(카카오 좌표) → poi 매칭.
- * 성공 시 poi 좌표·주소. 실패 시 ok:false (호출측에서 kakao 유지).
- */
-export async function resolvePlaceViaPoi(
-  supabase: SupabaseClient,
-  input: ResolveViaPoiInput,
-): Promise<ResolveViaPoiResult> {
-  const placeName = (input.placeName || "").trim();
-  if (!placeName) {
-    return { ok: false, reason: "empty_name", nearbyCount: 0 };
-  }
-  if (!Number.isFinite(input.originLat) || !Number.isFinite(input.originLng)) {
-    return { ok: false, reason: "bad_origin", nearbyCount: 0 };
-  }
-
-  const placeNorm = normalizePoiName(placeName);
-  if (placeNorm.length < 2) {
-    return { ok: false, reason: "norm_too_short", nearbyCount: 0 };
-  }
-
-  const routeSource = detectFacilityRoute(placeName);
-  const routing = Boolean(routeSource);
-  const radiusM = routing ? POI_ROUTING_RADIUS_M : POI_MATCH_RADIUS_M;
-
-  const tRpc = Date.now();
-  const nearby = await fetchNearbyPois(
-    supabase,
-    input.originLat,
-    input.originLng,
-    { radiusM, source: routeSource, maxResults: 100 },
-  );
-  const rpcMs = Date.now() - tRpc;
-
-  const tMatch = Date.now();
-  const candidates = [];
+function buildCandidates(
+  nearby: PoiRow[],
+  originLat: number,
+  originLng: number,
+  radiusM: number,
+  placeNorm: string,
+): Array<PoiRow & { distM: number; simRaw: number }> {
+  const candidates: Array<PoiRow & { distM: number; simRaw: number }> = [];
   for (const p of nearby) {
-    const distM = haversineM(
-      input.originLat,
-      input.originLng,
-      p.lat,
-      p.lng,
-    );
+    const distM = haversineM(originLat, originLng, p.lat, p.lng);
     if (distM > radiusM) continue;
     const poiNorm = p.name_norm || normalizePoiName(p.name);
     candidates.push({
@@ -160,16 +127,17 @@ export async function resolvePlaceViaPoi(
       simRaw: roughNameSimilarity(placeNorm, poiNorm),
     });
   }
+  return candidates;
+}
 
-  if (candidates.length === 0) {
-    return {
-      ok: false,
-      reason: "no_nearby",
-      nearbyCount: 0,
-      timing: { rpcMs, matchMs: Date.now() - tMatch },
-    };
-  }
-
+function finishMatch(
+  placeName: string,
+  placeNorm: string,
+  candidates: Array<PoiRow & { distM: number; simRaw: number }>,
+  routing: boolean,
+  rpcMs: number,
+  matchStarted: number,
+): ResolveViaPoiResult {
   const excluded: Partial<Record<ExcludeReason, number>> = {};
   let scoredN = 0;
   for (const c of candidates) {
@@ -192,10 +160,12 @@ export async function resolvePlaceViaPoi(
   }
 
   const best = pickBestPoiMatch(placeName, placeNorm, candidates, { routing });
-  const matchMs = Date.now() - tMatch;
-  const timing = { rpcMs, matchMs };
+  const timing = { rpcMs, matchMs: Date.now() - matchStarted };
 
   if (!best) {
+    if (candidates.length === 0) {
+      return { ok: false, reason: "no_nearby", nearbyCount: 0, timing };
+    }
     if (scoredN === 0) {
       return {
         ok: false,
@@ -238,6 +208,82 @@ export async function resolvePlaceViaPoi(
     poiId: best.poi.id,
     timing,
   };
+}
+
+/**
+ * placeName(Claude 이름) + origin(카카오 좌표) → poi 매칭.
+ * 성공 시 poi 좌표·주소. 실패 시 ok:false (호출측에서 kakao 유지).
+ * 시설 라우팅 실패 시 일반 경로(전체 source)로 한 번 더 시도.
+ */
+export async function resolvePlaceViaPoi(
+  supabase: SupabaseClient,
+  input: ResolveViaPoiInput,
+): Promise<ResolveViaPoiResult> {
+  const placeName = (input.placeName || "").trim();
+  if (!placeName) {
+    return { ok: false, reason: "empty_name", nearbyCount: 0 };
+  }
+  if (!Number.isFinite(input.originLat) || !Number.isFinite(input.originLng)) {
+    return { ok: false, reason: "bad_origin", nearbyCount: 0 };
+  }
+
+  const placeNorm = normalizePoiName(placeName);
+  if (placeNorm.length < 2) {
+    return { ok: false, reason: "norm_too_short", nearbyCount: 0 };
+  }
+
+  const routeSource = detectFacilityRoute(placeName);
+  let rpcMs = 0;
+  const tMatchAll = Date.now();
+
+  if (routeSource) {
+    const tRpc = Date.now();
+    const nearbyRouted = await fetchNearbyPois(
+      supabase,
+      input.originLat,
+      input.originLng,
+      {
+        radiusM: POI_ROUTING_RADIUS_M,
+        source: routeSource,
+        maxResults: 100,
+      },
+    );
+    rpcMs += Date.now() - tRpc;
+    const routedCands = buildCandidates(
+      nearbyRouted,
+      input.originLat,
+      input.originLng,
+      POI_ROUTING_RADIUS_M,
+      placeNorm,
+    );
+    const routed = finishMatch(
+      placeName,
+      placeNorm,
+      routedCands,
+      true,
+      rpcMs,
+      tMatchAll,
+    );
+    if (routed.ok) return routed;
+    // fall through to general path
+  }
+
+  const tRpc2 = Date.now();
+  const nearby = await fetchNearbyPois(
+    supabase,
+    input.originLat,
+    input.originLng,
+    { radiusM: POI_MATCH_RADIUS_M, source: null, maxResults: 100 },
+  );
+  rpcMs += Date.now() - tRpc2;
+  const candidates = buildCandidates(
+    nearby,
+    input.originLat,
+    input.originLng,
+    POI_MATCH_RADIUS_M,
+    placeNorm,
+  );
+  return finishMatch(placeName, placeNorm, candidates, false, rpcMs, tMatchAll);
 }
 
 /** B 경로: 카카오 성공 후 poi 재해결 실패 */

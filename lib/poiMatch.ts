@@ -122,11 +122,165 @@ function compactPlaceName(placeName: string): string {
   return (placeName || "").replace(/\s+/g, "").trim();
 }
 
+/** Starts with industry prefix (카페/커피/식당/…) → never facility-route. */
+export function startsWithIndustryPrefix(placeName: string): boolean {
+  const n = compactName(placeName);
+  if (!n) return false;
+  for (const pref of INDUSTRY_PREFIXES) {
+    const p = pref.toLowerCase();
+    if (n.startsWith(p) && n.length > p.length) return true;
+  }
+  return false;
+}
+
+/** Letter-script majority: hangul | latin | null (no letters / no majority). */
+export function scriptMajority(raw: string): "hangul" | "latin" | null {
+  let hangul = 0;
+  let latin = 0;
+  for (const ch of raw || "") {
+    if (/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(ch)) hangul += 1;
+    else if (/[A-Za-z]/.test(ch)) latin += 1;
+  }
+  const total = hangul + latin;
+  if (total === 0) return null;
+  if (hangul > total / 2) return "hangul";
+  if (latin > total / 2) return "latin";
+  return null;
+}
+
+const REGION_TAG_EXACT = new Set([
+  "강남",
+  "성수",
+  "홍대",
+  "부산",
+  "서울",
+  "연남",
+  "합정",
+  "망원",
+  "이태원",
+  "한남",
+  "을지로",
+  "명동",
+  "잠실",
+  "여의도",
+  "종로",
+  "용산",
+  "대구",
+  "인천",
+  "광주",
+  "대전",
+  "울산",
+  "제주",
+  "서면",
+  "해운대",
+  "전포",
+  "건대",
+  "신촌",
+  "이대",
+  "압구정",
+  "청담",
+  "삼성",
+  "역삼",
+  "선릉",
+  "가로수길",
+  "북촌",
+  "서촌",
+  "익선",
+]);
+
+const FACILITY_TAG_SUFFIXES = [
+  "몰",
+  "센터",
+  "타워",
+  "뮤지엄",
+  "미술관",
+  "박물관",
+  "시청",
+  "백화점",
+  "아울렛",
+  "터미널",
+] as const;
+
+/** Branch / location tag inside parens — do not use as match variant. */
+export function isParenBranchTag(inside: string): boolean {
+  const t = (inside || "").replace(/\s+/g, "").trim();
+  if (!t) return true;
+  if (t === "본점" || t === "지점" || t === "직영점") return true;
+  if (t.endsWith("점") && t.length >= 2) return true; // 홍대점, 서울시청점, 을지로점
+  if (REGION_TAG_EXACT.has(t)) return true;
+  for (const suf of FACILITY_TAG_SUFFIXES) {
+    if (t.endsWith(suf) && t.length > suf.length) return true;
+  }
+  return false;
+}
+
+/**
+ * Display-name variants for scoring.
+ * Always includes full string. Outside/inside paren splits only when:
+ *  (가) outside vs inside have different letter-script majorities (hangul↔latin)
+ *  (나) inside is not a branch/location tag
+ * Same-script parens (both hangul or both latin) → no split.
+ */
+export function nameDisplayVariants(raw: string): string[] {
+  const full = (raw || "").trim();
+  if (!full) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (s: string) => {
+    const t = s.trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  add(full);
+
+  const insides: string[] = [];
+  const re = /\(([^()]*)\)|（([^）]*)）/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(full))) {
+    insides.push((m[1] ?? m[2] ?? "").trim());
+  }
+  if (!insides.length) return out;
+
+  const outside = stripParens(full).trim();
+  const outScript = scriptMajority(outside);
+  for (const inn of insides) {
+    if (isParenBranchTag(inn)) continue;
+    const inScript = scriptMajority(inn);
+    if (!outScript || !inScript || outScript === inScript) continue;
+    // Cross-script alias only
+    add(outside);
+    add(inn);
+  }
+  return out;
+}
+
 /** 시설 라우팅 접미 → poi.source (없으면 null = 일반 경로) */
 export function detectFacilityRoute(placeName: string): string | null {
+  if (startsWithIndustryPrefix(placeName)) return null;
+
+  const raw = (placeName || "").replace(/\s+/g, " ").trim();
   const n = compactPlaceName(placeName);
   if (!n) return null;
+  const tokens = raw ? raw.split(" ").filter(Boolean) : [];
+
   for (const { kw, source } of ROUTING_PAIRS) {
+    if (kw === "산") {
+      // Only when last eoejeol is exactly ○○산 (avoid 부산/수산/남산 inside shop names).
+      // Ambiguous cases may still route; resolvePlaceViaPoi falls back to general.
+      if (!tokens.length) continue;
+      const last = tokens[tokens.length - 1]!;
+      if (!/^[0-9A-Za-z가-힣]{1,8}산$/.test(last)) continue;
+      const earlier = tokens.slice(0, -1).map((t) => compactName(t));
+      const industryHit = earlier.some((t) =>
+        INDUSTRY_PREFIXES.some((pref) => {
+          const p = pref.toLowerCase();
+          return t === p || t.startsWith(p);
+        }),
+      );
+      if (industryHit) continue;
+      return source;
+    }
     if (n.endsWith(kw)) return source;
   }
   return null;
@@ -457,45 +611,70 @@ export function evaluateCandidate(
   opts?: { routing?: boolean },
 ): MatchPick | null {
   const routing = Boolean(opts?.routing);
-  const scored = routing
-    ? scoreCandidateRouting(
-        c.placeName,
-        c.placeNorm,
-        c.poiName,
-        c.poiNorm,
-        c.simRaw,
-      )
-    : scoreCandidate(
-        c.placeName,
-        c.placeNorm,
-        c.poiName,
-        c.poiNorm,
-        c.simRaw,
-      );
-  if (!scored) return null;
-  const blocked = routing
-    ? applyFiltersRouting(
-        c.placeName,
-        c.placeNorm,
-        c.poiName,
-        c.poiNorm,
-        scored.score,
-        scored.reason,
-        c.distM,
-      )
-    : applyFilters(
-        c.placeName,
-        c.placeNorm,
-        c.poiName,
-        c.poiNorm,
-        scored.score,
-        scored.reason,
-        c.distM,
-      );
-  if (blocked) {
-    return { ...scored, distM: c.distM, excluded: blocked };
+  const placeVars = nameDisplayVariants(c.placeName);
+  const poiVars = nameDisplayVariants(c.poiName);
+  // Fall back to provided norms when no variants (should not happen)
+  if (!placeVars.length) placeVars.push(c.placeName);
+  if (!poiVars.length) poiVars.push(c.poiName);
+
+  let bestPass: MatchPick | null = null;
+  let bestExcl: MatchPick | null = null;
+
+  for (const placeVar of placeVars) {
+    for (const poiVar of poiVars) {
+      const placeNorm = normalizePoiName(placeVar);
+      const poiNorm = normalizePoiName(poiVar);
+      if (placeNorm.length < 2 || poiNorm.length < 2) continue;
+      const simRaw = roughNameSimilarity(placeNorm, poiNorm);
+      const scored = routing
+        ? scoreCandidateRouting(placeVar, placeNorm, poiVar, poiNorm, simRaw)
+        : scoreCandidate(placeVar, placeNorm, poiVar, poiNorm, simRaw);
+      if (!scored) continue;
+
+      // Franchise/facility checks use original display names; norms from winning pair.
+      const blocked = routing
+        ? applyFiltersRouting(
+            c.placeName,
+            placeNorm,
+            c.poiName,
+            poiNorm,
+            scored.score,
+            scored.reason,
+            c.distM,
+          )
+        : applyFilters(
+            c.placeName,
+            placeNorm,
+            c.poiName,
+            poiNorm,
+            scored.score,
+            scored.reason,
+            c.distM,
+          );
+
+      const pick: MatchPick = blocked
+        ? { ...scored, distM: c.distM, excluded: blocked }
+        : { ...scored, distM: c.distM };
+
+      if (!pick.excluded) {
+        if (
+          !bestPass ||
+          pick.score > bestPass.score ||
+          (pick.score === bestPass.score && pick.distM < bestPass.distM)
+        ) {
+          bestPass = pick;
+        }
+      } else if (
+        !bestExcl ||
+        pick.score > bestExcl.score ||
+        (pick.score === bestExcl.score && pick.distM < bestExcl.distM)
+      ) {
+        bestExcl = pick;
+      }
+    }
   }
-  return { ...scored, distM: c.distM };
+
+  return bestPass ?? bestExcl;
 }
 
 export type PoiRow = {
