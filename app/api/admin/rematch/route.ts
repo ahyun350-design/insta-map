@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { haversineM } from "@/lib/poiMatch";
-import { resolvePlaceViaPoi } from "@/lib/resolvePlaceViaPoi";
+import {
+  resolvePlaceViaPoi,
+  resolvePlacesViaPoiBatch,
+  type ResolveViaPoiResult,
+} from "@/lib/resolvePlaceViaPoi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -181,12 +185,17 @@ export async function POST(req: Request) {
     url.searchParams.get("dryRun") === "true" ||
     url.searchParams.get("dry_run") === "true";
   let batchSize = parseBatchSize(url.searchParams.get("batchSize"));
+  // Default: batch RPC (nearby_poi_batch). Set useBatchRpc:false to force sequential nearby_poi.
+  let useBatchRpc = true;
+  let includeResults = false;
 
   try {
     const body = (await req.json()) as {
       cursor?: unknown;
       dryRun?: unknown;
       batchSize?: unknown;
+      useBatchRpc?: unknown;
+      includeResults?: unknown;
     };
     if (typeof body.cursor === "string" && body.cursor.trim()) {
       cursor = body.cursor.trim();
@@ -195,6 +204,8 @@ export async function POST(req: Request) {
     if (body.batchSize !== undefined) {
       batchSize = parseBatchSize(body.batchSize);
     }
+    if (body.useBatchRpc === false) useBatchRpc = false;
+    if (body.includeResults === true) includeResults = true;
   } catch {
     /* empty body is fine */
   }
@@ -218,7 +229,7 @@ export async function POST(req: Request) {
 
   const phaseInfo = parseCursor(cursor);
   console.log(
-    `rematch_run|start|target=${places.length}|batchSize=${batchSize}|phase=${phaseInfo.phase}${dryRun ? "|dryRun=1" : ""}`,
+    `rematch_run|start|target=${places.length}|batchSize=${batchSize}|phase=${phaseInfo.phase}|batchRpc=${useBatchRpc ? 1 : 0}${dryRun ? "|dryRun=1" : ""}`,
   );
 
   let matched = 0;
@@ -229,9 +240,21 @@ export async function POST(req: Request) {
   let matchMs = 0;
   let updateMs = 0;
   let updateCalls = 0;
+  const resultRows: Array<{
+    placeId: string;
+    matched: boolean;
+    poiId: number | null;
+    reason?: string;
+  }> = [];
 
-  // Sequential on purpose — each place is one nearby_poi RPC.
-  // Parallelism (e.g. 10) would multiply DB load; skipped to stay under Supabase limits.
+  type WorkItem = {
+    place: PlaceRow;
+    placeName: string;
+    lat: number;
+    lng: number;
+  };
+  const work: WorkItem[] = [];
+
   for (const place of places) {
     processed += 1;
     const placeName = safePlaceName(place.name || "");
@@ -241,20 +264,64 @@ export async function POST(req: Request) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || !placeName) {
       skipped += 1;
       console.log(`rematch_run|skip|${placeName || "?"}|reason=no_match`);
+      if (includeResults) {
+        resultRows.push({
+          placeId: place.id,
+          matched: false,
+          poiId: null,
+          reason: "no_match",
+        });
+      }
       continue;
     }
+    work.push({ place, placeName, lat, lng });
+  }
 
-    const tResolve = Date.now();
-    const resolved = await resolvePlaceViaPoi(admin, {
-      placeName,
-      originLat: lat,
-      originLng: lng,
-    });
-    const resolveElapsed = Date.now() - tResolve;
-    resolveMs += resolveElapsed;
-    if (resolved.timing) {
-      rpcMs += resolved.timing.rpcMs;
-      matchMs += resolved.timing.matchMs;
+  // Resolve: batch RPC (≤50 origins/call) or legacy sequential nearby_poi.
+  const resolvedById = new Map<string, ResolveViaPoiResult>();
+  const tResolveAll = Date.now();
+  if (useBatchRpc) {
+    const batchMap = await resolvePlacesViaPoiBatch(
+      admin,
+      work.map((w) => ({
+        id: w.place.id,
+        placeName: w.placeName,
+        originLat: w.lat,
+        originLng: w.lng,
+      })),
+    );
+    for (const [id, r] of batchMap) resolvedById.set(id, r);
+  } else {
+    for (const w of work) {
+      const r = await resolvePlaceViaPoi(admin, {
+        placeName: w.placeName,
+        originLat: w.lat,
+        originLng: w.lng,
+      });
+      resolvedById.set(w.place.id, r);
+    }
+  }
+  resolveMs = Date.now() - tResolveAll;
+  for (const r of resolvedById.values()) {
+    if (r.timing) {
+      rpcMs += r.timing.rpcMs;
+      matchMs += r.timing.matchMs;
+    }
+  }
+
+  for (const w of work) {
+    const resolved = resolvedById.get(w.place.id);
+    if (!resolved) {
+      skipped += 1;
+      if (includeResults) {
+        resultRows.push({
+          placeId: w.place.id,
+          matched: false,
+          poiId: null,
+          reason: "no_match",
+        });
+      }
+      continue;
     }
 
     if (!resolved.ok) {
@@ -263,20 +330,36 @@ export async function POST(req: Request) {
         resolved.reason === "all_excluded" || resolved.reason === "no_score"
           ? "low_score"
           : "no_match";
-      console.log(`rematch_run|skip|${placeName}|reason=${reason}`);
+      console.log(`rematch_run|skip|${w.placeName}|reason=${reason}`);
+      if (includeResults) {
+        resultRows.push({
+          placeId: w.place.id,
+          matched: false,
+          poiId: null,
+          reason,
+        });
+      }
       continue;
     }
 
-    const moveM = haversineM(lat, lng, resolved.lat, resolved.lng);
+    const moveM = haversineM(w.lat, w.lng, resolved.lat, resolved.lng);
     if (moveM >= MAX_MOVE_M) {
       skipped += 1;
-      console.log(`rematch_run|skip|${placeName}|reason=distance`);
+      console.log(`rematch_run|skip|${w.placeName}|reason=distance`);
+      if (includeResults) {
+        resultRows.push({
+          placeId: w.place.id,
+          matched: false,
+          poiId: resolved.poiId,
+          reason: "distance",
+        });
+      }
       continue;
     }
 
     const poiSource = (resolved.match.poi.source || "poi").replace(/\|/g, "/");
     console.log(
-      `rematch_run|matched|${placeName}|source=${poiSource}|dist=${Math.round(moveM)}`,
+      `rematch_run|matched|${w.placeName}|source=${poiSource}|dist=${Math.round(moveM)}`,
     );
 
     if (!dryRun) {
@@ -290,22 +373,37 @@ export async function POST(req: Request) {
           source: "poi",
           poi_id: resolved.poiId,
         })
-        .eq("id", place.id);
+        .eq("id", w.place.id);
       updateMs += Date.now() - tUpd;
       updateCalls += 1;
 
       if (updErr) {
         console.error("[admin/rematch] update failed", {
-          id: place.id,
+          id: w.place.id,
           message: updErr.message,
         });
         skipped += 1;
-        console.log(`rematch_run|skip|${placeName}|reason=no_match`);
+        console.log(`rematch_run|skip|${w.placeName}|reason=no_match`);
+        if (includeResults) {
+          resultRows.push({
+            placeId: w.place.id,
+            matched: false,
+            poiId: resolved.poiId,
+            reason: "no_match",
+          });
+        }
         continue;
       }
     }
 
     matched += 1;
+    if (includeResults) {
+      resultRows.push({
+        placeId: w.place.id,
+        matched: true,
+        poiId: resolved.poiId,
+      });
+    }
   }
 
   const totalMs = Date.now() - t0;
@@ -318,6 +416,7 @@ export async function POST(req: Request) {
     updateMs,
     updateCalls,
     totalMs,
+    useBatchRpc,
     perPlaceMs: Math.round(totalMs / n),
     perPlaceResolveMs: Math.round(resolveMs / n),
     perPlaceRpcMs: Math.round(rpcMs / n),
@@ -335,6 +434,8 @@ export async function POST(req: Request) {
     nextCursor: done ? null : nextCursor,
     done,
     dryRun,
+    useBatchRpc,
     timing,
+    ...(includeResults ? { results: resultRows } : {}),
   });
 }

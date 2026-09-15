@@ -83,8 +83,12 @@ async function fetchNearbyPois(
     return [];
   }
 
+  return parseNearbyRows(data);
+}
+
+function parseNearbyRows(data: unknown): PoiRow[] {
   const out: PoiRow[] = [];
-  for (const row of data ?? []) {
+  for (const row of (data as unknown[]) ?? []) {
     if (!row || typeof row !== "object") continue;
     const r = row as Record<string, unknown>;
     const id = typeof r.id === "number" ? r.id : Number(r.id);
@@ -106,6 +110,203 @@ async function fetchNearbyPois(
       source: typeof r.source === "string" ? r.source : null,
     });
   }
+  return out;
+}
+
+const BATCH_RPC_CHUNK = 50;
+
+type BatchOrigin = {
+  id: string;
+  lat: number;
+  lng: number;
+  radius_m: number;
+  filter_source: string | null;
+};
+
+/**
+ * Rematch-only: one RPC per ≤50 origins.
+ * RPC returns one row per origin with pois jsonb (avoids PostgREST max-rows
+ * truncating a flat 50×100 result set). Matching rules unchanged.
+ */
+async function fetchNearbyPoisBatch(
+  supabase: SupabaseClient,
+  origins: BatchOrigin[],
+  maxResultsPer = 100,
+): Promise<Map<string, PoiRow[]>> {
+  const byOrigin = new Map<string, PoiRow[]>();
+  for (const o of origins) byOrigin.set(o.id, []);
+  if (origins.length === 0) return byOrigin;
+
+  const payload = origins.map((o) => ({
+    id: o.id,
+    lat: o.lat,
+    lng: o.lng,
+    radius_m: o.radius_m,
+    filter_source: o.filter_source,
+  }));
+
+  const { data, error } = await supabase.rpc("nearby_poi_batch", {
+    origins: payload,
+    max_results_per: maxResultsPer,
+  });
+
+  if (error) {
+    console.error("[resolvePlaceViaPoi] nearby_poi_batch rpc failed", {
+      code: error.code,
+      message: error.message,
+      n: origins.length,
+    });
+    return byOrigin;
+  }
+
+  for (const row of data ?? []) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const originId =
+      typeof r.origin_id === "string" ? r.origin_id : String(r.origin_id ?? "");
+    if (!originId || !byOrigin.has(originId)) continue;
+    byOrigin.set(originId, parseNearbyRows(r.pois));
+  }
+  return byOrigin;
+}
+
+export type ResolveBatchInput = ResolveViaPoiInput & { id: string };
+
+/**
+ * Rematch batch path: chunk origins into nearby_poi_batch RPCs (50 each),
+ * then run the same poiMatch scoring as resolvePlaceViaPoi (incl. facility fallback).
+ */
+export async function resolvePlacesViaPoiBatch(
+  supabase: SupabaseClient,
+  inputs: ResolveBatchInput[],
+): Promise<Map<string, ResolveViaPoiResult>> {
+  const out = new Map<string, ResolveViaPoiResult>();
+  if (inputs.length === 0) return out;
+
+  // Precompute norms / routing; skip invalid early
+  type Prep = {
+    id: string;
+    placeName: string;
+    placeNorm: string;
+    originLat: number;
+    originLng: number;
+    routeSource: string | null;
+  };
+  const preps: Prep[] = [];
+  for (const input of inputs) {
+    const placeName = (input.placeName || "").trim();
+    if (!placeName) {
+      out.set(input.id, { ok: false, reason: "empty_name", nearbyCount: 0 });
+      continue;
+    }
+    if (!Number.isFinite(input.originLat) || !Number.isFinite(input.originLng)) {
+      out.set(input.id, { ok: false, reason: "bad_origin", nearbyCount: 0 });
+      continue;
+    }
+    const placeNorm = normalizePoiName(placeName);
+    if (placeNorm.length < 2) {
+      out.set(input.id, { ok: false, reason: "norm_too_short", nearbyCount: 0 });
+      continue;
+    }
+    preps.push({
+      id: input.id,
+      placeName,
+      placeNorm,
+      originLat: input.originLat,
+      originLng: input.originLng,
+      routeSource: detectFacilityRoute(placeName),
+    });
+  }
+
+  for (let i = 0; i < preps.length; i += BATCH_RPC_CHUNK) {
+    const chunk = preps.slice(i, i + BATCH_RPC_CHUNK);
+    const needGeneral: Prep[] = [];
+
+    // Pass 1: facility-routed origins (if any)
+    const routed = chunk.filter((p) => p.routeSource);
+    if (routed.length) {
+      const tRpc = Date.now();
+      const nearbyMap = await fetchNearbyPoisBatch(
+        supabase,
+        routed.map((p) => ({
+          id: p.id,
+          lat: p.originLat,
+          lng: p.originLng,
+          radius_m: POI_ROUTING_RADIUS_M,
+          filter_source: p.routeSource,
+        })),
+      );
+      const rpcMs = Date.now() - tRpc;
+      for (const p of routed) {
+        const tMatch = Date.now();
+        const nearby = nearbyMap.get(p.id) ?? [];
+        const cands = buildCandidates(
+          nearby,
+          p.originLat,
+          p.originLng,
+          POI_ROUTING_RADIUS_M,
+          p.placeNorm,
+        );
+        const result = finishMatch(
+          p.placeName,
+          p.placeNorm,
+          cands,
+          true,
+          rpcMs / routed.length,
+          tMatch,
+        );
+        if (result.ok) {
+          out.set(p.id, result);
+        } else {
+          needGeneral.push(p);
+        }
+      }
+    }
+
+    // Pass 2: non-routed + facility misses → general nearby
+    for (const p of chunk) {
+      if (!p.routeSource) needGeneral.push(p);
+    }
+
+    if (needGeneral.length) {
+      const tRpc = Date.now();
+      const nearbyMap = await fetchNearbyPoisBatch(
+        supabase,
+        needGeneral.map((p) => ({
+          id: p.id,
+          lat: p.originLat,
+          lng: p.originLng,
+          radius_m: POI_MATCH_RADIUS_M,
+          filter_source: null,
+        })),
+      );
+      const rpcMs = Date.now() - tRpc;
+      for (const p of needGeneral) {
+        if (out.has(p.id)) continue;
+        const tMatch = Date.now();
+        const nearby = nearbyMap.get(p.id) ?? [];
+        const cands = buildCandidates(
+          nearby,
+          p.originLat,
+          p.originLng,
+          POI_MATCH_RADIUS_M,
+          p.placeNorm,
+        );
+        out.set(
+          p.id,
+          finishMatch(
+            p.placeName,
+            p.placeNorm,
+            cands,
+            false,
+            rpcMs / needGeneral.length,
+            tMatch,
+          ),
+        );
+      }
+    }
+  }
+
   return out;
 }
 
