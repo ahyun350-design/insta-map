@@ -8102,7 +8102,10 @@ function HomePageContent() {
     }
   };
 
-  const handleAddFromInstagram = async (urlOverride?: string) => {
+  const handleAddFromInstagram = async (
+    urlOverride?: string,
+    opts?: { forceRetry?: boolean },
+  ) => {
     const sourceUrl = (urlOverride ?? instagramUrl).trim();
     if (!sourceUrl || isSubmitting) return;
     if (!user?.id) {
@@ -8142,7 +8145,11 @@ function HomePageContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ instagramUrl: trimmedUrl, userId: user.id }),
+        body: JSON.stringify({
+          instagramUrl: trimmedUrl,
+          userId: user.id,
+          forceRetry: opts?.forceRetry === true,
+        }),
         signal: controller.signal,
       });
       window.clearTimeout(timeout);
@@ -16042,7 +16049,7 @@ function HomePageContent() {
                   setExtractOverlayBackground(false);
                   setExtractOverlayCompleteVariant("success");
                   setShowExtractOverlay(false);
-                  void handleAddFromInstagram(url);
+                  void handleAddFromInstagram(url, { forceRetry: true });
                 }
               : undefined
           }

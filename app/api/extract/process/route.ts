@@ -12,7 +12,22 @@ import {
 } from "@/app/api/extract/_shared";
 import { resolvePlaceCategoryFromKakao } from "@/lib/kakaoCategory";
 import { maskCaption } from "@/lib/maskCaption";
-import { readReelCache, writeReelCache, isNoCaptionScrapeError } from "@/lib/reelCache";
+import {
+  classifyCaption,
+  kakaoBranchTagAcceptable,
+  preparePlaceCandidatesForKakao,
+} from "@/lib/extractPlaceFilters";
+import {
+  readKakaoMissCache,
+  writeKakaoMissCache,
+} from "@/lib/kakaoMissCache";
+import {
+  isNegativeCacheableError,
+  isNoCaptionScrapeError,
+  readReelCache,
+  reelCacheFailToErrorMessage,
+  writeReelCache,
+} from "@/lib/reelCache";
 import {
   decidePoiAdoption,
   formatPoiLowconfLog,
@@ -189,11 +204,41 @@ type ResolvedPlace = {
 /** resolved === 0 원인 코드 (카카오 미스 장소명 + 시도 stage 진단) */
 function buildZeroResolvedErrorMessage(
   misses: ReadonlyArray<{ name: string; tried: number; stages: string[] }>,
+  opts?: { allOverseas?: boolean },
 ): string {
+  if (opts?.allOverseas && misses.length > 0) {
+    const names = misses
+      .map((m) => m.name.trim())
+      .filter(Boolean)
+      .slice(0, 5)
+      .join(",");
+    return names ? `overseas_unsupported|${names}` : "overseas_unsupported";
+  }
   if (misses.length === 0) {
     return "no_places_in_caption";
   }
   return formatKakaoUnresolvedErrorMessage(misses);
+}
+
+function cacheNegativeFailure(
+  supabase: ReturnType<typeof createServiceSupabase>,
+  instagramUrl: string,
+  message: string,
+  claudePlaces: RawPlace[] | null,
+): void {
+  const code = isNegativeCacheableError(message);
+  if (!code) return;
+  let status: "failed" | "no_places" | "no_caption" = "failed";
+  if (code === "no_places_in_caption" || code === "only_account_handles") {
+    status = "no_places";
+  } else if (code === "caption_empty" || code === "caption_too_short") {
+    status = "failed";
+  }
+  void writeReelCache(supabase, instagramUrl, {
+    status,
+    claudePlaces,
+    errorCode: code,
+  });
 }
 
 function buildPlaces(resolved: ResolvedPlace[]): Place[] {
@@ -240,8 +285,9 @@ export async function POST(req: Request) {
   let diagPendingPlaces: PendingPlaceJson[] | null = null;
 
   try {
-    const body = await req.json() as { jobId?: string };
+    const body = (await req.json()) as { jobId?: string; bypassCache?: boolean };
     jobId = body.jobId?.trim() ?? "";
+    const bypassCache = body.bypassCache === true;
     if (!jobId) return NextResponse.json({ error: "jobId가 필요합니다." }, { status: 400 });
 
     const supabase = createServiceSupabase();
@@ -258,36 +304,42 @@ export async function POST(req: Request) {
     }
     if (job.status === "completed") return NextResponse.json({ ok: true, skipped: true });
 
-    const cached = await readReelCache(supabase, job.instagram_url);
+    const cached = await readReelCache(supabase, job.instagram_url, { bypassCache });
     let caption: string;
     let rawPlaces: RawPlace[];
+    /** Caption text available for overseas city hints (empty on ok-cache hit) */
+    let captionForHints: string | null = null;
 
-    if (cached?.status === "no_places" || cached?.status === "no_caption") {
+    if (
+      cached &&
+      (cached.status === "no_places" ||
+        cached.status === "no_caption" ||
+        cached.status === "failed")
+    ) {
       console.log("[extract] reel_cache fail hit", {
         jobId,
-        url: cached.instagram_url,
+        host: "instagram.com",
         status: cached.status,
+        error_code: cached.error_code,
       });
-      // reel_cache.caption 원문은 더 이상 읽지 않음 — 진단 caption 비움
       diagCaption = null;
       diagClaudePlaces = cached.claude_places;
       await saveJobDiagnostics(jobId, {
         caption: diagCaption,
         claude_places: diagClaudePlaces,
       });
-      if (cached.status === "no_caption") {
-        throw new Error("캡션을 찾을 수 없습니다.");
-      }
-      throw new Error("no_places_in_caption");
+      throw new Error(reelCacheFailToErrorMessage(cached));
     }
 
     if (cached?.status === "ok" && cached.claude_places) {
       console.log("[extract] reel_cache hit", {
         jobId,
-        url: cached.instagram_url,
+        host: "instagram.com",
         status: cached.status,
+        rule_version: cached.rule_version,
       });
       caption = "";
+      captionForHints = null;
       rawPlaces = cached.claude_places;
       diagCaption = null;
       diagClaudePlaces = rawPlaces;
@@ -306,13 +358,35 @@ export async function POST(req: Request) {
           scrapeErr instanceof Error ? scrapeErr.message : String(scrapeErr);
         if (isNoCaptionScrapeError(scrapeMsg)) {
           void writeReelCache(supabase, job.instagram_url, {
-            status: "no_caption",
+            status: "failed",
             claudePlaces: null,
+            errorCode: "caption_empty",
           });
+          throw new Error("caption_empty");
         }
         throw scrapeErr;
       }
       console.log(`[PindMap:perf] extract.process.scrape ${Date.now() - scrapeT0}ms`);
+
+      const captionClass = classifyCaption(caption);
+      if (captionClass === "empty") {
+        void writeReelCache(supabase, job.instagram_url, {
+          status: "failed",
+          claudePlaces: null,
+          errorCode: "caption_empty",
+        });
+        throw new Error("caption_empty");
+      }
+      if (captionClass === "too_short") {
+        void writeReelCache(supabase, job.instagram_url, {
+          status: "failed",
+          claudePlaces: null,
+          errorCode: "caption_too_short",
+        });
+        throw new Error("caption_too_short");
+      }
+
+      captionForHints = caption;
       diagCaption = toDiagCaption(caption);
       await saveJobDiagnostics(jobId, { caption: diagCaption });
 
@@ -330,23 +404,60 @@ export async function POST(req: Request) {
       region: string | null;
       category: Place["category"];
     };
-    const candidates: PlaceCandidate[] = [];
+    const parsedCandidates: PlaceCandidate[] = [];
     for (const item of rawPlaces) {
       const name = typeof item.name === "string" ? item.name.trim() : "";
       const hint = typeof item.hint === "string" ? item.hint.trim() : "";
       const region = parseRegion(item.region);
       const category = normalizeCategory(item.category);
       if (!name || !category) continue;
-      candidates.push({ name, hint, region, category });
+      parsedCandidates.push({ name, hint, region, category });
     }
-    const candidateNames = candidates.map((c) => c.name);
 
-    if (candidates.length === 0) {
+    // Single gate before Kakao — cache hit and fresh Claude share this path
+    const prepared = preparePlaceCandidatesForKakao(parsedCandidates, {
+      caption: captionForHints,
+    });
+    if (prepared.onlyAccountHandles || prepared.candidates.length + prepared.hardOverseas.length === 0) {
+      if (prepared.onlyAccountHandles || prepared.droppedHandles.length > 0) {
+        void writeReelCache(supabase, job.instagram_url, {
+          status: "no_places",
+          claudePlaces: rawPlaces,
+          errorCode: "only_account_handles",
+        });
+        throw new Error("only_account_handles");
+      }
       void writeReelCache(supabase, job.instagram_url, {
         status: "no_places",
         claudePlaces: rawPlaces,
+        errorCode: "no_places_in_caption",
       });
       throw new Error("no_places_in_caption");
+    }
+
+    const candidates = prepared.candidates;
+    const candidateNames = [
+      ...candidates.map((c) => c.name),
+      ...prepared.hardOverseas.map((c) => c.name),
+    ];
+
+    // All hard-overseas, nothing to resolve domestically
+    if (candidates.length === 0 && prepared.hardOverseas.length > 0) {
+      void writeReelCache(supabase, job.instagram_url, {
+        status: "failed",
+        claudePlaces: rawPlaces,
+        errorCode: "overseas_unsupported",
+      });
+      throw new Error(
+        buildZeroResolvedErrorMessage(
+          prepared.hardOverseas.map((c) => ({
+            name: c.name,
+            tried: 0,
+            stages: ["overseas_hard"],
+          })),
+          { allOverseas: true },
+        ),
+      );
     }
 
     // 성공 경로 — Apify+Claude 결과 캐시 (캐시 히트로 온 경우에도 TTL 갱신)
@@ -364,18 +475,78 @@ export async function POST(req: Request) {
       tried: number;
       stages: string[];
       candidate: PlaceCandidate;
+      overseas?: boolean;
     }[] = [];
+
+    // Hard overseas: no Kakao
+    for (const item of prepared.hardOverseas) {
+      kakaoMissDiags.push({
+        name: item.name,
+        tried: 0,
+        stages: ["overseas_hard"],
+        candidate: item,
+        overseas: true,
+      });
+    }
 
     await Promise.all(
       candidates.map(async (item) => {
+        const soft = prepared.softOverseasNames.has(item.name);
+        const kakaoQuery = item.kakaoQueryName || item.name;
+        if (!soft) {
+          const cachedMiss = await readKakaoMissCache(supabase, item.name);
+          if (cachedMiss) {
+            console.log("[extract] kakao_miss_cache hit", { name: item.name });
+            kakaoMissDiags.push({
+              name: item.name,
+              tried: 0,
+              stages: ["miss_cache"],
+              candidate: item,
+            });
+            return;
+          }
+        }
+
         const { lookup: kakaoResult, tried, stages } = await searchKakaoPlaceWithDiag(
-          item.name,
+          kakaoQuery,
           item.hint,
           undefined,
           "",
+          soft
+            ? { maxAttempts: 1, branchMatchName: item.name }
+            : { branchMatchName: item.name },
         );
         if (!kakaoResult) {
+          if (soft) {
+            kakaoMissDiags.push({
+              name: item.name,
+              tried,
+              stages: [...stages, "overseas_soft"],
+              candidate: item,
+              overseas: true,
+            });
+            return;
+          }
+          void writeKakaoMissCache(supabase, item.name);
           kakaoMissDiags.push({ name: item.name, tried, stages, candidate: item });
+          return;
+        }
+
+        // Branch-tag guard: other branch on place_name → reject;
+        // no branch → address/alias check (unknown stems allowed).
+        const kakaoAddr =
+          kakaoResult.roadAddress || kakaoResult.address || "";
+        if (!kakaoBranchTagAcceptable(item.name, kakaoResult.placeName, kakaoAddr)) {
+          console.log("[extract] kakao branch_tag reject", {
+            name: item.name,
+          });
+          void writeKakaoMissCache(supabase, item.name);
+          kakaoMissDiags.push({
+            name: item.name,
+            tried,
+            stages: [...stages, "branch_tag_reject"],
+            candidate: item,
+          });
           return;
         }
 
@@ -444,6 +615,14 @@ export async function POST(req: Request) {
 
       await Promise.all(
         kakaoMissDiags.map(async (miss) => {
+          if (miss.overseas) {
+            unresolvedAfterPoi.push({
+              name: miss.name,
+              tried: miss.tried,
+              stages: miss.stages,
+            });
+            return;
+          }
           const item = miss.candidate;
           const hintRegion = item.region || item.hint || null;
           const hits: PoiSearchHit[] = await searchPoi(supabase, {
@@ -536,12 +715,14 @@ export async function POST(req: Request) {
     });
 
     if (resolved.length === 0) {
+      const missList =
+        unresolvedAfterPoi.length > 0
+          ? unresolvedAfterPoi
+          : kakaoMissDiags.map(({ name, tried, stages }) => ({ name, tried, stages }));
+      const allOverseas =
+        kakaoMissDiags.length > 0 && kakaoMissDiags.every((m) => m.overseas);
       throw new Error(
-        buildZeroResolvedErrorMessage(
-          unresolvedAfterPoi.length > 0
-            ? unresolvedAfterPoi
-            : kakaoMissDiags.map(({ name, tried, stages }) => ({ name, tried, stages })),
-        ),
+        buildZeroResolvedErrorMessage(missList, { allOverseas }),
       );
     }
 
@@ -655,11 +836,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, inserted: rows.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "작업 처리 중 오류가 발생했습니다.";
-    console.error("[extract] process route failed", { jobId, message });
+    console.error("[extract] process route failed", {
+      jobId,
+      message: message.split("|")[0],
+    });
     console.log(`[PindMap:perf] extract.process.failed ${Date.now() - routeT0}ms`);
     if (jobId) {
       try {
         const supabase = createServiceSupabase();
+        const { data: jobRow } = await supabase
+          .from("extract_jobs")
+          .select("instagram_url")
+          .eq("id", jobId)
+          .maybeSingle();
+        if (jobRow?.instagram_url) {
+          cacheNegativeFailure(
+            supabase,
+            jobRow.instagram_url,
+            message,
+            Array.isArray(diagClaudePlaces)
+              ? (diagClaudePlaces as RawPlace[])
+              : null,
+          );
+        }
         await supabase
           .from("extract_jobs")
           .update({

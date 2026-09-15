@@ -1,3 +1,8 @@
+import {
+  extractBranchTags,
+  kakaoPlaceNameMatchesBranch,
+} from "@/lib/extractPlaceFilters";
+
 export { isValidInstagramPostUrl } from "@/lib/instagramUrl";
 
 export const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
@@ -82,6 +87,13 @@ export type KakaoPlaceLookup = {
 export type SearchKakaoPlaceOptions = {
   /** epoch ms — 넘기면 남은 폴백 쿼리 중단 (선택) */
   deadlineMs?: number;
+  /** Cap fallback attempts (default: all). Soft-overseas uses 1. */
+  maxAttempts?: number;
+  /**
+   * Claude 추출 표시명 — 지점 꼬리표 매칭에 사용 (카카오 쿼리명과 다를 수 있음).
+   * 없으면 `name`(검색 쿼리)으로 지점 매칭.
+   */
+  branchMatchName?: string;
 };
 
 const KAKAO_SEARCH_MAX_ATTEMPTS = 6;
@@ -216,7 +228,12 @@ export async function searchKakaoPlaceWithDiag(
   const hintTrimmed = hint.trim();
 
   const deadlineMs = options?.deadlineMs;
-  const queries = buildKakaoQueryFallbacks(trimmed);
+  const maxAttempts = options?.maxAttempts;
+  const queriesAll = buildKakaoQueryFallbacks(trimmed);
+  const queries =
+    typeof maxAttempts === "number" && maxAttempts > 0
+      ? queriesAll.slice(0, maxAttempts)
+      : queriesAll;
   const attemptedStages: string[] = [];
 
   type Doc = {
@@ -229,7 +246,7 @@ export async function searchKakaoPlaceWithDiag(
     category_name?: string;
   };
 
-  type PickKind = "hint_match" | "hint_query" | "first";
+  type PickKind = "hint_match" | "hint_query" | "branch_match" | "first";
 
   const toLookup = (doc: Doc, queryIndex: number): KakaoPlaceLookup | null => {
     const lat = parseFloat(doc.y);
@@ -251,6 +268,21 @@ export async function searchKakaoPlaceWithDiag(
     const road = (doc.road_address_name || "").trim();
     const addr = (doc.address_name || "").trim();
     return road.includes(regionHint) || addr.includes(regionHint);
+  };
+
+  const BRANCH_SCAN_LIMIT = 5;
+  const branchSource = (options?.branchMatchName || trimmed).trim();
+  const hasBranchTags = extractBranchTags(branchSource).length > 0;
+
+  /** Prefer a doc whose place_name matches extracted branch tag (top N only). */
+  const pickBranchMatch = (docs: Doc[]): Doc | null => {
+    if (!hasBranchTags) return null;
+    const slice = docs.slice(0, BRANCH_SCAN_LIMIT);
+    return (
+      slice.find((d) =>
+        kakaoPlaceNameMatchesBranch(branchSource, (d.place_name || "").trim()),
+      ) ?? null
+    );
   };
 
   const fetchDocuments = async (
@@ -305,7 +337,10 @@ export async function searchKakaoPlaceWithDiag(
     });
   };
 
-  /** 결과 목록에서 hint 우선 → hint+상호명 재검색 → documents[0] */
+  /**
+   * hint 주소 우선 → (hint 재검색) → 지점 표기 일치(상위 5) → documents[0]
+   * documents는 메모리에서만 순회. 저장하지 않음.
+   */
   const pickFromDocuments = async (
     docs: Doc[],
     query: string,
@@ -340,9 +375,11 @@ export async function searchKakaoPlaceWithDiag(
         } else {
           const hintDocs = await fetchDocuments(hintQuery, queryIndex, `${stage}+hint_query`);
           if (hintDocs && hintDocs.length > 0) {
-            const lookup = toLookup(hintDocs[0]!, queryIndex);
+            const branchDoc = pickBranchMatch(hintDocs);
+            const chosen = branchDoc ?? hintDocs[0]!;
+            const lookup = toLookup(chosen, queryIndex);
             if (lookup) {
-              logPick("hint_query", lookup, {
+              logPick(branchDoc ? "branch_match" : "hint_query", lookup, {
                 query: hintQuery,
                 queryIndex,
                 stage: `${stage}+hint_query`,
@@ -352,6 +389,20 @@ export async function searchKakaoPlaceWithDiag(
             }
           }
         }
+      }
+    }
+
+    const branchDoc = pickBranchMatch(docs);
+    if (branchDoc) {
+      const lookup = toLookup(branchDoc, queryIndex);
+      if (lookup) {
+        logPick("branch_match", lookup, {
+          query,
+          queryIndex,
+          stage,
+          candidates: docs.length,
+        });
+        return lookup;
       }
     }
 
@@ -533,6 +584,10 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
     '("현대" 하나만 있으면 백화점인지 자동차인지 알 수 없음)',
     "확신이 없으면 뽑지 마세요. 잘못된 핀보다 없는 게 낫습니다.",
     "단, 여행 루트·리스트에 고유 지명·역·공원·해변이 고유명으로 나열되면 포함하세요.",
+    "",
+    "인스타그램 계정 아이디는 장소명이 아니다.",
+    "@로 시작하는 멘션, 또는 영문 소문자와 숫자에 점(.)이나 밑줄(_)만 섞인 토큰은 장소명으로 추출하지 말 것.",
+    "단, 캡션 본문에 그 계정의 실제 상호가 한글로 적혀 있으면 그 상호를 쓸 것.",
   ].join("\n");
 
   const prompt = `${fixedInstructions}\n\ncaption: ${caption}`;

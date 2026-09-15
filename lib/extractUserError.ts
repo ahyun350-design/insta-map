@@ -5,6 +5,7 @@
 export function mapExtractErrorToUserMessage(raw: string | null | undefined): string {
   const msg = (raw ?? "").trim();
   const lower = msg.toLowerCase();
+  const code = msg.split("|")[0]?.trim() || msg;
 
   if (
     msg === "timeout" ||
@@ -43,9 +44,16 @@ export function mapExtractErrorToUserMessage(raw: string | null | undefined): st
     return "이 릴스는 지금 불러올 수 없어요. 다른 링크로 시도해 주세요";
   }
 
+  if (code === "caption_empty" || code === "caption_too_short") {
+    return "이 게시물에는 장소 정보가 없어요";
+  }
+
+  if (code === "only_account_handles") {
+    return "이 게시물에는 가게 이름이 없어요. 영상 속 장소는 아직 읽지 못해요";
+  }
+
   if (
-    msg === "no_places_in_caption" ||
-    msg.startsWith("no_places_in_caption|") ||
+    code === "no_places_in_caption" ||
     msg.includes("캡션을 찾을 수 없습니다")
   ) {
     if (msg.includes("캡션을 찾을 수 없습니다")) {
@@ -54,11 +62,11 @@ export function mapExtractErrorToUserMessage(raw: string | null | undefined): st
     return "이 게시물에는 가게 이름이 없어요. 영상 속 장소는 아직 읽지 못해요";
   }
 
-  if (msg === "overseas_unsupported" || msg.startsWith("overseas_unsupported|")) {
-    return "해외 장소는 아직 지도에 담을 수 없어요";
+  if (code === "overseas_unsupported") {
+    return "아직 해외 장소는 지원하지 않아요";
   }
 
-  if (msg === "kakao_unresolved" || msg.startsWith("kakao_unresolved|")) {
+  if (code === "kakao_unresolved") {
     return "지도에서 가게를 찾지 못했어요. 다른 릴스로 시도해 주세요";
   }
 
@@ -67,4 +75,17 @@ export function mapExtractErrorToUserMessage(raw: string | null | undefined): st
   }
 
   return "잠시 후 다시 시도해 주세요";
+}
+
+/** Negative-cache hit style (user can force retry) */
+export function isExtractCachedFailure(raw: string | null | undefined): boolean {
+  const code = (raw ?? "").trim().split("|")[0] || "";
+  return (
+    code === "caption_empty" ||
+    code === "caption_too_short" ||
+    code === "only_account_handles" ||
+    code === "no_places_in_caption" ||
+    code === "overseas_unsupported" ||
+    code === "kakao_unresolved"
+  );
 }

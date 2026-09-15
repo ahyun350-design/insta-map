@@ -27,9 +27,14 @@ export async function POST(req: Request) {
       { auth: { persistSession: false, autoRefreshToken: false } },
     );
 
-    const body = await req.json() as { instagramUrl?: string; userId?: string };
+    const body = (await req.json()) as {
+      instagramUrl?: string;
+      userId?: string;
+      forceRetry?: boolean;
+    };
     const instagramUrl = body.instagramUrl?.trim();
     const userId = body.userId?.trim();
+    const forceRetry = body.forceRetry === true;
 
     if (!instagramUrl) {
       return NextResponse.json({ error: "instagramUrl이 필요합니다." }, { status: 400 });
@@ -48,6 +53,11 @@ export async function POST(req: Request) {
 
     // 신규 추출 전에 이 유저의 오래된 멈춤 job 정리 (크론 대용)
     void reclaimStaleExtractJobs(adminClient, { userId });
+
+    if (forceRetry) {
+      const { deleteReelCache } = await import("@/lib/reelCache");
+      await deleteReelCache(adminClient, instagramUrl);
+    }
 
     const jobId = crypto.randomUUID();
     const { error: insertError } = await adminClient.from("extract_jobs").insert({
@@ -69,7 +79,7 @@ export async function POST(req: Request) {
       const res = await fetch(processUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId }),
+        body: JSON.stringify({ jobId, bypassCache: forceRetry }),
       });
       if (!res.ok) {
         const text = await res.text();

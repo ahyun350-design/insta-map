@@ -59,15 +59,23 @@ const NO_PLACE_VARIANTS = [
   { icon: "🤔", title: "가게 이름을 못 찾겠어요" },
 ] as const;
 
-/** 서버 error_message — 캡션에 장소/캡션 없음 (재시도 무의미) */
+/** 서버 error_message — 캡션에 장소/캡션 없음 (재시도 무의미에 가깝지만 강제 재시도는 허용) */
 export function isExtractNoPlaceError(raw: string | null | undefined): boolean {
   const msg = (raw ?? "").trim();
   if (!msg) return false;
+  const code = msg.split("|")[0] || msg;
   return (
-    msg === "no_places_in_caption" ||
-    msg.startsWith("no_places_in_caption|") ||
+    code === "no_places_in_caption" ||
+    code === "caption_empty" ||
+    code === "caption_too_short" ||
+    code === "only_account_handles" ||
     msg.includes("캡션을 찾을 수 없습니다")
   );
+}
+
+export function isExtractOverseasError(raw: string | null | undefined): boolean {
+  const code = (raw ?? "").trim().split("|")[0] || "";
+  return code === "overseas_unsupported";
 }
 
 /** 빈 result_places (캡션 가이드 흡수용) */
@@ -135,6 +143,7 @@ export function ExtractLoadingOverlay({
 
   const showAllSaved = mode === "complete" && completeVariant === "all_saved";
   const noPlaceError = mode === "error" && isExtractNoPlaceError(errorRaw);
+  const overseasError = mode === "error" && isExtractOverseasError(errorRaw);
   const emptyResultError = mode === "error" && isExtractEmptyResult(errorRaw);
   const captionTipError = noPlaceError || emptyResultError;
 
@@ -237,9 +246,22 @@ export function ExtractLoadingOverlay({
                     직접 찾아보기
                   </button>
                 )}
+                {onRetry && (
+                  <button
+                    type="button"
+                    className="extractLoadingSecondaryBtn"
+                    onClick={onRetry}
+                  >
+                    다시 시도
+                  </button>
+                )}
                 <button
                   type="button"
-                  className={onManualSearch ? "extractLoadingSecondaryBtn" : "extractLoadingDismissBtn"}
+                  className={
+                    onManualSearch || onRetry
+                      ? "extractLoadingSecondaryBtn"
+                      : "extractLoadingDismissBtn"
+                  }
                   onClick={onDismiss}
                 >
                   확인
@@ -279,13 +301,45 @@ export function ExtractLoadingOverlay({
                 </button>
               </div>
             </div>
+          ) : overseasError ? (
+            <div className="extractLoadingComplete">
+              <p className="extractLoadingCompleteEmoji" aria-hidden>
+                🌏
+              </p>
+              <p className="extractLoadingCompleteTitle">아직 해외 장소는 지원하지 않아요</p>
+              <p className="extractLoadingCompleteSub">
+                지금은 국내 장소만 지도에 담을 수 있어요.
+                <br />
+                국내 릴스로 다시 시도해 주세요
+              </p>
+              <div className="extractLoadingActions">
+                {onRetry && (
+                  <button type="button" className="extractLoadingSecondaryBtn" onClick={onRetry}>
+                    다시 시도
+                  </button>
+                )}
+                <button type="button" className="extractLoadingDismissBtn" onClick={onDismiss}>
+                  확인
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="extractLoadingComplete">
               <p className="extractLoadingCompleteEmoji" aria-hidden>
                 😢
               </p>
               <p className="extractLoadingCompleteTitle">추출에 실패했어요</p>
-              <p className="extractLoadingCompleteSub">{errorMessage}</p>
+              <p className="extractLoadingCompleteSub">
+                {errorMessage}
+                {onRetry ? (
+                  <>
+                    <br />
+                    <span className="extractLoadingManualHint">
+                      이전에 시도했지만 찾지 못한 릴스예요. 다시 시도할 수 있어요
+                    </span>
+                  </>
+                ) : null}
+              </p>
               {onRetry && (
                 <button type="button" className="extractLoadingDismissBtn" onClick={onRetry}>
                   다시 시도
