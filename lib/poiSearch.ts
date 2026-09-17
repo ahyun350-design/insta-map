@@ -9,6 +9,7 @@ export type PoiSearchHit = {
   lat: number | null;
   lng: number | null;
   category: string | null;
+  raw_category: string | null;
   score: number;
 };
 
@@ -101,6 +102,7 @@ export async function searchPoi(
       lat: typeof r.lat === "number" && Number.isFinite(r.lat) ? r.lat : null,
       lng: typeof r.lng === "number" && Number.isFinite(r.lng) ? r.lng : null,
       category: typeof r.category === "string" ? r.category : null,
+      raw_category: typeof r.raw_category === "string" ? r.raw_category : null,
       score,
     });
   }

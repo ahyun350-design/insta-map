@@ -32,6 +32,7 @@ from prepare import (
     name_norm,
     map_category,
     open_csv,
+    should_exclude_raw,
 )
 
 try:
@@ -231,6 +232,9 @@ def prepare_dataset(spec: dict) -> tuple[list[dict], dict]:
             raw_cat = (row.get(raw_field) or "").strip()
             if source == "localdata_hotel" and not raw_cat:
                 raw_cat = (row.get("문화체육업종명") or "관광숙박업").strip()
+            if should_exclude_raw(raw_cat):
+                stats["skipped_exclude_raw"] = stats.get("skipped_exclude_raw", 0) + 1
+                continue
 
             if group == "c":
                 category = spec["category"]
@@ -249,7 +253,7 @@ def prepare_dataset(spec: dict) -> tuple[list[dict], dict]:
                     "lat": "" if lat is None else f"{lat:.8f}",
                     "lng": "" if lng is None else f"{lng:.8f}",
                     "raw_category": raw_cat,
-                    "category": category,
+                    "category": category or "",
                     "phone": (row.get("전화번호") or "").strip(),
                     "data_updated": upd,
                 }

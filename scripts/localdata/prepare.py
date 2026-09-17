@@ -79,24 +79,17 @@ SOURCES = [
     },
 ]
 
-# 업태구분명 → 핀맵 category
-CAFE = {
-    "까페",
-    "커피숍",
-    "다방",
-    "아이스크림",
-    "전통찻집",
-    "과자점",
-    "떡카페",
-}
-PLAY = {
-    "라이브카페",
-    "단란주점",
-    "감성주점",
-    "키즈카페",
-}
-# hotel source → always 숙소
-# everything else → 맛집
+# 업태구분명 → 핀맵 category (lib/localdataCategoryMap.json 과 공유)
+_MAP_PATH = ROOT / "lib" / "localdataCategoryMap.json"
+with _MAP_PATH.open("r", encoding="utf-8") as _mf:
+    _CAT_MAP = json.load(_mf)
+
+CAFE = set(_CAT_MAP.get("cafe", []))
+PLAY = set(_CAT_MAP.get("play", []))
+SHOP = set(_CAT_MAP.get("shop", []))
+STAY = set(_CAT_MAP.get("stay", []))
+UNINFORMATIVE = set(_CAT_MAP.get("uninformative", []))
+EXCLUDE = set(_CAT_MAP.get("exclude", []))
 
 PAREN_RE = re.compile(r"\([^)]*\)")
 SPECIAL_RE = re.compile(r"[·,&/\-_.''\"`~!@#$%^*+=?<>\[\]{}|\\:;]")
@@ -111,15 +104,27 @@ def name_norm(name: str) -> str:
     return s
 
 
-def map_category(source: str, raw: str) -> str:
+def should_exclude_raw(raw: str) -> bool:
+    return (raw or "").strip() in EXCLUDE
+
+
+def map_category(source: str, raw: str):
+    """업태 → 앱 category. 무정보/미매핑은 None (맛집으로 강제하지 않음)."""
     if source == "localdata_hotel":
         return "숙소"
     raw = (raw or "").strip()
+    if not raw or raw in UNINFORMATIVE or raw in EXCLUDE:
+        return None
     if raw in CAFE:
         return "카페"
     if raw in PLAY:
         return "놀거리"
-    return "맛집"
+    if raw in SHOP:
+        return "쇼핑"
+    if raw in STAY:
+        return "숙소"
+    # 알려지지 않은 업태도 맛집 기본값 금지 — None
+    return None
 
 
 def convert_xy(x_raw: str, y_raw: str):
@@ -265,6 +270,9 @@ def prepare(limit: int | None = None) -> dict:
                 raw = (row.get(spec["raw_field"]) or "").strip()
                 if spec["source"] == "localdata_hotel" and not raw:
                     raw = (row.get("문화체육업종명") or "관광숙박업").strip()
+                if should_exclude_raw(raw):
+                    stats["skipped_exclude_raw"] = stats.get("skipped_exclude_raw", 0) + 1
+                    continue
 
                 lat, lng = convert_xy(row.get("좌표정보(X)", ""), row.get("좌표정보(Y)", ""))
                 x_s = (row.get("좌표정보(X)") or "").strip()
@@ -294,7 +302,7 @@ def prepare(limit: int | None = None) -> dict:
                     "lat": "" if lat is None else f"{lat:.8f}",
                     "lng": "" if lng is None else f"{lng:.8f}",
                     "raw_category": raw,
-                    "category": category,
+                    "category": category or "",
                     "phone": phone or "",
                 }
                 if spec["source"] == "localdata_hotel":

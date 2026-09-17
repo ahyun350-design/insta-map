@@ -209,7 +209,8 @@ export function Step2PlaceTags({
       placeId: place.id || null,
       placeName: place.place_name,
       address: place.road_address_name || place.address_name || "",
-      category: mapKakaoCategoryToPindMap(place.category_name),
+      // 카카오 category_name 미매칭 시 저장 기본값은 맛집 (UI 칩 기본 선택과 무관)
+      category: mapKakaoCategoryToPindMap(place.category_name) ?? "맛집",
       lat: coords.lat,
       lng: coords.lng,
       x: pendingPin.x,

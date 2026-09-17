@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { mapKakaoCategoryGroupCode } from "@/lib/kakaoCategory";
+import {
+  mapKakaoCategoryGroupCode,
+  tryMapKakaoCategoryName,
+} from "@/lib/kakaoCategory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,16 +59,21 @@ export async function GET(req: Request) {
       road_address_name: string;
       address_name: string;
       category_group_code: string;
+      category_name?: string;
     }>;
   };
 
   const places = await Promise.all(
     (data.documents ?? []).map(async (doc) => {
       const image = await getNaverImage(doc.place_name);
+      const category =
+        mapKakaoCategoryGroupCode(doc.category_group_code) ??
+        tryMapKakaoCategoryName(doc.category_name) ??
+        null;
       return {
         name: doc.place_name,
         address: doc.road_address_name || doc.address_name,
-        category: mapKakaoCategoryGroupCode(doc.category_group_code),
+        category,
         image,
       };
     })

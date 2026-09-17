@@ -10,7 +10,7 @@ import {
   scrapeInstagramCaption,
   searchKakaoPlaceWithDiag,
 } from "@/app/api/extract/_shared";
-import { resolvePlaceCategoryFromKakao } from "@/lib/kakaoCategory";
+import { resolveExtractPlaceCategory } from "@/lib/kakaoCategory";
 import { maskCaption } from "@/lib/maskCaption";
 import {
   classifyCaption,
@@ -258,21 +258,20 @@ function averageOrigin(
   return { lat: lat / places.length, lng: lng / places.length };
 }
 
-function resolvePoiCategory(
-  poiCategory: string | null,
-  claudeCategory: Place["category"],
-): Place["category"] {
-  if (
-    poiCategory === "맛집" ||
-    poiCategory === "카페" ||
-    poiCategory === "쇼핑" ||
-    poiCategory === "숙소" ||
-    poiCategory === "놀거리" ||
-    poiCategory === "여행지"
-  ) {
-    return poiCategory;
-  }
-  return claudeCategory;
+async function fetchPoiRawCategory(
+  supabase: ReturnType<typeof createServiceSupabase>,
+  poiId: number,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("poi")
+    .select("raw_category")
+    .eq("id", poiId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const raw = (data as { raw_category?: string | null }).raw_category;
+  if (typeof raw === "string") return raw;
+  if (raw == null) return null;
+  return String(raw);
 }
 
 export async function POST(req: Request) {
@@ -550,22 +549,27 @@ export async function POST(req: Request) {
           return;
         }
 
-        const category = resolvePlaceCategoryFromKakao(
-          kakaoResult.category_group_code,
-          kakaoResult.category_name,
-          item.category,
-        );
         // 이름은 항상 Claude 추출명 유지. 카카오 좌표는 origin 으로만 사용.
         const poiResolved = await resolvePlaceViaPoi(supabase, {
           placeName: item.name,
           originLat: kakaoResult.lat,
           originLng: kakaoResult.lng,
         });
+        let poiRaw: string | null = null;
+        if (poiResolved.ok) {
+          poiRaw = await fetchPoiRawCategory(supabase, poiResolved.poiId);
+        }
+        const category = resolveExtractPlaceCategory({
+          groupCode: kakaoResult.category_group_code,
+          categoryName: kakaoResult.category_name,
+          claudeCategory: item.category,
+          poiRawCategory: poiRaw,
+        });
         if (poiResolved.ok) {
           console.log(formatPlaceSourceLog("poi", item.name));
           resolved.push({
             name: item.name,
-            category: resolvePoiCategory(poiResolved.match.poi.category ?? null, category),
+            category,
             address: poiResolved.address,
             lat: poiResolved.lat,
             lng: poiResolved.lng,
@@ -655,7 +659,10 @@ export async function POST(req: Request) {
             console.log(formatPlaceSourceLog("poi", item.name));
             resolved.push({
               name: item.name,
-              category: resolvePoiCategory(hit.category, item.category),
+              category: resolveExtractPlaceCategory({
+                claudeCategory: item.category,
+                poiRawCategory: hit.raw_category ?? null,
+              }),
               address,
               lat: hit.lat,
               lng: hit.lng,
