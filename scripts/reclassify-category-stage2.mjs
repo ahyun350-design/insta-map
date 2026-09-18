@@ -129,6 +129,7 @@ cur.execute("""
   INNER JOIN public.poi ON poi.id = p.poi_id
   WHERE p.source = 'poi'
     AND p.category = '맛집'
+    AND COALESCE(p.category_edited_by_user, false) = false
     AND (
       poi.raw_category IS NULL
       OR poi.raw_category IN ('기타', '기타 휴게음식점', '일반조리판매', '경양식')

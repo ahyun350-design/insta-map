@@ -1,12 +1,17 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import {
   getFirstMatchingPhotoIndex,
   getRelatedPostImageEntriesForPlace,
 } from "@/lib/photoPlaceTag";
 import { placeRefFromPlaceSheet, type PlaceSheetData, type PlaceSheetFeedPost } from "@/lib/placeSheet";
+import {
+  FEED_POST_CATEGORIES,
+  type FeedPostCategory,
+} from "@/lib/feedPost";
 
 type DirectionsMode = "car" | "walk";
 
@@ -26,6 +31,10 @@ type Props = {
   onEditMemo?: () => void;
   /** 저장된 메모 표시용 */
   memo?: string | null;
+  /** 저장된 장소 카테고리 즉시 변경 (낙관적 업데이트는 호출측) */
+  onCategoryChange?: (category: FeedPostCategory) => void;
+  /** 카테고리 칩 배경 — 핀 색과 동일 계열 */
+  categoryPin?: Record<string, { color: string; emoji: string }>;
   onCurationClick: (
     postId: string,
     photoIndex?: number,
@@ -40,6 +49,8 @@ type Props = {
   onOpenTransit?: () => void;
   onClearRoute?: () => void;
 };
+
+const LIGHT_PIN_CATEGORIES = new Set(["카페", "쇼핑", "숙소", "놀거리", "여행지"]);
 
 function PlaceDetailCurationImages({
   entries,
@@ -114,6 +125,8 @@ export function PlaceDetailSheet({
   onAddToList,
   onEditMemo,
   memo,
+  onCategoryChange,
+  categoryPin,
   onCurationClick,
   onImageLightbox: _onImageLightbox,
   timeAgoLabel,
@@ -130,6 +143,20 @@ export function PlaceDetailSheet({
   const lat = parseFloat(String(place.y ?? ""));
   const lng = parseFloat(String(place.x ?? ""));
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+
+  const canEditCategory = Boolean(place._savedPlaceId && onCategoryChange);
+  const currentCategory = place.category_name?.trim() || "";
+  const pinStyle = categoryPin?.[currentCategory];
+  const chipBg = pinStyle?.color ?? "#888";
+  const chipFg = LIGHT_PIN_CATEGORIES.has(currentCategory) ? "#333" : "#fff";
+
+  const selectCategory = (cat: FeedPostCategory) => {
+    setCategoryPickerOpen(false);
+    if (!onCategoryChange) return;
+    if (cat === currentCategory) return;
+    onCategoryChange(cat);
+  };
 
   return (
     <div
@@ -141,7 +168,25 @@ export function PlaceDetailSheet({
       <div className="placeDetailSheetHeader">
         <div className="placeDetailSheetHeaderText">
           <p className="placeDetailSheetName">{place.place_name}</p>
-          {place.category_name && <p className="placeDetailSheetCategory">{place.category_name}</p>}
+          {canEditCategory && currentCategory ? (
+            <button
+              type="button"
+              className="placeDetailSheetCategoryChip"
+              style={{ background: chipBg, color: chipFg, borderColor: chipBg }}
+              onClick={() => setCategoryPickerOpen(true)}
+              aria-label={`카테고리 ${currentCategory} — 변경`}
+            >
+              <span>
+                {pinStyle?.emoji ? `${pinStyle.emoji} ` : ""}
+                {currentCategory}
+              </span>
+              <span className="placeDetailSheetCategoryChipCaret" aria-hidden>
+                ⌄
+              </span>
+            </button>
+          ) : currentCategory ? (
+            <p className="placeDetailSheetCategory">{currentCategory}</p>
+          ) : null}
         </div>
         <div className="placeDetailSheetHeaderActions">
           <button type="button" className="placeDetailSheetHeartBtn" onClick={onToggleSave} aria-label={isSaved ? "저장 취소" : "장소 저장"}>
@@ -310,6 +355,56 @@ export function PlaceDetailSheet({
           <p>아직 큐레이션이 없어요</p>
         </div>
       )}
+
+      {categoryPickerOpen &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="placeCategoryPickerRoot"
+            role="presentation"
+            onClick={() => setCategoryPickerOpen(false)}
+          >
+            <div
+              className="placeCategoryPickerSheet"
+              role="dialog"
+              aria-label="카테고리 선택"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="placeCategoryPickerTitle">카테고리</p>
+              <ul className="placeCategoryPickerList">
+                {FEED_POST_CATEGORIES.map((cat) => {
+                  const style = categoryPin?.[cat];
+                  const selected = cat === currentCategory;
+                  return (
+                    <li key={cat}>
+                      <button
+                        type="button"
+                        className={
+                          selected
+                            ? "placeCategoryPickerItem placeCategoryPickerItemSelected"
+                            : "placeCategoryPickerItem"
+                        }
+                        onClick={() => selectCategory(cat)}
+                      >
+                        <span
+                          className="placeCategoryPickerDot"
+                          style={{ background: style?.color ?? "#ccc" }}
+                          aria-hidden
+                        />
+                        <span>
+                          {style?.emoji ? `${style.emoji} ` : ""}
+                          {cat}
+                        </span>
+                        {selected ? <span className="placeCategoryPickerCheck">✓</span> : null}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

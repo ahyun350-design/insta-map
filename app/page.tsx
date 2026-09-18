@@ -188,6 +188,7 @@ import {
   FEED_POST_CATEGORIES,
   type FeedPostCategory,
 } from "@/lib/feedPost";
+import { updatePlaceCategory } from "@/lib/placeCategory";
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
@@ -2189,6 +2190,46 @@ function HomePageContent() {
       return next;
     });
   }, []);
+
+  /** 저장 장소 카테고리 — 낙관적 반영 + 실패 시 롤백. savedPlacesListModel deps 구조는 유지. */
+  const changeSavedPlaceCategory = useCallback(
+    (placeId: string, nextCategory: FeedPostCategory) => {
+      const previous = savedPlacesRef.current.find((p) => p.id === placeId);
+      if (!previous || previous.category === nextCategory) return;
+
+      const applyLocal = (category: Category) => {
+        setSavedPlaces((prev) => {
+          const next = prev.map((p) => (p.id === placeId ? { ...p, category } : p));
+          savedPlacesRef.current = next;
+          const uid = userIdRef.current;
+          if (uid) void writeCachedPlaces(uid, next);
+          return next;
+        });
+        setSelectedPlace((prev: PlaceSheetData | null) => {
+          if (!prev || prev._savedPlaceId !== placeId) return prev;
+          return { ...prev, category_name: category };
+        });
+        setHomePlaceSheet((prev: PlaceSheetData | null) => {
+          if (!prev || prev._savedPlaceId !== placeId) return prev;
+          return { ...prev, category_name: category };
+        });
+        setSelectedMapPlace((prev: Place | null) => {
+          if (!prev || prev.id !== placeId) return prev;
+          return { ...prev, category };
+        });
+      };
+
+      applyLocal(nextCategory);
+      void (async () => {
+        const { error } = await updatePlaceCategory(placeId, nextCategory);
+        if (error) {
+          applyLocal(previous.category);
+          showToast(error, "error");
+        }
+      })();
+    },
+    [showToast],
+  );
 
   const openPlaceMemoForSavedPlace = useCallback(
     (place: Place) => {
@@ -11480,6 +11521,12 @@ function HomePageContent() {
         }}
         onAddToList={() => openAddToListFromPlaceSheet(placeData)}
         onEditMemo={savedMatch ? () => openPlaceMemoForSavedPlace(savedMatch) : undefined}
+        categoryPin={CATEGORY_PIN}
+        onCategoryChange={
+          placeData._savedPlaceId
+            ? (cat) => changeSavedPlaceCategory(placeData._savedPlaceId!, cat)
+            : undefined
+        }
         onCurationClick={(postId, photoIndex, opts) => {
           placeSheetResumeAfterDetailRef.current = {
             place: placeData,
@@ -15281,6 +15328,16 @@ function HomePageContent() {
                   ? () => openPlaceMemoFromPlaceSheet(selectedPlace as PlaceSheetData)
                   : undefined
               }
+              categoryPin={CATEGORY_PIN}
+              onCategoryChange={
+                (selectedPlace as PlaceSheetData)._savedPlaceId
+                  ? (cat) =>
+                      changeSavedPlaceCategory(
+                        (selectedPlace as PlaceSheetData)._savedPlaceId!,
+                        cat,
+                      )
+                  : undefined
+              }
               onCurationClick={(postId, photoIndex, opts) => {
                 placeSheetResumeAfterDetailRef.current = {
                   place: selectedPlace as PlaceSheetData,
@@ -15333,6 +15390,12 @@ function HomePageContent() {
                 onEditMemo={
                   resolveSavedMatch(homePlaceSheet)
                     ? () => openPlaceMemoFromPlaceSheet(homePlaceSheet)
+                    : undefined
+                }
+                categoryPin={CATEGORY_PIN}
+                onCategoryChange={
+                  homePlaceSheet._savedPlaceId
+                    ? (cat) => changeSavedPlaceCategory(homePlaceSheet._savedPlaceId!, cat)
                     : undefined
                 }
                 onCurationClick={(postId, photoIndex, opts) => {
