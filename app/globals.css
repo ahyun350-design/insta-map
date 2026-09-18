@@ -3237,6 +3237,7 @@ select:focus-visible {
 }
 
 .dot.restaurant { background: #e85555; }
+.dot.bar        { background: #722F37; }
 .dot.cafe       { background: var(--navy); }
 .dot.shopping   { background: #888; }
 

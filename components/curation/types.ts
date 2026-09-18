@@ -1,3 +1,5 @@
+import type { FeedPostCategory } from "@/lib/feedPost";
+
 export type PostImageItem = {
   id: string;
   previewUrl: string;
@@ -7,7 +9,7 @@ export type PostImageItem = {
   error?: string;
 };
 
-export type CurationCategory = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
+export type CurationCategory = FeedPostCategory;
 
 export type CurationStep = 1 | 2 | 3;
 

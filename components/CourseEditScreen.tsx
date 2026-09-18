@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, type CSSProperties } from "react";
 import type { SavedCourseItem } from "@/lib/courses";
+import type { FeedPostCategory } from "@/lib/feedPost";
 
-type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
+type Category = FeedPostCategory;
 
 type Place = {
   id: string;

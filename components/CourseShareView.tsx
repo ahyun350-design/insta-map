@@ -6,6 +6,7 @@ import { getAppStoreUrl } from "@/lib/pindmapLinks";
 
 const PLACE_CATEGORY_EMOJI: Record<string, string> = {
   맛집: "🍽️",
+  술집: "🍺",
   카페: "☕",
   쇼핑: "🛍️",
   숙소: "🏠",

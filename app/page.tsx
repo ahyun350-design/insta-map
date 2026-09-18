@@ -184,6 +184,10 @@ import { HomeFeedTopBar } from "@/components/HomeFeedTopBar";
 import { HomeSearchScreen } from "@/components/HomeSearchScreen";
 import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
 import { feedPostMatchesCategoryFilter, getDisplayCategories } from "@/lib/categoryUtil";
+import {
+  FEED_POST_CATEGORIES,
+  type FeedPostCategory,
+} from "@/lib/feedPost";
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
@@ -284,7 +288,7 @@ const MessageUserSearchRow = dynamic(
 );
 
 type TabId = "home" | "messages" | "map" | "saved" | "mypage";
-type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
+type Category = FeedPostCategory;
 
 /** BottomTabBar onTabChange용 — 모듈 상수로 매 렌더 재생성 방지 */
 const TAB_TRACK_EVENT: Record<TabId, string> = {
@@ -295,17 +299,31 @@ const TAB_TRACK_EVENT: Record<TabId, string> = {
   mypage: "tab_mypage",
 };
 
-/** 큐레이션·저장 탭 카테고리 나열 순 */
-const CATEGORY_MAIN_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"];
-const CATEGORY_COURSE_MODAL_ORDER: Category[] = ["카페", "맛집", "쇼핑", "숙소", "놀거리", "여행지"];
+/** 큐레이션·저장 탭 카테고리 나열 순 — FEED_POST_CATEGORIES (맛집 다음 술집) */
+const CATEGORY_MAIN_ORDER: Category[] = [...FEED_POST_CATEGORIES];
+const CATEGORY_COURSE_MODAL_ORDER: Category[] = [
+  "카페",
+  "맛집",
+  "술집",
+  "쇼핑",
+  "숙소",
+  "놀거리",
+  "여행지",
+];
 /** 현재 위치 기반 코스 추천 반경 (km) */
 const COURSE_WALK_RADIUS_KM = 1.5;
 type CoursePlaceSource = "nearby" | "all" | "list";
+/** 술집은 넣지 않음 — 1차·2차로 이어지는 게 자연스러움 */
 const DEFAULT_AVOID_CONSECUTIVE_CATEGORIES: Category[] = ["카페", "맛집"];
+
+const EMPTY_CATEGORY_COUNTS = Object.fromEntries(
+  FEED_POST_CATEGORIES.map((c) => [c, 0]),
+) as Record<Category, number>;
 
 /** 카카오/검색 `category_name` 기반 자동 카테고리 */
 function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): Category {
   const n = categoryName ?? "";
+  if (n.includes("> 술집 >")) return "술집";
   if (n.includes("카페")) return "카페";
   if (n.includes("음식") || n.includes("맛집")) return "맛집";
   if (n.includes("숙박") || n.includes("호텔")) return "숙소";
@@ -965,14 +983,17 @@ const CHAT_LIST = [
 
 const CATEGORY_CLASS: Record<Category, string> = {
   맛집: "restaurant",
+  술집: "bar",
   카페: "cafe",
   쇼핑: "shopping",
   숙소: "stay",
   놀거리: "fun",
   여행지: "travel",
 };
+/** 술집: 와인 톤(#722F37) + 🍺 — 맛집 브라운·놀거리 퍼플과 구분 */
 const CATEGORY_PIN: Record<Category, { color: string; emoji: string }> = {
   맛집: { color: "#513229", emoji: "🍽️" },
+  술집: { color: "#722F37", emoji: "🍺" },
   카페: { color: "#FCE6B7", emoji: "☕" },
   쇼핑: { color: "#D8EBF9", emoji: "🛍️" },
   숙소: { color: "#D7D4B1", emoji: "🏠" },
@@ -981,6 +1002,7 @@ const CATEGORY_PIN: Record<Category, { color: string; emoji: string }> = {
 };
 const CATEGORY_COLORS: Record<Category, string> = {
   맛집: "#513229",
+  술집: "#722F37",
   카페: "#b08d57",
   쇼핑: "#4a7fa5",
   숙소: "#7a7a50",
@@ -1749,14 +1771,9 @@ function HomePageContent() {
 
   // 코스 만들기 관련 state
   const [showCourseModal, setShowCourseModal] = useState(false);
-  const [courseCounts, setCourseCounts] = useState<Record<Category, number>>({
-    카페: 0,
-    맛집: 0,
-    쇼핑: 0,
-    숙소: 0,
-    놀거리: 0,
-    여행지: 0,
-  });
+  const [courseCounts, setCourseCounts] = useState<Record<Category, number>>(() => ({
+    ...EMPTY_CATEGORY_COUNTS,
+  }));
   const [courseSource, setCourseSource] = useState<CoursePlaceSource>("nearby");
   const [courseCandidateQuery, setCourseCandidateQuery] = useState("");
   /** 소스와 무관하게 유지되는 선택 — id → Place 스냅샷 */
@@ -3688,14 +3705,7 @@ function HomePageContent() {
   ]);
 
   const courseAvailableByCategory = useMemo(() => {
-    const counts = {
-      카페: 0,
-      맛집: 0,
-      쇼핑: 0,
-      숙소: 0,
-      놀거리: 0,
-      여행지: 0,
-    } as Record<Category, number>;
+    const counts = { ...EMPTY_CATEGORY_COUNTS };
     for (const p of courseAutoCandidatePlaces) {
       counts[p.category] = (counts[p.category] ?? 0) + 1;
     }
@@ -3753,7 +3763,7 @@ function HomePageContent() {
     setCourseActiveListTitle("");
     setCourseListPlaces([]);
     setCourseMyLists([]);
-    setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
+    setCourseCounts({ ...EMPTY_CATEGORY_COUNTS });
   }, []);
 
   const toggleCoursePlaceSelect = useCallback((place: Place) => {
@@ -7711,14 +7721,9 @@ function HomePageContent() {
         showToast("최소 한 개 이상 선택해주세요", "info");
         return;
       }
-      const byCat: Record<Category, Place[]> = {
-        카페: [],
-        맛집: [],
-        쇼핑: [],
-        숙소: [],
-        놀거리: [],
-        여행지: [],
-      };
+      const byCat = Object.fromEntries(
+        FEED_POST_CATEGORIES.map((c) => [c, [] as Place[]]),
+      ) as Record<Category, Place[]>;
       for (const p of courseAutoCandidatePlaces) {
         byCat[p.category].push(p);
       }
@@ -14248,7 +14253,7 @@ function HomePageContent() {
           viewingSavedCourseIdRef.current = null;
           setViewedCourseUserId(null);
           setIsReadOnlyCourse(false);
-          setCourseCounts({ 카페: 0, 맛집: 0, 쇼핑: 0, 숙소: 0, 놀거리: 0, 여행지: 0 });
+          setCourseCounts({ ...EMPTY_CATEGORY_COUNTS });
         }}
         style={{
           border: "1px solid #1a2a7a",

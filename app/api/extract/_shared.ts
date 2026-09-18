@@ -2,12 +2,13 @@ import {
   extractBranchTags,
   kakaoPlaceNameMatchesBranch,
 } from "@/lib/extractPlaceFilters";
+import type { FeedPostCategory } from "@/lib/feedPost";
 
 export { isValidInstagramPostUrl } from "@/lib/instagramUrl";
 
 export const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_APIFY_ACTOR_ID = "apify~instagram-post-scraper";
-export type ClaudeCategory = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
+export type ClaudeCategory = FeedPostCategory;
 export type Place = { name: string; address: string; category: ClaudeCategory };
 export type RawPlace = {
   name?: unknown;
@@ -50,6 +51,7 @@ function parseClaudeJsonSafely(rawText: string): unknown {
 export function normalizeCategory(raw: unknown): ClaudeCategory | null {
   if (
     raw === "맛집" ||
+    raw === "술집" ||
     raw === "카페" ||
     raw === "쇼핑" ||
     raw === "숙소" ||
@@ -59,6 +61,7 @@ export function normalizeCategory(raw: unknown): ClaudeCategory | null {
     return raw;
   }
   if (raw === "restaurant") return "맛집";
+  if (raw === "bar" || raw === "pub") return "술집";
   if (raw === "cafe") return "카페";
   if (raw === "shopping") return "쇼핑";
   if (raw === "stay" || raw === "hotel") return "숙소";
@@ -551,22 +554,24 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
   const fixedInstructions = [
     "아래 인스타그램 캡션에서 언급된 모든 장소를 추출하세요.",
     "장소가 여러 개면 모두 포함하고, 없으면 빈 배열을 반환하세요.",
-    '반드시 JSON 배열만 반환하세요. 형식: [{"name":"장소명","hint":"동네명또는역이름","region":"캡션에명시된지역또는null","category":"맛집|카페|쇼핑|숙소|놀거리|여행지"}]',
+    '반드시 JSON 배열만 반환하세요. 형식: [{"name":"장소명","hint":"동네명또는역이름","region":"캡션에명시된지역또는null","category":"맛집|술집|카페|쇼핑|숙소|놀거리|여행지"}]',
     "hint는 반드시 캡션에 직접 언급된 동네명, 역이름, 구명 중 가장 구체적인 것 하나만 넣으세요.",
     "예: 망원동, 합정, 성수, 용산역 처럼 짧고 구체적인 지역명 하나만.",
     "절대로 서울, 한국 같은 넓은 지역명은 쓰지 마세요. 구체적인 동네명이 없으면 빈 문자열.",
     'region은 캡션에 그 장소와 함께 명시된 지역명만 넣으세요. 예: "성수", "연남동", "강남역", "부산 서면".',
     "캡션에 지역이 없으면 region은 null. 추측·추론·힌트 보강 금지. 없으면 반드시 null.",
     "hint와 region이 같아도 됩니다. region만 없고 hint만 있으면 region은 null.",
-    'category는 반드시 "맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지" 중 하나만 사용하세요.',
-    "카테고리는 장소의 주된 목적(먹는 곳 / 사는 곳 / 노는 곳 / 자는 곳 / 보는 곳)을 기준으로 가장 가까운 것을 고르세요. 애매하다고 맛집·카페로 몰지 마세요.",
-    "맛집: 식사 중심 음식점(밥·요리 파는 곳). 레스토랑, 식당, 술집, 바.",
+    'category는 반드시 "맛집", "술집", "카페", "쇼핑", "숙소", "놀거리", "여행지" 중 하나만 사용하세요.',
+    "카테고리는 장소의 주된 목적(먹는 곳 / 마시는 곳 / 사는 곳 / 노는 곳 / 자는 곳 / 보는 곳)을 기준으로 가장 가까운 것을 고르세요. 애매하다고 맛집·카페로 몰지 마세요.",
+    "맛집: 식사 중심(밥·요리). 레스토랑, 식당. 술·호프가 주목적이면 술집.",
+    "술집: 호프, 바, 이자카야, 포차, 와인바, 칵테일바, 요리주점. 마시는 것이 주목적.",
     "카페: 커피·음료·디저트 중심.",
     "쇼핑: 물건 파는 곳 전반 — 편집샵, 소품샵, 편집매장, 브랜드 스토어·플래그십, 팝업스토어, 쇼핑몰, 백화점, 패션·의류·잡화 매장, 라이프스타일 스토어, 복합 리테일 공간(예: 무신사 메가스토어). 이름에 매장/스토어/샵/메가스토어/플래그십/편집샵/소품샵/팝업이 있으면 쇼핑을 우선 고려하세요.",
     "숙소: 호텔·펜션·게스트하우스·숙박.",
     "놀거리: 노래방, 볼링장, 영화관, 오락실, 방탈출, 액티비티·체험, 전시·팝업 체험형.",
     "여행지: 관광명소, 공원, 랜드마크, 자연경관, 포토스팟.",
     "복합공간(카페+매장 등)은 주된 기능으로 판단하되, 매장·쇼핑 비중이 크면 쇼핑으로 분류하세요.",
+    "식사가 중심이고 술도 파는 곳은 맛집이다. 치킨집은 술을 팔아도 맛집이다.",
     "게시물이 실제로 소개하는 장소만 추출한다.",
     "지나가듯 언급된 지명, 만나는 장소, 근처 랜드마크는 추출하지 않는다.",
     '예: "스타필드에서 만나서 ○○카페 갔어요" → ○○카페만 추출. 스타필드는 제외.',
@@ -600,7 +605,7 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
       max_tokens: 2000,
       temperature: 0,
       system:
-        'You must return only pure JSON array. Output format: [{"name":"...","hint":"...","region":null,"category":"카페"}]. region is optional string or null (only if explicitly in caption). category must be exactly one of: 맛집, 카페, 쇼핑, 숙소, 놀거리, 여행지 (Korean strings). Do not include markdown, code fences, explanations, or any extra text.',
+        'You must return only pure JSON array. Output format: [{"name":"...","hint":"...","region":null,"category":"카페"}]. region is optional string or null (only if explicitly in caption). category must be exactly one of: 맛집, 술집, 카페, 쇼핑, 숙소, 놀거리, 여행지 (Korean strings). Do not include markdown, code fences, explanations, or any extra text.',
       messages: [{ role: "user", content: prompt }],
     }),
   });

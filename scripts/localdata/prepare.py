@@ -85,6 +85,7 @@ with _MAP_PATH.open("r", encoding="utf-8") as _mf:
     _CAT_MAP = json.load(_mf)
 
 CAFE = set(_CAT_MAP.get("cafe", []))
+BAR = set(_CAT_MAP.get("bar", []))
 PLAY = set(_CAT_MAP.get("play", []))
 SHOP = set(_CAT_MAP.get("shop", []))
 STAY = set(_CAT_MAP.get("stay", []))
@@ -117,6 +118,8 @@ def map_category(source: str, raw: str):
         return None
     if raw in CAFE:
         return "카페"
+    if raw in BAR:
+        return "술집"
     if raw in PLAY:
         return "놀거리"
     if raw in SHOP:

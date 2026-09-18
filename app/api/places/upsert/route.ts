@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { FEED_POST_CATEGORIES } from "@/lib/feedPost";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const CATEGORIES = new Set(["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"]);
+const CATEGORIES = new Set<string>(FEED_POST_CATEGORIES);
 
 export async function POST(req: Request) {
   try {
@@ -54,11 +55,7 @@ export async function POST(req: Request) {
     if (!id || !name || !category) {
       return NextResponse.json({ error: "id, name, category는 필수입니다." }, { status: 400 });
     }
-    if (
-      !CATEGORIES.has(
-        category as "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지",
-      )
-    ) {
+    if (!CATEGORIES.has(category)) {
       return NextResponse.json({ error: "유효하지 않은 카테고리입니다." }, { status: 400 });
     }
 

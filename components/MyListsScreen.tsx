@@ -19,8 +19,9 @@ import {
   type PlaceListPlace,
   type PlaceListSummary,
 } from "@/lib/placeLists";
+import { FEED_POST_CATEGORIES, type FeedPostCategory } from "@/lib/feedPost";
 
-type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
+type Category = FeedPostCategory;
 
 type ListSort = "custom" | "region" | "near" | "category";
 
@@ -31,7 +32,7 @@ const LIST_SORT_OPTIONS: { id: ListSort; label: string }[] = [
   { id: "custom", label: "내 순서 (직접 정렬)" },
 ];
 
-const LIST_CATEGORY_ORDER: Category[] = ["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"];
+const LIST_CATEGORY_ORDER: Category[] = [...FEED_POST_CATEGORIES];
 
 const LIST_DISTANCE_BANDS: { id: string; label: string; maxMeters: number }[] = [
   { id: "500m", label: "500m 이내", maxMeters: 500 },

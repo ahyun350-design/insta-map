@@ -3,7 +3,11 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
-import { isOwnFeedAuthor, type PhotoPlaceTag } from "@/lib/feedPost";
+import {
+  isOwnFeedAuthor,
+  type FeedPostCategory,
+  type PhotoPlaceTag,
+} from "@/lib/feedPost";
 import { formatDisplayCategoriesForUi } from "@/lib/categoryUtil";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { getDisplayPlaceForPhoto, type PlaceRefForPhotoTagMatch } from "@/lib/photoPlaceTag";
@@ -14,7 +18,7 @@ import {
   type CurationAspectRatio,
 } from "@/lib/curationAspectRatio";
 
-type Category = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
+type Category = FeedPostCategory;
 
 export type FeedPostCardData = {
   id: string;

@@ -3,18 +3,13 @@
  * Source of truth: lib/localdataCategoryMap.json (shared with scripts/localdata/prepare.py).
  */
 import type { FeedPostCategory } from "@/lib/feedPost";
+import { FEED_POST_CATEGORIES } from "@/lib/feedPost";
 import mapJson from "@/lib/localdataCategoryMap.json";
 
-const APP_CATEGORIES = new Set<FeedPostCategory>([
-  "맛집",
-  "카페",
-  "쇼핑",
-  "숙소",
-  "놀거리",
-  "여행지",
-]);
+const APP_CATEGORIES = new Set<FeedPostCategory>(FEED_POST_CATEGORIES);
 
 export const LOCALDATA_CAFE_RAWS = new Set(mapJson.cafe);
+export const LOCALDATA_BAR_RAWS = new Set(mapJson.bar);
 export const LOCALDATA_PLAY_RAWS = new Set(mapJson.play);
 export const LOCALDATA_SHOP_RAWS = new Set(mapJson.shop);
 export const LOCALDATA_STAY_RAWS = new Set(mapJson.stay);
@@ -50,6 +45,7 @@ export function mapLocaldataRawCategory(
   if (shouldExcludePoiRawCategory(raw)) return null;
   const t = (raw || "").trim();
   if (LOCALDATA_CAFE_RAWS.has(t)) return "카페";
+  if (LOCALDATA_BAR_RAWS.has(t)) return "술집";
   if (LOCALDATA_PLAY_RAWS.has(t)) return "놀거리";
   if (LOCALDATA_SHOP_RAWS.has(t)) return "쇼핑";
   if (LOCALDATA_STAY_RAWS.has(t)) return "숙소";

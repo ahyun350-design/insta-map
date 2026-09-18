@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { FEED_POST_CATEGORIES } from "@/lib/feedPost";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const CATEGORIES = new Set(["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"]);
+const CATEGORIES = new Set<string>(FEED_POST_CATEGORIES);
 const MAX_ROWS = 50;
 
 type InsertRow = {
@@ -70,11 +71,7 @@ export async function POST(req: Request) {
       if (user_id !== authUser.id) {
         return NextResponse.json({ error: "본인 계정의 장소만 저장할 수 있습니다." }, { status: 403 });
       }
-      if (
-        !CATEGORIES.has(
-          category as "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지",
-        )
-      ) {
+      if (!CATEGORIES.has(category)) {
         return NextResponse.json({ error: "유효하지 않은 카테고리가 포함되어 있습니다." }, { status: 400 });
       }
       const latRaw = (r as { lat?: number | string | null }).lat;

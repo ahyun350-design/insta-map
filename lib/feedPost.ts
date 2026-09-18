@@ -7,16 +7,28 @@ import {
 
 export type { CurationAspectRatio };
 
-export type FeedPostCategory = "맛집" | "카페" | "쇼핑" | "숙소" | "놀거리" | "여행지";
+export type FeedPostCategory =
+  | "맛집"
+  | "술집"
+  | "카페"
+  | "쇼핑"
+  | "숙소"
+  | "놀거리"
+  | "여행지";
 
+/** Canonical app category list — order used by chips / saved-tab grouping. */
 export const FEED_POST_CATEGORIES: readonly FeedPostCategory[] = [
   "맛집",
+  "술집",
   "카페",
   "쇼핑",
   "숙소",
   "놀거리",
   "여행지",
 ];
+
+/** @deprecated Use FeedPostCategory */
+export type Category = FeedPostCategory;
 
 export type PhotoPlaceTag = {
   photoIndex: number;

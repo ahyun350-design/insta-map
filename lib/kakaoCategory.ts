@@ -4,6 +4,14 @@ import {
   mapLocaldataRawCategory,
 } from "@/lib/localdataCategory";
 
+/** 카카오 `category_name` path — 술집 하위 분류 (호프/와인바/이자카야 등). */
+export function isKakaoBarCategoryName(
+  categoryName: string | null | undefined,
+): boolean {
+  const n = categoryName ?? "";
+  return n.includes("> 술집 >");
+}
+
 /** 카카오 로컬 `category_group_code` → 앱 카테고리 (미매칭 시 null) */
 export function mapKakaoCategoryGroupCode(
   code: string | null | undefined,
@@ -24,12 +32,14 @@ export function mapKakaoCategoryGroupCode(
 /**
  * 카카오 `category_name` 문자열 휴리스틱.
  * 매칭 규칙이 없으면 null.
+ * 단순 "바" 매칭 금지 (커피바·샐러드바 오탐).
  */
 export function tryMapKakaoCategoryName(
   categoryName: string | null | undefined,
 ): FeedPostCategory | null {
   const n = categoryName ?? "";
   if (!n) return null;
+  if (isKakaoBarCategoryName(n)) return "술집";
   if (n.includes("제과,베이커리") || n.includes("떡,한과")) return "카페";
   if (n.includes("카페")) return "카페";
   if (n.includes("음식점") || n.includes("음식")) return "맛집";
@@ -49,14 +59,13 @@ export function mapKakaoCategoryToPindMap(
 
 /**
  * 추출 저장용 최종 카테고리 우선순위:
- * 1) 카카오 category_group_code (단, FD6은 예외 — 아래)
- * 2) 카카오 category_name 휴리스틱
- * 3) Claude category
- * 4) poi.raw_category (무정보 업태는 스킵)
- * 5) 맛집
- *
- * FD6 예외: 카카오 "음식점" 최상위 코드라 변별력이 없음.
- * Claude가 있고 맛집이 아니면 Claude, 아니면 맛집.
+ * 1) 카카오 category_name에 "> 술집 >" → 술집 (FD6보다 앞)
+ * 2) FD6 → Claude가 맛집이 아니면 Claude, 아니면 맛집
+ * 3) 기타 category_group_code
+ * 4) 카카오 category_name 휴리스틱
+ * 5) Claude category
+ * 6) poi.raw_category (무정보 업태는 스킵)
+ * 7) 맛집
  */
 export function resolveExtractPlaceCategory(input: {
   groupCode?: string | null;
@@ -64,9 +73,12 @@ export function resolveExtractPlaceCategory(input: {
   claudeCategory: FeedPostCategory;
   poiRawCategory?: string | null;
 }): FeedPostCategory {
+  // 술집 path는 FD6보다 구체적 — 최우선
+  if (isKakaoBarCategoryName(input.categoryName)) return "술집";
+
   const code = (input.groupCode ?? "").trim();
 
-  // FD6 = generic food — defer to Claude when Claude is more specific than 맛집
+  // FD6 = generic food — path에 술집 없을 때만 Claude 우선
   if (code === "FD6") {
     if (isAppCategory(input.claudeCategory) && input.claudeCategory !== "맛집") {
       return input.claudeCategory;
@@ -89,7 +101,7 @@ export function resolveExtractPlaceCategory(input: {
 }
 
 /**
- * @deprecated Use resolveExtractPlaceCategory. Kept for call sites that only have Kakao+Claude.
+ * @deprecated Use resolveExtractPlaceCategory.
  */
 export function resolvePlaceCategoryFromKakao(
   groupCode: string | null | undefined,

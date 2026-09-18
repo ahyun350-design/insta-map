@@ -1,10 +1,10 @@
 "use client";
 
-import type { FeedPostCategory } from "@/lib/feedPost";
+import { FEED_POST_CATEGORIES, type FeedPostCategory } from "@/lib/feedPost";
 
 export type HomeCategoryFilter = "all" | FeedPostCategory;
 
-const CATEGORY_ORDER: FeedPostCategory[] = ["맛집", "카페", "쇼핑", "숙소", "놀거리", "여행지"];
+const CATEGORY_ORDER: FeedPostCategory[] = [...FEED_POST_CATEGORIES];
 
 type Props = {
   value: HomeCategoryFilter;

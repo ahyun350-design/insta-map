@@ -509,6 +509,9 @@ private enum NativeMapMarkerStyleHelper {
         switch category {
         case "맛집":
             return CategoryPinStyle(fillColor: UIColor(hex: 0x513229), strokeColor: .white, emoji: "🍽️")
+        case "술집":
+            // Wine tone — distinct from 맛집 brown (#513229) and 놀거리 purple
+            return CategoryPinStyle(fillColor: UIColor(hex: 0x722F37), strokeColor: .white, emoji: "🍺")
         case "카페":
             return CategoryPinStyle(fillColor: UIColor(hex: 0xFCE6B7), strokeColor: UIColor(hex: 0x999999), emoji: "☕")
         case "쇼핑":
@@ -520,6 +523,7 @@ private enum NativeMapMarkerStyleHelper {
         case "여행지":
             return CategoryPinStyle(fillColor: UIColor(hex: 0x99e9f2), strokeColor: UIColor(hex: 0x999999), emoji: "🗺️")
         default:
+            // Deployed apps without 술집 case land here — red 📍 pin, no crash
             return CategoryPinStyle(fillColor: .systemRed, strokeColor: UIColor(hex: 0x999999), emoji: "📍")
         }
     }
@@ -532,6 +536,7 @@ private enum NativeMapMarkerStyleHelper {
         let key: String
         switch category {
         case "맛집": key = "food"
+        case "술집": key = "bar"
         case "카페": key = "cafe"
         case "쇼핑": key = "shopping"
         case "숙소": key = "stay"
