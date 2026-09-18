@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import {
   getFirstMatchingPhotoIndex,
@@ -163,27 +162,82 @@ export function PlaceDetailSheet({
       className={layout === "overlay" ? "placeDetailSheet placeDetailSheetOverlay" : "placeDetailSheet placeDetailSheetEmbedded"}
       role="dialog"
       aria-label="장소 정보"
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (categoryPickerOpen) setCategoryPickerOpen(false);
+      }}
     >
       <div className="placeDetailSheetHeader">
         <div className="placeDetailSheetHeaderText">
           <p className="placeDetailSheetName">{place.place_name}</p>
           {canEditCategory && currentCategory ? (
-            <button
-              type="button"
-              className="placeDetailSheetCategoryChip"
-              style={{ background: chipBg, color: chipFg, borderColor: chipBg }}
-              onClick={() => setCategoryPickerOpen(true)}
-              aria-label={`카테고리 ${currentCategory} — 변경`}
-            >
-              <span>
-                {pinStyle?.emoji ? `${pinStyle.emoji} ` : ""}
-                {currentCategory}
-              </span>
-              <span className="placeDetailSheetCategoryChipCaret" aria-hidden>
-                ⌄
-              </span>
-            </button>
+            <div className="placeDetailSheetCategoryBlock">
+              <button
+                type="button"
+                className="placeDetailSheetCategoryChip"
+                style={{ background: chipBg, color: chipFg, borderColor: chipBg }}
+                aria-expanded={categoryPickerOpen}
+                aria-label={`카테고리 ${currentCategory} — 변경`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCategoryPickerOpen((open) => !open);
+                }}
+              >
+                <span>
+                  {pinStyle?.emoji ? `${pinStyle.emoji} ` : ""}
+                  {currentCategory}
+                </span>
+                <span
+                  className={
+                    categoryPickerOpen
+                      ? "placeDetailSheetCategoryChipCaret isOpen"
+                      : "placeDetailSheetCategoryChipCaret"
+                  }
+                  aria-hidden
+                >
+                  ⌄
+                </span>
+              </button>
+              {categoryPickerOpen ? (
+                <ul
+                  className="placeDetailSheetCategoryInlineList"
+                  role="listbox"
+                  aria-label="카테고리 선택"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {FEED_POST_CATEGORIES.map((cat) => {
+                    const style = categoryPin?.[cat];
+                    const selected = cat === currentCategory;
+                    return (
+                      <li key={cat} role="option" aria-selected={selected}>
+                        <button
+                          type="button"
+                          className={
+                            selected
+                              ? "placeDetailSheetCategoryInlineItem isSelected"
+                              : "placeDetailSheetCategoryInlineItem"
+                          }
+                          onClick={() => selectCategory(cat)}
+                        >
+                          <span
+                            className="placeDetailSheetCategoryInlineDot"
+                            style={{ background: style?.color ?? "#ccc" }}
+                            aria-hidden
+                          />
+                          <span>
+                            {style?.emoji ? `${style.emoji} ` : ""}
+                            {cat}
+                          </span>
+                          {selected ? (
+                            <span className="placeDetailSheetCategoryInlineCheck">✓</span>
+                          ) : null}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </div>
           ) : currentCategory ? (
             <p className="placeDetailSheetCategory">{currentCategory}</p>
           ) : null}
@@ -356,55 +410,6 @@ export function PlaceDetailSheet({
         </div>
       )}
 
-      {categoryPickerOpen &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            className="placeCategoryPickerRoot"
-            role="presentation"
-            onClick={() => setCategoryPickerOpen(false)}
-          >
-            <div
-              className="placeCategoryPickerSheet"
-              role="dialog"
-              aria-label="카테고리 선택"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <p className="placeCategoryPickerTitle">카테고리</p>
-              <ul className="placeCategoryPickerList">
-                {FEED_POST_CATEGORIES.map((cat) => {
-                  const style = categoryPin?.[cat];
-                  const selected = cat === currentCategory;
-                  return (
-                    <li key={cat}>
-                      <button
-                        type="button"
-                        className={
-                          selected
-                            ? "placeCategoryPickerItem placeCategoryPickerItemSelected"
-                            : "placeCategoryPickerItem"
-                        }
-                        onClick={() => selectCategory(cat)}
-                      >
-                        <span
-                          className="placeCategoryPickerDot"
-                          style={{ background: style?.color ?? "#ccc" }}
-                          aria-hidden
-                        />
-                        <span>
-                          {style?.emoji ? `${style.emoji} ` : ""}
-                          {cat}
-                        </span>
-                        {selected ? <span className="placeCategoryPickerCheck">✓</span> : null}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </div>,
-          document.body,
-        )}
     </div>
   );
 }

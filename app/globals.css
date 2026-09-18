@@ -1981,71 +1981,67 @@ select:focus-visible {
   opacity: 0.85;
   line-height: 1;
   transform: translateY(-1px);
+  transition: transform 0.15s ease;
 }
 
-.placeCategoryPickerRoot {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
+.placeDetailSheetCategoryChipCaret.isOpen {
+  transform: translateY(1px) rotate(180deg);
 }
 
-.placeCategoryPickerSheet {
-  width: 100%;
-  max-width: 480px;
-  background: #fff;
-  border-radius: 16px 16px 0 0;
-  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
-  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.12);
-}
-
-.placeCategoryPickerTitle {
-  margin: 0 4px 12px;
-  font-size: 15px;
-  font-weight: 600;
-  color: #1a1a2e;
-}
-
-.placeCategoryPickerList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.placeDetailSheetCategoryBlock {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 0;
+  min-width: 0;
+  width: 100%;
 }
 
-.placeCategoryPickerItem {
+.placeDetailSheetCategoryInlineList {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  width: 100%;
+  max-width: 280px;
+  border: 1px solid #ececf0;
+  border-radius: 12px;
+  background: #fafafb;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-sizing: border-box;
+}
+
+.placeDetailSheetCategoryInlineItem {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 10px;
+  padding: 10px 10px;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
-  font-size: 15px;
+  font-size: 14px;
   color: #1a1a2e;
   text-align: left;
   cursor: pointer;
 }
 
-.placeCategoryPickerItem:active,
-.placeCategoryPickerItemSelected {
-  background: #f4f5f8;
+.placeDetailSheetCategoryInlineItem:active,
+.placeDetailSheetCategoryInlineItem.isSelected {
+  background: #fff;
+  box-shadow: 0 0 0 1px #e8e8ee;
 }
 
-.placeCategoryPickerDot {
+.placeDetailSheetCategoryInlineDot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.placeCategoryPickerCheck {
+.placeDetailSheetCategoryInlineCheck {
   margin-left: auto;
   color: #1a2a7a;
   font-weight: 700;
