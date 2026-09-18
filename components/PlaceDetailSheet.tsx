@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import {
   getFirstMatchingPhotoIndex,
@@ -144,15 +144,27 @@ export function PlaceDetailSheet({
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
 
-  const canEditCategory = Boolean(place._savedPlaceId && onCategoryChange);
+  const savedPlaceId =
+    typeof place._savedPlaceId === "string" ? place._savedPlaceId.trim() : "";
+  // 저장됨(하트) + 본인 places id + 핸들러 있을 때만 칩. id만 있고 미저장이면 텍스트.
+  const canEditCategory = Boolean(isSaved && savedPlaceId && onCategoryChange);
   const currentCategory = place.category_name?.trim() || "";
   const pinStyle = categoryPin?.[currentCategory];
   const chipBg = pinStyle?.color ?? "#888";
   const chipFg = LIGHT_PIN_CATEGORIES.has(currentCategory) ? "#333" : "#fff";
 
+  // 장소가 바뀌면 펼침 상태 초기화 (이전 시트 잔존 방지)
+  useEffect(() => {
+    setCategoryPickerOpen(false);
+  }, [savedPlaceId, place.place_name, place.road_address_name, place.y, place.x]);
+
+  useEffect(() => {
+    if (!canEditCategory && categoryPickerOpen) setCategoryPickerOpen(false);
+  }, [canEditCategory, categoryPickerOpen]);
+
   const selectCategory = (cat: FeedPostCategory) => {
     setCategoryPickerOpen(false);
-    if (!onCategoryChange) return;
+    if (!canEditCategory || !onCategoryChange) return;
     if (cat === currentCategory) return;
     onCategoryChange(cat);
   };

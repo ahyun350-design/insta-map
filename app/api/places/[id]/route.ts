@@ -79,7 +79,8 @@ export async function PATCH(req: Request, context: RouteContext) {
       return NextResponse.json({ error: "장소를 찾을 수 없습니다." }, { status: 404 });
     }
     if (row.user_id !== authUser.id) {
-      return NextResponse.json({ error: "수정 권한이 없습니다." }, { status: 403 });
+      // Do not reveal existence of another user's place
+      return NextResponse.json({ error: "장소를 찾을 수 없습니다." }, { status: 404 });
     }
 
     const prevCategory = typeof row.category === "string" ? row.category : "";

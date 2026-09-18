@@ -11,7 +11,7 @@ export type { FeedPostCategory };
 export async function updatePlaceCategory(
   placeId: string,
   category: FeedPostCategory,
-): Promise<{ error: string | null; category: FeedPostCategory }> {
+): Promise<{ error: string | null; notFound?: boolean; category: FeedPostCategory }> {
   const id = placeId.trim();
   if (!id) return { error: "장소 id가 없어요", category };
 
@@ -36,6 +36,9 @@ export async function updatePlaceCategory(
   });
 
   if (!res.ok) {
+    if (res.status === 404) {
+      return { error: "not_found", notFound: true, category };
+    }
     let msg = "카테고리를 바꾸지 못했어요";
     try {
       const body = (await res.json()) as { error?: string };

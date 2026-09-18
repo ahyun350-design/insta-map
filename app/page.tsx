@@ -2221,10 +2221,10 @@ function HomePageContent() {
 
       applyLocal(nextCategory);
       void (async () => {
-        const { error } = await updatePlaceCategory(placeId, nextCategory);
+        const { error, notFound } = await updatePlaceCategory(placeId, nextCategory);
         if (error) {
           applyLocal(previous.category);
-          showToast(error, "error");
+          if (!notFound) showToast(error, "error");
         }
       })();
     },
@@ -3491,6 +3491,19 @@ function HomePageContent() {
       return np === nRoad || np === nAddr || np.includes(nRoad) || nRoad.includes(np) || np.includes(nAddr) || nAddr.includes(np);
     });
   }, []);
+
+  /** 카테고리 편집 가능 id — 시트에 찍힌 _savedPlaceId가 실제 내 places 행일 때만 */
+  const editableSavedPlaceId = useCallback(
+    (candidate: PlaceSheetData | null | undefined): string | null => {
+      if (!candidate) return null;
+      const id = typeof candidate._savedPlaceId === "string" ? candidate._savedPlaceId.trim() : "";
+      if (!id) return null;
+      const match = resolveSavedMatch(candidate);
+      if (!match || match.id !== id) return null;
+      return id;
+    },
+    [resolveSavedMatch],
+  );
 
   const openAddToListFromPlaceSheet = useCallback(
     (placeData: PlaceSheetData) => {
@@ -9562,8 +9575,18 @@ function HomePageContent() {
     expandedSearchOpenDedupeRef.current = { t: now, key };
     devLog("[PindMap:expandedMap] open place card", source, place.place_name, { y: place.y, x: place.x });
     const expandedRef = placeRefFromKakaoPlace(place);
+    // Kakao 검색 결과는 places 행이 아님 — _savedPlaceId가 섞여 있으면 제거
+    const {
+      _savedPlaceId: _ignoredSavedId,
+      _feedPosts: _ignoredFeed,
+      _placeRef: _ignoredRef,
+      ...kakaoPlace
+    } = place as PlaceSheetData & Record<string, unknown>;
+    void _ignoredSavedId;
+    void _ignoredFeed;
+    void _ignoredRef;
     setSelectedPlace({
-      ...place,
+      ...kakaoPlace,
       _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, expandedRef),
       _placeRef: expandedRef,
     });
@@ -11523,9 +11546,10 @@ function HomePageContent() {
         onEditMemo={savedMatch ? () => openPlaceMemoForSavedPlace(savedMatch) : undefined}
         categoryPin={CATEGORY_PIN}
         onCategoryChange={
-          placeData._savedPlaceId
-            ? (cat) => changeSavedPlaceCategory(placeData._savedPlaceId!, cat)
-            : undefined
+          (() => {
+            const id = editableSavedPlaceId(placeData);
+            return id ? (cat: FeedPostCategory) => changeSavedPlaceCategory(id, cat) : undefined;
+          })()
         }
         onCurationClick={(postId, photoIndex, opts) => {
           placeSheetResumeAfterDetailRef.current = {
@@ -15330,13 +15354,10 @@ function HomePageContent() {
               }
               categoryPin={CATEGORY_PIN}
               onCategoryChange={
-                (selectedPlace as PlaceSheetData)._savedPlaceId
-                  ? (cat) =>
-                      changeSavedPlaceCategory(
-                        (selectedPlace as PlaceSheetData)._savedPlaceId!,
-                        cat,
-                      )
-                  : undefined
+                (() => {
+                  const id = editableSavedPlaceId(selectedPlace as PlaceSheetData);
+                  return id ? (cat: FeedPostCategory) => changeSavedPlaceCategory(id, cat) : undefined;
+                })()
               }
               onCurationClick={(postId, photoIndex, opts) => {
                 placeSheetResumeAfterDetailRef.current = {
@@ -15394,9 +15415,10 @@ function HomePageContent() {
                 }
                 categoryPin={CATEGORY_PIN}
                 onCategoryChange={
-                  homePlaceSheet._savedPlaceId
-                    ? (cat) => changeSavedPlaceCategory(homePlaceSheet._savedPlaceId!, cat)
-                    : undefined
+                  (() => {
+                    const id = editableSavedPlaceId(homePlaceSheet);
+                    return id ? (cat: FeedPostCategory) => changeSavedPlaceCategory(id, cat) : undefined;
+                  })()
                 }
                 onCurationClick={(postId, photoIndex, opts) => {
                   homePlaceSheetResumeRef.current = homePlaceSheet;
