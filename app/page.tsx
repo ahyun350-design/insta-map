@@ -194,6 +194,7 @@ import {
   DEFAULT_CATEGORY_PIN,
   resolvePinColor,
 } from "@/lib/categoryAppearance";
+import { resolveListColor } from "@/lib/listColors";
 import { updatePlaceCategory } from "@/lib/placeCategory";
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
 import { BottomTabBar } from "@/components/BottomTabBar";
@@ -1608,6 +1609,16 @@ function HomePageContent() {
   const fullscreenGeocodeRunRef = useRef(0);
   /** iOS 전체화면 Native 코스 모드 — showCourseOnMap에서 설정, 닫을 때 null */
   const fullscreenCourseRef = useRef<CoursePlace[] | null>(null);
+  /** 목록 전체화면 지도 — 그 목록 장소만 + 목록 색 */
+  const fullscreenListRef = useRef<{
+    listId: string;
+    title: string;
+    color: string | null;
+    places: Place[];
+  } | null>(null);
+  const [listMapActive, setListMapActive] = useState(false);
+  const returnToListDetailRef = useRef(false);
+  const listWebMarkersRef = useRef<any[]>([]);
   /** 코스 경로 비동기(Tmap) 취소용 — 닫기/코스 종료 시 증가 */
   const fullscreenCourseRouteSessionRef = useRef(0);
   const mapExpandedLiveRef = useRef(false);
@@ -1929,7 +1940,12 @@ function HomePageContent() {
   const myLocationMarkerRef = useRef<{ main: any | null; expanded: any | null }>({ main: null, expanded: null });
   /** 「지도에서 보기」 임시 강조 핀 (저장 핀과 별도 — addPlacePins 미사용) */
   const focusPlaceMarkerRef = useRef<{ main: any | null; expanded: any | null }>({ main: null, expanded: null });
-  const focusPlaceCoordsRef = useRef<{ lat: number; lng: number; category: Category } | null>(null);
+  const focusPlaceCoordsRef = useRef<{
+    lat: number;
+    lng: number;
+    category: Category;
+    listPresetId?: string | null;
+  } | null>(null);
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
@@ -2995,6 +3011,8 @@ function HomePageContent() {
 
       const coursePlaces = fullscreenCourseRef.current;
       const isFullscreenCourseMode = Boolean(coursePlaces?.length);
+      const listSession = fullscreenListRef.current;
+      const isFullscreenListMode = Boolean(listSession?.places.length);
 
       const courseToMarker = (place: CoursePlace, index: number, coords: LatLng) => ({
         id: `course-${index}`,
@@ -3016,9 +3034,38 @@ function HomePageContent() {
         address?: string;
         photos?: string[];
         postCount?: number;
+        isSaved?: boolean;
+        photoPostIds?: string[];
+        listPresetId?: string | null;
+        order?: number;
       }>;
 
-      if (isFullscreenCourseMode && coursePlaces) {
+      if (isFullscreenListMode && listSession) {
+        initialMarkers = listSession.places.flatMap((place) => {
+          const coords = resolvePlaceCoords(place);
+          if (!coords) return [];
+          placePinByIdRef.current.set(`place-${place.id}`, place);
+          savedPlaceCoordsRef.current[place.id] = coords;
+          const { photos, postCount, photoPostIds } = getMarkerPhotoMetaForPlace(
+            feedPostsRef.current,
+            place,
+            coords,
+          );
+          return [{
+            id: `place-${place.id}`,
+            lat: coords.lat,
+            lng: coords.lng,
+            category: place.category,
+            title: place.name,
+            address: place.address,
+            isSaved: true,
+            ...(listSession.color ? { listPresetId: listSession.color } : {}),
+            ...(photos.length > 0 ? { photos } : {}),
+            ...(postCount > 0 ? { postCount } : {}),
+            ...(photoPostIds.length > 0 ? { photoPostIds } : {}),
+          }];
+        });
+      } else if (isFullscreenCourseMode && coursePlaces) {
         const courseEntries = coursePlaces.flatMap((place, index) => {
           let coords: LatLng | null = null;
           if (Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
@@ -3117,7 +3164,7 @@ function HomePageContent() {
         initialMarkers,
         { lat, lng },
         {
-          useMyLocation: !isFullscreenCourseMode,
+          useMyLocation: !isFullscreenCourseMode && !isFullscreenListMode,
           myLocation:
             storedMyLocation &&
             Number.isFinite(storedMyLocation.lat) &&
@@ -3150,6 +3197,9 @@ function HomePageContent() {
                 lat: focusAtPresent.lat,
                 lng: focusAtPresent.lng,
                 category: focusAtPresent.category,
+                ...(focusAtPresent.listPresetId
+                  ? { listPresetId: focusAtPresent.listPresetId }
+                  : {}),
               },
             ],
             clearPrefix: "focus-",
@@ -3168,6 +3218,10 @@ function HomePageContent() {
 
       if (isFullscreenCourseMode) {
         scheduleRestoreFullscreenPlaceSheet(selectedMarkerIdForRestore);
+        return;
+      }
+
+      if (isFullscreenListMode) {
         return;
       }
 
@@ -3243,6 +3297,7 @@ function HomePageContent() {
                       lat: focus.lat,
                       lng: focus.lng,
                       category: focus.category,
+                      ...(focus.listPresetId ? { listPresetId: focus.listPresetId } : {}),
                     },
                   ];
                 })(),
@@ -3284,6 +3339,8 @@ function HomePageContent() {
     fullscreenAutoOpenedRef.current = false;
     fullscreenCourseRouteSessionRef.current += 1;
     fullscreenCourseRef.current = null;
+    fullscreenListRef.current = null;
+    setListMapActive(false);
     fullscreenCourseNavigationRef.current = null;
     setCourseNavigation(null);
     setCourseNavSegmentIndex(null);
@@ -3302,6 +3359,8 @@ function HomePageContent() {
       fullscreenAutoOpenedRef.current = false;
       fullscreenCourseRouteSessionRef.current += 1;
       fullscreenCourseRef.current = null;
+      fullscreenListRef.current = null;
+      setListMapActive(false);
       fullscreenCourseNavigationRef.current = null;
       setCourseNavigation(null);
       setCourseNavSegmentIndex(null);
@@ -3316,6 +3375,13 @@ function HomePageContent() {
         setShowCourseRoute(false);
         setCourseDesignPath(null);
         setShowCourseModal(true);
+        return;
+      }
+      if (returnToListDetailRef.current) {
+        returnToListDetailRef.current = false;
+        setMapExpanded(false);
+        setActiveTab("saved");
+        setShowMyListsScreen(true);
         return;
       }
       setMapExpanded(false);
@@ -6741,7 +6807,14 @@ function HomePageContent() {
   }, []);
 
   const applyFocusPlaceMarkerOnMap = useCallback(
-    (map: any, scope: "main" | "expanded", lat: number, lng: number, category: Category) => {
+    (
+      map: any,
+      scope: "main" | "expanded",
+      lat: number,
+      lng: number,
+      category: Category,
+      listPresetId?: string | null,
+    ) => {
       if (!map || !window.kakao?.maps) return;
       const existing = focusPlaceMarkerRef.current[scope];
       if (existing) {
@@ -6753,10 +6826,11 @@ function HomePageContent() {
         focusPlaceMarkerRef.current[scope] = null;
       }
       try {
+        const fillColor = resolveListColor(listPresetId) ?? resolvePinColor(category);
         const marker = new window.kakao.maps.Marker({
           position: new window.kakao.maps.LatLng(lat, lng),
           image: new window.kakao.maps.MarkerImage(
-            makeFocusMarkerImage(category, resolvePinColor(category)),
+            makeFocusMarkerImage(category, fillColor),
             new window.kakao.maps.Size(48, 58),
             { offset: new window.kakao.maps.Point(24, 58) },
           ),
@@ -6772,10 +6846,16 @@ function HomePageContent() {
   );
 
   const syncFocusPlaceMarkerToNative = useCallback(
-    (lat: number, lng: number, category: Category) => {
+    (lat: number, lng: number, category: Category, listPresetId?: string | null) => {
       if (!isNativeMapAvailable()) return;
       const payload = [
-        { id: FOCUS_PLACE_MARKER_ID, lat, lng, category },
+        {
+          id: FOCUS_PLACE_MARKER_ID,
+          lat,
+          lng,
+          category,
+          ...(listPresetId ? { listPresetId } : {}),
+        },
       ];
       void clearNativeMarkers("focus-").then(() => addNativeMarkers(payload));
       if (mapExpandedLiveRef.current) {
@@ -6790,16 +6870,23 @@ function HomePageContent() {
 
   /** 저장 핀과 별도 임시 강조 마커 (미니맵 + 확장 웹 + 네이티브) */
   const showFocusPlaceMarker = useCallback(
-    (lat: number, lng: number, category: Category) => {
+    (lat: number, lng: number, category: Category, listPresetId?: string | null) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      focusPlaceCoordsRef.current = { lat, lng, category };
+      focusPlaceCoordsRef.current = { lat, lng, category, listPresetId: listPresetId ?? null };
       if (mapRef.current) {
-        applyFocusPlaceMarkerOnMap(mapRef.current, "main", lat, lng, category);
+        applyFocusPlaceMarkerOnMap(mapRef.current, "main", lat, lng, category, listPresetId);
       }
       if (mapExpandedLiveRef.current && expandedMapRef.current) {
-        applyFocusPlaceMarkerOnMap(expandedMapRef.current, "expanded", lat, lng, category);
+        applyFocusPlaceMarkerOnMap(
+          expandedMapRef.current,
+          "expanded",
+          lat,
+          lng,
+          category,
+          listPresetId,
+        );
       }
-      syncFocusPlaceMarkerToNative(lat, lng, category);
+      syncFocusPlaceMarkerToNative(lat, lng, category, listPresetId);
     },
     [applyFocusPlaceMarkerOnMap, syncFocusPlaceMarkerToNative],
   );
@@ -6816,11 +6903,14 @@ function HomePageContent() {
         | { type: "curation"; postId: string; fromTab?: TabId }
         | null;
       switchToMap?: boolean;
+      /** 목록에서 지도로 올 때 목록 색 프리셋 (null이면 카테고리 색) */
+      listColor?: string | null;
     },
   ) => {
     const returnTo =
       opts?.returnTo === undefined ? { type: "saved" as const } : opts.returnTo;
     const switchToMap = opts?.switchToMap === true;
+    const listColor = opts?.listColor ?? null;
     console.log("[PindMap:placeSheet] handleSavedPlaceClick", {
       placeId: place.id,
       name: place.name,
@@ -6828,6 +6918,7 @@ function HomePageContent() {
       lng: place.lng,
       returnTo,
       switchToMap,
+      listColor,
       hasMap: !!mapRef.current,
     });
     placeSheetReturnRef.current = returnTo;
@@ -6854,14 +6945,14 @@ function HomePageContent() {
       mapRef.current.setLevel(4);
       savedPlaceCoordsRef.current[place.id] = stored;
       if (goingToMap) {
-        showFocusPlaceMarker(stored.lat, stored.lng, place.category);
+        showFocusPlaceMarker(stored.lat, stored.lng, place.category, listColor);
       }
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
       return;
     }
     if (stored) {
       if (goingToMap) {
-        showFocusPlaceMarker(stored.lat, stored.lng, place.category);
+        showFocusPlaceMarker(stored.lat, stored.lng, place.category, listColor);
       }
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
       return;
@@ -6880,7 +6971,7 @@ function HomePageContent() {
         mapRef.current.setLevel(4);
       }
       if (goingToMap) {
-        showFocusPlaceMarker(coords.lat, coords.lng, place.category);
+        showFocusPlaceMarker(coords.lat, coords.lng, place.category, listColor);
       }
       setSelectedPlace(toSelectedFromSavedPlace({ ...place, ...coords }, relatedPosts, coords.lat, coords.lng));
     })();
@@ -7936,6 +8027,149 @@ function HomePageContent() {
     setMapExpanded(true);
     // 지도가 그려진 후에 마커와 폴리라인 그리기 (살짝 딜레이)
     setTimeout(() => void drawCourseRoute(), 800);
+  };
+
+  const clearListWebMarkers = () => {
+    listWebMarkersRef.current.forEach((m) => {
+      try {
+        m.setMap(null);
+      } catch {
+        /* noop */
+      }
+    });
+    listWebMarkersRef.current = [];
+  };
+
+  const drawListMarkersOnExpandedMap = () => {
+    const session = fullscreenListRef.current;
+    if (!session?.places.length || !expandedMapRef.current || !window.kakao?.maps) return;
+
+    clearListWebMarkers();
+    expandedMarkersRef.current.forEach((m) => {
+      try {
+        m.setMap(null);
+      } catch {
+        /* noop */
+      }
+    });
+    expandedMarkersRef.current = [];
+
+    const fillOverride = resolveListColor(session.color);
+    const bounds = new window.kakao.maps.LatLngBounds();
+    let pinned = 0;
+
+    for (const place of session.places) {
+      const lat = place.lat;
+      const lng = place.lng;
+      if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+        continue;
+      }
+      const fillColor = fillOverride ?? resolvePinColor(place.category);
+      const position = new window.kakao.maps.LatLng(lat, lng);
+      const marker = new window.kakao.maps.Marker({
+        position,
+        image: new window.kakao.maps.MarkerImage(
+          makeMarkerImage(place.category, fillColor),
+          new window.kakao.maps.Size(36, 44),
+        ),
+        zIndex: 5,
+      });
+      marker.setMap(expandedMapRef.current);
+      listWebMarkersRef.current.push(marker);
+      bounds.extend(position);
+      pinned += 1;
+
+      window.kakao.maps.event.addListener(marker, "click", () => {
+        const relatedPosts = getRelatedPostsForPlaceSheet(
+          feedPostsRef.current,
+          placeRefFromPlace(place, lat, lng),
+        );
+        placeSheetReturnRef.current = null;
+        setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, lat, lng));
+      });
+    }
+
+    if (pinned === 0) return;
+    if (pinned === 1) {
+      const only = session.places.find(
+        (p) =>
+          typeof p.lat === "number" &&
+          typeof p.lng === "number" &&
+          Number.isFinite(p.lat) &&
+          Number.isFinite(p.lng),
+      );
+      if (only?.lat != null && only?.lng != null) {
+        expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(only.lat, only.lng));
+        expandedMapRef.current.setLevel(4);
+      }
+      return;
+    }
+    expandedMapRef.current.setBounds(bounds);
+  };
+
+  const showListOnMap = (
+    list: { id: string; title: string; color: string | null },
+    listPlaces: Array<{
+      id: string;
+      name: string;
+      address: string;
+      category: string;
+      lat?: number;
+      lng?: number;
+      created_at?: string;
+      memo?: string | null;
+    }>,
+  ) => {
+    const places: Place[] = listPlaces
+      .filter(
+        (p) =>
+          typeof p.lat === "number" &&
+          typeof p.lng === "number" &&
+          Number.isFinite(p.lat) &&
+          Number.isFinite(p.lng),
+      )
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        address: p.address,
+        category: p.category as Category,
+        lat: p.lat,
+        lng: p.lng,
+        ...(p.created_at ? { created_at: p.created_at } : {}),
+        ...(p.memo !== undefined ? { memo: p.memo } : {}),
+      }));
+    if (places.length === 0) {
+      showToast("지도에 표시할 장소가 없어요", "info");
+      return;
+    }
+
+    returnToListDetailRef.current = true;
+    returnToCourseSheetRef.current = false;
+    fullscreenCourseRef.current = null;
+    setShowCourseRoute(false);
+    setCourseDesignPath(null);
+    setCourseNavigation(null);
+    setCourseNavSegmentIndex(null);
+    setCourseNavFocusMode(false);
+    setCourseNavStepIndex(null);
+    fullscreenCourseNavigationRef.current = null;
+    clearFocusPlaceMarker();
+    clearListWebMarkers();
+
+    fullscreenListRef.current = {
+      listId: list.id,
+      title: list.title,
+      color: list.color,
+      places,
+    };
+    setListMapActive(true);
+    setShowMyListsScreen(false);
+    setActiveTab("map");
+    setMapExpanded(true);
+
+    if (!isNativeMapAvailable()) {
+      window.setTimeout(() => drawListMarkersOnExpandedMap(), 800);
+    }
   };
 
   // 전체화면 지도에 코스 경로 그리기
@@ -10637,9 +10871,14 @@ function HomePageContent() {
       expandedMarkersRef.current = [];
       return;
     }
+    if (listMapActive && fullscreenListRef.current?.places.length) {
+      drawListMarkersOnExpandedMap();
+      return;
+    }
+    clearListWebMarkers();
     addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPosts, savedPlaces, "expanded");
     // addFeedPins(expandedMapRef.current, feedMarkersRef.current, feedPosts); // 비활성화: 다른 사람 큐레이션 핀 안 보이게
-  }, [feedPosts, mapExpanded, savedPlaces, expandedMapPinsTick, showCourseRoute]);
+  }, [feedPosts, mapExpanded, savedPlaces, expandedMapPinsTick, showCourseRoute, listMapActive]);
 
   useEffect(() => {
     if (activeTab !== "map") {
@@ -10670,9 +10909,10 @@ function HomePageContent() {
         focus.lat,
         focus.lng,
         focus.category,
+        focus.listPresetId,
       );
     }
-    syncFocusPlaceMarkerToNative(focus.lat, focus.lng, focus.category);
+    syncFocusPlaceMarkerToNative(focus.lat, focus.lng, focus.category, focus.listPresetId);
   }, [mapExpanded, applyFocusPlaceMarkerOnMap, syncFocusPlaceMarkerToNative]);
 
   useEffect(() => {
@@ -10686,6 +10926,11 @@ function HomePageContent() {
       pendingSearchCenterSyncRef.current = false;
       setExpandedNativeMapEnabled(false);
       setExpandedNativeMapId(null);
+      clearListWebMarkers();
+      if (!isNativeMapAvailable()) {
+        fullscreenListRef.current = null;
+        setListMapActive(false);
+      }
     }
   }, [mapExpanded]);
 
@@ -13977,6 +14222,20 @@ function HomePageContent() {
                             setShowCourseModal(true);
                             return;
                           }
+                          if (returnToListDetailRef.current) {
+                            returnToListDetailRef.current = false;
+                            fullscreenListRef.current = null;
+                            setListMapActive(false);
+                            clearListWebMarkers();
+                            setMapExpanded(false);
+                            setSelectedPlace(null);
+                            setActiveTab("saved");
+                            setShowMyListsScreen(true);
+                            return;
+                          }
+                          fullscreenListRef.current = null;
+                          setListMapActive(false);
+                          clearListWebMarkers();
                           setMapExpanded(false);
                           setSelectedPlace(null);
                           setShowCourseRoute(false);
@@ -15459,7 +15718,7 @@ function HomePageContent() {
                 { returnTo: { type: "list" } },
               );
             }}
-            onViewOnMap={(place) => {
+            onViewOnMap={(place, listColor) => {
               const fromSaved = savedPlacesRef.current.find((p) => p.id === place.id);
               setShowMyListsScreen(false);
               handleSavedPlaceClick(
@@ -15477,8 +15736,11 @@ function HomePageContent() {
                       ? { memo: place.memo }
                       : {}),
                 },
-                { returnTo: { type: "list" }, switchToMap: true },
+                { returnTo: { type: "list" }, switchToMap: true, listColor },
               );
+            }}
+            onViewListOnMap={(list, places) => {
+              showListOnMap(list, places);
             }}
             onOpenMemo={(place) => {
               const fromSaved = savedPlacesRef.current.find((p) => p.id === place.id);

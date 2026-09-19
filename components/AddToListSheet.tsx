@@ -9,6 +9,12 @@ import {
   removePlaceFromList,
   type PlaceListSummary,
 } from "@/lib/placeLists";
+import {
+  DEFAULT_LIST_COLOR_PRESET,
+  ListColorDot,
+  ListColorSwatches,
+} from "@/components/ListColorSwatches";
+import type { ListColorPresetId } from "@/lib/listColors";
 
 type Props = {
   open: boolean;
@@ -47,6 +53,7 @@ export function AddToListSheet({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
+  const [newColor, setNewColor] = useState<ListColorPresetId>(DEFAULT_LIST_COLOR_PRESET);
   const [createBusy, setCreateBusy] = useState(false);
   const createRowRef = useRef<HTMLDivElement | null>(null);
   const hasLoadedRef = useRef(false);
@@ -62,7 +69,6 @@ export function AddToListSheet({
       now - listsFetchedAtRef.current < LISTS_TTL_MS;
 
     if (listsFresh) {
-      // 목록은 TTL 재사용 — 체크 상태만 장소 기준으로 갱신
       if (singlePlaceId) {
         const forPlaceRes = await fetchListsForPlace(singlePlaceId);
         if (forPlaceRes.error) {
@@ -111,6 +117,7 @@ export function AddToListSheet({
     if (!open) return;
     setCreating(false);
     setNewTitle("");
+    setNewColor(DEFAULT_LIST_COLOR_PRESET);
     void load();
   }, [open, load]);
 
@@ -189,19 +196,19 @@ export function AddToListSheet({
       id: tempId,
       user_id: userId,
       title: trimmed,
+      color: newColor,
       place_count: placeIds.length,
       created_at: now,
       updated_at: now,
     };
 
-    // 즉시 UI 반영 — 서버는 뒤에서
     setLists((prev) => [optimistic, ...prev]);
     setCheckedIds((prev) => new Set(prev).add(tempId));
     setNewTitle("");
     setCreating(false);
     setCreateBusy(true);
 
-    const { data, error } = await createList(userId, trimmed);
+    const { data, error } = await createList(userId, trimmed, newColor);
     if (error || !data) {
       setLists((prev) => prev.filter((l) => l.id !== tempId));
       setCheckedIds((prev) => {
@@ -214,7 +221,8 @@ export function AddToListSheet({
       return;
     }
 
-    // temp → 서버 id 교체 (전체 재조회 없음)
+    setNewColor(DEFAULT_LIST_COLOR_PRESET);
+
     setLists((prev) =>
       prev.map((l) =>
         l.id === tempId ? { ...data, place_count: placeIds.length } : l,
@@ -239,12 +247,10 @@ export function AddToListSheet({
         prev.map((l) => (l.id === data.id ? { ...l, place_count: 0 } : l)),
       );
       showToast(addError, "error");
-      // 생성은 됐으므로 다음 오픈 시 목록 강제 재조회
       listsFetchedAtRef.current = 0;
       return;
     }
 
-    // 목록 생성 직후 — TTL 무효화 후 서버 목록으로 맞춤
     listsFetchedAtRef.current = 0;
     void load({ force: true });
 
@@ -295,32 +301,46 @@ export function AddToListSheet({
               type="button"
               className="placeListSheetCreateBtn"
               disabled={createBusy}
-              onClick={() => setCreating(true)}
+              onClick={() => {
+                setNewColor(DEFAULT_LIST_COLOR_PRESET);
+                setCreating(true);
+              }}
             >
               {createBusy ? "목록 저장 중…" : "+ 새 목록 만들기"}
             </button>
           ) : (
-            <div className="placeListSheetCreateRow" ref={createRowRef}>
-              <input
-                className="placeListSheetCreateInput"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="목록 이름 (예: 데이트용)"
-                maxLength={60}
-                autoFocus
-                disabled={createBusy}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleCreate();
-                }}
-              />
-              <button
-                type="button"
-                className="placeListSheetCreateConfirm"
-                disabled={!newTitle.trim() || createBusy}
-                onClick={() => void handleCreate()}
-              >
-                {createBusy ? "…" : "만들기"}
-              </button>
+            <div className="placeListSheetCreateBlock" ref={createRowRef}>
+              <div className="placeListSheetCreateRow">
+                <input
+                  className="placeListSheetCreateInput"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="목록 이름 (예: 데이트용)"
+                  maxLength={60}
+                  autoFocus
+                  disabled={createBusy}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleCreate();
+                  }}
+                />
+                <button
+                  type="button"
+                  className="placeListSheetCreateConfirm"
+                  disabled={!newTitle.trim() || createBusy}
+                  onClick={() => void handleCreate()}
+                >
+                  {createBusy ? "…" : "만들기"}
+                </button>
+              </div>
+              <div className="placeListSheetCreateColors">
+                <ListColorSwatches
+                  value={newColor}
+                  onChange={setNewColor}
+                  disabled={createBusy}
+                  size="sm"
+                  aria-label="새 목록 색"
+                />
+              </div>
             </div>
           )}
 
@@ -346,6 +366,7 @@ export function AddToListSheet({
                         disabled={!!busyId || pendingCreate || createBusy}
                         onChange={() => void toggleList(list.id)}
                       />
+                      <ListColorDot color={list.color} size={10} />
                       <span className="placeListSheetCheckText">
                         <span className="placeListSheetCheckName">
                           {list.title}

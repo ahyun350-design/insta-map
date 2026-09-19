@@ -5,6 +5,8 @@ export type PlaceListSummary = {
   id: string;
   user_id: string;
   title: string;
+  /** Preset id or null (null → category pin colors) */
+  color: string | null;
   place_count: number;
   created_at: string;
   updated_at: string;
@@ -22,6 +24,23 @@ export type PlaceListPlace = {
   sort_order: number;
 };
 
+const LIST_COLOR_PRESET_IDS = [
+  "coral",
+  "orange",
+  "yellow",
+  "lime",
+  "green",
+  "sky",
+  "violet",
+  "pink",
+  "slate",
+] as const;
+
+export type PlaceListColorPresetId = (typeof LIST_COLOR_PRESET_IDS)[number];
+
+const PLACE_LIST_SELECT =
+  "id, user_id, title, color, created_at, updated_at, place_list_items(count)";
+
 function mapDbError(error: { code?: string; message?: string }, fallback: string): string {
   return toUserMessage(error, fallback);
 }
@@ -30,6 +49,17 @@ function validateListTitle(trimmed: string): string | null {
   if (!trimmed) return "이름을 입력해주세요";
   if (trimmed.length > 60) return "이름은 60자 이내로 입력해주세요";
   return null;
+}
+
+export function normalizeListColor(
+  color: string | null | undefined,
+): PlaceListColorPresetId | null {
+  if (typeof color !== "string") return null;
+  const key = color.trim();
+  if (!key) return null;
+  return (LIST_COLOR_PRESET_IDS as readonly string[]).includes(key)
+    ? (key as PlaceListColorPresetId)
+    : null;
 }
 
 function mapListRow(row: Record<string, unknown>): PlaceListSummary {
@@ -47,6 +77,7 @@ function mapListRow(row: Record<string, unknown>): PlaceListSummary {
     id: String(row.id ?? ""),
     user_id: String(row.user_id ?? ""),
     title: String(row.title ?? ""),
+    color: normalizeListColor(typeof row.color === "string" ? row.color : null),
     place_count: placeCount,
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
@@ -59,7 +90,7 @@ export async function fetchMyLists(
 ): Promise<{ data: PlaceListSummary[]; error: string | null }> {
   const { data, error } = await supabase
     .from("place_lists")
-    .select("id, user_id, title, created_at, updated_at, place_list_items(count)")
+    .select(PLACE_LIST_SELECT)
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
@@ -73,10 +104,11 @@ export async function fetchMyLists(
   };
 }
 
-/** 목록 생성 */
+/** 목록 생성 — color는 프리셋 id 또는 null */
 export async function createList(
   userId: string,
   title: string,
+  color?: string | null,
 ): Promise<{ data: PlaceListSummary | null; error: string | null }> {
   const trimmed = title.trim();
   const validationError = validateListTitle(trimmed);
@@ -84,10 +116,15 @@ export async function createList(
     return { data: null, error: validationError };
   }
 
+  const normalizedColor = normalizeListColor(color);
   const { data, error } = await supabase
     .from("place_lists")
-    .insert({ user_id: userId, title: trimmed })
-    .select("id, user_id, title, created_at, updated_at")
+    .insert({
+      user_id: userId,
+      title: trimmed,
+      color: normalizedColor,
+    })
+    .select("id, user_id, title, color, created_at, updated_at")
     .single();
 
   if (error) {
@@ -100,7 +137,7 @@ export async function createList(
   };
 }
 
-/** 이름 수정 (updated_at 갱신) */
+/** 이름 수정 (updated_at 갱신) — 색은 건드리지 않음 */
 export async function renameList(
   listId: string,
   title: string,
@@ -115,11 +152,35 @@ export async function renameList(
     .from("place_lists")
     .update({ title: trimmed, updated_at: new Date().toISOString() })
     .eq("id", listId)
-    .select("id, user_id, title, created_at, updated_at, place_list_items(count)")
+    .select(PLACE_LIST_SELECT)
     .single();
 
   if (error) {
     return { data: null, error: mapDbError(error, "이름을 바꾸지 못했어요.") };
+  }
+
+  return { data: mapListRow(data as Record<string, unknown>), error: null };
+}
+
+/** 목록 색만 변경 (이름과 분리) */
+export async function updateListColor(
+  listId: string,
+  color: string | null,
+): Promise<{ data: PlaceListSummary | null; error: string | null }> {
+  const normalizedColor = normalizeListColor(color);
+  if (color != null && color.trim() !== "" && normalizedColor === null) {
+    return { data: null, error: "지원하지 않는 색이에요." };
+  }
+
+  const { data, error } = await supabase
+    .from("place_lists")
+    .update({ color: normalizedColor, updated_at: new Date().toISOString() })
+    .eq("id", listId)
+    .select(PLACE_LIST_SELECT)
+    .single();
+
+  if (error) {
+    return { data: null, error: mapDbError(error, "색을 바꾸지 못했어요.") };
   }
 
   return { data: mapListRow(data as Record<string, unknown>), error: null };

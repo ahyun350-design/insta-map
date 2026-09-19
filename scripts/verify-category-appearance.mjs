@@ -69,8 +69,12 @@ function resolveListColor(presetId) {
   return EXPECTED_PRESETS[key] ?? null;
 }
 
-function resolveNativeMarkerColorHex() {
-  return undefined;
+function resolveNativeMarkerColorHex(input) {
+  const raw = input?.listPresetId;
+  if (typeof raw !== "string") return undefined;
+  const key = raw.trim();
+  if (!key) return undefined;
+  return EXPECTED_PRESETS[key];
 }
 
 let failed = 0;
@@ -115,11 +119,22 @@ assert(/LIST_COLOR_PRESETS/.test(listSrc), "listColors.ts re-exports LIST_COLOR_
 assert(resolveListColor("nope") === null, "invalid list id → null");
 assert(resolveListColor("") === null, "empty list id → null");
 
-assert(resolveNativeMarkerColorHex() === undefined, "native colorHex phase1 undefined");
+assert(resolveNativeMarkerColorHex() === undefined, "native colorHex no input → undefined");
 assert(
-  /return undefined/.test(appearanceSrc) &&
-    /resolveNativeMarkerColorHex/.test(appearanceSrc),
-  "categoryAppearance.ts resolveNativeMarkerColorHex returns undefined",
+  resolveNativeMarkerColorHex({ category: "맛집" }) === undefined,
+  "native colorHex category-only → undefined",
+);
+assert(
+  resolveNativeMarkerColorHex({ listPresetId: "coral" }) === "#E85D4C",
+  "native colorHex list mode coral",
+);
+assert(
+  resolveNativeMarkerColorHex({ listPresetId: "nope" }) === undefined,
+  "native colorHex invalid list → undefined",
+);
+assert(
+  /listPresetId/.test(appearanceSrc) && /LIST_COLOR_PRESETS\[key\]/.test(appearanceSrc),
+  "categoryAppearance.ts listPresetId resolves via LIST_COLOR_PRESETS",
 );
 assert(/withNativeMarkerColorHex/.test(appearanceSrc), "withNativeMarkerColorHex exported");
 assert(/buildCategoryPinRecord/.test(appearanceSrc), "buildCategoryPinRecord exported");

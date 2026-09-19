@@ -16,10 +16,18 @@ import {
   removePlaceFromList,
   renameList,
   reorderListPlaces,
+  updateListColor,
   type PlaceListPlace,
   type PlaceListSummary,
 } from "@/lib/placeLists";
 import { FEED_POST_CATEGORIES, type FeedPostCategory } from "@/lib/feedPost";
+import {
+  DEFAULT_LIST_COLOR_PRESET,
+  ListColorDot,
+  ListColorSwatches,
+} from "@/components/ListColorSwatches";
+import type { ListColorPresetId } from "@/lib/listColors";
+import { LIST_COLOR_PRESETS } from "@/lib/listColors";
 
 type Category = FeedPostCategory;
 
@@ -82,8 +90,10 @@ type Props = {
   onClose: () => void;
   /** 행 탭 — 장소 상세 시트 (목록 유지) */
   onOpenPlace: (place: PlaceListPlace) => void;
-  /** ⋯ → 지도에서 보기 — 지도 탭 이동 */
-  onViewOnMap: (place: PlaceListPlace) => void;
+  /** ⋯ → 지도에서 보기 — 지도 탭 이동 (목록 색 전달) */
+  onViewOnMap: (place: PlaceListPlace, listColor: string | null) => void;
+  /** 목록 전체 → 전체화면 지도 (목록 색 핀) */
+  onViewListOnMap: (list: PlaceListSummary, places: PlaceListPlace[]) => void;
   onOpenMemo: (place: PlaceListPlace) => void;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
 };
@@ -97,6 +107,7 @@ export function MyListsScreen({
   onClose,
   onOpenPlace,
   onViewOnMap,
+  onViewListOnMap,
   onOpenMemo,
   showToast,
 }: Props) {
@@ -120,6 +131,8 @@ export function MyListsScreen({
   const [nearDenied, setNearDenied] = useState(false);
   const [menuPlaceId, setMenuPlaceId] = useState<string | null>(null);
   const [menuClosing, setMenuClosing] = useState(false);
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [savingColor, setSavingColor] = useState(false);
 
   const placesRef = useRef(places);
   placesRef.current = places;
@@ -191,6 +204,7 @@ export function MyListsScreen({
       setDetailSortMenuOpen(false);
       setMenuPlaceId(null);
       setDetailLoading(true);
+      setColorPickerOpen(false);
       const { data, error } = await fetchListPlaces(list.id);
       setDetailLoading(false);
       if (error) {
@@ -256,9 +270,56 @@ export function MyListsScreen({
       preserveDetailOnHideRef.current = true;
       setMenuPlaceId(null);
       setMenuClosing(false);
-      onViewOnMap(place);
+      onViewOnMap(place, detailList?.color ?? null);
     },
-    [onViewOnMap],
+    [onViewOnMap, detailList?.color],
+  );
+
+  const handleViewListOnMap = useCallback(() => {
+    if (!detailList) return;
+    const mappable = places.filter(
+      (p) => typeof p.lat === "number" && typeof p.lng === "number" && Number.isFinite(p.lat) && Number.isFinite(p.lng),
+    );
+    if (mappable.length === 0) {
+      showToast("지도에 표시할 장소가 없어요", "info");
+      return;
+    }
+    detailScrollTopRef.current = detailBodyRef.current?.scrollTop ?? 0;
+    preserveDetailOnHideRef.current = true;
+    setColorPickerOpen(false);
+    setMenuPlaceId(null);
+    setMenuClosing(false);
+    onViewListOnMap(detailList, mappable);
+  }, [detailList, places, onViewListOnMap, showToast]);
+
+  const handleUpdateColor = useCallback(
+    async (next: ListColorPresetId) => {
+      if (!detailList || savingColor) return;
+      if (detailList.color === next) {
+        setColorPickerOpen(false);
+        return;
+      }
+      const listId = detailList.id;
+      const prevColor = detailList.color;
+      setDetailList((d) => (d ? { ...d, color: next } : d));
+      setLists((prev) => prev.map((l) => (l.id === listId ? { ...l, color: next } : l)));
+      setColorPickerOpen(false);
+      setSavingColor(true);
+      const { data, error } = await updateListColor(listId, next);
+      setSavingColor(false);
+      if (error || !data) {
+        showToast(error || "색을 바꾸지 못했어요.", "error");
+        setDetailList((d) => (d ? { ...d, color: prevColor } : d));
+        setLists((prev) =>
+          prev.map((l) => (l.id === listId ? { ...l, color: prevColor } : l)),
+        );
+        return;
+      }
+      setDetailList(data);
+      setLists((prev) => prev.map((l) => (l.id === data.id ? { ...l, color: data.color } : l)));
+      listsFetchedAtRef.current = 0;
+    },
+    [detailList, savingColor, showToast],
   );
 
   useEffect(() => {
@@ -697,17 +758,34 @@ export function MyListsScreen({
                 onBlur={() => void handleRename()}
               />
             ) : (
-              <button
-                type="button"
-                className="myListsTitleBtn"
-                onClick={() => {
-                  setTitleDraft(detailList.title);
-                  setEditingTitle(true);
-                }}
-              >
-                {detailList.title}
-                {savingTitle ? " …" : ""}
-              </button>
+              <div className="myListsTitleRow">
+                <button
+                  type="button"
+                  className="myListsColorSwatchBtn"
+                  aria-label="목록 색 바꾸기"
+                  aria-expanded={colorPickerOpen}
+                  disabled={savingColor}
+                  onClick={() => setColorPickerOpen((o) => !o)}
+                  style={{
+                    background:
+                      (detailList.color && LIST_COLOR_PRESETS[detailList.color]) ||
+                      LIST_COLOR_PRESETS[DEFAULT_LIST_COLOR_PRESET],
+                    opacity: detailList.color ? 1 : 0.45,
+                  }}
+                />
+                <button
+                  type="button"
+                  className="myListsTitleBtn"
+                  onClick={() => {
+                    setColorPickerOpen(false);
+                    setTitleDraft(detailList.title);
+                    setEditingTitle(true);
+                  }}
+                >
+                  {detailList.title}
+                  {savingTitle ? " …" : ""}
+                </button>
+              </div>
             )}
             <button
               type="button"
@@ -730,8 +808,39 @@ export function MyListsScreen({
         )}
       </header>
 
+      {detailList && colorPickerOpen ? (
+        <div className="myListsColorPicker">
+          <ListColorSwatches
+            value={
+              (detailList.color as ListColorPresetId | null) ?? DEFAULT_LIST_COLOR_PRESET
+            }
+            onChange={(id) => void handleUpdateColor(id)}
+            disabled={savingColor}
+            size="md"
+            aria-label="목록 색 선택"
+          />
+        </div>
+      ) : null}
       {detailList && !detailLoading && places.length > 0 ? (
         <div className="myListsDetailChrome">
+          <div className="myListsMapRow">
+            <button
+              type="button"
+              className="myListsMapBtn"
+              disabled={
+                !places.some(
+                  (p) =>
+                    typeof p.lat === "number" &&
+                    typeof p.lng === "number" &&
+                    Number.isFinite(p.lat) &&
+                    Number.isFinite(p.lng),
+                )
+              }
+              onClick={handleViewListOnMap}
+            >
+              지도로 보기
+            </button>
+          </div>
           <div className="myListsDetailSearchWrap">
             <input
               type="search"
@@ -837,6 +946,7 @@ export function MyListsScreen({
                     className="myListsListItem"
                     onClick={() => void openDetail(list)}
                   >
+                    <ListColorDot color={list.color} size={12} />
                     <span className="myListsListName">{list.title}</span>
                     <span className="myListsListMeta">{list.place_count}곳</span>
                   </button>

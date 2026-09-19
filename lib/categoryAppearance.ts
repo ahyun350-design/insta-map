@@ -93,19 +93,23 @@ export function resolveUiColor(
 
 export type ResolveNativeMarkerColorHexInput = {
   category?: string;
+  /** When set (list map mode), pin fill uses list preset; omit for category default */
   listPresetId?: string | null;
   categoryOverrides?: CategoryColorOverrides;
 };
 
 /**
  * Single decision point for native MarkerInput.colorHex.
- * Phase 1: always undefined so 1.8 uses built-in category palette (same as today).
- * Later: list preset / category overrides plug in here.
+ * List mode: valid preset → hex. Otherwise undefined → native category palette (1.7/1.8 safe).
  */
 export function resolveNativeMarkerColorHex(
-  _input?: ResolveNativeMarkerColorHexInput,
+  input?: ResolveNativeMarkerColorHexInput,
 ): string | undefined {
-  return undefined;
+  const raw = input?.listPresetId;
+  if (typeof raw !== "string") return undefined;
+  const key = raw.trim();
+  if (!key) return undefined;
+  return LIST_COLOR_PRESETS[key];
 }
 
 /** Props helper — pin record via resolvePinColor (emoji from defaults). */
@@ -134,19 +138,21 @@ export function buildCategoryColorsRecord(
 }
 
 /**
- * Attach phase-1 colorHex to a native marker payload.
- * Always omits colorHex today; later list/category overrides resolve here.
+ * Attach colorHex for native markers via resolveNativeMarkerColorHex.
+ * Strips listPresetId so it never reaches the plugin bridge.
  */
-export function withNativeMarkerColorHex<T extends { category?: string; colorHex?: string }>(
+export function withNativeMarkerColorHex<
+  T extends { category?: string; colorHex?: string; listPresetId?: string | null },
+>(
   marker: T,
-  input?: Omit<ResolveNativeMarkerColorHexInput, "category">,
-): Omit<T, "colorHex"> & { colorHex?: string } {
+  input?: Omit<ResolveNativeMarkerColorHexInput, "category" | "listPresetId">,
+): Omit<T, "colorHex" | "listPresetId"> & { colorHex?: string } {
   const colorHex = resolveNativeMarkerColorHex({
     category: marker.category,
-    listPresetId: input?.listPresetId,
+    listPresetId: marker.listPresetId,
     categoryOverrides: input?.categoryOverrides,
   });
-  const { colorHex: _drop, ...rest } = marker;
+  const { colorHex: _drop, listPresetId: _list, ...rest } = marker;
   if (colorHex === undefined) {
     return rest;
   }

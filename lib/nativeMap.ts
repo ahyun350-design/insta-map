@@ -92,8 +92,10 @@ export type NativeMarkerInput = {
   title?: string;
   address?: string;
   category?: string;
-  /** Optional pin fill; phase 1 always stripped via withNativeMarkerColorHex */
+  /** Optional pin fill; applied via withNativeMarkerColorHex */
   colorHex?: string;
+  /** List map mode — resolved to colorHex; stripped before plugin */
+  listPresetId?: string | null;
   photos?: string[];
   postCount?: number;
   isSaved?: boolean;
