@@ -4925,13 +4925,21 @@ function HomePageContent() {
   ]);
 
   /**
-   * Whats New (existing users) — home tab only, after auth/load settle.
+   * Whats New (existing users) — once after first screen is ready (any tab).
    * Does not read/write homeSessionSnapshot; only opens a portal modal.
+   * Map tab: wait until Kakao compact map is drawn (or SDK error) so the modal
+   * does not cover a blank/loading map.
    */
   useEffect(() => {
     if (!sessionChecked || userLoading || !user?.id) return;
-    if (activeTab !== "home") return;
     if (whatsNewCheckedRef.current && !whatsNewPack) return;
+
+    // First landing tab is usually map — wait for compact map paint
+    if (activeTab === "map") {
+      if (kakaoStatus === "idle" || kakaoStatus === "loading") return;
+      if (kakaoStatus === "ready" && !compactMapReady) return;
+      // kakaoStatus === "error" → still show (don't block forever)
+    }
 
     const overlaysOpen =
       showPostModal ||
@@ -4995,6 +5003,8 @@ function HomePageContent() {
     userLoading,
     user?.id,
     activeTab,
+    kakaoStatus,
+    compactMapReady,
     whatsNewPack,
     showPostModal,
     showCourseShareModal,
