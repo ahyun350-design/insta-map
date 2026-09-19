@@ -31,17 +31,17 @@ export const DEFAULT_CATEGORY_COLORS: Record<FeedPostCategory, string> = {
   여행지: "#1b9aad",
 };
 
-/** List folder color presets (a) — id → hex */
+/** List folder color presets — Pantone TCX set (distinct from category 7) */
 export const LIST_COLOR_PRESETS: Readonly<Record<string, string>> = {
-  coral: "#E85D4C",
-  orange: "#F0982B",
-  yellow: "#E6C200",
-  lime: "#7CB342",
-  green: "#2E7D57",
-  sky: "#2B8CEE",
-  violet: "#8E24AA",
-  pink: "#E91E8C",
-  slate: "#5C6B7A",
+  sunOrange: "#F48037",
+  beetroot: "#A9226B",
+  peach: "#F5B8AE",
+  foliage: "#7BA640",
+  spring: "#5CC49B",
+  bronze: "#525F48",
+  persian: "#6E7FBE",
+  windward: "#6E8CA3",
+  violet: "#B085B7",
 };
 
 export type ListColorPresetId = keyof typeof LIST_COLOR_PRESETS;

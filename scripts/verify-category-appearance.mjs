@@ -36,15 +36,15 @@ const LEGACY_UI = {
 };
 
 const EXPECTED_PRESETS = {
-  coral: "#E85D4C",
-  orange: "#F0982B",
-  yellow: "#E6C200",
-  lime: "#7CB342",
-  green: "#2E7D57",
-  sky: "#2B8CEE",
-  violet: "#8E24AA",
-  pink: "#E91E8C",
-  slate: "#5C6B7A",
+  sunOrange: "#F48037",
+  beetroot: "#A9226B",
+  peach: "#F5B8AE",
+  foliage: "#7BA640",
+  spring: "#5CC49B",
+  bronze: "#525F48",
+  persian: "#6E7FBE",
+  windward: "#6E8CA3",
+  violet: "#B085B7",
 };
 
 /** Mirror of lib/categoryAppearance.ts resolve (kept in sync by source hex asserts below). */
@@ -125,8 +125,8 @@ assert(
   "native colorHex category-only → undefined",
 );
 assert(
-  resolveNativeMarkerColorHex({ listPresetId: "coral" }) === "#E85D4C",
-  "native colorHex list mode coral",
+  resolveNativeMarkerColorHex({ listPresetId: "sunOrange" }) === "#F48037",
+  "native colorHex list mode sunOrange",
 );
 assert(
   resolveNativeMarkerColorHex({ listPresetId: "nope" }) === undefined,

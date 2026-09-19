@@ -4,7 +4,7 @@ import { LIST_COLOR_PRESETS, type ListColorPresetId } from "@/lib/listColors";
 
 export const LIST_COLOR_PRESET_IDS = Object.keys(LIST_COLOR_PRESETS) as ListColorPresetId[];
 
-export const DEFAULT_LIST_COLOR_PRESET: ListColorPresetId = "coral";
+export const DEFAULT_LIST_COLOR_PRESET: ListColorPresetId = "sunOrange";
 
 type Props = {
   value: ListColorPresetId | null;

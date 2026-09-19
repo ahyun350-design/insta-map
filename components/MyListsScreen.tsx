@@ -94,6 +94,8 @@ type Props = {
   onViewOnMap: (place: PlaceListPlace, listColor: string | null) => void;
   /** 목록 전체 → 전체화면 지도 (목록 색 핀) */
   onViewListOnMap: (list: PlaceListSummary, places: PlaceListPlace[]) => void;
+  /** 담기/빼기/목록 색 변경 후 저장 지도 핀 색 갱신 */
+  onListsChanged?: () => void;
   onOpenMemo: (place: PlaceListPlace) => void;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
 };
@@ -108,6 +110,7 @@ export function MyListsScreen({
   onOpenPlace,
   onViewOnMap,
   onViewListOnMap,
+  onListsChanged,
   onOpenMemo,
   showToast,
 }: Props) {
@@ -318,8 +321,9 @@ export function MyListsScreen({
       setDetailList(data);
       setLists((prev) => prev.map((l) => (l.id === data.id ? { ...l, color: data.color } : l)));
       listsFetchedAtRef.current = 0;
+      onListsChanged?.();
     },
-    [detailList, savingColor, showToast],
+    [detailList, savingColor, showToast, onListsChanged],
   );
 
   useEffect(() => {
@@ -655,6 +659,8 @@ export function MyListsScreen({
       setLists((prevLists) =>
         prevLists.map((l) => (l.id === listId ? { ...l, place_count: prevCount } : l)),
       );
+    } else {
+      onListsChanged?.();
     }
   };
 

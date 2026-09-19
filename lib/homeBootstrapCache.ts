@@ -12,6 +12,8 @@ export type CachedPlace = {
   lng?: number;
   created_at?: string;
   memo?: string | null;
+  /** Representative list color preset id (null = category pin) */
+  listColor?: string | null;
 };
 
 export type CachedPlacesPayload = {
@@ -100,6 +102,11 @@ function parsePlace(raw: unknown): CachedPlace | null {
   } else if (o.memo === null) {
     place.memo = null;
   }
+  if (typeof o.listColor === "string" && o.listColor.trim()) {
+    place.listColor = o.listColor.trim();
+  } else if (o.listColor === null) {
+    place.listColor = null;
+  }
   return place;
 }
 
@@ -137,6 +144,11 @@ export async function writeCachedPlaces(userId: string, places: CachedPlace[]): 
         : p.memo === null
           ? { memo: null }
           : {}),
+      ...(typeof p.listColor === "string" && p.listColor.trim()
+        ? { listColor: p.listColor.trim() }
+        : p.listColor === null
+          ? { listColor: null }
+          : {}),
     })),
   };
   await prefsSet(CACHE_PLACES_KEY, JSON.stringify(payload));
@@ -171,7 +183,7 @@ export function placesCacheFingerprint(places: ReadonlyArray<CachedPlace>): stri
   return places
     .map(
       (p) =>
-        `${p.id}\t${p.name}\t${p.address}\t${p.category}\t${p.lat ?? ""}\t${p.lng ?? ""}\t${p.created_at ?? ""}\t${p.memo ?? ""}`,
+        `${p.id}\t${p.name}\t${p.address}\t${p.category}\t${p.lat ?? ""}\t${p.lng ?? ""}\t${p.created_at ?? ""}\t${p.memo ?? ""}\t${p.listColor ?? ""}`,
     )
     .sort()
     .join("\n");

@@ -44,6 +44,8 @@ import { toUserMessage } from "@/lib/userErrorMessage";
 import {
   fetchListPlaces,
   fetchMyLists,
+  fetchPlaceRepresentativeListColors,
+  mergePlacesWithListColors,
   type PlaceListSummary,
 } from "@/lib/placeLists";
 
@@ -366,6 +368,8 @@ type Place = {
   lng?: number;
   created_at?: string;
   memo?: string | null;
+  /** 대표 목록 색 프리셋 id — 없으면 카테고리 핀 */
+  listColor?: string | null;
 };
 type KakaoStatus = "idle" | "loading" | "ready" | "error";
 
@@ -533,11 +537,18 @@ function mapPlaceRow(p: {
   lng?: unknown;
   created_at?: unknown;
   memo?: unknown;
+  listColor?: unknown;
 }): Place {
   const coords = latLngFromRow(p);
   const createdAt = typeof p.created_at === "string" && p.created_at.trim() ? p.created_at.trim() : undefined;
   const memoRaw = typeof p.memo === "string" ? p.memo.trim() : p.memo === null ? null : undefined;
   const memo = memoRaw === undefined ? undefined : memoRaw ? memoRaw : null;
+  const listColor =
+    typeof p.listColor === "string" && p.listColor.trim()
+      ? p.listColor.trim()
+      : p.listColor === null
+        ? null
+        : undefined;
   return {
     id: p.id,
     name: p.name,
@@ -546,7 +557,12 @@ function mapPlaceRow(p: {
     ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
     ...(createdAt ? { created_at: createdAt } : {}),
     ...(memo !== undefined ? { memo } : {}),
+    ...(listColor !== undefined ? { listColor } : {}),
   };
+}
+
+function pinFillForPlace(place: { category: Category; listColor?: string | null }): string {
+  return resolveListColor(place.listColor) ?? resolvePinColor(place.category);
 }
 
 function normalizeText(value: string): string {
@@ -1919,7 +1935,17 @@ function HomePageContent() {
   const expandedMarkersRef = useRef<any[]>([]); const feedMarkersRef = useRef<any[]>([]);
   /** 미니맵 Kakao 마커 id→인스턴스 (diff 갱신용). expanded는 기존 배열 경로 유지 */
   const mainPlaceMarkersByIdRef = useRef<
-    Map<string, { marker: any; category: Category; lat: number; lng: number; address: string }>
+    Map<
+      string,
+      {
+        marker: any;
+        category: Category;
+        listColor: string | null;
+        lat: number;
+        lng: number;
+        address: string;
+      }
+    >
   >(new Map());
   const searchMarkersRef = useRef<any[]>([]);
   /** 코스 이름 CustomOverlay (웹) */
@@ -2193,6 +2219,27 @@ function HomePageContent() {
       savedPlacesRef.current = next;
       const uid = userIdRef.current;
       if (uid) void writeCachedPlaces(uid, next);
+      return next;
+    });
+  }, []);
+
+  /** 목록 담기/빼기/색 변경 후 대표 목록 색만 재조회 — savedPlacesListModel deps 배열은 그대로 */
+  const refreshSavedPlaceListColors = useCallback(async () => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const { data, error, elapsedMs, source } = await fetchPlaceRepresentativeListColors(uid);
+    if (error) {
+      console.warn("[listColors] refresh failed", error);
+      return;
+    }
+    console.log(
+      `[listColors] refresh source=${source} elapsedMs=${elapsedMs.toFixed(1)} coloredPlaces=${Object.keys(data).length}`,
+    );
+    setSavedPlaces((prev) => {
+      const next = mergePlacesWithListColors(prev, data);
+      if (next === prev) return prev;
+      savedPlacesRef.current = next;
+      void writeCachedPlaces(uid, next);
       return next;
     });
   }, []);
@@ -3003,6 +3050,7 @@ function HomePageContent() {
           title: place.name,
           address: place.address,
           isSaved: true,
+          ...(place.listColor ? { listPresetId: place.listColor } : {}),
           ...(photos.length > 0 ? { photos } : {}),
           ...(postCount > 0 ? { postCount } : {}),
           ...(photoPostIds.length > 0 ? { photoPostIds } : {}),
@@ -3059,7 +3107,9 @@ function HomePageContent() {
             title: place.name,
             address: place.address,
             isSaved: true,
-            ...(listSession.color ? { listPresetId: listSession.color } : {}),
+            ...((place.listColor ?? listSession.color)
+              ? { listPresetId: place.listColor ?? listSession.color }
+              : {}),
             ...(photos.length > 0 ? { photos } : {}),
             ...(postCount > 0 ? { postCount } : {}),
             ...(photoPostIds.length > 0 ? { photoPostIds } : {}),
@@ -4241,7 +4291,7 @@ function HomePageContent() {
     setHomeLoadError(null);
     try {
       // critical path: places / feed / follows / likes only (chat·notifications·avatar await는 스플래시 밖)
-      const [placesRes, postsRes, followsRes, myLikesRes] = await withTimeout(Promise.all([
+      const [placesRes, postsRes, followsRes, myLikesRes, listColorsRes] = await withTimeout(Promise.all([
         timedLoadQuery("places", supabase.from("places").select("*").eq("user_id", uid).order("created_at", { ascending: false })),
         timedLoadQuery(
           "feed_posts",
@@ -4259,6 +4309,7 @@ function HomePageContent() {
             return supabase.from("likes").select("post_id").eq("user_id", uid);
           })(),
         ),
+        timedLoadQuery("place_list_colors", fetchPlaceRepresentativeListColors(uid)),
       ]), 8000);
 
       const myLikedSet = new Set((myLikesRes.data ?? []).map((l: { post_id: string }) => l.post_id));
@@ -4268,7 +4319,13 @@ function HomePageContent() {
       syncCurrentUserToAvatarCache();
 
       if (placesRes.data) {
-        const mappedPlaces = placesRes.data.map((p) => mapPlaceRow(p));
+        let mappedPlaces = placesRes.data.map((p) => mapPlaceRow(p));
+        if (listColorsRes && !listColorsRes.error) {
+          mappedPlaces = mergePlacesWithListColors(mappedPlaces, listColorsRes.data);
+          console.log(
+            `[listColors] source=${listColorsRes.source} elapsedMs=${listColorsRes.elapsedMs.toFixed(1)} coloredPlaces=${Object.keys(listColorsRes.data).length}`,
+          );
+        }
         mappedPlaces.forEach((place) => {
           const coords = latLngFromRow(place);
           if (coords) savedPlaceCoordsRef.current[place.id] = coords;
@@ -4508,6 +4565,7 @@ function HomePageContent() {
                 lng: p.lng,
                 created_at: p.created_at,
                 memo: p.memo,
+                listColor: p.listColor,
               }),
             );
             asPlaces.forEach((place) => {
@@ -8054,7 +8112,6 @@ function HomePageContent() {
     });
     expandedMarkersRef.current = [];
 
-    const fillOverride = resolveListColor(session.color);
     const bounds = new window.kakao.maps.LatLngBounds();
     let pinned = 0;
 
@@ -8064,7 +8121,10 @@ function HomePageContent() {
       if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
         continue;
       }
-      const fillColor = fillOverride ?? resolvePinColor(place.category);
+      const fillColor =
+        resolveListColor(place.listColor) ??
+        resolveListColor(session.color) ??
+        resolvePinColor(place.category);
       const position = new window.kakao.maps.LatLng(lat, lng);
       const marker = new window.kakao.maps.Marker({
         position,
@@ -8128,16 +8188,20 @@ function HomePageContent() {
           Number.isFinite(p.lat) &&
           Number.isFinite(p.lng),
       )
-      .map((p) => ({
-        id: p.id,
-        name: p.name,
-        address: p.address,
-        category: p.category as Category,
-        lat: p.lat,
-        lng: p.lng,
-        ...(p.created_at ? { created_at: p.created_at } : {}),
-        ...(p.memo !== undefined ? { memo: p.memo } : {}),
-      }));
+      .map((p) => {
+        const fromSaved = savedPlacesRef.current.find((s) => s.id === p.id);
+        return {
+          id: p.id,
+          name: p.name,
+          address: p.address,
+          category: p.category as Category,
+          lat: p.lat,
+          lng: p.lng,
+          ...(p.created_at ? { created_at: p.created_at } : {}),
+          ...(p.memo !== undefined ? { memo: p.memo } : {}),
+          listColor: fromSaved?.listColor ?? list.color ?? null,
+        };
+      });
     if (places.length === 0) {
       showToast("지도에 표시할 장소가 없어요", "info");
       return;
@@ -9242,7 +9306,13 @@ function HomePageContent() {
         clearNativeMarkerClickHandlers("place-");
         placePinByIdRef.current.clear();
       }
-      const nativePlacePins: { id: string; lat: number; lng: number; category?: string }[] = [];
+      const nativePlacePins: {
+        id: string;
+        lat: number;
+        lng: number;
+        category?: string;
+        listPresetId?: string | null;
+      }[] = [];
       if (places.length === 0) return;
       let completed = 0;
       const done = () => {
@@ -9274,6 +9344,7 @@ function HomePageContent() {
             lat: markerLat,
             lng: markerLng,
             category: place.category,
+            ...(place.listColor ? { listPresetId: place.listColor } : {}),
           });
           setNativeMarkerClickHandler(markerId, () => {
             const savedPlace = placePinByIdRef.current.get(markerId);
@@ -9290,7 +9361,7 @@ function HomePageContent() {
         try {
           marker = new window.kakao.maps.Marker({
             position: new window.kakao.maps.LatLng(markerLat, markerLng),
-            image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category, resolvePinColor(place.category)), new window.kakao.maps.Size(36, 44)),
+            image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category, pinFillForPlace(place)), new window.kakao.maps.Size(36, 44)),
           });
           marker.setMap(liveMap);
           savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
@@ -9383,7 +9454,9 @@ function HomePageContent() {
         Math.abs(existing.lat - markerLat) < 1e-7 &&
         Math.abs(existing.lng - markerLng) < 1e-7;
       const sameCategory = existing && existing.category === place.category;
-      if (existing && sameCoords && sameCategory) {
+      const sameListColor =
+        existing && (existing.listColor ?? null) === (place.listColor ?? null);
+      if (existing && sameCoords && sameCategory && sameListColor) {
         return;
       }
       if (existing) {
@@ -9398,7 +9471,7 @@ function HomePageContent() {
       try {
         marker = new window.kakao.maps.Marker({
           position: new window.kakao.maps.LatLng(markerLat, markerLng),
-          image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category, resolvePinColor(place.category)), new window.kakao.maps.Size(36, 44)),
+          image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category, pinFillForPlace(place)), new window.kakao.maps.Size(36, 44)),
         });
         marker.setMap(liveMap);
         savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
@@ -9414,6 +9487,7 @@ function HomePageContent() {
         byId.set(place.id, {
           marker,
           category: place.category,
+          listColor: place.listColor ?? null,
           lat: markerLat,
           lng: markerLng,
           address: place.address,
@@ -11567,6 +11641,7 @@ function HomePageContent() {
         title: place.name,
         address: place.address,
         isSaved: true,
+        ...(place.listColor ? { listPresetId: place.listColor } : {}),
         ...(photos.length > 0 ? { photos } : {}),
         ...(postCount > 0 ? { postCount } : {}),
         ...(photoPostIds.length > 0 ? { photoPostIds } : {}),
@@ -15742,6 +15817,9 @@ function HomePageContent() {
             onViewListOnMap={(list, places) => {
               showListOnMap(list, places);
             }}
+            onListsChanged={() => {
+              void refreshSavedPlaceListColors();
+            }}
             onOpenMemo={(place) => {
               const fromSaved = savedPlacesRef.current.find((p) => p.id === place.id);
               openPlaceMemoForSavedPlace({
@@ -15773,6 +15851,7 @@ function HomePageContent() {
             onClose={() => setAddToListTarget(null)}
             onChanged={() => {
               if (savedSelectMode) exitSavedSelectMode();
+              void refreshSavedPlaceListColors();
             }}
             showToast={showToast}
           />

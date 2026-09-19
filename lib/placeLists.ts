@@ -25,15 +25,15 @@ export type PlaceListPlace = {
 };
 
 const LIST_COLOR_PRESET_IDS = [
-  "coral",
-  "orange",
-  "yellow",
-  "lime",
-  "green",
-  "sky",
+  "sunOrange",
+  "beetroot",
+  "peach",
+  "foliage",
+  "spring",
+  "bronze",
+  "persian",
+  "windward",
   "violet",
-  "pink",
-  "slate",
 ] as const;
 
 export type PlaceListColorPresetId = (typeof LIST_COLOR_PRESET_IDS)[number];
@@ -364,4 +364,106 @@ export async function fetchListsForPlace(
       .filter(Boolean),
     error: null,
   };
+}
+
+export type PlaceListColorMap = Record<string, string | null>;
+
+/**
+ * 장소별 대표 목록 색 — place_list_items.created_at 최신 목록의 color.
+ * RPC 1회(장소당 1행). RPC 없으면 조인 페이지네이션 폴백(N+1 아님).
+ */
+export async function fetchPlaceRepresentativeListColors(
+  userId: string,
+): Promise<{ data: PlaceListColorMap; error: string | null; elapsedMs: number; source: "rpc" | "join" }> {
+  const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+  const rpc = await supabase.rpc("place_representative_list_colors", {
+    p_user_id: userId,
+  });
+
+  if (!rpc.error && Array.isArray(rpc.data)) {
+    const data: PlaceListColorMap = {};
+    for (const row of rpc.data as Array<{ place_id?: string; color?: string | null }>) {
+      const placeId = typeof row.place_id === "string" ? row.place_id : "";
+      if (!placeId) continue;
+      data[placeId] = normalizeListColor(row.color ?? null);
+    }
+    const elapsedMs =
+      (typeof performance !== "undefined" ? performance.now() : Date.now()) - t0;
+    return { data, error: null, elapsedMs, source: "rpc" };
+  }
+
+  // Fallback: single join, paginated (PostgREST 1000-row pages) — still one logical query family, not N+1
+  const pageSize = 1000;
+  let from = 0;
+  const rows: Array<{ place_id: string; created_at: string; color: string | null }> = [];
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from("place_list_items")
+      .select("place_id, created_at, place_lists!inner(user_id, color)")
+      .eq("place_lists.user_id", userId)
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      const elapsedMs =
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) - t0;
+      return {
+        data: {},
+        error: mapDbError(error, "목록 색을 불러오지 못았어요."),
+        elapsedMs,
+        source: "join",
+      };
+    }
+
+    for (const raw of data ?? []) {
+      const r = raw as {
+        place_id?: string;
+        created_at?: string;
+        place_lists?:
+          | { user_id?: string; color?: string | null }
+          | Array<{ user_id?: string; color?: string | null }>
+          | null;
+      };
+      const placeId = typeof r.place_id === "string" ? r.place_id : "";
+      if (!placeId) continue;
+      const nested = Array.isArray(r.place_lists) ? r.place_lists[0] : r.place_lists;
+      rows.push({
+        place_id: placeId,
+        created_at: typeof r.created_at === "string" ? r.created_at : "",
+        color: nested && typeof nested === "object" ? (nested.color ?? null) : null,
+      });
+    }
+
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  // created_at DESC globally → first sighting per place_id is representative
+  const data: PlaceListColorMap = {};
+  for (const row of rows) {
+    if (Object.prototype.hasOwnProperty.call(data, row.place_id)) continue;
+    data[row.place_id] = normalizeListColor(row.color);
+  }
+
+  const elapsedMs =
+    (typeof performance !== "undefined" ? performance.now() : Date.now()) - t0;
+  return { data, error: null, elapsedMs, source: "join" };
+}
+
+export function mergePlacesWithListColors<T extends { id: string; listColor?: string | null }>(
+  places: T[],
+  colorByPlaceId: PlaceListColorMap,
+): T[] {
+  let changed = false;
+  const next = places.map((p) => {
+    const listColor = Object.prototype.hasOwnProperty.call(colorByPlaceId, p.id)
+      ? colorByPlaceId[p.id] ?? null
+      : null;
+    if ((p.listColor ?? null) === listColor) return p;
+    changed = true;
+    return { ...p, listColor };
+  });
+  return changed ? next : places;
 }
