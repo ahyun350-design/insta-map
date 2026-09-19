@@ -91,6 +91,41 @@ export async function dismissCoachmarks(page: Page, max = 5): Promise<void> {
 }
 
 /**
+ * Whats New modal (existing-user intro). Returns true if it was visible and closed.
+ * Short timeout — absence is normal when already seen.
+ */
+export async function dismissWhatsNewIfPresent(
+  page: Page,
+  timeoutMs = 4500,
+): Promise<boolean> {
+  const root = page
+    .getByTestId("whats-new-modal")
+    .or(page.locator(".whatsNewRoot[role='dialog']"))
+    .or(page.locator(".whatsNewRoot"));
+
+  try {
+    await root.first().waitFor({ state: "visible", timeout: timeoutMs });
+  } catch {
+    return false;
+  }
+
+  const close = page
+    .getByTestId("whats-new-skip")
+    .or(page.getByTestId("whats-new-close"))
+    .or(root.first().getByRole("button", { name: "건너뛰기" }))
+    .or(root.first().locator("button.whatsNewSkip"));
+
+  await close.first().click({ force: true });
+  await expect(root.first())
+    .toBeHidden({ timeout: 5_000 })
+    .catch(async () => {
+      await page.keyboard.press("Escape").catch(() => null);
+      await expect(root.first()).toBeHidden({ timeout: 3_000 });
+    });
+  return true;
+}
+
+/**
  * Close SAVED-tab sheets/overlays that can cover 「내 목록」.
  * Place detail / add-to-list / my-lists confirm — best-effort.
  */

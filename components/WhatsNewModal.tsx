@@ -188,12 +188,29 @@ export function WhatsNewModal({ pack, onClose }: Props) {
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="whatsNewRoot" role="dialog" aria-modal="true" aria-labelledby="whats-new-title">
-      <button type="button" className="whatsNewBackdrop" aria-label="닫기" onClick={() => void finish()} />
+    <div
+      className="whatsNewRoot"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="whats-new-title"
+      data-testid="whats-new-modal"
+    >
+      <button
+        type="button"
+        className="whatsNewBackdrop"
+        aria-label="닫기"
+        data-testid="whats-new-close"
+        onClick={() => void finish()}
+      />
       <div className="whatsNewCard">
         <header className="whatsNewHeader">
           <span className="whatsNewEyebrow">새 기능</span>
-          <button type="button" className="whatsNewSkip" onClick={() => void finish()}>
+          <button
+            type="button"
+            className="whatsNewSkip"
+            data-testid="whats-new-skip"
+            onClick={() => void finish()}
+          >
             건너뛰기
           </button>
         </header>

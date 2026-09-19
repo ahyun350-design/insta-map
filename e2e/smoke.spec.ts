@@ -7,6 +7,7 @@ import {
   assertHomeFeedContent,
   dismissCoachmarks,
   dismissSavedOverlays,
+  dismissWhatsNewIfPresent,
   gotoTab,
   loginEmailInput,
   loginPasswordInput,
@@ -48,6 +49,7 @@ test("production smoke — major tabs (continue on failure)", async ({
     endStep: () => collectors.endStep(),
     beforeEachStep: async () => {
       await dismissCoachmarks(page);
+      await dismissWhatsNewIfPresent(page, 800);
     },
   });
 
@@ -67,6 +69,13 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(tabBar(page)).toBeVisible({ timeout: 45_000 });
     await expect(tabButton(page, "home")).toBeVisible({ timeout: 15_000 });
     await dismissCoachmarks(page);
+  });
+
+  // ── 1b. Whats New (optional — may already be seen) ────────
+  await runner.stepOptional("1b. Whats New 모달 표시 및 닫기", async () => {
+    // Map-first landing waits for compact map + ~900ms before showing
+    const shown = await dismissWhatsNewIfPresent(page, 5_000);
+    return shown ? "pass" : "skip";
   });
 
   // ── 2. HOME feed ──────────────────────────────────────────

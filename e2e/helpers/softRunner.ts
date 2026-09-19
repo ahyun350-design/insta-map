@@ -6,6 +6,8 @@ import type { StepIssues } from "./collectors";
 export type StepResult = {
   name: string;
   ok: boolean;
+  /** Soft-pass when feature under test was absent (e.g. Whats New already seen). */
+  skipped?: boolean;
   error?: string;
   screenshot?: string;
   consoleErrors: string[];
@@ -14,6 +16,14 @@ export type StepResult = {
 
 export type SoftRunner = {
   step: (name: string, fn: () => Promise<void>) => Promise<void>;
+  /**
+   * Like step, but `fn` may return `"skip"` when the subject is absent.
+   * Skipped steps count as passed for assertAllPassed.
+   */
+  stepOptional: (
+    name: string,
+    fn: () => Promise<"pass" | "skip">,
+  ) => Promise<void>;
   results: () => StepResult[];
   writeReport: (extra?: string) => string;
   assertAllPassed: () => void;
@@ -90,10 +100,71 @@ export function createSoftRunner(
       }
     },
 
+    async stepOptional(name, fn) {
+      const index = results.length + 1;
+      const fileName = `${String(index).padStart(2, "0")}-${slug(name)}.png`;
+      const shotPath = path.join(opts.screenshotDir, fileName);
+      opts.beginStep();
+
+      if (opts.beforeEachStep) {
+        try {
+          await opts.beforeEachStep();
+        } catch {
+          /* non-fatal */
+        }
+      }
+
+      try {
+        const outcome = await fn();
+        await page.screenshot({ path: shotPath, fullPage: false }).catch(() => null);
+        const issues = opts.endStep();
+        if (outcome === "skip") {
+          results.push({
+            name,
+            ok: true,
+            skipped: true,
+            screenshot: shotPath,
+            ...issues,
+          });
+          // eslint-disable-next-line no-console
+          console.log(`  ○ ${name} (skipped)`);
+        } else {
+          results.push({
+            name,
+            ok: true,
+            screenshot: shotPath,
+            ...issues,
+          });
+          // eslint-disable-next-line no-console
+          console.log(`  ✓ ${name}`);
+        }
+      } catch (err) {
+        let screenshot: string | undefined;
+        try {
+          await page.screenshot({ path: shotPath, fullPage: false });
+          screenshot = shotPath;
+        } catch {
+          /* ignore */
+        }
+        const issues = opts.endStep();
+        const error = err instanceof Error ? err.message : String(err);
+        results.push({
+          name,
+          ok: false,
+          error,
+          screenshot,
+          ...issues,
+        });
+        // eslint-disable-next-line no-console
+        console.log(`  ✗ ${name}: ${error}`);
+      }
+    },
+
     results: () => results,
 
     writeReport(extra = "") {
-      const passed = results.filter((r) => r.ok).length;
+      const passed = results.filter((r) => r.ok && !r.skipped).length;
+      const skipped = results.filter((r) => r.ok && r.skipped).length;
       const failed = results.filter((r) => !r.ok).length;
       const lines: string[] = [
         `# PindMap E2E Report`,
@@ -103,6 +174,7 @@ export function createSoftRunner(
         ``,
         `## Summary`,
         `- Passed: ${passed}`,
+        `- Skipped: ${skipped}`,
         `- Failed: ${failed}`,
         `- Total: ${results.length}`,
         ``,
@@ -110,7 +182,8 @@ export function createSoftRunner(
       ];
 
       for (const r of results) {
-        lines.push(`### ${r.ok ? "PASS" : "FAIL"} — ${r.name}`);
+        const label = !r.ok ? "FAIL" : r.skipped ? "SKIP" : "PASS";
+        lines.push(`### ${label} — ${r.name}`);
         if (r.error) lines.push(`- Error: ${r.error}`);
         if (r.screenshot) lines.push(`- Screenshot: \`${r.screenshot}\``);
         if (r.consoleErrors.length) {
@@ -138,13 +211,16 @@ export function createSoftRunner(
       // eslint-disable-next-line no-console
       console.log("\n========== E2E SUMMARY ==========");
       for (const r of results) {
+        const tag = !r.ok ? "FAIL" : r.skipped ? "SKIP" : "PASS";
         // eslint-disable-next-line no-console
-        console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.error ? ` — ${r.error}` : ""}`);
+        console.log(`${tag}  ${r.name}${r.error ? ` — ${r.error}` : ""}`);
       }
       // eslint-disable-next-line no-console
       console.log(`---------------------------------`);
       // eslint-disable-next-line no-console
-      console.log(`${passed} passed, ${failed} failed (of ${results.length})`);
+      console.log(
+        `${passed} passed, ${skipped} skipped, ${failed} failed (of ${results.length})`,
+      );
       // eslint-disable-next-line no-console
       console.log(`Report: ${opts.reportPath}`);
       // eslint-disable-next-line no-console
