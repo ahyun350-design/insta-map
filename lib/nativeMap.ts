@@ -24,6 +24,7 @@ import type {
   ShowFullscreenPlaceSheetOptions,
   FullscreenRouteMode,
 } from "@pindmap/native-map";
+import { withNativeMarkerColorHex } from "@/lib/categoryAppearance";
 
 /** Re-export plugin types for Step 3 consumers */
 export type {
@@ -91,12 +92,19 @@ export type NativeMarkerInput = {
   title?: string;
   address?: string;
   category?: string;
+  /** Optional pin fill; phase 1 always stripped via withNativeMarkerColorHex */
+  colorHex?: string;
   photos?: string[];
   postCount?: number;
   isSaved?: boolean;
   photoPostIds?: string[];
   order?: number;
 };
+
+/** Single pipe: every native marker payload goes through resolveNativeMarkerColorHex. */
+function applyNativeMarkerColorHex(markers: MarkerInput[]): MarkerInput[] {
+  return markers.map((marker) => withNativeMarkerColorHex(marker));
+}
 
 const DEFAULT_PROVIDER: NativeMapProvider = "kakao";
 const UNAVAILABLE_MAP_ID = "unavailable";
@@ -392,7 +400,7 @@ export async function addNativeMarkers(
     return result instanceof Promise ? result : Promise.resolve(result);
   }
 
-  const payload: MarkerInput[] = markers;
+  const payload: MarkerInput[] = applyNativeMarkerColorHex(markers);
 
   try {
     nativeMapLog("addNativeMarkers", { count: markers.length });
@@ -473,8 +481,11 @@ export async function presentFullscreenNativeMap(
   }
 
   try {
+    const markers = options.markers
+      ? applyNativeMarkerColorHex(options.markers)
+      : options.markers;
     nativeMapLog("presentFullscreenNativeMap", options);
-    await getPlugin().presentFullscreenMap(options);
+    await getPlugin().presentFullscreenMap({ ...options, markers });
   } catch (err) {
     nativeMapWarn("presentFullscreenNativeMap failed", err);
     if (!silent) {
@@ -518,8 +529,9 @@ export async function updateFullscreenNativeMarkers(
   }
 
   try {
-    nativeMapLog("updateFullscreenNativeMarkers", { count: options.markers.length, clearPrefix: options.clearPrefix });
-    await getPlugin().updateFullscreenMarkers(options);
+    const markers = applyNativeMarkerColorHex(options.markers);
+    nativeMapLog("updateFullscreenNativeMarkers", { count: markers.length, clearPrefix: options.clearPrefix });
+    await getPlugin().updateFullscreenMarkers({ ...options, markers });
   } catch (err) {
     nativeMapWarn("updateFullscreenNativeMarkers failed", err);
     if (!silent) {

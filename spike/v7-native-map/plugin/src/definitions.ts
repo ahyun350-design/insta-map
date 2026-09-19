@@ -26,6 +26,12 @@ export interface MarkerInput {
   title?: string;
   address?: string;
   category?: string;
+  /**
+   * Optional pin fill override (e.g. "#722F37").
+   * When omitted or invalid, native uses category pin colors (unchanged).
+   * Web must not send this until list/follower color features ship.
+   */
+  colorHex?: string;
   photos?: string[];
   postCount?: number;
   isSaved?: boolean;

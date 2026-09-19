@@ -17,6 +17,7 @@ spike/v7-native-map/plugin/.swiftpm
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+/.playwright-browsers/
 /e2e/artifacts/
 /localdata/
 scripts/localdata/.venv/

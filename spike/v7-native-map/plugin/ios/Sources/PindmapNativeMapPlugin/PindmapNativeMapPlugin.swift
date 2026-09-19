@@ -53,7 +53,7 @@ private final class KakaoMapHost: UIView {
     private static let markerLayerID = "pindmap-markers"
     private static let markerStyleID = "pindmap-marker-style"
     private var mapViewReady = false
-    private var pendingMarkers: [(id: String, lat: Double, lng: Double, category: String?)] = []
+    private var pendingMarkers: [(id: String, lat: Double, lng: Double, category: String?, colorHex: String?)] = []
     private var enginePrepareRequested = false
     var onMarkerClick: ((String) -> Void)?
 
@@ -119,7 +119,7 @@ private final class KakaoMapHost: UIView {
         pendingCamera = nil
     }
 
-    func addNativeMarkers(_ inputs: [(id: String, lat: Double, lng: Double, category: String?)]) -> Int {
+    func addNativeMarkers(_ inputs: [(id: String, lat: Double, lng: Double, category: String?, colorHex: String?)]) -> Int {
         if !mapViewReady {
             for input in inputs {
                 pendingMarkers.removeAll { $0.id == input.id }
@@ -130,7 +130,7 @@ private final class KakaoMapHost: UIView {
         return drawMarkers(inputs)
     }
 
-    private func drawMarkers(_ inputs: [(id: String, lat: Double, lng: Double, category: String?)]) -> Int {
+    private func drawMarkers(_ inputs: [(id: String, lat: Double, lng: Double, category: String?, colorHex: String?)]) -> Int {
         guard let layer = ensureMarkerInfrastructure() else { return 0 }
         var added = 0
         for input in inputs {
@@ -138,7 +138,7 @@ private final class KakaoMapHost: UIView {
                 layer.removePoi(poiID: input.id)
                 markerPois.removeValue(forKey: input.id)
             }
-            let styleID = ensureStyle(for: input.category)
+            let styleID = ensureStyle(for: input.category, colorHex: input.colorHex)
             let option = PoiOptions(styleID: styleID, poiID: input.id)
             option.rank = 0
             option.clickable = true
@@ -210,17 +210,17 @@ private final class KakaoMapHost: UIView {
         }
     }
 
-    private func ensureStyle(for category: String?) -> String {
+    private func ensureStyle(for category: String?, colorHex: String? = nil) -> String {
         guard let map = kakaoMapView() else {
             return Self.markerStyleID
         }
-        let styleID = NativeMapMarkerStyleHelper.styleID(for: category)
+        let styleID = NativeMapMarkerStyleHelper.styleID(for: category, colorHex: colorHex)
         if registeredStyleIDs.contains(styleID) {
             return styleID
         }
         let manager = map.getLabelManager()
         let iconStyle = NativeMapMarkerStyleHelper.makeFixedZoomPoiIconStyle(
-            symbol: NativeMapMarkerStyleHelper.makeMarkerIcon(category: category),
+            symbol: NativeMapMarkerStyleHelper.makeMarkerIcon(category: category, colorHex: colorHex),
             anchorPoint: NativeMapMarkerStyleHelper.savedPinAnchor
         )
         NativeMapMarkerStyleHelper.registerFixedZoomPoiStyle(on: manager, styleID: styleID, iconStyle: iconStyle)
@@ -505,7 +505,26 @@ private enum NativeMapMarkerStyleHelper {
         let emoji: String
     }
 
-    static func categoryPinStyle(for category: String?) -> CategoryPinStyle {
+    /// Normalize "#RRGGBB" / "RRGGBB" → uppercase RRGGBB, or nil if invalid.
+    static func normalizedColorHexKey(_ colorHex: String?) -> String? {
+        guard var s = colorHex?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else {
+            return nil
+        }
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, s.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains($0) }) else {
+            return nil
+        }
+        return s.uppercased()
+    }
+
+    static func parseColorHex(_ colorHex: String?) -> UIColor? {
+        guard let key = normalizedColorHexKey(colorHex), let value = UInt32(key, radix: 16) else {
+            return nil
+        }
+        return UIColor(hex: value)
+    }
+
+    private static func categoryPinStyleForCategory(_ category: String?) -> CategoryPinStyle {
         switch category {
         case "맛집":
             return CategoryPinStyle(fillColor: UIColor(hex: 0x513229), strokeColor: .white, emoji: "🍽️")
@@ -528,11 +547,23 @@ private enum NativeMapMarkerStyleHelper {
         }
     }
 
-    static func markerColor(for category: String?) -> UIColor {
-        categoryPinStyle(for: category).fillColor
+    /// 1) valid colorHex → custom fill (category emoji kept)
+    /// 2) else category palette (identical to pre-colorHex behavior when colorHex is nil)
+    static func categoryPinStyle(for category: String?, colorHex: String? = nil) -> CategoryPinStyle {
+        let base = categoryPinStyleForCategory(category)
+        guard let fill = parseColorHex(colorHex) else { return base }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        fill.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        let stroke: UIColor = luminance > 0.72 ? UIColor(hex: 0x999999) : .white
+        return CategoryPinStyle(fillColor: fill, strokeColor: stroke, emoji: base.emoji)
     }
 
-    static func styleID(for category: String?, order: Int? = nil) -> String {
+    static func markerColor(for category: String?, colorHex: String? = nil) -> UIColor {
+        categoryPinStyle(for: category, colorHex: colorHex).fillColor
+    }
+
+    static func styleID(for category: String?, order: Int? = nil, colorHex: String? = nil) -> String {
         let key: String
         switch category {
         case "맛집": key = "food"
@@ -544,16 +575,27 @@ private enum NativeMapMarkerStyleHelper {
         case "여행지": key = "travel"
         default: key = "default"
         }
+        let base: String
         if key == "default" {
-            if let order, order > 0 { return "\(defaultStyleID)-order-\(order)" }
-            return defaultStyleID
+            if let order, order > 0 {
+                base = "\(defaultStyleID)-order-\(order)"
+            } else {
+                base = defaultStyleID
+            }
+        } else if let order, order > 0 {
+            base = "pindmap-marker-\(key)-order-\(order)"
+        } else {
+            base = "pindmap-marker-\(key)"
         }
-        if let order, order > 0 { return "pindmap-marker-\(key)-order-\(order)" }
-        return "pindmap-marker-\(key)"
+        // Include color in cache key so custom fills do not collide with category styles
+        if let colorKey = normalizedColorHexKey(colorHex) {
+            return "\(base)-c-\(colorKey)"
+        }
+        return base
     }
 
-    static func makeMarkerIcon(category: String?, order: Int? = nil, courseStopCount: Int? = nil) -> UIImage {
-        let style = categoryPinStyle(for: category)
+    static func makeMarkerIcon(category: String?, order: Int? = nil, courseStopCount: Int? = nil, colorHex: String? = nil) -> UIImage {
+        let style = categoryPinStyle(for: category, colorHex: colorHex)
         let isCoursePin = (order ?? 0) > 0
         let emphasize =
             isCoursePin
@@ -749,6 +791,7 @@ private final class KakaoMapTestViewController: UIViewController {
         let lat: Double
         let lng: Double
         let category: String?
+        let colorHex: String?
         let title: String?
         let address: String?
         let photos: [String]
@@ -1419,7 +1462,7 @@ private final class KakaoMapTestViewController: UIViewController {
 
     @objc private func replaceMarkersTapped() {
         let busanInputs = busanMarkers.map {
-            MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0, isSaved: false, photoPostIds: [], order: nil)
+            MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, colorHex: nil, title: nil, address: nil, photos: [], postCount: 0, isSaved: false, photoPostIds: [], order: nil)
         }
         updateMarkers(busanInputs, clearPrefix: nil)
     }
@@ -1435,11 +1478,11 @@ private final class KakaoMapTestViewController: UIViewController {
         }
     }
 
-    private func ensureStyle(for category: String?, order: Int? = nil, courseStopCount: Int? = nil) -> String {
+    private func ensureStyle(for category: String?, order: Int? = nil, courseStopCount: Int? = nil, colorHex: String? = nil) -> String {
         guard let map = kakaoMapView() else {
-            return NativeMapMarkerStyleHelper.styleID(for: category, order: order)
+            return NativeMapMarkerStyleHelper.styleID(for: category, order: order, colorHex: colorHex)
         }
-        let styleID = NativeMapMarkerStyleHelper.styleID(for: category, order: order)
+        let styleID = NativeMapMarkerStyleHelper.styleID(for: category, order: order, colorHex: colorHex)
         if registeredStyleIDs.contains(styleID) {
             return styleID
         }
@@ -1450,7 +1493,8 @@ private final class KakaoMapTestViewController: UIViewController {
             symbol: NativeMapMarkerStyleHelper.makeMarkerIcon(
                 category: category,
                 order: order,
-                courseStopCount: courseStopCount
+                courseStopCount: courseStopCount,
+                colorHex: colorHex
             ),
             anchorPoint: anchor
         )
@@ -1560,7 +1604,8 @@ private final class KakaoMapTestViewController: UIViewController {
             let styleID = ensureStyle(
                 for: marker.category,
                 order: marker.order,
-                courseStopCount: courseStopCount
+                courseStopCount: courseStopCount,
+                colorHex: marker.colorHex
             )
             let option = PoiOptions(styleID: styleID, poiID: marker.id)
             let isCourse = (marker.order ?? 0) > 0
@@ -2385,7 +2430,7 @@ private final class KakaoMapTestViewController: UIViewController {
         applyPendingCamera(animated: false)
         if mode == .prototype {
             let protoMarkers = seoulMarkers.map {
-                MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, title: nil, address: nil, photos: [], postCount: 0, isSaved: false, photoPostIds: [], order: nil)
+                MapMarkerInput(id: $0.id, lat: $0.lat, lng: $0.lng, category: nil, colorHex: nil, title: nil, address: nil, photos: [], postCount: 0, isSaved: false, photoPostIds: [], order: nil)
             }
             _ = addMarkers(protoMarkers)
         } else if !pendingInitialMarkers.isEmpty && markerPois.isEmpty {
@@ -3207,7 +3252,7 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func addMarkers(_ call: CAPPluginCall) {
         let parsed = Self.parseMarkerInputs(from: call)
-        let inputs = parsed.map { (id: $0.id, lat: $0.lat, lng: $0.lng, category: $0.category) }
+        let inputs = parsed.map { (id: $0.id, lat: $0.lat, lng: $0.lng, category: $0.category, colorHex: $0.colorHex) }
         DispatchQueue.main.async { [weak self] in
             guard let kakao = self?.mapHost as? KakaoMapHost else {
                 call.resolve(["added": 0])
@@ -3540,7 +3585,7 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private static func toMapMarkerInputs(
-        _ tuples: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String], order: Int?)]
+        _ tuples: [(id: String, lat: Double, lng: Double, category: String?, colorHex: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String], order: Int?)]
     ) -> [KakaoMapTestViewController.MapMarkerInput] {
         tuples.map {
             KakaoMapTestViewController.MapMarkerInput(
@@ -3548,6 +3593,7 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
                 lat: $0.lat,
                 lng: $0.lng,
                 category: $0.category,
+                colorHex: $0.colorHex,
                 title: $0.title,
                 address: $0.address,
                 photos: $0.photos,
@@ -3594,13 +3640,14 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
         return out
     }
 
-    private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String], order: Int?)] {
+    private static func parseMarkerInputs(from call: CAPPluginCall) -> [(id: String, lat: Double, lng: Double, category: String?, colorHex: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String], order: Int?)] {
         guard let raw = call.options["markers"] as? [[String: Any]] else { return [] }
-        var out: [(id: String, lat: Double, lng: Double, category: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String], order: Int?)] = []
+        var out: [(id: String, lat: Double, lng: Double, category: String?, colorHex: String?, title: String?, address: String?, photos: [String], postCount: Int, isSaved: Bool, photoPostIds: [String], order: Int?)] = []
         for dict in raw {
             guard let id = dict["id"] as? String else { continue }
             guard let lat = doubleValue(dict["lat"]), let lng = doubleValue(dict["lng"]) else { continue }
             let category = dict["category"] as? String
+            let colorHex = dict["colorHex"] as? String
             let title = dict["title"] as? String
             let address = dict["address"] as? String
             let photos = (dict["photos"] as? [String])?.filter { !$0.isEmpty } ?? []
@@ -3608,7 +3655,7 @@ public class PindmapNativeMapPlugin: CAPPlugin, CAPBridgedPlugin {
             let isSaved = dict["isSaved"] as? Bool ?? false
             let photoPostIds = (dict["photoPostIds"] as? [String]) ?? []
             let order = intValue(dict["order"])
-            out.append((id: id, lat: lat, lng: lng, category: category, title: title, address: address, photos: photos, postCount: postCount, isSaved: isSaved, photoPostIds: photoPostIds, order: order))
+            out.append((id: id, lat: lat, lng: lng, category: category, colorHex: colorHex, title: title, address: address, photos: photos, postCount: postCount, isSaved: isSaved, photoPostIds: photoPostIds, order: order))
         }
         return out
     }

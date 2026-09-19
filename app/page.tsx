@@ -188,6 +188,12 @@ import {
   FEED_POST_CATEGORIES,
   type FeedPostCategory,
 } from "@/lib/feedPost";
+import {
+  buildCategoryColorsRecord,
+  buildCategoryPinRecord,
+  DEFAULT_CATEGORY_PIN,
+  resolvePinColor,
+} from "@/lib/categoryAppearance";
 import { updatePlaceCategory } from "@/lib/placeCategory";
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
 import { BottomTabBar } from "@/components/BottomTabBar";
@@ -991,25 +997,9 @@ const CATEGORY_CLASS: Record<Category, string> = {
   놀거리: "fun",
   여행지: "travel",
 };
-/** 술집: 와인 톤(#722F37) + 🍺 — 맛집 브라운·놀거리 퍼플과 구분 */
-const CATEGORY_PIN: Record<Category, { color: string; emoji: string }> = {
-  맛집: { color: "#513229", emoji: "🍽️" },
-  술집: { color: "#722F37", emoji: "🍺" },
-  카페: { color: "#FCE6B7", emoji: "☕" },
-  쇼핑: { color: "#D8EBF9", emoji: "🛍️" },
-  숙소: { color: "#D7D4B1", emoji: "🏠" },
-  놀거리: { color: "#c4b5fd", emoji: "🎮" },
-  여행지: { color: "#99e9f2", emoji: "🗺️" },
-};
-const CATEGORY_COLORS: Record<Category, string> = {
-  맛집: "#513229",
-  술집: "#722F37",
-  카페: "#b08d57",
-  쇼핑: "#4a7fa5",
-  숙소: "#7a7a50",
-  놀거리: "#6d4bd6",
-  여행지: "#1b9aad",
-};
+/** 술집: 와인 톤(#722F37) + 🍺 — 맛집 브라운·놀거리 퍼플과 구분 — defaults in lib/categoryAppearance */
+const CATEGORY_PIN = buildCategoryPinRecord();
+const CATEGORY_COLORS = buildCategoryColorsRecord();
 const ACTIVE_JOBS_STORAGE_KEY = "pindmap_active_extract_jobs";
 const HIDDEN_PLACE_IDS_STORAGE_KEY = "pindmap_hidden_place_ids";
 
@@ -1022,16 +1012,16 @@ const EXTRACT_SOFT_TIMEOUT_MS = 120_000;
 /** Interval polling stops; visibility/resume still polls */
 const EXTRACT_INTERVAL_GIVE_UP_MS = 12 * 60_000;
 
-function makeMarkerImage(category: Category) {
-  const { color, emoji } = CATEGORY_PIN[category];
+function makeMarkerImage(category: Category, fillColor: string) {
+  const emoji = DEFAULT_CATEGORY_PIN[category]?.emoji ?? "📍";
   const stroke = category === "맛집" ? "#fff" : "#999";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${color}" stroke="${stroke}" stroke-width="1"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${fillColor}" stroke="${stroke}" stroke-width="1"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 /** 「지도에서 보기」 임시 강조 핀 — 저장 핀(36×44)보다 큼 + 네이비 외곽 */
-function makeFocusMarkerImage(category: Category) {
-  const { color, emoji } = CATEGORY_PIN[category];
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58"><path d="M24 1C11.3 1 1 11.3 1 24c0 17.5 23 33 23 33s23-15.5 23-33C47 11.3 36.7 1 24 1z" fill="${color}" stroke="#1a2a7a" stroke-width="2.5"/><circle cx="24" cy="24" r="15" fill="white" opacity="0.95"/><text x="24" y="30" text-anchor="middle" font-size="16">${emoji}</text></svg>`;
+function makeFocusMarkerImage(category: Category, fillColor: string) {
+  const emoji = DEFAULT_CATEGORY_PIN[category]?.emoji ?? "📍";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58"><path d="M24 1C11.3 1 1 11.3 1 24c0 17.5 23 33 23 33s23-15.5 23-33C47 11.3 36.7 1 24 1z" fill="${fillColor}" stroke="#1a2a7a" stroke-width="2.5"/><circle cx="24" cy="24" r="15" fill="white" opacity="0.95"/><text x="24" y="30" text-anchor="middle" font-size="16">${emoji}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 const FOCUS_PLACE_MARKER_ID = "focus-place";
@@ -6766,7 +6756,7 @@ function HomePageContent() {
         const marker = new window.kakao.maps.Marker({
           position: new window.kakao.maps.LatLng(lat, lng),
           image: new window.kakao.maps.MarkerImage(
-            makeFocusMarkerImage(category),
+            makeFocusMarkerImage(category, resolvePinColor(category)),
             new window.kakao.maps.Size(48, 58),
             { offset: new window.kakao.maps.Point(24, 58) },
           ),
@@ -9066,7 +9056,7 @@ function HomePageContent() {
         try {
           marker = new window.kakao.maps.Marker({
             position: new window.kakao.maps.LatLng(markerLat, markerLng),
-            image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
+            image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category, resolvePinColor(place.category)), new window.kakao.maps.Size(36, 44)),
           });
           marker.setMap(liveMap);
           savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
@@ -9174,7 +9164,7 @@ function HomePageContent() {
       try {
         marker = new window.kakao.maps.Marker({
           position: new window.kakao.maps.LatLng(markerLat, markerLng),
-          image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category), new window.kakao.maps.Size(36, 44)),
+          image: new window.kakao.maps.MarkerImage(makeMarkerImage(place.category, resolvePinColor(place.category)), new window.kakao.maps.Size(36, 44)),
         });
         marker.setMap(liveMap);
         savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
@@ -9287,7 +9277,7 @@ function HomePageContent() {
       const marker = new window.kakao.maps.Marker({
         map,
         position: new window.kakao.maps.LatLng(lat, lng),
-        image: new window.kakao.maps.MarkerImage(makeMarkerImage(rep.category), new window.kakao.maps.Size(36, 44)),
+        image: new window.kakao.maps.MarkerImage(makeMarkerImage(rep.category, resolvePinColor(rep.category)), new window.kakao.maps.Size(36, 44)),
       });
       const groupPosts = getRelatedPostsForPlaceSheet(posts, {
         placeName: rep.placeName,
