@@ -48,6 +48,12 @@ import {
   mergePlacesWithListColors,
   type PlaceListSummary,
 } from "@/lib/placeLists";
+import {
+  PLACES_BULK_DELETE_MAX,
+  PLACES_BULK_DELETE_PROGRESS_THRESHOLD,
+  chunkPlaceIds,
+  formatPlaceCount,
+} from "@/lib/placesBulkDelete";
 
 const ADMIN_USER_ID = "63772749-e01b-4396-a41c-c17a4d3acfe6";
 const ADMIN_STATUS_CARD_OPEN_KEY = "pindmap_admin_status_card_open";
@@ -563,6 +569,24 @@ function mapPlaceRow(p: {
 
 function pinFillForPlace(place: { category: Category; listColor?: string | null }): string {
   return resolveListColor(place.listColor) ?? resolvePinColor(place.category);
+}
+
+/** 선택 모드 「전체 선택」— 현재 화면(검색·정렬 반영)에 보이는 place id */
+function visiblePlaceIdsFromSavedListModel(model: {
+  kind: string;
+  regions?: Array<{ regionPlaces: Array<{ id: string }> }>;
+  groups?: Array<{ places?: Array<{ id: string }>; items?: Array<{ place: { id: string } }> }>;
+}): string[] {
+  if (model.kind === "region" && model.regions) {
+    return model.regions.flatMap((r) => r.regionPlaces.map((p) => p.id));
+  }
+  if (model.kind === "category" && model.groups) {
+    return model.groups.flatMap((g) => (g.places ?? []).map((p) => p.id));
+  }
+  if (model.kind === "near" && model.groups) {
+    return model.groups.flatMap((g) => (g.items ?? []).map((item) => item.place.id));
+  }
+  return [];
 }
 
 function normalizeText(value: string): string {
@@ -1782,6 +1806,15 @@ function HomePageContent() {
   const [savedSelectedIds, setSavedSelectedIds] = useState<Set<string>>(() => new Set());
   const [savedBulkDeleteConfirm, setSavedBulkDeleteConfirm] = useState(false);
   const [savedBulkDeleting, setSavedBulkDeleting] = useState(false);
+  const [savedBulkDeleteProgress, setSavedBulkDeleteProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  const [savedBulkDeleteRetry, setSavedBulkDeleteRetry] = useState<{
+    remainingIds: string[];
+    deletedSoFar: number;
+    totalOriginal: number;
+  } | null>(null);
   const savedLongPressTimerRef = useRef<number | null>(null);
   const savedLongPressStartRef = useRef<{ x: number; y: number; id: string } | null>(null);
   const savedSuppressClickRef = useRef(false);
@@ -5269,18 +5302,28 @@ function HomePageContent() {
     }
   };
 
-  /** SAVED 선택 모드 — 여러 장소 일괄 삭제 (낙관적) */
-  const deleteSelectedSavedPlaces = async () => {
-    const ids = Array.from(savedSelectedIds);
+  /** SAVED 선택 모드 — 배치 API로 청크 순차 삭제 (부분 성공은 되돌리지 않음) */
+  const deleteSelectedSavedPlaces = async (overrideIds?: string[]) => {
+    const ids = overrideIds ?? Array.from(savedSelectedIds);
     if (ids.length === 0 || savedBulkDeleting) return;
-    const idSet = new Set(ids);
-    const previous = savedPlacesRef.current.slice();
-    const next = previous.filter((p) => !idSet.has(p.id));
-    savedPlacesRef.current = next;
-    setSavedPlaces(next);
+
+    const retrySnapshot = overrideIds ? savedBulkDeleteRetry : null;
+    const totalOriginal = retrySnapshot?.totalOriginal ?? ids.length;
+    const deletedBefore = retrySnapshot?.deletedSoFar ?? 0;
+
     setSavedBulkDeleteConfirm(false);
+    setSavedBulkDeleteRetry(null);
     setSavedBulkDeleting(true);
     exitSavedSelectMode();
+    const showProgress = totalOriginal > PLACES_BULK_DELETE_PROGRESS_THRESHOLD;
+    if (showProgress) {
+      setSavedBulkDeleteProgress({ done: deletedBefore, total: totalOriginal });
+    } else {
+      setSavedBulkDeleteProgress(null);
+    }
+
+    let deletedSoFar = deletedBefore;
+    let pendingIds = ids.slice();
 
     try {
       const {
@@ -5288,37 +5331,88 @@ function HomePageContent() {
       } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error("세션 만료");
 
-      const results = await Promise.all(
-        ids.map(async (id) => {
-          const res = await fetch(`/api/places/${encodeURIComponent(id)}`, {
-            method: "DELETE",
-            headers: { Authorization: `Bearer ${session.access_token}` },
-          });
-          return { id, ok: res.ok };
-        }),
-      );
-      const failed = results.filter((r) => !r.ok);
-      if (failed.length > 0) {
-        savedPlacesRef.current = previous;
-        setSavedPlaces(previous);
-        showToast(
-          failed.length === ids.length
-            ? "삭제에 실패했어요"
-            : `${failed.length}곳은 삭제하지 못했어요`,
-          "error",
+      const chunks = chunkPlaceIds(pendingIds, PLACES_BULK_DELETE_MAX);
+      for (const chunk of chunks) {
+        const t0 = perfNow();
+        const res = await fetch("/api/places/bulk-delete", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ids: chunk }),
+        });
+        const elapsed = perfNow() - t0;
+        console.log(
+          `[places/bulk-delete] chunkSize=${chunk.length} elapsedMs=${elapsed.toFixed(1)} status=${res.status}`,
         );
-        return;
+
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error || "delete_failed");
+        }
+
+        const data = (await res.json()) as {
+          deleted?: number;
+          deletedIds?: string[];
+        };
+        const deletedIds = Array.isArray(data.deletedIds)
+          ? data.deletedIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+          : [];
+        const deletedSet = new Set(deletedIds);
+
+        if (deletedSet.size > 0) {
+          setSavedPlaces((prev) => {
+            const next = prev.filter((p) => !deletedSet.has(p.id));
+            savedPlacesRef.current = next;
+            const uid = userIdRef.current;
+            if (uid) void writeCachedPlaces(uid, next);
+            return next;
+          });
+          for (const id of deletedIds) {
+            delete savedPlaceCoordsRef.current[id];
+          }
+        }
+
+        deletedSoFar += deletedIds.length;
+        const chunkSet = new Set(chunk);
+        pendingIds = pendingIds.filter((id) => !chunkSet.has(id));
+
+        if (showProgress) {
+          setSavedBulkDeleteProgress({ done: deletedSoFar, total: totalOriginal });
+        }
       }
+
+      void refreshSavedPlaceListColors();
+      const newlyDeleted = deletedSoFar - deletedBefore;
       showToast(
-        ids.length === 1 ? "삭제했어요" : `${ids.length}곳을 삭제했어요`,
-        "success",
+        newlyDeleted <= 0
+          ? "삭제할 장소가 없어요"
+          : newlyDeleted === 1
+            ? "삭제했어요"
+            : `${formatPlaceCount(newlyDeleted)}곳을 삭제했어요`,
+        newlyDeleted > 0 ? "success" : "info",
       );
     } catch (err) {
-      savedPlacesRef.current = previous;
-      setSavedPlaces(previous);
-      showToast(toUserMessage(err, "삭제에 실패했어요"), "error");
+      const remainingIds = pendingIds;
+      if (deletedSoFar > deletedBefore && remainingIds.length > 0) {
+        setSavedBulkDeleteRetry({
+          remainingIds,
+          deletedSoFar,
+          totalOriginal,
+        });
+      } else if (deletedSoFar > deletedBefore) {
+        void refreshSavedPlaceListColors();
+        showToast(
+          `${formatPlaceCount(deletedSoFar)}곳을 삭제했어요`,
+          "success",
+        );
+      } else {
+        showToast(toUserMessage(err, "삭제에 실패했어요"), "error");
+      }
     } finally {
       setSavedBulkDeleting(false);
+      setSavedBulkDeleteProgress(null);
     }
   };
   const submitPost = async (
@@ -11252,6 +11346,15 @@ function HomePageContent() {
     savedNearDenied,
   ]);
 
+  /** 선택 모드 전체 선택용 — 검색·정렬 반영된 현재 화면 place id (listModel deps는 건드리지 않음) */
+  const savedVisiblePlaceIds = useMemo(
+    () => visiblePlaceIdsFromSavedListModel(savedPlacesListModel),
+    [savedPlacesListModel],
+  );
+  const savedAllVisibleSelected =
+    savedVisiblePlaceIds.length > 0 &&
+    savedVisiblePlaceIds.every((id) => savedSelectedIds.has(id));
+
   // 홈 피드 무한 스크롤
   useEffect(() => {
     if (activeTab !== "home" || loading || homeLoadError) return;
@@ -14771,21 +14874,38 @@ function HomePageContent() {
             내 목록
           </button>
           {savedSelectMode && (
-            <button
-              type="button"
-              className="savedSelectDeletePill"
-              disabled={savedSelectedIds.size === 0 || savedBulkDeleting}
-              onClick={() => setSavedBulkDeleteConfirm(true)}
-            >
-              선택 삭제
-            </button>
+            <>
+              <button
+                type="button"
+                className="savedSelectAllPill"
+                disabled={savedVisiblePlaceIds.length === 0}
+                onClick={() => {
+                  if (savedVisiblePlaceIds.length === 0) return;
+                  if (savedAllVisibleSelected) {
+                    setSavedSelectedIds(new Set());
+                  } else {
+                    setSavedSelectedIds(new Set(savedVisiblePlaceIds));
+                  }
+                }}
+              >
+                {savedAllVisibleSelected ? "선택 해제" : "전체 선택"}
+              </button>
+              <button
+                type="button"
+                className="savedSelectDeletePill"
+                disabled={savedSelectedIds.size === 0 || savedBulkDeleting}
+                onClick={() => setSavedBulkDeleteConfirm(true)}
+              >
+                선택 삭제
+              </button>
+            </>
           )}
         </div>
       </>
     )}
     {savedSelectMode && savedPlaces.length > 0 && (
       <div className="savedSelectBar" role="toolbar" aria-label="선택 모드">
-        <span className="savedSelectBarCount">{savedSelectedIds.size}개 선택</span>
+        <span className="savedSelectBarCount">{savedSelectedIds.size}개 선택됨</span>
         <button
           type="button"
           className="savedSelectBarBtn"
@@ -14815,10 +14935,21 @@ function HomePageContent() {
           aria-labelledby="saved-bulk-delete-title"
           onClick={(e) => e.stopPropagation()}
         >
-          <p id="saved-bulk-delete-title" className="myListsConfirmTitle">
-            {savedSelectedIds.size}개 장소를 삭제할까요?
-          </p>
-          <p className="myListsConfirmDesc">삭제한 장소는 저장 목록에서 사라져요.</p>
+          {savedSelectedIds.size >= PLACES_BULK_DELETE_PROGRESS_THRESHOLD ? (
+            <>
+              <p id="saved-bulk-delete-title" className="myListsConfirmTitle">
+                저장한 장소 {formatPlaceCount(savedSelectedIds.size)}개를 모두 삭제합니다. 되돌릴 수 없어요.
+              </p>
+              <p className="myListsConfirmDesc">목록에 담아 둔 연결도 함께 사라져요.</p>
+            </>
+          ) : (
+            <>
+              <p id="saved-bulk-delete-title" className="myListsConfirmTitle">
+                {formatPlaceCount(savedSelectedIds.size)}개 장소를 삭제할까요?
+              </p>
+              <p className="myListsConfirmDesc">삭제한 장소는 저장 목록에서 사라져요.</p>
+            </>
+          )}
           <div className="myListsConfirmActions">
             <button
               type="button"
@@ -14833,9 +14964,58 @@ function HomePageContent() {
               disabled={savedBulkDeleting || savedSelectedIds.size === 0}
               onClick={() => void deleteSelectedSavedPlaces()}
             >
-              {savedBulkDeleting ? "삭제 중…" : "삭제"}
+              {savedBulkDeleting
+                ? "삭제 중…"
+                : `${formatPlaceCount(savedSelectedIds.size)}개 삭제`}
             </button>
           </div>
+        </div>
+      </div>
+    )}
+    {savedBulkDeleteRetry && !savedBulkDeleting && (
+      <div
+        className="myListsConfirmOverlay"
+        role="presentation"
+        onClick={() => setSavedBulkDeleteRetry(null)}
+      >
+        <div
+          className="myListsConfirmDialog"
+          role="alertdialog"
+          aria-labelledby="saved-bulk-delete-retry-title"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p id="saved-bulk-delete-retry-title" className="myListsConfirmTitle">
+            {formatPlaceCount(savedBulkDeleteRetry.totalOriginal)}개 중{" "}
+            {formatPlaceCount(savedBulkDeleteRetry.deletedSoFar)}개를 삭제했어요. 다시
+            시도할까요?
+          </p>
+          <p className="myListsConfirmDesc">
+            남은 {formatPlaceCount(savedBulkDeleteRetry.remainingIds.length)}곳은 아직
+            남아 있어요. 이미 지운 장소는 되돌리지 않아요.
+          </p>
+          <div className="myListsConfirmActions">
+            <button type="button" onClick={() => setSavedBulkDeleteRetry(null)}>
+              닫기
+            </button>
+            <button
+              type="button"
+              className="myListsConfirmDelete"
+              onClick={() => {
+                const remaining = savedBulkDeleteRetry.remainingIds;
+                void deleteSelectedSavedPlaces(remaining);
+              }}
+            >
+              다시 시도
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    {savedBulkDeleteProgress && (
+      <div className="savedBulkDeleteProgressOverlay" role="status" aria-live="polite">
+        <div className="savedBulkDeleteProgressCard">
+          삭제 중… {formatPlaceCount(savedBulkDeleteProgress.done)}/
+          {formatPlaceCount(savedBulkDeleteProgress.total)}
         </div>
       </div>
     )}

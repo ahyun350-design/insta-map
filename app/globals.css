@@ -3387,6 +3387,53 @@ select:focus-visible {
   background: #f8d7d4;
 }
 
+.savedSelectAllPill {
+  display: inline-flex;
+  align-items: center;
+  border: 0.5px solid #d8d4c8;
+  background: #fff;
+  color: #1a2a7a;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+}
+
+.savedSelectAllPill:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.savedSelectAllPill:not(:disabled):active {
+  background: #f3f1ea;
+}
+
+.savedBulkDeleteProgressOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 42, 122, 0.28);
+  pointer-events: all;
+}
+
+.savedBulkDeleteProgressCard {
+  background: #fff;
+  color: #1a2a7a;
+  border-radius: 12px;
+  padding: 18px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  box-shadow: 0 8px 28px rgba(26, 42, 122, 0.18);
+}
+
 .savedSelectBar {
   position: fixed;
   left: 0;
