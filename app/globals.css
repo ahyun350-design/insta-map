@@ -6557,4 +6557,291 @@ select:focus-visible {
   background: rgba(0, 0, 0, 0.05);
 }
 
+/* ── Whats New (existing-user feature intro) ── */
+.whatsNewRoot {
+  position: fixed;
+  inset: 0;
+  z-index: 100030;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.whatsNewBackdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: rgba(26, 42, 122, 0.4);
+  cursor: pointer;
+}
+
+.whatsNewCard {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 440px;
+  max-height: min(92vh, 760px);
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 20px 20px 0 0;
+  padding: 16px 18px calc(16px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+  box-shadow: 0 -8px 32px rgba(26, 42, 122, 0.18);
+}
+
+.whatsNewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.whatsNewEyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #1a2a7a;
+}
+
+.whatsNewSkip {
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 6px 4px;
+}
+
+.whatsNewBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 8px;
+}
+
+.whatsNewTitle {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #1a1a2e;
+  line-height: 1.3;
+}
+
+.whatsNewDescription {
+  margin: 0 0 14px;
+  font-size: 14px;
+  color: #555;
+  line-height: 1.5;
+}
+
+.whatsNewStepsCarousel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.whatsNewStepsTrack {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  gap: 0;
+}
+
+.whatsNewStepsTrack::-webkit-scrollbar {
+  display: none;
+}
+
+.whatsNewStepPane {
+  flex: 0 0 100%;
+  width: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  box-sizing: border-box;
+  padding: 0 2px;
+}
+
+.whatsNewStepPaneHeader {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.whatsNewStepBadge {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #1a2a7a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.whatsNewStepPaneCopy {
+  flex: 1;
+  min-width: 0;
+}
+
+.whatsNewStepText {
+  margin: 0;
+  font-size: 14px;
+  color: #1a1a2e;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.whatsNewStepHint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #1a2a7a;
+  line-height: 1.35;
+}
+
+.whatsNewStepMedia,
+.whatsNewHeroMedia {
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f3f1ea;
+  max-height: min(42vh, 360px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.whatsNewMediaImg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(42vh, 360px);
+  object-fit: contain;
+  object-position: top center;
+  background: #f3f1ea;
+}
+
+.whatsNewStepNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.whatsNewStepNavBtn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 0.5px solid #d8d4c8;
+  border-radius: 10px;
+  background: #fff;
+  color: #1a2a7a;
+  font-size: 22px;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.whatsNewStepNavBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.whatsNewStepDots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.whatsNewStepDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  background: #ddd;
+  cursor: pointer;
+}
+
+.whatsNewStepDotActive {
+  background: #1a2a7a;
+  width: 18px;
+  border-radius: 4px;
+}
+
+.whatsNewStepProgress {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #999;
+  letter-spacing: 0.04em;
+}
+
+.whatsNewFooter {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 0.5px solid #efefef;
+}
+
+.whatsNewDots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.whatsNewDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ddd;
+}
+
+.whatsNewDotActive {
+  background: #1a2a7a;
+  width: 16px;
+  border-radius: 3px;
+}
+
+.whatsNewPrimary {
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  background: #1a2a7a;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.whatsNewPrimary:active {
+  opacity: 0.9;
+}
+
 

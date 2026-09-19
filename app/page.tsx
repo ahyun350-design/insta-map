@@ -222,6 +222,12 @@ import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/M
 import { MapResearchAreaButton } from "@/components/MapResearchAreaButton";
 import { Coachmark } from "@/components/Coachmark";
 import { nextCoachToShow, setCoachSeen, COACHMARK_DEFS } from "@/lib/coachmarks";
+import { WhatsNewModal } from "@/components/WhatsNewModal";
+import {
+  isAccountOldEnoughForWhatsNew,
+  nextWhatsNewPackToShow,
+  type WhatsNewPack,
+} from "@/lib/whatsNew";
 import {
   buildCourseWalkNavigationFromTmap,
   parseTmapWalkGeoJsonToPath,
@@ -1560,6 +1566,8 @@ function HomePageContent() {
   const courseInviteImageInputRef = useRef<HTMLInputElement>(null);
   const [activeCoach, setActiveCoach] = useState<string | null>(null);
   const [coachTick, setCoachTick] = useState(0);
+  const [whatsNewPack, setWhatsNewPack] = useState<WhatsNewPack | null>(null);
+  const whatsNewCheckedRef = useRef(false);
   const [showProfileEditModal, setShowProfileEditModal] = useState(false);
   const [profileEditName, setProfileEditName] = useState("");
   const [profileEditBio, setProfileEditBio] = useState("");
@@ -4872,7 +4880,8 @@ function HomePageContent() {
       showProfileEditModal ||
       !!showFollowList ||
       (showCourseModal && !candidates.includes("course_share")) ||
-      mapExpanded;
+      mapExpanded ||
+      !!whatsNewPack;
 
     if (candidates.length === 0 || !user?.id || overlaysOpen) {
       setActiveCoach(null);
@@ -4912,6 +4921,104 @@ function HomePageContent() {
     showProfileEditModal,
     showFollowList,
     coachTick,
+    whatsNewPack,
+  ]);
+
+  /**
+   * Whats New (existing users) — home tab only, after auth/load settle.
+   * Does not read/write homeSessionSnapshot; only opens a portal modal.
+   */
+  useEffect(() => {
+    if (!sessionChecked || userLoading || !user?.id) return;
+    if (activeTab !== "home") return;
+    if (whatsNewCheckedRef.current && !whatsNewPack) return;
+
+    const overlaysOpen =
+      showPostModal ||
+      showCourseShareModal ||
+      showCourseEditScreen ||
+      showCourseSaveModal ||
+      !!lightboxImg ||
+      showNotifications ||
+      showJobsModal ||
+      !!detailPostId ||
+      !!placePostsList ||
+      !!sharePost ||
+      !!editingPost ||
+      isHomeSearchOpen ||
+      showProfileEditModal ||
+      !!showFollowList ||
+      showCourseModal ||
+      mapExpanded ||
+      !!activeCoach ||
+      showMyListsScreen ||
+      savedSelectMode ||
+      savedBulkDeleteConfirm ||
+      !!savedBulkDeleteProgress ||
+      activeJobs.length > 0 ||
+      isSubmitting;
+
+    if (overlaysOpen) return;
+    if (whatsNewPack) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        if (whatsNewCheckedRef.current) return;
+        try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          if (cancelled) return;
+          const createdAt = session?.user?.created_at;
+          if (!isAccountOldEnoughForWhatsNew(createdAt)) {
+            whatsNewCheckedRef.current = true;
+            return;
+          }
+          const pack = await nextWhatsNewPackToShow();
+          if (cancelled) return;
+          whatsNewCheckedRef.current = true;
+          if (pack) setWhatsNewPack(pack);
+        } catch (err) {
+          console.warn("[whatsNew] check failed", err);
+          whatsNewCheckedRef.current = true;
+        }
+      })();
+    }, 900);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    sessionChecked,
+    userLoading,
+    user?.id,
+    activeTab,
+    whatsNewPack,
+    showPostModal,
+    showCourseShareModal,
+    showCourseEditScreen,
+    showCourseSaveModal,
+    lightboxImg,
+    showNotifications,
+    showJobsModal,
+    detailPostId,
+    placePostsList,
+    sharePost,
+    editingPost,
+    isHomeSearchOpen,
+    showProfileEditModal,
+    showFollowList,
+    showCourseModal,
+    mapExpanded,
+    activeCoach,
+    showMyListsScreen,
+    savedSelectMode,
+    savedBulkDeleteConfirm,
+    savedBulkDeleteProgress,
+    activeJobs.length,
+    isSubmitting,
   ]);
 
   useEffect(() => {
@@ -16593,6 +16700,14 @@ function HomePageContent() {
         />
       );
     })()}
+    {whatsNewPack ? (
+      <WhatsNewModal
+        pack={whatsNewPack}
+        onClose={() => {
+          setWhatsNewPack(null);
+        }}
+      />
+    ) : null}
     {inAppNotificationCurrent &&
       typeof document !== "undefined" &&
       createPortal(
