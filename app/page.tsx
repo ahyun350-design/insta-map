@@ -13844,11 +13844,12 @@ function HomePageContent() {
                     const filterActive = selectedHomeCategory !== "all";
                     const narrowed = filterActive && view.narrowed;
                     const repPlace = getRepresentativePlaceForPost(post);
+                    // 필터 ON: 반드시 해당 카테고리 대표 태그만 (다른 카테고리/legacy 폴백 금지)
                     const placeName = narrowed
-                      ? view.placeName || repPlace.placeName
+                      ? view.placeName
                       : view.placeName || repPlace.placeName;
                     const address = narrowed
-                      ? view.address || repPlace.address
+                      ? view.address
                       : view.address || repPlace.address;
                     const catKey = view.visibleCategories[0] as Category | undefined;
                     const categoryBadge =
@@ -13859,9 +13860,11 @@ function HomePageContent() {
                       narrowed && view.otherPlaceCount > 0
                         ? `이 큐레이션에 다른 장소 ${view.otherPlaceCount}곳이 더 있어요`
                         : null;
-                    const thumbUrl = narrowed
-                      ? view.images[0]
-                      : view.images[view.thumbSourceIndex] ?? view.images[0];
+                    const thumbUrl =
+                      view.thumbUrl ||
+                      view.images[0] ||
+                      post.images[0] ||
+                      "";
                     return (
                     <PostGridCell
                       key={post.id}

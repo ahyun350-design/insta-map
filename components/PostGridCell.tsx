@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { extractRegion } from "@/lib/extractRegion";
 
 type PostGridCellProps = {
@@ -57,7 +57,11 @@ function PostGridCellComponent({
   otherPlacesHint = null,
 }: PostGridCellProps) {
   const isHome = variant === "home";
-  const thumb = imageUrl?.trim();
+  const [imgFailed, setImgFailed] = useState(false);
+  useEffect(() => {
+    setImgFailed(false);
+  }, [imageUrl]);
+  const thumb = !imgFailed ? imageUrl?.trim() : "";
   const region = extractRegion(address);
   const trimmedPlaceName = placeName.trim();
   const primaryLabel = (titleLine.trim() || trimmedPlaceName || "").trim() || "—";
@@ -128,7 +132,14 @@ function PostGridCellComponent({
         }}
       >
         {thumb ? (
-          <img src={thumb} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+          <img
+            src={thumb}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            onError={() => setImgFailed(true)}
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
         ) : (
           <span
             style={{

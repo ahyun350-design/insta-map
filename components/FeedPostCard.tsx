@@ -450,17 +450,18 @@ export function FeedPostCardComponent({
     ],
   );
 
-  const displayImages = filterView.images;
+  const displayImages =
+    filterView.images.length > 0 ? filterView.images : post.images.slice(0, 1);
   const displayPlaceSource = useMemo(
     () => ({
-      placeName: filterView.placeName || post.placeName,
-      address: filterView.address || post.address,
+      placeName: filterView.placeName || (categoryFilter === "all" ? post.placeName : ""),
+      address: filterView.address || (categoryFilter === "all" ? post.address : ""),
       category: post.category,
       lat: post.lat,
       lng: post.lng,
       photoPlaceTags: filterView.photoPlaceTags,
     }),
-    [filterView, post.placeName, post.address, post.category, post.lat, post.lng],
+    [filterView, categoryFilter, post.placeName, post.address, post.category, post.lat, post.lng],
   );
 
   const { visible: visibleCategories, extraCount: extraCategoryCount } =
