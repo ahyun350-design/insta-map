@@ -191,7 +191,7 @@ import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
 import { HomeFeedTopBar } from "@/components/HomeFeedTopBar";
 import { HomeSearchScreen } from "@/components/HomeSearchScreen";
 import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
-import { getDisplayCategories, projectPostForCategoryFilter } from "@/lib/categoryUtil";
+import { getDisplayCategories, getRepresentativeImageIndex, projectPostForCategoryFilter } from "@/lib/categoryUtil";
 import {
   FEED_POST_CATEGORIES,
   type FeedPostCategory,
@@ -13832,7 +13832,7 @@ function HomePageContent() {
                   icon="🔍"
                   title={
                     selectedHomeCategory !== "all"
-                      ? `아직 ${selectedHomeCategory} 큐레이션이 없어요`
+                      ? `아직 태그된 ${selectedHomeCategory} 장소가 없어요`
                       : `아직 ${companionFilterChipLabel(selectedCompanionTag)} 큐레이션이 없어요`
                   }
                   description="다른 필터를 선택하거나 새 큐레이션을 올려보세요"
@@ -13846,10 +13846,10 @@ function HomePageContent() {
                     const repPlace = getRepresentativePlaceForPost(post);
                     const placeName = narrowed
                       ? view.placeName || repPlace.placeName
-                      : repPlace.placeName;
+                      : view.placeName || repPlace.placeName;
                     const address = narrowed
                       ? view.address || repPlace.address
-                      : repPlace.address;
+                      : view.address || repPlace.address;
                     const catKey = view.visibleCategories[0] as Category | undefined;
                     const categoryBadge =
                       narrowed && catKey
@@ -13859,11 +13859,14 @@ function HomePageContent() {
                       narrowed && view.otherPlaceCount > 0
                         ? `이 큐레이션에 다른 장소 ${view.otherPlaceCount}곳이 더 있어요`
                         : null;
+                    const thumbUrl = narrowed
+                      ? view.images[0]
+                      : view.images[view.thumbSourceIndex] ?? view.images[0];
                     return (
                     <PostGridCell
                       key={post.id}
                       variant="home"
-                      imageUrl={view.images[0]}
+                      imageUrl={thumbUrl}
                       titleLine={(post.title || post.comment || placeName || "").trim()}
                       placeName={placeName}
                       address={address}
@@ -15947,10 +15950,14 @@ function HomePageContent() {
                 >
                   {myMypagePosts.map((post) => {
                     const repPlace = getRepresentativePlaceForPost(post);
+                    const thumbIdx = getRepresentativeImageIndex(
+                      post.images.length,
+                      post.photoPlaceTags,
+                    );
                     return (
                     <PostGridCell
                       key={post.id}
-                      imageUrl={post.images[0]}
+                      imageUrl={post.images[thumbIdx] ?? post.images[0]}
                       titleLine={(post.title || repPlace.placeName || "").trim()}
                       placeName={repPlace.placeName}
                       address={repPlace.address}
@@ -16714,11 +16721,15 @@ function HomePageContent() {
           <PostGrid columns={2} className="homeFeedGrid homeSearchFeedGrid">
             {homeSearchResultPosts.map((post) => {
               const repPlace = getRepresentativePlaceForPost(post);
+              const thumbIdx = getRepresentativeImageIndex(
+                post.images.length,
+                post.photoPlaceTags,
+              );
               return (
               <PostGridCell
                 key={post.id}
                 variant="home"
-                imageUrl={post.images[0]}
+                imageUrl={post.images[thumbIdx] ?? post.images[0]}
                 titleLine={(post.title || post.comment || repPlace.placeName || "").trim()}
                 placeName={repPlace.placeName}
                 address={repPlace.address}

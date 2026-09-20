@@ -9,6 +9,11 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { MAX_CURATION_PHOTOS, type PostImageItem } from "@/components/curation/types";
+import type { PhotoPlaceTag } from "@/lib/feedPost";
+import {
+  remapPhotoPlaceTagsAfterRemove,
+  remapPhotoPlaceTagsAfterReorder,
+} from "@/lib/photoPlaceTag";
 import {
   curationAspectRatioCss,
   DEFAULT_CURATION_ASPECT_RATIO,
@@ -21,6 +26,8 @@ type Props = {
   onImagesChange: (updater: (prev: PostImageItem[]) => PostImageItem[]) => void;
   onImageUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   onRetryImage: (item: PostImageItem) => void;
+  photoPlaceTags?: PhotoPlaceTag[];
+  onPhotoPlaceTagsChange?: (tags: PhotoPlaceTag[]) => void;
 };
 
 const THUMB = 64;
@@ -105,7 +112,14 @@ function StatusOverlay({
   );
 }
 
-export function Step1Photos({ images, onImagesChange, onImageUpload, onRetryImage }: Props) {
+export function Step1Photos({
+  images,
+  onImagesChange,
+  onImageUpload,
+  onRetryImage,
+  photoPlaceTags = [],
+  onPhotoPlaceTagsChange,
+}: Props) {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -169,12 +183,20 @@ export function Step1Photos({ images, onImagesChange, onImageUpload, onRetryImag
 
   const removeImage = (img: PostImageItem) => {
     const removeIdx = images.findIndex((x) => x.id === img.id);
+    if (removeIdx < 0) return;
+    const hadTag = photoPlaceTags.some((t) => t.photoIndex === removeIdx);
+    if (hadTag) {
+      const ok = window.confirm("이 사진의 장소 태그도 함께 지워집니다");
+      if (!ok) return;
+    }
     onImagesChange((prev) => {
       const removed = prev.find((x) => x.id === img.id);
       if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
       return prev.filter((x) => x.id !== img.id);
     });
-    if (removeIdx < 0) return;
+    if (onPhotoPlaceTagsChange) {
+      onPhotoPlaceTagsChange(remapPhotoPlaceTagsAfterRemove(photoPlaceTags, removeIdx));
+    }
     setSelectedIndex((cur) => {
       if (images.length <= 1) return 0;
       if (removeIdx < cur) return cur - 1;
@@ -192,6 +214,9 @@ export function Step1Photos({ images, onImagesChange, onImageUpload, onRetryImag
       next.splice(to, 0, item);
       return next;
     });
+    if (onPhotoPlaceTagsChange && photoPlaceTags.length > 0) {
+      onPhotoPlaceTagsChange(remapPhotoPlaceTagsAfterReorder(photoPlaceTags, from, to));
+    }
     dragIndexRef.current = to;
     setSelectedIndex(to);
   };

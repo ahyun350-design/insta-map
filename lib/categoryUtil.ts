@@ -44,10 +44,40 @@ export function getDisplayCategories(post: FeedPostCategorySource): string[] {
 }
 
 /**
- * 홈 카테고리 필터(가):
- * - filter=all → 항상 포함
- * - 해당 category 태그 사진 ≥1 → 포함(사진 좁힘)
- * - 태그 0장이어도 categories에 있으면 포함(원본 그대로)
+ * 유효한 태그 photoIndex 중 오름차순 첫 값.
+ * categoryFilter가 있으면 해당 category 태그만.
+ * 없으면 null (호출측에서 images[0] 폴백).
+ */
+export function getFirstTaggedPhotoIndex(
+  imagesLength: number,
+  tags: PhotoPlaceTag[] | null | undefined,
+  categoryFilter?: string | null,
+): number | null {
+  if (!tags?.length || imagesLength <= 0) return null;
+  const filter =
+    categoryFilter && categoryFilter !== "all" ? categoryFilter.trim() : null;
+  let best: number | null = null;
+  for (const tag of tags) {
+    const idx = tag.photoIndex;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= imagesLength) continue;
+    if (filter && (tag.category?.trim() ?? "") !== filter) continue;
+    if (best === null || idx < best) best = idx;
+  }
+  return best;
+}
+
+/** 그리드/카드 썸네일용 이미지 인덱스 (태그 없으면 0) */
+export function getRepresentativeImageIndex(
+  imagesLength: number,
+  tags: PhotoPlaceTag[] | null | undefined,
+  categoryFilter?: string | null,
+): number {
+  return getFirstTaggedPhotoIndex(imagesLength, tags, categoryFilter) ?? 0;
+}
+
+/**
+ * 홈 카테고리 필터: filter=all → 항상 true.
+ * 그 외 → 해당 category 태그가 붙은 사진이 1장 이상일 때만.
  */
 export function feedPostMatchesCategoryFilter(
   post: CategoryFilterPostSource,
@@ -57,15 +87,14 @@ export function feedPostMatchesCategoryFilter(
   return projectPostForCategoryFilter(post, filter).include;
 }
 
-/** categories에는 있는데 매칭 태그 사진이 0장 — 원본 폴백 대상 */
+/** categories에는 있는데 매칭 태그 사진이 0장 (허위/의도 추가 여분) */
 export function feedPostHasCategoryWithoutMatchingTags(
   post: CategoryFilterPostSource,
   filter: string,
 ): boolean {
   if (filter === "all") return false;
   if (!getDisplayCategories(post).includes(filter)) return false;
-  const view = projectPostForCategoryFilter(post, filter);
-  return view.include && !view.narrowed;
+  return !projectPostForCategoryFilter(post, filter).include;
 }
 
 export type CategoryFilterCardView = {
@@ -73,11 +102,13 @@ export type CategoryFilterCardView = {
   include: boolean;
   /**
    * true: 매칭 사진만·선택 카테고리 뱃지.
-   * false: 원본 전체(필터 all이거나 태그 0장 폴백).
+   * false: 필터 all — 전체 사진(대표는 첫 태그 장으로 별도 선택).
    */
   narrowed: boolean;
-  /** 카드/그리드에 보여줄 이미지 */
+  /** 카드/그리드에 보여줄 이미지 (narrowed면 매칭만) */
   images: string[];
+  /** 원본 images 기준 썸네일/캐러셀 시작 인덱스 (narrowed면 항상 0) */
+  thumbSourceIndex: number;
   /** 필터된 이미지에 맞게 photoIndex를 0..n-1로 재매핑한 태그 (narrowed일 때) */
   photoPlaceTags: PhotoPlaceTag[] | null;
   /** 뱃지에 표시할 카테고리 */
@@ -100,26 +131,11 @@ function uniqueOtherPlaceCount(tags: PhotoPlaceTag[], filter: string): number {
   return names.size;
 }
 
-function originalCardView(post: CategoryFilterPostSource): CategoryFilterCardView {
-  const images = Array.isArray(post.images) ? post.images : [];
-  return {
-    include: true,
-    narrowed: false,
-    images,
-    photoPlaceTags: post.photoPlaceTags ?? null,
-    visibleCategories: getDisplayCategories(post),
-    otherPlaceCount: 0,
-    placeName: post.placeName ?? "",
-    address: post.address ?? "",
-  };
-}
-
 /**
  * 홈 카드용 카테고리 필터 투영.
- * filter=all → 원본.
+ * filter=all → 전체 포함, thumbSourceIndex=첫 태그 사진.
  * 매칭 태그 ≥1 → 해당 사진만·뱃지 단일.
- * 매칭 0장이되 categories에 포함 → 원본 폴백(제외하지 않음).
- * categories에도 없고 매칭도 없으면 제외.
+ * 매칭 0장 → 제외 (categories 폴백 없음).
  */
 export function projectPostForCategoryFilter(
   post: CategoryFilterPostSource,
@@ -129,10 +145,20 @@ export function projectPostForCategoryFilter(
   const tags = post.photoPlaceTags ?? [];
 
   if (filter === "all") {
-    return originalCardView(post);
+    const thumbSourceIndex = getRepresentativeImageIndex(images.length, tags, null);
+    const thumbTag = tags.find((t) => t.photoIndex === thumbSourceIndex);
+    return {
+      include: true,
+      narrowed: false,
+      images,
+      thumbSourceIndex,
+      photoPlaceTags: post.photoPlaceTags ?? null,
+      visibleCategories: getDisplayCategories(post),
+      otherPlaceCount: 0,
+      placeName: thumbTag?.placeName?.trim() || (post.placeName ?? ""),
+      address: thumbTag?.address?.trim() || (post.address ?? ""),
+    };
   }
-
-  const inCategories = getDisplayCategories(post).includes(filter);
 
   const matchingSrcIndices: number[] = [];
   const seen = new Set<number>();
@@ -147,13 +173,11 @@ export function projectPostForCategoryFilter(
   matchingSrcIndices.sort((a, b) => a - b);
 
   if (matchingSrcIndices.length === 0) {
-    if (inCategories) {
-      return originalCardView(post);
-    }
     return {
       include: false,
       narrowed: false,
       images: [],
+      thumbSourceIndex: 0,
       photoPlaceTags: null,
       visibleCategories: [],
       otherPlaceCount: 0,
@@ -184,6 +208,7 @@ export function projectPostForCategoryFilter(
     include: true,
     narrowed: true,
     images: filteredImages,
+    thumbSourceIndex: 0,
     photoPlaceTags: remappedTags,
     visibleCategories: [filter],
     otherPlaceCount: uniqueOtherPlaceCount(tags, filter),

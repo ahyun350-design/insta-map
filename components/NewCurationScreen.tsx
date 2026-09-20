@@ -291,6 +291,8 @@ export function NewCurationScreen({
             onImagesChange={onImagesChange}
             onImageUpload={onImageUpload}
             onRetryImage={onRetryImage}
+            photoPlaceTags={photoPlaceTags}
+            onPhotoPlaceTagsChange={onPhotoPlaceTagsChange}
           />
         )}
         {currentStep === 2 && (

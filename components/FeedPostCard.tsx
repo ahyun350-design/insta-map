@@ -453,8 +453,8 @@ export function FeedPostCardComponent({
   const displayImages = filterView.images;
   const displayPlaceSource = useMemo(
     () => ({
-      placeName: filterView.narrowed ? filterView.placeName || post.placeName : post.placeName,
-      address: filterView.narrowed ? filterView.address || post.address : post.address,
+      placeName: filterView.placeName || post.placeName,
+      address: filterView.address || post.address,
       category: post.category,
       lat: post.lat,
       lng: post.lng,
@@ -528,6 +528,7 @@ export function FeedPostCardComponent({
         images={displayImages}
         placeSource={displayPlaceSource}
         aspectRatio={post.aspectRatio}
+        initialIndex={filterView.thumbSourceIndex}
         onMediaClick={handleMediaClick}
         onPlaceOverlayClick={onPlaceOverlayClick}
       />

@@ -108,7 +108,7 @@ export function PlaceSearchModal({
   const [mode, setMode] = useState<"search" | "manual">("search");
   const [manualName, setManualName] = useState("");
   const [manualAddress, setManualAddress] = useState("");
-  const [manualCategory, setManualCategory] = useState<FeedPostCategory>("쇼핑");
+  const [manualCategory, setManualCategory] = useState<FeedPostCategory | null>(null);
   const [geocodeHit, setGeocodeHit] = useState<GeocodeHit | null>(null);
   const [addressConfirmed, setAddressConfirmed] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
@@ -119,7 +119,7 @@ export function PlaceSearchModal({
       setMode("search");
       setManualName("");
       setManualAddress("");
-      setManualCategory("쇼핑");
+      setManualCategory(null);
       setGeocodeHit(null);
       setAddressConfirmed(false);
       setGeocoding(false);
@@ -148,6 +148,7 @@ export function PlaceSearchModal({
     setMode("manual");
     setManualName(searchQuery.trim() || lastSearchedQuery.trim());
     setManualAddress("");
+    setManualCategory(null);
     setGeocodeHit(null);
     setAddressConfirmed(false);
     setManualError(null);
@@ -194,6 +195,10 @@ export function PlaceSearchModal({
     }
     if (!addressConfirmed) {
       setManualError("변환된 주소가 맞는지 확인해 주세요");
+      return;
+    }
+    if (!manualCategory) {
+      setManualError("카테고리를 선택해 주세요");
       return;
     }
     onManualSelect({
@@ -570,12 +575,15 @@ export function PlaceSearchModal({
               type="button"
               className="primaryButton"
               onClick={submitManual}
-              disabled={!geocodeHit || !addressConfirmed || !manualName.trim()}
+              disabled={!geocodeHit || !addressConfirmed || !manualName.trim() || !manualCategory}
               style={{
                 width: "100%",
                 padding: "12px",
                 marginTop: 4,
-                opacity: !geocodeHit || !addressConfirmed || !manualName.trim() ? 0.5 : 1,
+                opacity:
+                  !geocodeHit || !addressConfirmed || !manualName.trim() || !manualCategory
+                    ? 0.5
+                    : 1,
               }}
             >
               이 장소로 태그하기

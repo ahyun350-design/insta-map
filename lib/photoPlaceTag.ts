@@ -33,6 +33,34 @@ export function removePhotoPlaceTag(tags: PhotoPlaceTag[], photoIndex: number): 
   return tags.filter((t) => t.photoIndex !== photoIndex);
 }
 
+/** Step1: 사진 삭제 후 태그 제거 + 뒤 인덱스 당김 */
+export function remapPhotoPlaceTagsAfterRemove(
+  tags: PhotoPlaceTag[],
+  removedIndex: number,
+): PhotoPlaceTag[] {
+  return tags
+    .filter((t) => t.photoIndex !== removedIndex)
+    .map((t) =>
+      t.photoIndex > removedIndex ? { ...t, photoIndex: t.photoIndex - 1 } : t,
+    );
+}
+
+/** Step1: 사진 순서 변경에 맞춰 photoIndex 재매핑 */
+export function remapPhotoPlaceTagsAfterReorder(
+  tags: PhotoPlaceTag[],
+  from: number,
+  to: number,
+): PhotoPlaceTag[] {
+  if (from === to || from < 0 || to < 0) return tags;
+  return tags.map((t) => {
+    const i = t.photoIndex;
+    if (i === from) return { ...t, photoIndex: to };
+    if (from < to && i > from && i <= to) return { ...t, photoIndex: i - 1 };
+    if (from > to && i >= to && i < from) return { ...t, photoIndex: i + 1 };
+    return t;
+  });
+}
+
 export function getPhotoPlaceTag(tags: PhotoPlaceTag[], photoIndex: number): PhotoPlaceTag | undefined {
   return tags.find((t) => t.photoIndex === photoIndex);
 }
