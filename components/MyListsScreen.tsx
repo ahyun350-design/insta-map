@@ -28,6 +28,7 @@ import {
 } from "@/components/ListColorSwatches";
 import type { ListColorPresetId } from "@/lib/listColors";
 import { LIST_COLOR_PRESETS } from "@/lib/listColors";
+import { getCurrentPositionForMapStage1 } from "@/lib/getCurrentPositionForMap";
 import {
   EDGE_SWIPE_PRIORITY,
   useEdgeSwipeBack,
@@ -359,25 +360,22 @@ export function MyListsScreen({
   const dragEnabled = detailSort === "custom" && !searchActive;
 
   const requestNearOrigin = useCallback(() => {
-    if (!navigator.geolocation) {
-      setNearDenied(true);
-      setNearLocating(false);
-      return;
-    }
     setNearLocating(true);
     setNearDenied(false);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setNearOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setNearLocating(false);
+    void (async () => {
+      try {
+        const pos = await getCurrentPositionForMapStage1();
+        setNearOrigin({ lat: pos.latitude, lng: pos.longitude });
         setNearDenied(false);
-      },
-      () => {
-        setNearLocating(false);
+      } catch {
+        // Quiet fallback — keep list usable on region sort
+        setNearOrigin(null);
         setNearDenied(true);
-      },
-      { enableHighAccuracy: true, timeout: 12_000 },
-    );
+        setDetailSort("region");
+      } finally {
+        setNearLocating(false);
+      }
+    })();
   }, []);
 
   const handleListSortChange = useCallback(

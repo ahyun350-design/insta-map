@@ -2794,27 +2794,15 @@ function HomePageContent() {
         return;
       }
 
-      await new Promise<void>((resolve) => {
-        navigator.geolocation.getCurrentPosition(
-          async (pos) => {
-            try {
-              await runWithOrigin({
-                lat: pos.coords.latitude,
-                lng: pos.coords.longitude,
-              });
-            } catch (err) {
-              console.error("[fullscreen] directions failed", err);
-              showToast("길찾기에 실패했어요", "error");
-            }
-            resolve();
-          },
-          (err) => {
-            console.error("[fullscreen] geolocation failed", err);
-            showToast("현재 위치를 가져올 수 없어요", "error");
-            resolve();
-          },
-        );
-      });
+      try {
+        const pos = await getCurrentPositionForMapStage1();
+        const origin = { lat: pos.latitude, lng: pos.longitude };
+        myLocationLatLngRef.current = origin;
+        await runWithOrigin(origin);
+      } catch (err) {
+        console.error("[fullscreen] geolocation failed", err);
+        showToast("현재 위치를 가져올 수 없어요", "error");
+      }
     } catch (err) {
       console.error("[fullscreen] directions failed", err);
     }
@@ -4001,23 +3989,7 @@ function HomePageContent() {
     setCourseResultFromMode(null);
   }, [courseResult]);
 
-  // GPS (현재 위치 모드)
-  useEffect(() => {
-    if (!showCourseModal || courseOriginMode !== "current") return;
-    if (!navigator.geolocation) return;
-    setCourseLocationLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setCourseCurrentLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setCourseLocationLoading(false);
-      },
-      () => {
-        setCourseCurrentLocation(null);
-        setCourseLocationLoading(false);
-      },
-      { timeout: 5000 },
-    );
-  }, [showCourseModal, courseOriginMode]);
+  // 현재 위치 모드 GPS는 generateCourse 실행 시에만 요청 (모달 오픈만으로 웹 권한 팝업 금지)
 
   // 직접 입력 → geocode 로 courseCurrentLocation 설정 (반경·거리 라벨용)
   useEffect(() => {
@@ -5665,16 +5637,17 @@ function HomePageContent() {
 
     // 저장된 위치 없으면 백그라운드로 GPS만 갱신 (이미 웹은 연 상태)
     if (!hasOrigin) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
+      void (async () => {
+        try {
+          const pos = await getCurrentPositionForMapStage1();
           myLocationLatLngRef.current = {
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
+            lat: pos.latitude,
+            lng: pos.longitude,
           };
-        },
-        () => {},
-        { enableHighAccuracy: false, timeout: 5000 },
-      );
+        } catch {
+          /* silent — 카카오맵은 이미 연 상태 */
+        }
+      })();
     }
   };
 
@@ -7274,22 +7247,19 @@ function HomePageContent() {
     }
   }, [clearFocusPlaceMarker]);
 
-  const resolveDirectionsOrigin = useCallback((): Promise<{ lat: number; lng: number } | null> => {
+  const resolveDirectionsOrigin = useCallback(async (): Promise<{ lat: number; lng: number } | null> => {
     const stored = myLocationLatLngRef.current;
     if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
-      return Promise.resolve(stored);
+      return stored;
     }
-    return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const o = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          myLocationLatLngRef.current = o;
-          resolve(o);
-        },
-        () => resolve(null),
-        { enableHighAccuracy: true, timeout: 12_000 },
-      );
-    });
+    try {
+      const pos = await getCurrentPositionForMapStage1();
+      const o = { lat: pos.latitude, lng: pos.longitude };
+      myLocationLatLngRef.current = o;
+      return o;
+    } catch {
+      return null;
+    }
   }, []);
 
   /** 장소 시트 → 전체화면 지도. 컴팩트에서 이동수단을 고른 뒤면 준비 후 자동 길찾기 */
@@ -8171,21 +8141,23 @@ function HomePageContent() {
         originLat = courseCurrentLocation.lat;
         originLng = courseCurrentLocation.lng;
       } else if (courseOriginMode === "current") {
-        await new Promise<void>((resolve) => {
-          if (!navigator.geolocation) {
-            resolve();
-            return;
+        const stored = myLocationLatLngRef.current;
+        if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
+          originLat = stored.lat;
+          originLng = stored.lng;
+          setCourseCurrentLocation(stored);
+        } else {
+          try {
+            const pos = await getCurrentPositionForMapStage1();
+            originLat = pos.latitude;
+            originLng = pos.longitude;
+            const origin = { lat: originLat, lng: originLng };
+            myLocationLatLngRef.current = origin;
+            setCourseCurrentLocation(origin);
+          } catch {
+            /* keep Seoul default — course still builds */
           }
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              originLat = pos.coords.latitude;
-              originLng = pos.coords.longitude;
-              resolve();
-            },
-            () => resolve(),
-            { timeout: 5000 },
-          );
-        });
+        }
       } else if (courseOriginAddress.trim()) {
         await new Promise<void>((resolve) => {
           geocoderRef.current.addressSearch(courseOriginAddress.trim(), (result: any[], st: string) => {
@@ -9978,103 +9950,113 @@ function HomePageContent() {
     setDirectionsMode(mode);
     setDirectionsLoading(true);
     clearRoute();
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      myLocationLatLngRef.current = origin;
+
+    let origin: { lat: number; lng: number } | null = null;
+    const stored = myLocationLatLngRef.current;
+    if (stored && Number.isFinite(stored.lat) && Number.isFinite(stored.lng)) {
+      origin = stored;
+    } else {
       try {
-        const paintOnExpanded = (path: { lat: number; lng: number }[]) => {
-          if (!expandedMapRef.current || path.length < 2) return;
-          const linePath = path.map((p) => new window.kakao.maps.LatLng(p.lat, p.lng));
-          const strokeColor = mode === "walk" ? "#16a34a" : "#1a2a7a";
-          const strokeWeight = mode === "walk" ? 7 : 5;
-          const strokeStyle = mode === "walk" ? "shortdash" : "solid";
-          routePolylineRef.current = new window.kakao.maps.Polyline({
-            path: linePath,
-            strokeWeight,
-            strokeColor,
-            strokeOpacity: 0.95,
-            strokeStyle,
-          });
-          routePolylineRef.current.setMap(expandedMapRef.current);
-          const bounds = new window.kakao.maps.LatLngBounds();
-          linePath.forEach((p) => bounds.extend(p));
-          expandedMapRef.current.setBounds(bounds);
-        };
+        const pos = await getCurrentPositionForMapStage1();
+        origin = { lat: pos.latitude, lng: pos.longitude };
+        myLocationLatLngRef.current = origin;
+      } catch {
+        showToast("현재 위치를 가져올 수 없어요", "error");
+        setDirectionsLoading(false);
+        return;
+      }
+    }
 
-        if (mode === "walk") {
-          // 카카오 /api/directions 는 자동차 전용 — 도보는 Tmap
-          const res = await fetch("/api/walk-directions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              origin,
-              destination: { lat: destLat, lng: destLng },
-            }),
-          });
-          const data = await res.json().catch(() => null);
-          const path = data ? parseTmapWalkGeoJsonToPath(data) : [];
-          const totals = data ? readTmapWalkTotals(data) : { distanceM: null, timeSec: null };
+    try {
+      const paintOnExpanded = (path: { lat: number; lng: number }[]) => {
+        if (!expandedMapRef.current || path.length < 2) return;
+        const linePath = path.map((p) => new window.kakao.maps.LatLng(p.lat, p.lng));
+        const strokeColor = mode === "walk" ? "#16a34a" : "#1a2a7a";
+        const strokeWeight = mode === "walk" ? 7 : 5;
+        const strokeStyle = mode === "walk" ? "shortdash" : "solid";
+        routePolylineRef.current = new window.kakao.maps.Polyline({
+          path: linePath,
+          strokeWeight,
+          strokeColor,
+          strokeOpacity: 0.95,
+          strokeStyle,
+        });
+        routePolylineRef.current.setMap(expandedMapRef.current);
+        const bounds = new window.kakao.maps.LatLngBounds();
+        linePath.forEach((p) => bounds.extend(p));
+        expandedMapRef.current.setBounds(bounds);
+      };
 
-          if (res.ok && path.length >= 2 && totals.timeSec != null && totals.timeSec > 0) {
-            const distanceM =
-              totals.distanceM != null && totals.distanceM > 0
-                ? totals.distanceM
-                : Math.round(distanceMeters(origin.lat, origin.lng, destLat, destLng));
-            setDirectionsInfo({
-              duration: Math.max(1, Math.round(totals.timeSec / 60)),
-              distance: Math.round((distanceM / 1000) * 10) / 10,
-            });
-            paintOnExpanded(path);
-            return;
-          }
-
-          const km = distanceMeters(origin.lat, origin.lng, destLat, destLng) / 1000;
-          setDirectionsInfo({
-            duration: estimateWalkMinutesFromKm(km),
-            distance: Math.round(km * 10) / 10,
-            approx: true,
-          });
-          if (path.length >= 2) {
-            paintOnExpanded(path);
-          } else if (expandedMapRef.current) {
-            const bounds = new window.kakao.maps.LatLngBounds();
-            bounds.extend(new window.kakao.maps.LatLng(origin.lat, origin.lng));
-            bounds.extend(new window.kakao.maps.LatLng(destLat, destLng));
-            expandedMapRef.current.setBounds(bounds);
-          }
-          return;
-        }
-
-        const res = await fetch("/api/directions", {
+      if (mode === "walk") {
+        // 카카오 /api/directions 는 자동차 전용 — 도보는 Tmap
+        const res = await fetch("/api/walk-directions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             origin,
             destination: { lat: destLat, lng: destLng },
-            mode: "car",
           }),
         });
-        const data = await res.json();
-        if (!data.routes?.[0]) {
-          showToast("경로를 찾을 수 없어요", "error");
+        const data = await res.json().catch(() => null);
+        const path = data ? parseTmapWalkGeoJsonToPath(data) : [];
+        const totals = data ? readTmapWalkTotals(data) : { distanceM: null, timeSec: null };
+
+        if (res.ok && path.length >= 2 && totals.timeSec != null && totals.timeSec > 0) {
+          const distanceM =
+            totals.distanceM != null && totals.distanceM > 0
+              ? totals.distanceM
+              : Math.round(distanceMeters(origin.lat, origin.lng, destLat, destLng));
+          setDirectionsInfo({
+            duration: Math.max(1, Math.round(totals.timeSec / 60)),
+            distance: Math.round((distanceM / 1000) * 10) / 10,
+          });
+          paintOnExpanded(path);
           return;
         }
-        const route = data.routes[0];
-        const summary = route.summary;
+
+        const km = distanceMeters(origin.lat, origin.lng, destLat, destLng) / 1000;
         setDirectionsInfo({
-          duration: Math.round(summary.duration / 60),
-          distance: Math.round((summary.distance / 1000) * 10) / 10,
+          duration: estimateWalkMinutesFromKm(km),
+          distance: Math.round(km * 10) / 10,
+          approx: true,
         });
-        paintOnExpanded(parseKakaoCarRoutePath(route));
-      } catch {
-        showToast("길찾기에 실패했어요", "error");
-      } finally {
-        setDirectionsLoading(false);
+        if (path.length >= 2) {
+          paintOnExpanded(path);
+        } else if (expandedMapRef.current) {
+          const bounds = new window.kakao.maps.LatLngBounds();
+          bounds.extend(new window.kakao.maps.LatLng(origin.lat, origin.lng));
+          bounds.extend(new window.kakao.maps.LatLng(destLat, destLng));
+          expandedMapRef.current.setBounds(bounds);
+        }
+        return;
       }
-    }, () => {
-      showToast("현재 위치를 가져올 수 없어요", "error");
+
+      const res = await fetch("/api/directions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          origin,
+          destination: { lat: destLat, lng: destLng },
+          mode: "car",
+        }),
+      });
+      const data = await res.json();
+      if (!data.routes?.[0]) {
+        showToast("경로를 찾을 수 없어요", "error");
+        return;
+      }
+      const route = data.routes[0];
+      const summary = route.summary;
+      setDirectionsInfo({
+        duration: Math.round(summary.duration / 60),
+        distance: Math.round((summary.distance / 1000) * 10) / 10,
+      });
+      paintOnExpanded(parseKakaoCarRoutePath(route));
+    } catch {
+      showToast("길찾기에 실패했어요", "error");
+    } finally {
       setDirectionsLoading(false);
-    });
+    }
   };
 
   /** 전체 지도(확장) 검색 핀 카드 공통 처리 — places 저장만 허용, feed에는 넣지 않음 */

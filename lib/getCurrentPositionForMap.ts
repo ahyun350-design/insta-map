@@ -73,9 +73,30 @@ async function getPositionWithOptions(opts: PositionRequestOptions): Promise<Map
   });
 }
 
+/** Dev/ops counter — how many real Stage1 lookups ran this session. */
+let stage1RequestCount = 0;
+
 /** Stage 1 — 지도 진입 시 즉시 표시용 */
 export async function getCurrentPositionForMapStage1(): Promise<MapLatLng> {
-  return getPositionWithOptions(STAGE1_OPTIONS);
+  stage1RequestCount += 1;
+  const n = stage1RequestCount;
+  const platform = Capacitor.isNativePlatform() ? "native" : "web";
+  // eslint-disable-next-line no-console
+  console.log(`[PindMap:location] stage1 request #${n} (${platform})`);
+  try {
+    const pos = await getPositionWithOptions(STAGE1_OPTIONS);
+    // eslint-disable-next-line no-console
+    console.log(`[PindMap:location] stage1 ok #${n}`);
+    return pos;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.log(`[PindMap:location] stage1 fail #${n}`, err);
+    throw err;
+  }
+}
+
+export function getStage1RequestCountForTests(): number {
+  return stage1RequestCount;
 }
 
 /** Stage 2 — 백그라운드 정밀 보강 */
