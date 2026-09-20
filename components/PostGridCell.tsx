@@ -9,9 +9,11 @@ type PostGridCellProps = {
   placeName: string;
   address?: string;
   likeCount: number;
-  /** 안정된 부모 핸들러 — 셀이 자기 postId로 호출 */
+  /** 안정된 부모 핸들러 — 셀이 자기 postId(+원본 이미지 인덱스)로 호출 */
   postId?: string;
-  onSelect?: (postId: string) => void;
+  onSelect?: (postId: string, originalImageIndex?: number) => void;
+  /** 상세 진입용 원본 images 인덱스 (기본 0) */
+  originalImageIndex?: number;
   /** 안정된 프로필 핸들러 — username으로 호출 */
   onSelectProfile?: (username: string) => void;
   /** 레거시: postId/onSelect 없을 때 (매 렌더 새 함수면 memo 무효) */
@@ -45,6 +47,7 @@ function PostGridCellComponent({
   likeCount,
   postId,
   onSelect,
+  originalImageIndex = 0,
   onSelectProfile,
   onClick,
   variant = "default",
@@ -91,7 +94,7 @@ function PostGridCellComponent({
   };
 
   const handleClick = () => {
-    if (postId && onSelect) onSelect(postId);
+    if (postId && onSelect) onSelect(postId, originalImageIndex);
     else onClick?.();
   };
 

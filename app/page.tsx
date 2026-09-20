@@ -11539,7 +11539,12 @@ function HomePageContent() {
     setActiveTab(id);
   }, []);
 
-  const handlePostGridSelect = useCallback((postId: string) => {
+  const handlePostGridSelect = useCallback((postId: string, photoIndex = 0) => {
+    setDetailEntryPhotoIndex(
+      typeof photoIndex === "number" && Number.isFinite(photoIndex)
+        ? Math.max(0, Math.floor(photoIndex))
+        : 0,
+    );
     setDetailPostId(postId);
   }, []);
 
@@ -11559,9 +11564,14 @@ function HomePageContent() {
     [router, persistHomeSessionSnapshot],
   );
 
-  const handleMypagePostGridSelect = useCallback((postId: string) => {
+  const handleMypagePostGridSelect = useCallback((postId: string, photoIndex = 0) => {
     setDetailReturnTo({ type: "mypage" });
     setActiveTab("mypage");
+    setDetailEntryPhotoIndex(
+      typeof photoIndex === "number" && Number.isFinite(photoIndex)
+        ? Math.max(0, Math.floor(photoIndex))
+        : 0,
+    );
     setDetailPostId(postId);
   }, []);
 
@@ -13875,6 +13885,7 @@ function HomePageContent() {
                       showMultiIcon
                       username={post.user}
                       postId={post.id}
+                      originalImageIndex={view.originalImageIndex}
                       onSelect={handlePostGridSelect}
                       onSelectProfile={handleHomeFeedProfileSelect}
                       categoryBadge={categoryBadge}
@@ -15962,6 +15973,7 @@ function HomePageContent() {
                       address={repPlace.address}
                       likeCount={post.likes_count}
                       postId={post.id}
+                      originalImageIndex={0}
                       onSelect={handleMypagePostGridSelect}
                     />
                     );
@@ -16738,6 +16750,7 @@ function HomePageContent() {
                 showMultiIcon
                 username={post.user}
                 postId={post.id}
+                originalImageIndex={0}
                 onSelect={handlePostGridSelect}
                 onSelectProfile={handleHomeSearchProfileSelect}
               />

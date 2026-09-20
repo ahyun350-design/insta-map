@@ -186,6 +186,12 @@ export type CategoryFilterCardView = {
   thumbUrl: string;
   /** 원본 images 기준 썸네일/캐러셀 시작 인덱스 (narrowed면 필터된 배열 기준 0) */
   thumbSourceIndex: number;
+  /**
+   * 상세(원본 images) 진입용 원본 인덱스.
+   * all → 0, 칩 ON → pickCategoryRepresentative의 sourceIndex.
+   * thumbSourceIndex와 별개 (카드 필터 캐러셀은 thumbSourceIndex 유지).
+   */
+  originalImageIndex: number;
   /** 필터된 이미지에 맞게 photoIndex를 0..n-1로 재매핑한 태그 (narrowed일 때) */
   photoPlaceTags: PhotoPlaceTag[] | null;
   /** 뱃지에 표시할 카테고리 */
@@ -231,6 +237,7 @@ export function projectPostForCategoryFilter(
       images,
       thumbUrl,
       thumbSourceIndex,
+      originalImageIndex: 0,
       photoPlaceTags: post.photoPlaceTags ?? null,
       visibleCategories: getDisplayCategories(post),
       otherPlaceCount: 0,
@@ -248,6 +255,7 @@ export function projectPostForCategoryFilter(
       images: [],
       thumbUrl: "",
       thumbSourceIndex: 0,
+      originalImageIndex: 0,
       photoPlaceTags: null,
       visibleCategories: [],
       otherPlaceCount: 0,
@@ -310,6 +318,7 @@ export function projectPostForCategoryFilter(
     images: displayImages.length > 0 ? displayImages : images.slice(0, 1),
     thumbUrl,
     thumbSourceIndex: 0,
+    originalImageIndex: rep.sourceIndex,
     photoPlaceTags: remappedTags,
     visibleCategories: [filter],
     otherPlaceCount: uniqueOtherPlaceCount(tags, filter),
