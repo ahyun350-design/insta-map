@@ -22,7 +22,8 @@ export async function POST(req: Request) {
     if (!isValidInstagramPostUrl(instagramUrl)) return NextResponse.json({ error: "유효한 Instagram 게시물 URL을 입력해주세요." }, { status: 400 });
 
     const caption = await scrapeInstagramCaption(instagramUrl);
-    const rawPlaces = await extractPlacesByClaude(caption);
+    const extracted = await extractPlacesByClaude(caption);
+    const rawPlaces = extracted.places;
 
     const places: Place[] = [];
     for (const item of rawPlaces as RawPlace[]) {

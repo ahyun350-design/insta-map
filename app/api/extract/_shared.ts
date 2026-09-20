@@ -17,17 +17,38 @@ export type RawPlace = {
   hint?: unknown;
   /** 캡션에 명시된 지역만. 없으면 null/생략 (추측 금지) */
   region?: unknown;
+  /** ISO 3166-1 alpha-2 or "unknown" — Claude place-level country */
+  country?: unknown;
+  /** Duplicated on cached places for caption-level inherit (optional) */
+  caption_country?: unknown;
+};
+
+export type ClaudePlacesExtract = {
+  captionCountry: string;
+  places: RawPlace[];
 };
 
 function sanitizeJsonLikeText(input: string): string {
   return input.replace(/```json|```/gi, "").replace(/[""]/g, '"').replace(/['']/g, "'").replace(/,\s*([}\]])/g, "$1").trim();
 }
 function extractJsonPayload(text: string): string {
-  const arrayStart = text.indexOf("["); const arrayEnd = text.lastIndexOf("]");
-  if (arrayStart >= 0 && arrayEnd > arrayStart) return text.slice(arrayStart, arrayEnd + 1).trim();
-  const objectStart = text.indexOf("{"); const objectEnd = text.lastIndexOf("}");
-  if (objectStart >= 0 && objectEnd > objectStart) return text.slice(objectStart, objectEnd + 1).trim();
-  return text.trim();
+  const trimmed = text.trim();
+  // Prefer object wrapper ({ caption_country, places }) when `{` precedes `[`
+  const objectStart = trimmed.indexOf("{");
+  const arrayStart = trimmed.indexOf("[");
+  if (objectStart >= 0 && (arrayStart < 0 || objectStart < arrayStart)) {
+    const objectEnd = trimmed.lastIndexOf("}");
+    if (objectEnd > objectStart) return trimmed.slice(objectStart, objectEnd + 1).trim();
+  }
+  if (arrayStart >= 0) {
+    const arrayEnd = trimmed.lastIndexOf("]");
+    if (arrayEnd > arrayStart) return trimmed.slice(arrayStart, arrayEnd + 1).trim();
+  }
+  if (objectStart >= 0) {
+    const objectEnd = trimmed.lastIndexOf("}");
+    if (objectEnd > objectStart) return trimmed.slice(objectStart, objectEnd + 1).trim();
+  }
+  return trimmed;
 }
 function quoteUnquotedKeys(jsonLike: string): string {
   return jsonLike.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3');
@@ -69,10 +90,29 @@ export function normalizeCategory(raw: unknown): ClaudeCategory | null {
   if (raw === "travel" || raw === "sightseeing") return "여행지";
   return null;
 }
-function parseClaudePlacesSafely(rawText: string): RawPlace[] {
+function parseClaudePlacesSafely(rawText: string): ClaudePlacesExtract {
   const parsed = parseClaudeJsonSafely(rawText);
-  const items = Array.isArray(parsed) ? parsed : [parsed];
-  return items.filter((item) => item && typeof item === "object") as RawPlace[];
+  if (Array.isArray(parsed)) {
+    return {
+      captionCountry: "unknown",
+      places: parsed.filter((item) => item && typeof item === "object") as RawPlace[],
+    };
+  }
+  if (parsed && typeof parsed === "object") {
+    const obj = parsed as Record<string, unknown>;
+    const placesRaw = obj.places ?? obj.Places;
+    const places = Array.isArray(placesRaw)
+      ? (placesRaw.filter((item) => item && typeof item === "object") as RawPlace[])
+      : [];
+    const captionCountry =
+      typeof obj.caption_country === "string"
+        ? obj.caption_country
+        : typeof obj.captionCountry === "string"
+          ? obj.captionCountry
+          : "unknown";
+    return { captionCountry, places };
+  }
+  return { captionCountry: "unknown", places: [] };
 }
 
 export type KakaoPlaceLookup = {
@@ -546,15 +586,21 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
   return String(caption).trim();
 }
 
-export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]> {
+export async function extractPlacesByClaude(caption: string): Promise<ClaudePlacesExtract> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("서버에 ANTHROPIC_API_KEY가 설정되지 않았습니다.");
 
   // 고정 지시문 (캡션 앞에 둠). Haiku 4.5 캐시 최소 4096토큰 미달(~1.6k)이라 cache_control 미적용.
   const fixedInstructions = [
     "아래 인스타그램 캡션에서 언급된 모든 장소를 추출하세요.",
-    "장소가 여러 개면 모두 포함하고, 없으면 빈 배열을 반환하세요.",
-    '반드시 JSON 배열만 반환하세요. 형식: [{"name":"장소명","hint":"동네명또는역이름","region":"캡션에명시된지역또는null","category":"맛집|술집|카페|쇼핑|숙소|놀거리|여행지"}]',
+    "장소가 여러 개면 모두 포함하고, 없으면 places를 빈 배열로 두세요.",
+    '반드시 JSON 객체만 반환하세요. 형식: {"caption_country":"KR|JP|TW|TH|VN|US|unknown","places":[{"name":"장소명","hint":"동네명또는역이름","region":"캡션에명시된지역또는null","category":"맛집|술집|카페|쇼핑|숙소|놀거리|여행지","country":"KR|JP|TW|TH|VN|US|unknown"}]}',
+    "caption_country: 캡션 전체가 어느 나라 여행·맛집 글인지 하나로 판정. ISO 3166-1 alpha-2 (KR, JP, TW, TH, VN, US 등) 또는 unknown.",
+    "places[].country: 그 장소의 실제 소재 국가. ISO 2자리 또는 unknown.",
+    "장소의 실제 소재 국가를 판정하라. 캡션 전체의 맥락(언급된 도시·역·지역명, '현지인', '여행', 환율·통화 표기 등)을 근거로 쓴다.",
+    "장소명이 한글로 음차되어 있어도 실제 소재지가 해외면 해외로 판정하라.",
+    "예: '잇푸도 긴자점', '야키니쿠코코카라 야에스구치점'은 일본(JP)이다.",
+    "컨셉이나 분위기가 외국풍인 것과 실제 소재지를 구분하라. 서울에 있는 일본식 이자카야는 KR이다.",
     "hint는 반드시 캡션에 직접 언급된 동네명, 역이름, 구명 중 가장 구체적인 것 하나만 넣으세요.",
     "예: 망원동, 합정, 성수, 용산역 처럼 짧고 구체적인 지역명 하나만.",
     "절대로 서울, 한국 같은 넓은 지역명은 쓰지 마세요. 구체적인 동네명이 없으면 빈 문자열.",
@@ -605,7 +651,7 @@ export async function extractPlacesByClaude(caption: string): Promise<RawPlace[]
       max_tokens: 2000,
       temperature: 0,
       system:
-        'You must return only pure JSON array. Output format: [{"name":"...","hint":"...","region":null,"category":"카페"}]. region is optional string or null (only if explicitly in caption). category must be exactly one of: 맛집, 술집, 카페, 쇼핑, 숙소, 놀거리, 여행지 (Korean strings). Do not include markdown, code fences, explanations, or any extra text.',
+        'You must return only pure JSON object. Output format: {"caption_country":"KR","places":[{"name":"...","hint":"...","region":null,"category":"카페","country":"KR"}]}. caption_country and each places[].country must be ISO 3166-1 alpha-2 (KR, JP, TW, TH, VN, US, …) or "unknown". region is optional string or null (only if explicitly in caption). category must be exactly one of: 맛집, 술집, 카페, 쇼핑, 숙소, 놀거리, 여행지 (Korean strings). Do not include markdown, code fences, explanations, or any extra text.',
       messages: [{ role: "user", content: prompt }],
     }),
   });

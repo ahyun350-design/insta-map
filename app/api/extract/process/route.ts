@@ -15,6 +15,7 @@ import { maskCaption } from "@/lib/maskCaption";
 import {
   classifyCaption,
   kakaoBranchTagAcceptable,
+  normalizeCountryCode,
   preparePlaceCandidatesForKakao,
 } from "@/lib/extractPlaceFilters";
 import {
@@ -308,6 +309,8 @@ export async function POST(req: Request) {
     let rawPlaces: RawPlace[];
     /** Caption text available for overseas city hints (empty on ok-cache hit) */
     let captionForHints: string | null = null;
+    /** Claude caption-level country (ISO or unknown); recovered from cached places when needed */
+    let captionCountry: string = "unknown";
 
     if (
       cached &&
@@ -340,6 +343,13 @@ export async function POST(req: Request) {
       caption = "";
       captionForHints = null;
       rawPlaces = cached.claude_places;
+      captionCountry = "unknown";
+      for (const p of rawPlaces) {
+        if (typeof p?.caption_country === "string") {
+          captionCountry = normalizeCountryCode(p.caption_country);
+          break;
+        }
+      }
       diagCaption = null;
       diagClaudePlaces = rawPlaces;
       await saveJobDiagnostics(jobId, {
@@ -391,8 +401,18 @@ export async function POST(req: Request) {
 
       await updateJobProgress(jobId, "AI가 장소 분석하는 중");
       const aiT0 = Date.now();
-      rawPlaces = await extractPlacesByClaude(caption);
-      console.log(`[PindMap:perf] extract.process.ai ${Date.now() - aiT0}ms`);
+      const extracted = await extractPlacesByClaude(caption);
+      captionCountry = normalizeCountryCode(extracted.captionCountry);
+      // Persist caption_country on each place for reel_cache hit path (no schema change)
+      rawPlaces = extracted.places.map((p) => ({
+        ...p,
+        caption_country: captionCountry,
+        country: typeof p.country === "string" ? normalizeCountryCode(p.country) : "unknown",
+      }));
+      console.log(`[PindMap:perf] extract.process.ai ${Date.now() - aiT0}ms`, {
+        caption_country: captionCountry,
+        places: rawPlaces.length,
+      });
       diagClaudePlaces = rawPlaces;
       await saveJobDiagnostics(jobId, { claude_places: diagClaudePlaces });
     }
@@ -402,6 +422,7 @@ export async function POST(req: Request) {
       hint: string;
       region: string | null;
       category: Place["category"];
+      country: string;
     };
     const parsedCandidates: PlaceCandidate[] = [];
     for (const item of rawPlaces) {
@@ -409,13 +430,15 @@ export async function POST(req: Request) {
       const hint = typeof item.hint === "string" ? item.hint.trim() : "";
       const region = parseRegion(item.region);
       const category = normalizeCategory(item.category);
+      const country = normalizeCountryCode(item.country);
       if (!name || !category) continue;
-      parsedCandidates.push({ name, hint, region, category });
+      parsedCandidates.push({ name, hint, region, category, country });
     }
 
     // Single gate before Kakao — cache hit and fresh Claude share this path
     const prepared = preparePlaceCandidatesForKakao(parsedCandidates, {
       caption: captionForHints,
+      captionCountry,
     });
     if (prepared.onlyAccountHandles || prepared.candidates.length + prepared.hardOverseas.length === 0) {
       if (prepared.onlyAccountHandles || prepared.droppedHandles.length > 0) {

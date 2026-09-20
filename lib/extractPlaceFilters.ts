@@ -3,10 +3,17 @@
  * Used by both fresh Claude and reel_cache hit paths before Kakao.
  */
 
+import {
+  OVERSEAS_BRANCH_DISTRICT_STEMS,
+  OVERSEAS_CITY_HINTS,
+} from "@/lib/overseasToponyms";
+
+export { OVERSEAS_BRANCH_DISTRICT_STEMS, OVERSEAS_CITY_HINTS };
+
 export const CAPTION_MIN_CHARS = 10;
 
-/** Bump when account-handle / overseas rules change. Lazy filter ignores version for now. */
-export const EXTRACT_PLACE_RULE_VERSION = 2;
+/** Bump when account-handle / overseas / Claude country rules change. */
+export const EXTRACT_PLACE_RULE_VERSION = 3;
 
 const HANGUL_RE = /[\uAC00-\uD7A3]/;
 const LATIN_RE = /[A-Za-z]/;
@@ -19,71 +26,62 @@ const HAN_RE = /[\u4E00-\u9FFF]/;
 /** Instagram-style handle: lowercase alnum with at least one . or _ segment */
 const ACCOUNT_HANDLE_RE = /^[a-z0-9]+([._][a-z0-9]+)+$/;
 
-/** Caption-only city hints (weak; never sole hard-block). */
-export const OVERSEAS_CITY_HINTS = [
-  "도쿄",
-  "오사카",
-  "후쿠오카",
-  "교토",
-  "요코하마",
-  "나고야",
-  "타이베이",
-  "타이완",
-  "대만",
-  "방콕",
-  "다낭",
-  "하노이",
-  "호치민",
-  "파리",
-  "뉴욕",
-  "런던",
-  "싱가포르",
-  "홍콩",
-  "상하이",
-  "베이징",
-  "오키나와",
-  "삿포로",
-  "tokyo",
-  "osaka",
-  "fukuoka",
-  "taipei",
-  "bangkok",
-  "paris",
-  "new york",
-  "singapore",
-] as const;
+const COUNTRY_ALIASES: Record<string, string> = {
+  KOREA: "KR",
+  "SOUTH KOREA": "KR",
+  SOUTHKOREA: "KR",
+  한국: "KR",
+  대한민국: "KR",
+  JAPAN: "JP",
+  일본: "JP",
+  TAIWAN: "TW",
+  대만: "TW",
+  타이완: "TW",
+  THAILAND: "TH",
+  태국: "TH",
+  VIETNAM: "VN",
+  베트남: "VN",
+  USA: "US",
+  "UNITED STATES": "US",
+  AMERICA: "US",
+  미국: "US",
+  FRANCE: "FR",
+  프랑스: "FR",
+  UK: "GB",
+  "UNITED KINGDOM": "GB",
+  영국: "GB",
+  SINGAPORE: "SG",
+  싱가포르: "SG",
+  "HONG KONG": "HK",
+  홍콩: "HK",
+  PHILIPPINES: "PH",
+  필리핀: "PH",
+};
 
-/**
- * Overseas district / area stems. If name contains stem + 점|본점 → hard overseas.
- * Expandable constant.
- */
-export const OVERSEAS_BRANCH_DISTRICT_STEMS = [
-  "우메다",
-  "긴자",
-  "시부야",
-  "신주쿠",
-  "난바",
-  "하카타",
-  "텐진",
-  "타이베이",
-  "시먼딩",
-  "방콕",
-  "다낭",
-  "하노이",
-  "호치민",
-  "오사카",
-  "도쿄",
-  "후쿠오카",
-  "교토",
-  "요코하마",
-  "梅田",
-  "銀座",
-  "渋谷",
-  "新宿",
-  "難波",
-  "博多",
-  "天神",
-] as const;
+/** Normalize Claude country → ISO 3166-1 alpha-2 or "unknown". */
+export function normalizeCountryCode(raw: unknown): string {
+  if (typeof raw !== "string") return "unknown";
+  const trimmed = raw.trim();
+  if (!trimmed) return "unknown";
+  const upper = trimmed.toUpperCase();
+  if (
+    upper === "UNKNOWN" ||
+    upper === "N/A" ||
+    upper === "NULL" ||
+    upper === "NONE" ||
+    upper === "UNCLEAR"
+  ) {
+    return "unknown";
+  }
+  if (/^[A-Z]{2}$/.test(upper)) return upper;
+  const alias = COUNTRY_ALIASES[upper] ?? COUNTRY_ALIASES[trimmed];
+  return alias ?? "unknown";
+}
+
+export function isConcreteNonKrCountry(code: string): boolean {
+  const c = normalizeCountryCode(code);
+  return c !== "unknown" && c !== "KR";
+}
 
 /**
  * Tokens ending in 점 that are shop-type / ops labels, NOT location branches.
@@ -129,6 +127,8 @@ export type PlaceCandidateIn = {
   hint: string;
   region: string | null;
   category: string;
+  /** Claude ISO country or "unknown" */
+  country?: string | null;
 };
 
 export type OverseasVerdict =
@@ -211,7 +211,7 @@ function compact(s: string): string {
   return (s || "").replace(/\s+/g, "").toLowerCase();
 }
 
-/** True if name has overseas district stem + 점/본점 (e.g. 긴자점, 梅田…店). */
+/** True if name has overseas district stem + 점/본점/구치점/店 (e.g. 긴자점, 야에스구치점). */
 export function hasOverseasDistrictBranch(name: string): boolean {
   const raw = (name || "").trim();
   if (!raw) return false;
@@ -219,8 +219,13 @@ export function hasOverseasDistrictBranch(name: string): boolean {
   for (const stem of OVERSEAS_BRANCH_DISTRICT_STEMS) {
     const s = compact(stem);
     if (!s) continue;
-    // stem + 점 / 본점 / 店
-    if (n.includes(`${s}점`) || n.includes(`${s}본점`) || n.includes(`${s}店`)) {
+    // stem + 점 / 본점 / 구치점 / 店
+    if (
+      n.includes(`${s}점`) ||
+      n.includes(`${s}본점`) ||
+      n.includes(`${s}구치점`) ||
+      n.includes(`${s}店`)
+    ) {
       return true;
     }
   }
@@ -498,10 +503,16 @@ export type PreparedKakaoCandidates<T extends PlaceCandidateIn> = {
 
 /**
  * Single gate before Kakao: drop account handles, split overseas, set kakaoQueryName.
+ *
+ * Routing (Claude country primary, script/toponym backstop):
+ * - place country KR → domestic path + character/toponym backstop
+ * - place country concrete non-KR → hard overseas (skip Kakao/POI)
+ * - place country unknown → inherit caption_country if concrete non-KR;
+ *   else domestic path + backstop
  */
 export function preparePlaceCandidatesForKakao<T extends PlaceCandidateIn>(
   items: T[],
-  opts?: { caption?: string | null },
+  opts?: { caption?: string | null; captionCountry?: string | null },
 ): PreparedKakaoCandidates<T> {
   const droppedHandles: string[] = [];
   const kept: T[] = [];
@@ -530,11 +541,35 @@ export function preparePlaceCandidatesForKakao<T extends PlaceCandidateIn>(
     };
   }
 
+  const captionCountry = normalizeCountryCode(opts?.captionCountry);
   const hardOverseas: T[] = [];
   const candidates: Array<T & { kakaoQueryName: string }> = [];
   const softOverseasNames = new Set<string>();
 
   for (const item of kept) {
+    const placeCountry = normalizeCountryCode(item.country);
+
+    if (isConcreteNonKrCountry(placeCountry)) {
+      hardOverseas.push(item);
+      console.log("[extract] place_filter overseas", {
+        kind: "hard",
+        reason: `claude_country_${placeCountry}`,
+        name: item.name.trim(),
+      });
+      continue;
+    }
+
+    if (placeCountry === "unknown" && isConcreteNonKrCountry(captionCountry)) {
+      hardOverseas.push(item);
+      console.log("[extract] place_filter overseas", {
+        kind: "hard",
+        reason: `caption_country_${captionCountry}`,
+        name: item.name.trim(),
+      });
+      continue;
+    }
+
+    // KR or unknown+unknown/KR: character / toponym backstop
     const resolved = resolveOverseasForKakao(item.name, { caption: opts?.caption });
     if (resolved.verdict.kind === "hard") {
       hardOverseas.push(item);
