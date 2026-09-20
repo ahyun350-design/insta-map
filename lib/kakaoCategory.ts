@@ -44,6 +44,24 @@ export function tryMapKakaoCategoryName(
   if (n.includes("카페")) return "카페";
   if (n.includes("음식점") || n.includes("음식")) return "맛집";
   if (n.includes("쇼핑") || n.includes("마트")) return "쇼핑";
+  // group_code 비는 전문 소매 (카메라판매·의류 등)
+  if (
+    n.includes("카메라") ||
+    n.includes("의류") ||
+    n.includes("패션") ||
+    n.includes("잡화") ||
+    n.includes("문구") ||
+    n.includes("서점") ||
+    n.includes("안경") ||
+    n.includes("화장품") ||
+    n.includes("가전") ||
+    n.includes("꽃집") ||
+    n.includes("생활용품점") ||
+    n.includes("반려동물") ||
+    (n.includes("판매") && !n.includes("음식"))
+  ) {
+    return "쇼핑";
+  }
   if (n.includes("숙박")) return "숙소";
   if (n.includes("관광") || n.includes("명소")) return "여행지";
   if (n.includes("스포츠") || n.includes("여가")) return "놀거리";

@@ -7,10 +7,10 @@
  *      (category_edited_by_user=true 우선) → 적용
  *   2) poi: search_poi → category / raw_category 매핑
  *      ★ 기존 category가 있으면 적용하지 않음 (poi는 기존 값을 이기지 못함)
- *   3) 둘 다 없으면 건드리지 않음
- *
- * 카카오 group_code/name 은 태그에 저장돼 있지 않아 이 배치에서는 0건.
- * (신규 Step2 경로는 카카오 신호를 우선 적용)
+ *   3) unresolved + placeId 있음 → 카카오 keyword 검색으로 id 매칭 후
+ *      category_group_code / category_name 으로 판정 (resolvePlaceCategorySignals 카카오 경로)
+ *      ★ 카카오 응답 전체는 저장하지 않음. 판정된 category 문자열만 태그에 기록
+ *   4) 그 외 건드리지 않음
  *
  * ★ feed_posts.categories 는 절대 수정하지 않음.
  *
@@ -112,6 +112,124 @@ function mapLocaldataRawCategory(raw) {
   if (SHOP_RAWS.has(t)) return "쇼핑";
   if (STAY_RAWS.has(t)) return "숙소";
   return null;
+}
+
+/** lib/kakaoCategory.ts resolvePlaceCategorySignals — 카카오 경로만 (claude/poi 없음) */
+function isKakaoBarCategoryName(categoryName) {
+  return String(categoryName ?? "").includes("> 술집 >");
+}
+
+function mapKakaoCategoryGroupCode(code) {
+  const c = String(code ?? "").trim();
+  if (!c) return null;
+  if (c === "CE7") return "카페";
+  if (c === "FD6") return "맛집";
+  if (c === "MT1" || c === "CS2") return "쇼핑";
+  if (c === "AD5") return "숙소";
+  if (c === "AT4" || c === "CT1") return "여행지";
+  if (c === "PK6" || c === "LN3") return "놀거리";
+  return null;
+}
+
+function tryMapKakaoCategoryName(categoryName) {
+  const n = String(categoryName ?? "");
+  if (!n) return null;
+  if (isKakaoBarCategoryName(n)) return "술집";
+  if (n.includes("제과,베이커리") || n.includes("떡,한과")) return "카페";
+  if (n.includes("카페")) return "카페";
+  if (n.includes("음식점") || n.includes("음식")) return "맛집";
+  if (n.includes("쇼핑") || n.includes("마트")) return "쇼핑";
+  if (
+    n.includes("카메라") ||
+    n.includes("의류") ||
+    n.includes("패션") ||
+    n.includes("잡화") ||
+    n.includes("문구") ||
+    n.includes("서점") ||
+    n.includes("안경") ||
+    n.includes("화장품") ||
+    n.includes("가전") ||
+    n.includes("꽃집") ||
+    n.includes("생활용품점") ||
+    n.includes("반려동물") ||
+    (n.includes("판매") && !n.includes("음식"))
+  ) {
+    return "쇼핑";
+  }
+  if (n.includes("숙박")) return "숙소";
+  if (n.includes("관광") || n.includes("명소")) return "여행지";
+  if (n.includes("스포츠") || n.includes("여가")) return "놀거리";
+  return null;
+}
+
+/**
+ * resolveExtractPlaceCategory 카카오 경로 (FD6 포함).
+ * claude/poi/최종맛집폴백 없음 — FD6만 맛집.
+ */
+function resolveKakaoPlaceCategory(groupCode, categoryName) {
+  if (isKakaoBarCategoryName(categoryName)) {
+    return { category: "술집", source: "kakao_name" };
+  }
+  const code = String(groupCode ?? "").trim();
+  if (code === "FD6") {
+    return { category: "맛집", source: "kakao_code" };
+  }
+  const byCode = mapKakaoCategoryGroupCode(code);
+  if (byCode) return { category: byCode, source: "kakao_code" };
+  const byName = tryMapKakaoCategoryName(categoryName);
+  if (byName) return { category: byName, source: "kakao_name" };
+  return null;
+}
+
+/**
+ * placeId로 keyword 검색 결과 중 id 매칭 → group_code/name만 추출.
+ * 응답 전체는 저장·로깅하지 않음.
+ */
+async function fetchKakaoSignalsByPlaceId(
+  restKey,
+  placeId,
+  placeName,
+  lat,
+  lng,
+  counters,
+) {
+  counters.apiCalls += 1;
+  const url = new URL("https://dapi.kakao.com/v2/local/search/keyword.json");
+  url.searchParams.set("query", placeName.trim());
+  url.searchParams.set("size", "15");
+  if (Number.isFinite(lng) && Number.isFinite(lat)) {
+    url.searchParams.set("x", String(lng));
+    url.searchParams.set("y", String(lat));
+  }
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `KakaoAK ${restKey}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    counters.apiErrors += 1;
+    return null;
+  }
+  const data = await res.json();
+  const docs = Array.isArray(data?.documents) ? data.documents : [];
+  let groupCode = null;
+  let categoryName = null;
+  let matched = false;
+  for (const d of docs) {
+    if (String(d?.id) === String(placeId)) {
+      matched = true;
+      groupCode =
+        typeof d.category_group_code === "string" ? d.category_group_code : "";
+      categoryName =
+        typeof d.category_name === "string" ? d.category_name : "";
+      break;
+    }
+  }
+  // data/docs discarded here — only signals leave this function
+  if (!matched) {
+    counters.idMiss += 1;
+    return null;
+  }
+  return { groupCode, categoryName };
 }
 
 function shuffleInPlace(arr) {
@@ -245,7 +363,7 @@ async function main() {
   console.log(`mode=${dryRun ? "dryRun" : "APPLY"}`);
 
   const posts = await fetchAllFeedPosts(admin);
-  /** @type {Array<{postId:string, tagIndex:number, placeName:string, lat:number, lng:number, oldCat:string, tag:any}>} */
+  /** @type {Array<{postId:string, tagIndex:number, placeName:string, placeId:string|null, lat:number, lng:number, oldCat:string, tag:any}>} */
   const tagRows = [];
   for (const post of posts) {
     if (post.archived) continue;
@@ -257,10 +375,16 @@ async function main() {
       const lng = Number(tag.lng);
       const oldCat = typeof tag.category === "string" ? tag.category.trim() : "";
       if (!placeName || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      const rawId = tag.placeId;
+      const placeId =
+        rawId === null || rawId === undefined
+          ? null
+          : String(rawId).trim() || null;
       tagRows.push({
         postId: post.id,
         tagIndex,
         placeName,
+        placeId,
         lat,
         lng,
         oldCat,
@@ -278,13 +402,22 @@ async function main() {
   );
   console.log(`places_name_buckets=${placesByName.size}`);
 
+  const restKey = process.env.KAKAO_REST_API_KEY?.trim();
+  if (!restKey) {
+    console.warn("WARN: KAKAO_REST_API_KEY missing — placeId Kakao pass will skip");
+  }
+
   /** @type {Array<{postId:string, tagIndex:number, placeName:string, from:string, to:string, source:string}>} */
   const changes = [];
   /** poi가 다른 값을 제안했지만 기존 category가 있어 스킵한 건 */
   const poiSkipped = [];
-  let unresolved = 0;
+  /** @type {typeof tagRows} */
+  const unresolvedRows = [];
   let same = 0;
   const poiCache = new Map();
+  /** unresolved 중 poi hit(이름+100m)은 있었으나 category 매핑 실패 */
+  let unresolvedPoiHitUnmapped = 0;
+  let unresolvedPoiNoHit = 0;
 
   function isPoiSource(src) {
     return src === "poi_category" || src === "poi_raw" || src === "poi";
@@ -296,6 +429,42 @@ async function main() {
     if (src === "places" || src === "places_edited") return "places";
     if (isPoiSource(src)) return "poi";
     return src;
+  }
+
+  async function probePoiHit(placeName, lat, lng) {
+    const cacheKey = `probe|${placeName}|${lat.toFixed(5)}|${lng.toFixed(5)}`;
+    if (poiCache.has(cacheKey)) return poiCache.get(cacheKey);
+    const { data, error } = await admin.rpc("search_poi", {
+      q: placeName.trim(),
+      hint_region: null,
+      origin_lat: lat,
+      origin_lng: lng,
+      max_results: 5,
+    });
+    if (error) {
+      poiCache.set(cacheKey, false);
+      return false;
+    }
+    const target = compactName(placeName);
+    let hit = false;
+    for (const row of data || []) {
+      const hitLat = row.lat != null ? Number(row.lat) : NaN;
+      const hitLng = row.lng != null ? Number(row.lng) : NaN;
+      if (!Number.isFinite(hitLat) || !Number.isFinite(hitLng)) continue;
+      if (haversineM(lat, lng, hitLat, hitLng) > PLACE_MATCH_RADIUS_M) continue;
+      const hitNorm = compactName(row.name);
+      const nameNorm = row.name_norm ? compactName(row.name_norm) : "";
+      const nameOk =
+        hitNorm === target ||
+        nameNorm === target ||
+        hitNorm.includes(target) ||
+        target.includes(hitNorm);
+      if (!nameOk) continue;
+      hit = true;
+      break;
+    }
+    poiCache.set(cacheKey, hit);
+    return hit;
   }
 
   for (let i = 0; i < tagRows.length; i++) {
@@ -316,7 +485,12 @@ async function main() {
       }
     }
     if (!resolved) {
-      unresolved += 1;
+      unresolvedRows.push(row);
+      if (await probePoiHit(row.placeName, row.lat, row.lng)) {
+        unresolvedPoiHitUnmapped += 1;
+      } else {
+        unresolvedPoiNoHit += 1;
+      }
       continue;
     }
 
@@ -351,11 +525,76 @@ async function main() {
     });
   }
 
+  // --- Pass: unresolved + placeId → Kakao ---
+  const unresolved = unresolvedRows.length;
+  const unresolvedWithPlaceId = unresolvedRows.filter((r) => r.placeId);
+  const unresolvedWithoutPlaceId = unresolved - unresolvedWithPlaceId.length;
+  const kakaoCounters = { apiCalls: 0, apiErrors: 0, idMiss: 0 };
+  /** @type {Map<string, {groupCode:string, categoryName:string}|null>} */
+  const kakaoSignalCache = new Map();
+  /** @type {typeof changes} */
+  const kakaoChanges = [];
+  let kakaoSame = 0;
+  let kakaoUnresolvedStill = 0;
+
+  for (const row of unresolvedWithPlaceId) {
+    if (!restKey) {
+      kakaoUnresolvedStill += 1;
+      continue;
+    }
+    let signals = kakaoSignalCache.get(row.placeId);
+    if (signals === undefined) {
+      signals = await fetchKakaoSignalsByPlaceId(
+        restKey,
+        row.placeId,
+        row.placeName,
+        row.lat,
+        row.lng,
+        kakaoCounters,
+      );
+      kakaoSignalCache.set(row.placeId, signals);
+      // small pacing
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    if (!signals) {
+      kakaoUnresolvedStill += 1;
+      continue;
+    }
+    const resolved = resolveKakaoPlaceCategory(
+      signals.groupCode,
+      signals.categoryName,
+    );
+    if (!resolved) {
+      kakaoUnresolvedStill += 1;
+      continue;
+    }
+    if (resolved.category === row.oldCat) {
+      kakaoSame += 1;
+      same += 1;
+      continue;
+    }
+    const change = {
+      postId: row.postId,
+      tagIndex: row.tagIndex,
+      placeName: row.placeName,
+      from: row.oldCat || "(empty)",
+      to: resolved.category,
+      source: resolved.source,
+    };
+    kakaoChanges.push(change);
+    changes.push(change);
+  }
+
   // Transition distribution (applied only)
   const transitions = new Map();
   for (const c of changes) {
     const key = `${c.from}→${c.to}`;
     transitions.set(key, (transitions.get(key) || 0) + 1);
+  }
+  const kakaoTransitions = new Map();
+  for (const c of kakaoChanges) {
+    const key = `${c.from}→${c.to}`;
+    kakaoTransitions.set(key, (kakaoTransitions.get(key) || 0) + 1);
   }
 
   const sourceApplied = {
@@ -368,12 +607,6 @@ async function main() {
     const b = reportSourceBucket(c.source);
     if (b in sourceApplied) sourceApplied[b] += 1;
   }
-  const sourcePoiSkipped = {
-    kakao_code: 0,
-    kakao_name: 0,
-    places: 0,
-    poi: poiSkipped.length,
-  };
 
   // Expected chip counts after recompute (applied only)
   const chipAfter = Object.fromEntries(APP_CATS.map((c) => [c, 0]));
@@ -389,47 +622,81 @@ async function main() {
     if (APP_SET.has(after)) chipAfter[after] += 1;
   }
 
-  const cafeToRestaurant = transitions.get("카페→맛집") || 0;
-
   console.log("\n=== SUMMARY ===");
   console.log(`total_tags=${totalTags}`);
   console.log(`changing_applied=${changes.length}`);
+  console.log(`  places=${sourceApplied.places}`);
+  console.log(`  kakao_code=${sourceApplied.kakao_code}`);
+  console.log(`  kakao_name=${sourceApplied.kakao_name}`);
+  console.log(`  poi=${sourceApplied.poi}`);
   console.log(`poi_skipped_keep_existing=${poiSkipped.length}`);
   console.log(`unchanged_same_category=${same}`);
-  console.log(`unresolved_untouched=${unresolved}`);
+  console.log(`unresolved_before_kakao=${unresolved}`);
 
-  console.log("\n=== SOURCE COUNTS (applied transitions) ===");
-  console.log(sourceApplied);
-  console.log("(kakao_code/kakao_name=0: tags have no stored Kakao signals in this batch)");
-  console.log("=== SOURCE: poi proposed diff but skipped ===");
-  console.log(sourcePoiSkipped);
+  console.log("\n=== UNRESOLVED → KAKAO placeId PASS ===");
+  console.log(`unresolved_total=${unresolved}`);
+  console.log(`unresolved_with_placeId=${unresolvedWithPlaceId.length}`);
+  console.log(`unresolved_without_placeId=${unresolvedWithoutPlaceId}`);
+  console.log(`kakao_changing=${kakaoChanges.length}`);
+  console.log(`kakao_same_category=${kakaoSame}`);
+  console.log(`kakao_still_unresolved=${kakaoUnresolvedStill + unresolvedWithoutPlaceId}`);
+  console.log(`kakao_api_calls=${kakaoCounters.apiCalls}`);
+  console.log(`kakao_api_errors=${kakaoCounters.apiErrors}`);
+  console.log(`kakao_id_miss_in_results=${kakaoCounters.idMiss}`);
+  console.log(`unique_placeIds_queried=${kakaoSignalCache.size}`);
 
-  console.log("\n=== TRANSITIONS (applied) ===");
-  const sortedTrans = [...transitions.entries()].sort((a, b) => b[1] - a[1]);
-  for (const [k, n] of sortedTrans) {
+  console.log("\n=== POI among unresolved (separate check) ===");
+  console.log(`poi_hit_but_unmapped_category=${unresolvedPoiHitUnmapped}`);
+  console.log(`poi_no_nearby_name_hit=${unresolvedPoiNoHit}`);
+
+  console.log("\n=== KAKAO PASS TRANSITIONS ===");
+  for (const [k, n] of [...kakaoTransitions.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`  ${k}: ${n}`);
   }
-  console.log(`cafe→restaurant remaining: ${cafeToRestaurant}`);
 
-  if (poiSkipped.length > 0) {
-    const poiTrans = new Map();
-    for (const c of poiSkipped) {
-      const key = `${c.from}→${c.to}`;
-      poiTrans.set(key, (poiTrans.get(key) || 0) + 1);
+  console.log("\n=== 언포모 ===");
+  const unpomoChanges = kakaoChanges.filter((c) => c.placeName.includes("언포모"));
+  const unpomoRows = unresolvedWithPlaceId.filter((r) =>
+    r.placeName.includes("언포모"),
+  );
+  if (unpomoChanges.length) {
+    for (const c of unpomoChanges) {
+      console.log(`  ${c.placeName} | ${c.from} → ${c.to} | src=${c.source}`);
     }
-    console.log("\n=== POI SKIPPED TRANSITIONS (not applied) ===");
-    for (const [k, n] of [...poiTrans.entries()].sort((a, b) => b[1] - a[1])) {
-      console.log(`  ${k}: ${n}`);
+  } else if (unpomoRows.length) {
+    for (const r of unpomoRows) {
+      const sig = r.placeId ? kakaoSignalCache.get(r.placeId) : null;
+      const mapped = sig
+        ? resolveKakaoPlaceCategory(sig.groupCode, sig.categoryName)
+        : null;
+      console.log(
+        `  ${r.placeName} | placeId=${r.placeId} | old=${r.oldCat} | group=${sig?.groupCode ?? "(none)"} | mapped=${mapped?.category ?? "(null)"}`,
+      );
+    }
+  } else {
+    console.log("  (not in unresolved-with-placeId set — may already be places-resolved)");
+    const any = tagRows.filter((r) => r.placeName.includes("언포모"));
+    for (const r of any) {
+      const key = `${r.postId}:${r.tagIndex}`;
+      const after = changeMap.get(key);
+      console.log(
+        `  ${r.placeName} | old=${r.oldCat} | after=${after ?? r.oldCat} | placeId=${r.placeId}`,
+      );
     }
   }
 
-  console.log("\n=== SAMPLE 30 (random among applied changes) ===");
-  const sample = [...changes];
+  console.log("\n=== SAMPLE 20 (random among kakao placeId changes) ===");
+  const sample = [...kakaoChanges];
   shuffleInPlace(sample);
-  for (const s of sample.slice(0, 30)) {
+  for (const s of sample.slice(0, 20)) {
     console.log(
       `  ${s.placeName} | ${s.from} → ${s.to} | src=${s.source} | post=${s.postId.slice(0, 8)}`,
     );
+  }
+
+  console.log("\n=== ALL APPLIED TRANSITIONS ===");
+  for (const [k, n] of [...transitions.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${k}: ${n}`);
   }
 
   console.log("\n=== CHIP COUNTS (tag category) ===");
