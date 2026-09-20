@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import type { PhotoPlaceTag } from "@/lib/feedPost";
+import type { FeedPostCategory, PhotoPlaceTag } from "@/lib/feedPost";
 import {
   getPhotoPlaceTag,
-  mapKakaoCategoryToPindMap,
   photoTapToNormalized,
   removePhotoPlaceTag,
   upsertPhotoPlaceTag,
@@ -18,11 +17,19 @@ import {
   resolveCurationAspectRatioFromSrc,
   type CurationAspectRatio,
 } from "@/lib/curationAspectRatio";
+import { resolveCurationTagCategory } from "@/lib/curationPlaceCategory";
+import { supabase } from "@/lib/supabase";
 
 type PendingPin = {
   photoIndex: number;
   x: number;
   y: number;
+};
+
+type PendingKakaoTag = {
+  place: KakaoPlaceSearchResult;
+  coords: { lat: number; lng: number };
+  pin: PendingPin;
 };
 
 type Props = {
@@ -96,6 +103,8 @@ export function Step2PlaceTags({
   const [searchNotice, setSearchNotice] = useState<string | null>(null);
   const [actionMenuIndex, setActionMenuIndex] = useState<number | null>(null);
   const [frameAspect, setFrameAspect] = useState<CurationAspectRatio>(DEFAULT_CURATION_ASPECT_RATIO);
+  const [resolvingCategory, setResolvingCategory] = useState(false);
+  const [pendingKakaoTag, setPendingKakaoTag] = useState<PendingKakaoTag | null>(null);
   const searchGenRef = useRef(0);
 
   useEffect(() => {
@@ -133,6 +142,8 @@ export function Step2PlaceTags({
     setHasSearched(false);
     setLastSearchedQuery("");
     setSearchNotice(null);
+    setResolvingCategory(false);
+    setPendingKakaoTag(null);
   };
 
   const openSearchModal = (pin: PendingPin) => {
@@ -146,6 +157,27 @@ export function Step2PlaceTags({
     setModalOpen(false);
     setPendingPin(null);
     resetSearchUi();
+  };
+
+  const commitKakaoTag = (
+    place: KakaoPlaceSearchResult,
+    coords: { lat: number; lng: number },
+    pin: PendingPin,
+    category: FeedPostCategory,
+  ) => {
+    const tag: PhotoPlaceTag = {
+      photoIndex: pin.photoIndex,
+      placeId: place.id || null,
+      placeName: place.place_name,
+      address: place.road_address_name || place.address_name || "",
+      category,
+      lat: coords.lat,
+      lng: coords.lng,
+      x: pin.x,
+      y: pin.y,
+    };
+    onPhotoPlaceTagsChange(upsertPhotoPlaceTag(photoPlaceTags, tag));
+    closeSearchModal();
   };
 
   const runSearch = async () => {
@@ -182,6 +214,7 @@ export function Step2PlaceTags({
           query: q,
           hits: found.length,
           top: found[0]?.place_name ?? null,
+          topGroup: found[0]?.category_group_code ?? null,
         });
         if (found.length > 0) break;
       }
@@ -199,26 +232,53 @@ export function Step2PlaceTags({
     }
   };
 
-  const handleSelectPlace = (place: KakaoPlaceSearchResult) => {
-    if (!pendingPin) return;
+  const handleSelectPlace = async (place: KakaoPlaceSearchResult) => {
+    if (!pendingPin || resolvingCategory) return;
     const coords = kakaoYXToLatLng(place.y, place.x);
     if (!coords) return;
 
-    const tag: PhotoPlaceTag = {
-      photoIndex: pendingPin.photoIndex,
-      placeId: place.id || null,
-      placeName: place.place_name,
-      address: place.road_address_name || place.address_name || "",
-      // 카카오 category_name 미매칭 시 저장 기본값은 맛집 (UI 칩 기본 선택과 무관)
-      category: mapKakaoCategoryToPindMap(place.category_name) ?? "맛집",
-      lat: coords.lat,
-      lng: coords.lng,
-      x: pendingPin.x,
-      y: pendingPin.y,
-    };
+    setResolvingCategory(true);
+    setSearchNotice(null);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const resolved = await resolveCurationTagCategory(supabase, {
+        placeName: place.place_name,
+        lat: coords.lat,
+        lng: coords.lng,
+        groupCode: place.category_group_code ?? null,
+        categoryName: place.category_name ?? null,
+        userId: user?.id ?? null,
+      });
+      console.log("[crs][place-category]", {
+        place: place.place_name,
+        group: place.category_group_code ?? null,
+        namePath: place.category_name ?? null,
+        source: resolved.source,
+        category: resolved.category,
+      });
+      if (resolved.category) {
+        commitKakaoTag(place, coords, pendingPin, resolved.category);
+        return;
+      }
+      setPendingKakaoTag({ place, coords, pin: pendingPin });
+    } catch (err) {
+      console.error("[crs][place-category] resolve failed", err);
+      setPendingKakaoTag({ place, coords, pin: pendingPin });
+    } finally {
+      setResolvingCategory(false);
+    }
+  };
 
-    onPhotoPlaceTagsChange(upsertPhotoPlaceTag(photoPlaceTags, tag));
-    closeSearchModal();
+  const handleKakaoCategoryPick = (category: FeedPostCategory) => {
+    if (!pendingKakaoTag) return;
+    commitKakaoTag(
+      pendingKakaoTag.place,
+      pendingKakaoTag.coords,
+      pendingKakaoTag.pin,
+      category,
+    );
   };
 
   const handleManualPlace = (place: ManualPlaceResult) => {
@@ -326,13 +386,21 @@ export function Step2PlaceTags({
           void runSearch();
         }}
         results={searchResults}
-        onSelect={handleSelectPlace}
+        onSelect={(place) => {
+          void handleSelectPlace(place);
+        }}
         onManualSelect={handleManualPlace}
         keyboardHeight={keyboardHeight}
         searching={searching}
         hasSearched={hasSearched}
         lastSearchedQuery={lastSearchedQuery}
-        searchNotice={searchNotice}
+        searchNotice={
+          resolvingCategory ? "카테고리 확인 중…" : searchNotice
+        }
+        resolvingCategory={resolvingCategory}
+        categoryPickPlaceName={pendingKakaoTag?.place.place_name ?? null}
+        onCategoryPick={handleKakaoCategoryPick}
+        onCategoryPickCancel={() => setPendingKakaoTag(null)}
       />
     </div>
   );

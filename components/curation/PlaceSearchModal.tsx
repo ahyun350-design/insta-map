@@ -8,6 +8,8 @@ export type KakaoPlaceSearchResult = {
   id: string;
   place_name: string;
   category_name?: string;
+  /** 카카오 Places keywordSearch 응답 필드 (CE7/FD6 등) */
+  category_group_code?: string;
   road_address_name?: string;
   address_name?: string;
   y?: string | number;
@@ -45,6 +47,12 @@ type Props = {
   hasSearched?: boolean;
   lastSearchedQuery?: string;
   searchNotice?: string | null;
+  /** 카카오 선택 후 카테고리 자동 판정 중 */
+  resolvingCategory?: boolean;
+  /** 자동 판정 실패 시 사용자 선택 (장소명) */
+  categoryPickPlaceName?: string | null;
+  onCategoryPick?: (category: FeedPostCategory) => void;
+  onCategoryPickCancel?: () => void;
 };
 
 function addressSearchOnce(query: string): Promise<GeocodeHit | null> {
@@ -92,7 +100,12 @@ export function PlaceSearchModal({
   hasSearched = false,
   lastSearchedQuery = "",
   searchNotice = null,
+  resolvingCategory = false,
+  categoryPickPlaceName = null,
+  onCategoryPick,
+  onCategoryPickCancel,
 }: Props) {
+  const [kakaoPickCategory, setKakaoPickCategory] = useState<FeedPostCategory | null>(null);
   const modalPaddingBottom =
     keyboardHeight > 0
       ? "12px"
@@ -124,6 +137,7 @@ export function PlaceSearchModal({
       setAddressConfirmed(false);
       setGeocoding(false);
       setManualError(null);
+      setKakaoPickCategory(null);
       return;
     }
     if (mode === "search") {
@@ -131,6 +145,10 @@ export function PlaceSearchModal({
       return () => window.clearTimeout(id);
     }
   }, [open, mode]);
+
+  useEffect(() => {
+    setKakaoPickCategory(null);
+  }, [categoryPickPlaceName]);
 
   useEffect(() => {
     if (!open || keyboardHeight <= 0) return;
@@ -267,10 +285,16 @@ export function PlaceSearchModal({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {mode === "manual" && (
+            {(mode === "manual" || categoryPickPlaceName) && (
               <button
                 type="button"
-                onClick={() => setMode("search")}
+                onClick={() => {
+                  if (categoryPickPlaceName) {
+                    onCategoryPickCancel?.();
+                    return;
+                  }
+                  setMode("search");
+                }}
                 aria-label="검색으로 돌아가기"
                 style={{
                   border: "none",
@@ -285,7 +309,11 @@ export function PlaceSearchModal({
               </button>
             )}
             <span style={{ fontSize: 16, fontWeight: 600, color: "#1a2a7a" }}>
-              {mode === "manual" ? "직접 입력" : "장소 검색"}
+              {categoryPickPlaceName
+                ? "카테고리 선택"
+                : mode === "manual"
+                  ? "직접 입력"
+                  : "장소 검색"}
             </span>
           </div>
           <button
@@ -306,7 +334,73 @@ export function PlaceSearchModal({
           </button>
         </div>
 
-        {mode === "search" ? (
+        {categoryPickPlaceName ? (
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+              padding: "16px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 14, color: "#1a1a2e", fontWeight: 600 }}>
+              {categoryPickPlaceName}
+            </p>
+            <p style={{ margin: 0, fontSize: 13, color: "#888", lineHeight: 1.45 }}>
+              카테고리를 자동으로 찾지 못했어요. 직접 선택해 주세요.
+            </p>
+            <div>
+              <p style={{ margin: "0 0 8px", fontSize: 12, color: "#666", fontWeight: 600 }}>
+                카테고리 *
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {FEED_POST_CATEGORIES.map((cat) => {
+                  const active = kakaoPickCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setKakaoPickCategory(cat)}
+                      style={{
+                        border: active ? "1px solid #1a2a7a" : "1px solid #ddd",
+                        background: active ? "#1a2a7a" : "#fff",
+                        color: active ? "#fff" : "#555",
+                        borderRadius: 16,
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {cat}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="primaryButton"
+              disabled={!kakaoPickCategory}
+              onClick={() => {
+                if (!kakaoPickCategory) return;
+                onCategoryPick?.(kakaoPickCategory);
+              }}
+              style={{
+                width: "100%",
+                padding: "12px",
+                marginTop: 4,
+                opacity: kakaoPickCategory ? 1 : 0.5,
+              }}
+            >
+              이 장소로 태그하기
+            </button>
+          </div>
+        ) : mode === "search" ? (
           <>
             <div
               style={{
@@ -325,12 +419,14 @@ export function PlaceSearchModal({
                 onChange={(e) => onSearchQueryChange(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && onSearch()}
                 style={{ flex: 1 }}
+                disabled={resolvingCategory}
               />
               <button
                 className="primaryButton"
                 type="button"
                 onClick={onSearch}
                 style={{ padding: "0 14px", flexShrink: 0 }}
+                disabled={resolvingCategory}
               >
                 검색
               </button>
@@ -390,6 +486,7 @@ export function PlaceSearchModal({
                       <button
                         type="button"
                         onClick={() => onSelect(r)}
+                        disabled={resolvingCategory}
                         style={{
                           display: "block",
                           width: "100%",
@@ -398,8 +495,9 @@ export function PlaceSearchModal({
                           background: "transparent",
                           border: "none",
                           borderBottom: "0.5px solid #f5f5f5",
-                          cursor: "pointer",
+                          cursor: resolvingCategory ? "wait" : "pointer",
                           fontFamily: "inherit",
+                          opacity: resolvingCategory ? 0.6 : 1,
                         }}
                       >
                         <p style={{ margin: 0, fontSize: 14, color: "#1a1a2e", fontWeight: 500 }}>

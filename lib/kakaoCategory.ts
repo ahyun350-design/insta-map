@@ -65,14 +65,14 @@ export function mapKakaoCategoryToPindMap(
  * 4) 카카오 category_name 휴리스틱
  * 5) Claude category
  * 6) poi.raw_category (무정보 업태는 스킵)
- * 7) 맛집
+ * 7) 맛집 (defaultCategory, 큐레이션은 null로 끄고 사용자 선택)
  */
-export function resolveExtractPlaceCategory(input: {
+export function resolvePlaceCategorySignals(input: {
   groupCode?: string | null;
   categoryName?: string | null;
-  claudeCategory: FeedPostCategory;
+  claudeCategory?: FeedPostCategory | null;
   poiRawCategory?: string | null;
-}): FeedPostCategory {
+}): FeedPostCategory | null {
   // 술집 path는 FD6보다 구체적 — 최우선
   if (isKakaoBarCategoryName(input.categoryName)) return "술집";
 
@@ -80,7 +80,11 @@ export function resolveExtractPlaceCategory(input: {
 
   // FD6 = generic food — path에 술집 없을 때만 Claude 우선
   if (code === "FD6") {
-    if (isAppCategory(input.claudeCategory) && input.claudeCategory !== "맛집") {
+    if (
+      input.claudeCategory &&
+      isAppCategory(input.claudeCategory) &&
+      input.claudeCategory !== "맛집"
+    ) {
       return input.claudeCategory;
     }
     return "맛집";
@@ -92,12 +96,30 @@ export function resolveExtractPlaceCategory(input: {
   const byName = tryMapKakaoCategoryName(input.categoryName);
   if (byName) return byName;
 
-  if (isAppCategory(input.claudeCategory)) return input.claudeCategory;
+  if (input.claudeCategory && isAppCategory(input.claudeCategory)) {
+    return input.claudeCategory;
+  }
 
   const byRaw = mapLocaldataRawCategory(input.poiRawCategory);
   if (byRaw) return byRaw;
 
-  return "맛집";
+  return null;
+}
+
+export function resolveExtractPlaceCategory(input: {
+  groupCode?: string | null;
+  categoryName?: string | null;
+  claudeCategory: FeedPostCategory;
+  poiRawCategory?: string | null;
+}): FeedPostCategory {
+  return (
+    resolvePlaceCategorySignals({
+      groupCode: input.groupCode,
+      categoryName: input.categoryName,
+      claudeCategory: input.claudeCategory,
+      poiRawCategory: input.poiRawCategory,
+    }) ?? "맛집"
+  );
 }
 
 /**
