@@ -13,7 +13,11 @@ import {
   projectPostForCategoryFilter,
 } from "@/lib/categoryUtil";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
-import { getDisplayPlaceForPhoto, type PlaceRefForPhotoTagMatch } from "@/lib/photoPlaceTag";
+import {
+  getDisplayPlaceForPhoto,
+  getRepresentativePlaceForPost,
+  type PlaceRefForPhotoTagMatch,
+} from "@/lib/photoPlaceTag";
 import type { SavedCourse } from "@/lib/courses";
 import {
   curationAspectRatioCss,
@@ -452,16 +456,49 @@ export function FeedPostCardComponent({
 
   const displayImages =
     filterView.images.length > 0 ? filterView.images : post.images.slice(0, 1);
+  const repPlaceAll = useMemo(
+    () =>
+      getRepresentativePlaceForPost({
+        photoPlaceTags: post.photoPlaceTags,
+        placeName: post.placeName,
+        address: post.address ?? "",
+        category: post.category,
+        lat: post.lat,
+        lng: post.lng,
+      }),
+    [
+      post.photoPlaceTags,
+      post.placeName,
+      post.address,
+      post.category,
+      post.lat,
+      post.lng,
+    ],
+  );
   const displayPlaceSource = useMemo(
     () => ({
-      placeName: filterView.placeName || (categoryFilter === "all" ? post.placeName : ""),
-      address: filterView.address || (categoryFilter === "all" ? post.address : ""),
+      placeName:
+        categoryFilter === "all"
+          ? repPlaceAll.placeName
+          : filterView.placeName,
+      address:
+        categoryFilter === "all"
+          ? repPlaceAll.address
+          : filterView.address,
       category: post.category,
       lat: post.lat,
       lng: post.lng,
       photoPlaceTags: filterView.photoPlaceTags,
     }),
-    [filterView, categoryFilter, post.placeName, post.address, post.category, post.lat, post.lng],
+    [
+      filterView,
+      categoryFilter,
+      repPlaceAll.placeName,
+      repPlaceAll.address,
+      post.category,
+      post.lat,
+      post.lng,
+    ],
   );
 
   const { visible: visibleCategories, extraCount: extraCategoryCount } =

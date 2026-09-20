@@ -140,12 +140,13 @@ export function getFirstTaggedPhotoIndex(
   return best;
 }
 
-/** 그리드/카드 썸네일용 이미지 인덱스 (태그 없으면 0) */
+/** 그리드/카드 썸네일용 이미지 인덱스. all/미지정 → 0(커버). 카테고리 필터 → 해당 첫 태그. */
 export function getRepresentativeImageIndex(
   imagesLength: number,
   tags: PhotoPlaceTag[] | null | undefined,
   categoryFilter?: string | null,
 ): number {
+  if (!categoryFilter || categoryFilter === "all") return 0;
   return getFirstTaggedPhotoIndex(imagesLength, tags, categoryFilter) ?? 0;
 }
 
@@ -174,10 +175,10 @@ export function feedPostHasCategoryWithoutMatchingTags(
 export type CategoryFilterCardView = {
   /** 필터 목록에 넣을지 */
   include: boolean;
-  /**
-   * true: 매칭 사진만·선택 카테고리 뱃지.
-   * false: 필터 all — 전체 사진(대표는 첫 태그 장).
-   */
+/**
+ * true: 매칭 사진만·선택 카테고리 뱃지.
+ * false: 필터 all — 전체 사진(대표는 images[0]).
+ */
   narrowed: boolean;
   /** 카드/그리드에 보여줄 이미지 (narrowed면 매칭만, 대표가 [0]) */
   images: string[];
@@ -209,8 +210,9 @@ function uniqueOtherPlaceCount(tags: PhotoPlaceTag[], filter: string): number {
 
 /**
  * 홈 카드용 카테고리 필터 투영.
- * filter=all → 전체 포함, 대표=첫 태그 사진(장소명·이미지 일치).
- * 매칭 태그 ≥1 → 해당 category만, 대표=그 category 태그 중 photoIndex 최소(장소·이미지·뱃지 일치).
+ * filter=all → 전체 포함, 대표 이미지=images[0], 캐러셀 시작=0.
+ *   장소명은 호출측 getRepresentativePlaceForPost 사용 (여기선 legacy 필드만).
+ * 매칭 태그 ≥1 → 해당 category만, 대표=그 category 태그 중 photoIndex 최소.
  * 매칭 0장 → 제외.
  */
 export function projectPostForCategoryFilter(
@@ -221,13 +223,8 @@ export function projectPostForCategoryFilter(
   const tags = post.photoPlaceTags ?? [];
 
   if (filter === "all") {
-    const rep = pickCategoryRepresentative(images, tags, null);
-    const thumbSourceIndex = rep?.sourceIndex ?? 0;
-    const thumbUrl = resolveFeedThumbUrl(
-      images,
-      thumbSourceIndex,
-      tags.map((t) => t.photoIndex),
-    );
+    const thumbSourceIndex = 0;
+    const thumbUrl = resolveFeedThumbUrl(images, 0, []);
     return {
       include: true,
       narrowed: false,
@@ -237,8 +234,9 @@ export function projectPostForCategoryFilter(
       photoPlaceTags: post.photoPlaceTags ?? null,
       visibleCategories: getDisplayCategories(post),
       otherPlaceCount: 0,
-      placeName: rep?.placeName || (post.placeName ?? ""),
-      address: rep?.address || (post.address ?? ""),
+      // 장소 라벨은 getRepresentativePlaceForPost — 여기선 legacy만 두고 호출측이 덮음
+      placeName: post.placeName ?? "",
+      address: post.address ?? "",
     };
   }
 

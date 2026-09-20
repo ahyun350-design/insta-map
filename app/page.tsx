@@ -13844,13 +13844,9 @@ function HomePageContent() {
                     const filterActive = selectedHomeCategory !== "all";
                     const narrowed = filterActive && view.narrowed;
                     const repPlace = getRepresentativePlaceForPost(post);
-                    // 필터 ON: 반드시 해당 카테고리 대표 태그만 (다른 카테고리/legacy 폴백 금지)
-                    const placeName = narrowed
-                      ? view.placeName
-                      : view.placeName || repPlace.placeName;
-                    const address = narrowed
-                      ? view.address
-                      : view.address || repPlace.address;
+                    // 필터 ON: 해당 카테고리 대표 태그. all: getRepresentativePlaceForPost
+                    const placeName = narrowed ? view.placeName : repPlace.placeName;
+                    const address = narrowed ? view.address : repPlace.address;
                     const catKey = view.visibleCategories[0] as Category | undefined;
                     const categoryBadge =
                       narrowed && catKey
