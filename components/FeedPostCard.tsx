@@ -224,24 +224,28 @@ export function FeedPostMedia({
     (i: number) => {
       if (variant !== "detail") return;
       if (i !== activeIndex) return;
-
-      if (!firstPixelLoggedRef.current) {
-        firstPixelLoggedRef.current = true;
-        const ms =
-          typeof perfOpenAt === "number" && Number.isFinite(perfOpenAt)
-            ? Math.round(perfNow() - perfOpenAt)
-            : null;
-        // eslint-disable-next-line no-console
-        console.log("[PindMap:perf] detail.firstPixel", {
-          chip: perfChip ?? "unknown",
-          index: i,
-          ms,
-        });
+      if (firstPixelLoggedRef.current) {
+        if (!widenedBeyondNeighborRef.current) {
+          widenedBeyondNeighborRef.current = true;
+          requestAnimationFrame(() => {
+            expandLoadIndices(activeIndex, 2);
+          });
+        }
+        return;
       }
-
+      firstPixelLoggedRef.current = true;
+      const ms =
+        typeof perfOpenAt === "number" && Number.isFinite(perfOpenAt)
+          ? Math.round(perfNow() - perfOpenAt)
+          : null;
+      // eslint-disable-next-line no-console
+      console.log("[PindMap:perf] detail.firstPixel", {
+        chip: perfChip ?? "unknown",
+        index: i,
+        ms,
+      });
       if (!widenedBeyondNeighborRef.current) {
         widenedBeyondNeighborRef.current = true;
-        // After first paint of the target photo, prefetch ±2
         requestAnimationFrame(() => {
           expandLoadIndices(activeIndex, 2);
         });
@@ -249,6 +253,19 @@ export function FeedPostMedia({
     },
     [variant, activeIndex, perfChip, perfOpenAt, expandLoadIndices],
   );
+
+  // Cached images may skip onLoad in some WebViews — check once after paint.
+  useEffect(() => {
+    if (variant !== "detail") return;
+    const root = scrollRef.current;
+    if (!root) return;
+    const img = root.querySelector<HTMLImageElement>(
+      `.feedPostMediaSlide[data-slide-index="${activeIndex}"] img.feedPostMediaImg`,
+    );
+    if (img && img.complete && img.naturalWidth > 0) {
+      markFirstPixelAndWiden(activeIndex);
+    }
+  }, [variant, activeIndex, loadIndices, markFirstPixelAndWiden]);
 
   /** 상세: 가로 스크롤 IO로 여유(400px) 있게 미리 마운트 — native lazy 대신 */
   useEffect(() => {
@@ -397,11 +414,6 @@ export function FeedPostMedia({
                           | "high"
                           | "auto",
                         onLoad: () => markFirstPixelAndWiden(i),
-                        ref: (img: HTMLImageElement | null) => {
-                          if (img && img.complete && img.naturalWidth > 0) {
-                            markFirstPixelAndWiden(i);
-                          }
-                        },
                       }
                     : { loading: "lazy" as const })}
                 />

@@ -10,10 +10,6 @@ import {
   dismissWhatsNewIfPresent,
   edgeSwipeBack,
   gotoTab,
-  loginEmailInput,
-  loginPasswordInput,
-  loginSubmitButton,
-  reachLoginForm,
   safeClick,
   savedMyListsButton,
   suppressCoachmarks,
@@ -21,6 +17,7 @@ import {
   tabButton,
   waitForHomeFeed,
 } from "./helpers/nav";
+import { ensureLoggedIn } from "./helpers/login";
 
 const ARTIFACTS = path.resolve(process.cwd(), "e2e/artifacts");
 const SCREENSHOTS = path.join(ARTIFACTS, "screenshots");
@@ -32,7 +29,7 @@ test("production smoke — major tabs (continue on failure)", async ({
   page,
   context,
 }) => {
-  const { email, password } = requireE2ECredentials();
+  requireE2ECredentials();
   await context.grantPermissions(["geolocation"]);
   await context.setGeolocation({ latitude: 37.5665, longitude: 126.978 });
   await suppressCoachmarks(context);
@@ -58,18 +55,9 @@ test("production smoke — major tabs (continue on failure)", async ({
 
   // ── 1. Login ──────────────────────────────────────────────
   await runner.step("1. 로그인", async () => {
-    await reachLoginForm(page);
-
-    if (!(await tabButton(page, "home").isVisible().catch(() => false))) {
-      await loginEmailInput(page).fill(email);
-      await loginPasswordInput(page).fill(password);
-      await safeClick(loginSubmitButton(page));
-    }
-
-    // Login success = bottom tab bar visible (don't require .homeFeedGrid yet)
-    await expect(tabBar(page)).toBeVisible({ timeout: 45_000 });
+    await ensureLoggedIn(page);
+    await expect(tabBar(page)).toBeVisible({ timeout: 15_000 });
     await expect(tabButton(page, "home")).toBeVisible({ timeout: 15_000 });
-    await dismissCoachmarks(page);
   });
 
   // ── 1b. Whats New (optional — may already be seen) ────────

@@ -223,50 +223,12 @@ export async function safeClick(
 }
 
 /**
- * Unauthenticated `/login` redirects to `/onboarding` until seen.
- * Finish onboarding (skip) then wait for the email/password form.
+ * @deprecated Use `ensureLoggedIn` from `./login`.
+ * Kept as a thin alias so older call sites keep working.
  */
 export async function reachLoginForm(page: Page): Promise<void> {
-  await page.goto("/login", { waitUntil: "domcontentloaded" });
-
-  const email = loginEmailInput(page);
-  const onboardingRoot = page.locator(".onboardingRoot, .onboardingRootFinal");
-  const skipBtn = page.getByRole("button", { name: "건너뛰기" });
-  const nextBtn = page.getByRole("button", { name: "다음" });
-  const startBtn = page.getByRole("button", { name: "시작하기" });
-
-  const homeTab = tabButton(page, "home");
-
-  await Promise.race([
-    email.waitFor({ state: "visible", timeout: 45_000 }),
-    onboardingRoot.waitFor({ state: "visible", timeout: 45_000 }),
-    homeTab.waitFor({ state: "visible", timeout: 45_000 }),
-  ]).catch(() => null);
-
-  if (await homeTab.isVisible().catch(() => false)) return;
-  if (await email.isVisible().catch(() => false)) return;
-
-  if (await onboardingRoot.isVisible().catch(() => false)) {
-    if (await skipBtn.isVisible().catch(() => false)) {
-      await safeClick(skipBtn);
-    } else {
-      for (let i = 0; i < 6; i++) {
-        if (await email.isVisible().catch(() => false)) break;
-        if (await startBtn.isVisible().catch(() => false)) {
-          await safeClick(startBtn);
-          break;
-        }
-        if (await nextBtn.isVisible().catch(() => false)) {
-          await safeClick(nextBtn);
-          await page.waitForTimeout(250);
-          continue;
-        }
-        break;
-      }
-    }
-  }
-
-  await expect(email).toBeVisible({ timeout: 45_000 });
+  const { ensureLoggedIn } = await import("./login");
+  await ensureLoggedIn(page);
 }
 
 export async function gotoTab(page: Page, tab: MainTab): Promise<void> {
