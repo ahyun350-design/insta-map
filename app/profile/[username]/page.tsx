@@ -17,6 +17,11 @@ import {
   type ProfilePageCachePost,
   type ProfilePageCacheUser,
 } from "@/lib/profilePageCache";
+import {
+  EDGE_SWIPE_PRIORITY,
+  useEdgeSwipeBack,
+} from "@/lib/useEdgeSwipeBack";
+import { pushInAppRoute, safeRouterBack } from "@/lib/safeRouterBack";
 
 type ProfileUser = ProfilePageCacheUser;
 type ProfilePost = ProfilePageCachePost;
@@ -521,6 +526,63 @@ export default function ProfilePage() {
     }
   };
 
+  const leaveProfile = useCallback(() => {
+    const params =
+      typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const fromChat = params?.get("fromChat");
+    if (fromChat) {
+      router.push(`/?openChatRoom=${encodeURIComponent(fromChat)}`);
+      return;
+    }
+    if (params?.get("from") === "messages") {
+      router.push("/?tab=messages");
+      return;
+    }
+    const from = params?.get("from");
+    const postId = params?.get("postId");
+    if (from === "detail" && postId) {
+      router.push(`/?postId=${encodeURIComponent(postId)}&tab=home`);
+      return;
+    }
+    if (from === "feed") {
+      router.push("/?tab=home");
+      return;
+    }
+    if (from === "search") {
+      router.push("/?tab=home&openHomeSearch=1");
+      return;
+    }
+    safeRouterBack(router, "/?tab=home");
+  }, [router]);
+
+  useEdgeSwipeBack({
+    id: "profile-follow-list",
+    enabled: !!showFollowList,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => setShowFollowList(null),
+  });
+  useEdgeSwipeBack({
+    id: "profile-share-modal",
+    enabled: !!sharePost,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => {
+      setSharePost(null);
+      setFriendRooms([]);
+    },
+  });
+  useEdgeSwipeBack({
+    id: "profile-lightbox",
+    enabled: !!lightboxImg,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => setLightboxImg(null),
+  });
+  useEdgeSwipeBack({
+    id: "profile-router",
+    enabled: true,
+    priority: EDGE_SWIPE_PRIORITY.ROUTER_SCREEN,
+    onClose: leaveProfile,
+  });
+
   // 캐시된 프로필이 있으면 세션/재조회 대기 중에도 즉시 표시 (뒤로가기 로딩 깜빡임 방지)
   if ((!sessionChecked || userLoading || loadingProfile) && !profile) {
     return (
@@ -537,34 +599,7 @@ export default function ProfilePage() {
       <section className="phoneFrame">
         <header className="subpageHeader" style={{ height: "56px", display: "flex", alignItems: "center", padding: "0 20px", borderBottom: "0.5px solid #efefef", background: "#fff", gap: "12px", flexShrink: 0 }}>
           <button
-            onClick={() => {
-              const params =
-                typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-              const fromChat = params?.get("fromChat");
-              if (fromChat) {
-                router.push(`/?openChatRoom=${encodeURIComponent(fromChat)}`);
-                return;
-              }
-              if (params?.get("from") === "messages") {
-                router.push("/?tab=messages");
-                return;
-              }
-              const from = params?.get("from");
-              const postId = params?.get("postId");
-              if (from === "detail" && postId) {
-                router.push(`/?postId=${encodeURIComponent(postId)}&tab=home`);
-                return;
-              }
-              if (from === "feed") {
-                router.push("/?tab=home");
-                return;
-              }
-              if (from === "search") {
-                router.push("/?tab=home&openHomeSearch=1");
-                return;
-              }
-              router.back();
-            }}
+            onClick={leaveProfile}
             style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -757,7 +792,7 @@ export default function ProfilePage() {
                 return;
               }
               if (username === profile.username) return;
-              router.push(`/profile/${encodeURIComponent(username)}`);
+              pushInAppRoute(router, `/profile/${encodeURIComponent(username)}`);
             }}
           />
         )}

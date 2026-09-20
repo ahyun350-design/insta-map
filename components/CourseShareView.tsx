@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { resolveCourseInviteImage, type SavedCourse } from "@/lib/courses";
 import { getAppStoreUrl } from "@/lib/pindmapLinks";
+import {
+  EDGE_SWIPE_PRIORITY,
+  useEdgeSwipeBack,
+} from "@/lib/useEdgeSwipeBack";
+import { safeRouterBack } from "@/lib/safeRouterBack";
 
 const PLACE_CATEGORY_EMOJI: Record<string, string> = {
   맛집: "🍽️",
@@ -27,6 +33,7 @@ type Props = {
 };
 
 export function CourseShareView({ course, isIOS }: Props) {
+  const router = useRouter();
   const [step, setStep] = useState<1 | 2>(1);
   const [inviteFailed, setInviteFailed] = useState(false);
   const [nahPos, setNahPos] = useState({ x: 0, y: 12 });
@@ -39,6 +46,13 @@ export function CourseShareView({ course, isIOS }: Props) {
   const appStoreUrl = getAppStoreUrl();
   const showAppStoreCta = isIOS && !!appStoreUrl;
   const inviteImageSrc = resolveCourseInviteImage(course);
+
+  useEdgeSwipeBack({
+    id: "course-share-router",
+    enabled: true,
+    priority: EDGE_SWIPE_PRIORITY.ROUTER_SCREEN,
+    onClose: () => safeRouterBack(router, "/"),
+  });
 
   const getNahBounds = useCallback((playW: number, playH: number) => {
     const btnW = Math.min(NAH_BTN_MAX_W, playW - NAH_PAD * 2);

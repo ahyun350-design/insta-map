@@ -466,6 +466,22 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(tabButton(page, "home")).toBeVisible({ timeout: 20_000 });
   });
 
+  // ── 6a. Edge swipe — profile router back ───────────────────
+  await runner.stepOptional("6a. 가장자리 스와이프 — 프로필 뒤로", async () => {
+    await gotoTab(page, "home");
+    await waitForHomeFeed(page);
+    const authors = page.getByTestId("feed-post-author");
+    if (!(await authors.first().isVisible().catch(() => false))) return "skip";
+    await safeClick(authors.first());
+    await expect(page).toHaveURL(/\/profile\//, { timeout: 20_000 });
+    await edgeSwipeBack(page);
+    await expect(page).not.toHaveURL(/\/profile\//, { timeout: 15_000 });
+    await expect(tabButton(page, "home").or(tabButton(page, "message"))).toBeVisible({
+      timeout: 15_000,
+    });
+    return "pass";
+  });
+
   // ── 6b. Edge swipe — home search close ─────────────────────
   await runner.step("6b. 가장자리 스와이프 — 홈 검색 닫기", async () => {
     await gotoTab(page, "home");

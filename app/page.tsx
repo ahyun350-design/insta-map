@@ -225,8 +225,10 @@ import { nextCoachToShow, setCoachSeen, COACHMARK_DEFS } from "@/lib/coachmarks"
 import { WhatsNewModal } from "@/components/WhatsNewModal";
 import {
   EDGE_SWIPE_PRIORITY,
+  setEdgeSwipeBlockedByKeyboard,
   useEdgeSwipeBack,
 } from "@/lib/useEdgeSwipeBack";
+import { pushInAppRoute } from "@/lib/safeRouterBack";
 import {
   isAccountOldEnoughForWhatsNew,
   nextWhatsNewPackToShow,
@@ -3828,7 +3830,7 @@ function HomePageContent() {
       if (useBack) {
         router.back();
       } else {
-        router.push(`/profile/${encodeURIComponent(ret.username)}`);
+        pushInAppRoute(router, `/profile/${encodeURIComponent(ret.username)}`);
       }
       requestAnimationFrame(() => {
         setDetailPostId(null);
@@ -6605,7 +6607,7 @@ function HomePageContent() {
 
   const openMessageSearchProfile = useCallback(
     (username: string) => {
-      router.push(`/profile/${encodeURIComponent(username)}?from=messages`);
+      pushInAppRoute(router, `/profile/${encodeURIComponent(username)}?from=messages`);
     },
     [router],
   );
@@ -6776,7 +6778,7 @@ function HomePageContent() {
         return;
       }
       if (item.type === "follow") {
-        router.push(`/profile/${encodeURIComponent(item.actorUsername)}`);
+        pushInAppRoute(router, `/profile/${encodeURIComponent(item.actorUsername)}`);
         return;
       }
       if (item.type === "message" && item.targetId) {
@@ -11597,6 +11599,21 @@ function HomePageContent() {
     priority: EDGE_SWIPE_PRIORITY.HOME_SEARCH,
     onClose: closeHomeSearch,
   });
+  useEdgeSwipeBack({
+    id: "chat-room",
+    enabled: activeTab === "messages" && !!activeChatRoom,
+    priority: EDGE_SWIPE_PRIORITY.CHAT_ROOM,
+    onClose: () => {
+      resetWindowScrollAfterChatKeyboard();
+      setActiveChatRoom(null);
+    },
+  });
+
+  useEffect(() => {
+    setEdgeSwipeBlockedByKeyboard(
+      keyboardVisible || keyboardWillShow || keyboardHeight > 0,
+    );
+  }, [keyboardVisible, keyboardWillShow, keyboardHeight]);
 
   const handleBottomTabChange = useCallback((id: TabId) => {
     track(TAB_TRACK_EVENT[id]);
@@ -11615,7 +11632,7 @@ function HomePageContent() {
   const handleHomeFeedProfileSelect = useCallback(
     (username: string) => {
       persistHomeSessionSnapshot();
-      router.push(`/profile/${encodeURIComponent(username)}?from=feed`);
+      pushInAppRoute(router, `/profile/${encodeURIComponent(username)}?from=feed`);
     },
     [router, persistHomeSessionSnapshot],
   );
@@ -11623,7 +11640,7 @@ function HomePageContent() {
   const handleHomeSearchProfileSelect = useCallback(
     (username: string) => {
       persistHomeSessionSnapshot();
-      router.push(`/profile/${encodeURIComponent(username)}?from=search`);
+      pushInAppRoute(router, `/profile/${encodeURIComponent(username)}?from=search`);
     },
     [router, persistHomeSessionSnapshot],
   );
@@ -13520,7 +13537,8 @@ function HomePageContent() {
                 type="button"
                 onClick={() => {
                   persistHomeSessionSnapshot();
-                  router.push(
+                  pushInAppRoute(
+                    router,
                     `/profile/${encodeURIComponent(detailPost.user)}?from=detail&postId=${encodeURIComponent(detailPost.id)}`,
                   );
                 }}
@@ -13677,7 +13695,8 @@ function HomePageContent() {
                     type="button"
                     onClick={() => {
                       persistHomeSessionSnapshot();
-                      router.push(
+                      pushInAppRoute(
+                        router,
                         `/profile/${encodeURIComponent(c.user)}?from=detail&postId=${encodeURIComponent(detailPost.id)}`,
                       );
                     }}
@@ -13691,7 +13710,8 @@ function HomePageContent() {
                         type="button"
                         onClick={() => {
                           persistHomeSessionSnapshot();
-                          router.push(
+                          pushInAppRoute(
+                            router,
                             `/profile/${encodeURIComponent(c.user)}?from=detail&postId=${encodeURIComponent(detailPost.id)}`,
                           );
                         }}
@@ -14008,7 +14028,8 @@ function HomePageContent() {
                 router.push("/?tab=mypage");
                 return;
               }
-              router.push(
+              pushInAppRoute(
+                router,
                 `/profile/${encodeURIComponent(activeChatRoom.friendName)}?fromChat=${encodeURIComponent(activeChatRoom.id)}`,
               );
             }}
@@ -16392,7 +16413,7 @@ function HomePageContent() {
             onUserClick={(username) => {
               setShowFollowList(null);
               if (username === user.username) return;
-              router.push(`/profile/${encodeURIComponent(username)}`);
+              pushInAppRoute(router, `/profile/${encodeURIComponent(username)}`);
             }}
           />
         )}

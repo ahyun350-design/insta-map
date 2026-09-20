@@ -11,6 +11,10 @@ export const EDGE_SWIPE_PRIORITY = {
   SAVED_SELECT: 6,
   WHATS_NEW: 7,
   HOME_SEARCH: 8,
+  /** React-state chat room (messages tab) — above router screens */
+  CHAT_ROOM: 9,
+  /** Next.js App Router pages (profile, /course/[id], …) — last */
+  ROUTER_SCREEN: 20,
 } as const;
 
 export type EdgeSwipePriority =
@@ -31,6 +35,8 @@ const DX_OVER_DY = 1.5;
 const stack: EdgeSwipeEntry[] = [];
 let seqCounter = 0;
 let listenersAttached = false;
+/** When true (keyboard open), edge-swipe is ignored entirely. */
+let blockedByKeyboard = false;
 
 type GestureState = {
   tracking: boolean;
@@ -62,6 +68,10 @@ function abandonGesture(): void {
 }
 
 function onTouchStart(e: TouchEvent): void {
+  if (blockedByKeyboard) {
+    abandonGesture();
+    return;
+  }
   if (e.touches.length !== 1) {
     abandonGesture();
     return;
@@ -187,6 +197,12 @@ export function useEdgeSwipeBack(options: {
       onClose: () => onCloseRef.current(),
     });
   }, [options.enabled, options.id, options.priority]);
+}
+
+/** Block edge-swipe while the soft keyboard is visible (protects chat drafts). */
+export function setEdgeSwipeBlockedByKeyboard(blocked: boolean): void {
+  blockedByKeyboard = blocked;
+  if (blocked) abandonGesture();
 }
 
 /** Test helper — current stack size. */
