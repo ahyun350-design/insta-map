@@ -4773,7 +4773,10 @@ function HomePageContent() {
       return;
     }
     track("curation_view");
-    detailOpenPerfRef.current = { postId: detailPostId, t: perfNow() };
+    // Keep tap-time from handlePostGridSelect when already stamped for this id
+    if (detailOpenPerfRef.current?.postId !== detailPostId) {
+      detailOpenPerfRef.current = { postId: detailPostId, t: perfNow() };
+    }
     detailOpenLoggedRef.current = null;
   }, [detailPostId]);
 
@@ -11621,6 +11624,7 @@ function HomePageContent() {
   }, []);
 
   const handlePostGridSelect = useCallback((postId: string, photoIndex = 0) => {
+    detailOpenPerfRef.current = { postId, t: perfNow() };
     setDetailEntryPhotoIndex(
       typeof photoIndex === "number" && Number.isFinite(photoIndex)
         ? Math.max(0, Math.floor(photoIndex))
@@ -11648,6 +11652,7 @@ function HomePageContent() {
   const handleMypagePostGridSelect = useCallback((postId: string, photoIndex = 0) => {
     setDetailReturnTo({ type: "mypage" });
     setActiveTab("mypage");
+    detailOpenPerfRef.current = { postId, t: perfNow() };
     setDetailEntryPhotoIndex(
       typeof photoIndex === "number" && Number.isFinite(photoIndex)
         ? Math.max(0, Math.floor(photoIndex))
@@ -13635,6 +13640,12 @@ function HomePageContent() {
                   mediaAriaLabel="사진"
                   onMediaClick={() => {}}
                   onPlaceOverlayClick={(placeRef) => openHomePlaceSheetFromPost(detailPost, placeRef)}
+                  perfChip={selectedHomeCategory}
+                  perfOpenAt={
+                    detailOpenPerfRef.current?.postId === detailPost.id
+                      ? detailOpenPerfRef.current.t
+                      : undefined
+                  }
                 />
               </div>
             )}

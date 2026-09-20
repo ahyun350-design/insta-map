@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
 import {
@@ -24,6 +24,7 @@ import {
   DEFAULT_CURATION_ASPECT_RATIO,
   type CurationAspectRatio,
 } from "@/lib/curationAspectRatio";
+import { perfNow } from "@/lib/debugLog";
 
 type Category = FeedPostCategory;
 
@@ -92,17 +93,28 @@ const SWIPE_SCROLL_PX = 2;
 
 type FeedPostMediaVariant = "list" | "detail";
 
-function initialLoadIndices(variant: FeedPostMediaVariant, count: number): Set<number> {
+function clampPhotoIndex(raw: number, count: number): number {
+  if (!Number.isFinite(raw) || raw < 0 || count <= 0) return 0;
+  return Math.min(Math.floor(raw), count - 1);
+}
+
+/** list: 0(+1). detail: center ±1 only (no hardcoded 0..2). */
+function initialLoadIndices(
+  variant: FeedPostMediaVariant,
+  count: number,
+  center = 0,
+): Set<number> {
   const s = new Set<number>();
   if (count <= 0) return s;
   if (variant === "detail") {
-    for (let i = 0; i < Math.min(3, count); i++) s.add(i);
-    // 캐러셀 이웃 (첫 장 기준)
-    if (count > 1) s.add(1);
-  } else {
-    s.add(0);
-    if (count > 1) s.add(1);
+    const c = clampPhotoIndex(center, count);
+    for (const i of [c - 1, c, c + 1]) {
+      if (i >= 0 && i < count) s.add(i);
+    }
+    return s;
   }
+  s.add(0);
+  if (count > 1) s.add(1);
   return s;
 }
 
@@ -115,6 +127,8 @@ export function FeedPostMedia({
   variant = "list",
   aspectRatio = DEFAULT_CURATION_ASPECT_RATIO,
   initialIndex = 0,
+  perfChip,
+  perfOpenAt,
 }: {
   images: string[];
   placeSource: Pick<
@@ -129,19 +143,23 @@ export function FeedPostMedia({
   aspectRatio?: CurationAspectRatio | null;
   /** 상세 등에서 특정 사진부터 보이기 (범위 밖이면 0) */
   initialIndex?: number;
+  /** detail.firstPixel 로그용 — 홈 카테고리 칩 id */
+  perfChip?: string;
+  /** performance.now() at tap / open */
+  perfOpenAt?: number;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const targetScrollIndexRef = useRef(clampPhotoIndex(initialIndex, images.length));
+  const firstPixelLoggedRef = useRef(false);
+  const widenedBeyondNeighborRef = useRef(false);
+
   const clampIndex = useCallback(
-    (raw: number) => {
-      if (!Number.isFinite(raw) || raw < 0) return 0;
-      const max = Math.max(0, images.length - 1);
-      return Math.min(Math.floor(raw), max);
-    },
+    (raw: number) => clampPhotoIndex(raw, images.length),
     [images.length],
   );
   const [activeIndex, setActiveIndex] = useState(() => clampIndex(initialIndex));
   const [loadIndices, setLoadIndices] = useState<Set<number>>(() =>
-    initialLoadIndices(variant, images.length),
+    initialLoadIndices(variant, images.length, clampPhotoIndex(initialIndex, images.length)),
   );
   const multi = images.length > 1;
   const pointerStartRef = useRef<{ x: number; y: number; scrollLeft: number } | null>(null);
@@ -151,58 +169,86 @@ export function FeedPostMedia({
   const mediaInteractive = variant !== "detail";
 
   const expandLoadIndices = useCallback(
-    (center: number) => {
+    (center: number, radius = 1) => {
       setLoadIndices((prev) => {
         const next = new Set(prev);
-        const add = (i: number) => {
-          if (i >= 0 && i < images.length) next.add(i);
-        };
-        add(center);
-        add(center - 1);
-        add(center + 1);
-        if (variant === "detail") {
-          for (let i = 0; i < Math.min(3, images.length); i++) add(i);
-        }
-        if (next.size === prev.size) {
-          for (const i of next) {
-            if (!prev.has(i)) return next;
+        let changed = false;
+        for (let d = -radius; d <= radius; d++) {
+          const i = center + d;
+          if (i >= 0 && i < images.length && !next.has(i)) {
+            next.add(i);
+            changed = true;
           }
-          return prev;
         }
-        return next;
+        return changed ? next : prev;
       });
     },
-    [images.length, variant],
+    [images.length],
   );
 
-  const scrollToIndex = useCallback((idx: number) => {
-    const apply = () => {
-      const el = scrollRef.current;
-      if (!el || el.clientWidth <= 0) return false;
-      el.scrollLeft = idx * el.clientWidth;
-      return true;
-    };
-    if (apply()) return;
-    requestAnimationFrame(() => {
-      if (apply()) return;
-      requestAnimationFrame(() => {
-        apply();
-      });
-    });
+  const applyScrollLeftNow = useCallback((el: HTMLDivElement | null, idx: number) => {
+    if (!el) return false;
+    const w = el.clientWidth;
+    if (w <= 0) return false;
+    const left = idx * w;
+    if (Math.abs(el.scrollLeft - left) > 0.5) {
+      el.scrollLeft = left;
+    }
+    return true;
   }, []);
 
-  useEffect(() => {
+  /** Mount-time sync scroll — avoids one frame at index 0 before jumping to n. */
+  const setTrackRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      scrollRef.current = el;
+      if (el) applyScrollLeftNow(el, targetScrollIndexRef.current);
+    },
+    [applyScrollLeftNow],
+  );
+
+  useLayoutEffect(() => {
     const idx = clampIndex(initialIndex);
-    setLoadIndices(initialLoadIndices(variant, images.length));
+    targetScrollIndexRef.current = idx;
+    firstPixelLoggedRef.current = false;
+    widenedBeyondNeighborRef.current = false;
     setActiveIndex(idx);
-    expandLoadIndices(idx);
-    scrollToIndex(idx);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 이미지 URL·초기 인덱스 변경 시만
-  }, [variant, images.join("\0"), initialIndex, clampIndex, scrollToIndex]);
+    setLoadIndices(initialLoadIndices(variant, images.length, idx));
+    applyScrollLeftNow(scrollRef.current, idx);
+  }, [variant, images.join("\0"), initialIndex, clampIndex, applyScrollLeftNow]);
 
   useEffect(() => {
-    expandLoadIndices(activeIndex);
+    expandLoadIndices(activeIndex, 1);
   }, [activeIndex, expandLoadIndices]);
+
+  const markFirstPixelAndWiden = useCallback(
+    (i: number) => {
+      if (variant !== "detail") return;
+      if (i !== activeIndex) return;
+
+      if (!firstPixelLoggedRef.current) {
+        firstPixelLoggedRef.current = true;
+        const ms =
+          typeof perfOpenAt === "number" && Number.isFinite(perfOpenAt)
+            ? Math.round(perfNow() - perfOpenAt)
+            : null;
+        // eslint-disable-next-line no-console
+        console.log("[PindMap:perf] detail.firstPixel", {
+          chip: perfChip ?? "unknown",
+          index: i,
+          ms,
+        });
+      }
+
+      if (!widenedBeyondNeighborRef.current) {
+        widenedBeyondNeighborRef.current = true;
+        // After first paint of the target photo, prefetch ±2
+        requestAnimationFrame(() => {
+          expandLoadIndices(activeIndex, 2);
+        });
+      }
+    },
+    [variant, activeIndex, perfChip, perfOpenAt, expandLoadIndices],
+  );
 
   /** 상세: 가로 스크롤 IO로 여유(400px) 있게 미리 마운트 — native lazy 대신 */
   useEffect(() => {
@@ -218,7 +264,7 @@ export function FeedPostMedia({
           const raw = (entry.target as HTMLElement).dataset.slideIndex;
           const i = raw != null ? Number(raw) : NaN;
           if (!Number.isFinite(i)) continue;
-          expandLoadIndices(i);
+          expandLoadIndices(i, 1);
         }
       },
       { root, rootMargin: "0px 400px", threshold: 0 },
@@ -230,7 +276,9 @@ export function FeedPostMedia({
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el || el.clientWidth <= 0) return;
-    setActiveIndex(Math.round(el.scrollLeft / el.clientWidth));
+    const next = Math.round(el.scrollLeft / el.clientWidth);
+    setActiveIndex(next);
+    targetScrollIndexRef.current = next;
   }, []);
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -308,7 +356,7 @@ export function FeedPostMedia({
       style={{ ["--feed-post-aspect" as string]: aspectCss }}
     >
       <div
-        ref={scrollRef}
+        ref={setTrackRef}
         className="feedPostMediaTrack"
         role={mediaInteractive ? "button" : undefined}
         tabIndex={mediaInteractive ? 0 : undefined}
@@ -331,8 +379,8 @@ export function FeedPostMedia({
       >
         {images.map((src, i) => {
           const shouldLoad = loadIndices.has(i);
-          const eager =
-            variant === "detail" && (i < 3 || Math.abs(i - activeIndex) <= 1);
+          const nearActive = Math.abs(i - activeIndex) <= 1;
+          const eager = variant === "detail" && nearActive;
           return (
             <div key={`${src}-${i}`} className="feedPostMediaSlide" data-slide-index={i}>
               {shouldLoad ? (
@@ -343,9 +391,18 @@ export function FeedPostMedia({
                   draggable={false}
                   decoding="async"
                   {...(variant === "detail"
-                    ? eager
-                      ? { loading: "eager" as const, fetchPriority: i === 0 ? ("high" as const) : undefined }
-                      : {}
+                    ? {
+                        loading: (eager ? "eager" : "lazy") as "eager" | "lazy",
+                        fetchPriority: (i === activeIndex ? "high" : "auto") as
+                          | "high"
+                          | "auto",
+                        onLoad: () => markFirstPixelAndWiden(i),
+                        ref: (img: HTMLImageElement | null) => {
+                          if (img && img.complete && img.naturalWidth > 0) {
+                            markFirstPixelAndWiden(i);
+                          }
+                        },
+                      }
                     : { loading: "lazy" as const })}
                 />
               ) : (
