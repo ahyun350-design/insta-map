@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { thumbFileNameFromOriginal } from "@/lib/postImageThumb";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_THUMB_BYTES = 2 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/pjpeg"]);
 
 export async function POST(req: Request) {
@@ -81,6 +83,28 @@ export async function POST(req: Request) {
         { error: "upload_failed", code: (uploadError as { statusCode?: string }).statusCode ?? null },
         { status: 500 },
       );
+    }
+
+    const thumbField = form.get("thumb");
+    if (thumbField instanceof Blob && thumbField.size > 0) {
+      const thumbType = (thumbField as File).type?.toLowerCase() || "";
+      if (thumbType && !ALLOWED_TYPES.has(thumbType)) {
+        console.warn("[upload/image] thumb skipped: bad type", thumbType);
+      } else if (thumbField.size > MAX_THUMB_BYTES) {
+        console.warn("[upload/image] thumb skipped: too large", thumbField.size);
+      } else {
+        const thumbName = thumbFileNameFromOriginal(fileName);
+        const thumbBuf = Buffer.from(await thumbField.arrayBuffer());
+        const { error: thumbErr } = await admin.storage.from("post-images").upload(thumbName, thumbBuf, {
+          contentType: "image/jpeg",
+          cacheControl: "3600",
+          upsert: false,
+        });
+        if (thumbErr) {
+          // Full already uploaded — do not fail the post; grid will onError→full.
+          console.warn("[upload/image] thumb upload failed", thumbErr);
+        }
+      }
     }
 
     const { data: urlData } = admin.storage.from("post-images").getPublicUrl(fileName);

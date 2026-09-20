@@ -7816,7 +7816,7 @@ function HomePageContent() {
         showToast("로그인이 필요합니다.", "error");
         return;
       }
-      const prepared = await prepareImageForUpload(file);
+      const { full: prepared } = await prepareImageForUpload(file);
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}-invite.jpg`;
       const formData = new FormData();
       formData.append("file", prepared, fileName);
@@ -8938,13 +8938,18 @@ function HomePageContent() {
       type: file.type,
       size: file.size,
     });
-    const prepared = await prepareImageForUpload(file);
+    const { full, thumb } = await prepareImageForUpload(file);
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}-${Math.random().toString(36).substring(2, 11)}.jpg`;
-    devLog("[handleImageUpload] 압축 완료, 업로드 시작", { fileName, size: prepared.size });
+    devLog("[handleImageUpload] 압축 완료, 업로드 시작", {
+      fileName,
+      fullSize: full.size,
+      thumbSize: thumb.size,
+    });
 
     const formData = new FormData();
-    formData.append("file", prepared, fileName);
+    formData.append("file", full, fileName);
     formData.append("fileName", fileName);
+    formData.append("thumb", thumb, thumb.name);
 
     const fetchPromise = fetch("/api/upload/image", {
       method: "POST",

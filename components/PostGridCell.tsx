@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useState } from "react";
 import { extractRegion } from "@/lib/extractRegion";
+import { derivePostImageThumbUrl } from "@/lib/postImageThumb";
 
 type PostGridCellProps = {
   imageUrl?: string;
@@ -60,11 +61,16 @@ function PostGridCellComponent({
   otherPlacesHint = null,
 }: PostGridCellProps) {
   const isHome = variant === "home";
+  const fullUrl = imageUrl?.trim() || "";
+  const thumbCandidate = fullUrl ? derivePostImageThumbUrl(fullUrl) : "";
+  const [displaySrc, setDisplaySrc] = useState(thumbCandidate || fullUrl);
   const [imgFailed, setImgFailed] = useState(false);
   useEffect(() => {
     setImgFailed(false);
-  }, [imageUrl]);
-  const thumb = !imgFailed ? imageUrl?.trim() : "";
+    const nextThumb = fullUrl ? derivePostImageThumbUrl(fullUrl) : "";
+    setDisplaySrc(nextThumb || fullUrl);
+  }, [fullUrl]);
+  const thumb = !imgFailed ? displaySrc : "";
   const region = extractRegion(address);
   const trimmedPlaceName = placeName.trim();
   const primaryLabel = (titleLine.trim() || trimmedPlaceName || "").trim() || "—";
@@ -140,7 +146,14 @@ function PostGridCellComponent({
             alt=""
             loading="lazy"
             decoding="async"
-            onError={() => setImgFailed(true)}
+            onError={() => {
+              // No HEAD probe: if thumb 404s, fall back to full once; then placeholder.
+              if (displaySrc && fullUrl && displaySrc !== fullUrl) {
+                setDisplaySrc(fullUrl);
+                return;
+              }
+              setImgFailed(true);
+            }}
             style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
           />
         ) : (

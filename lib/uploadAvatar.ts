@@ -17,7 +17,7 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
     throw new Error("이미지 파일만 업로드할 수 있어요");
   }
 
-  const prepared = await prepareImageForUpload(file);
+  const { full: prepared } = await prepareImageForUpload(file);
   const path = avatarObjectPath(userId);
 
   const { error } = await supabase.storage.from("avatars").upload(path, prepared, {

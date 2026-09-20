@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { thumbStoragePathFromOriginal } from "@/lib/postImageThumb";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,7 +90,10 @@ export async function POST(req: Request) {
       const imgs = (row as { images?: string[] }).images ?? [];
       for (const url of imgs) {
         const p = extractPostImagePath(url);
-        if (p) imagePaths.push(p);
+        if (!p) continue;
+        imagePaths.push(p);
+        const thumbPath = thumbStoragePathFromOriginal(p);
+        if (thumbPath) imagePaths.push(thumbPath);
       }
     }
     if (imagePaths.length > 0) {

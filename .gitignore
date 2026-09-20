@@ -28,3 +28,4 @@ scripts/localdata/.db_url
 # LOCALDATA C-group raw CSVs (large)
 scripts/localdata/raw_c/
 .xcode-derived/
+.worktrees/

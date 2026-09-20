@@ -25,6 +25,7 @@ import {
   type CurationAspectRatio,
 } from "@/lib/curationAspectRatio";
 import { perfNow } from "@/lib/debugLog";
+import { derivePostImageThumbUrl } from "@/lib/postImageThumb";
 
 type Category = FeedPostCategory;
 
@@ -113,6 +114,94 @@ function initialLoadIndices(
   s.add(0);
   if (count > 1) s.add(1);
   return s;
+}
+
+/**
+ * Detail active slide: paint thumb first (grid cache hit), then fade in full.
+ * Neighbors load full only. No layout shift — absolute stack, same object-fit.
+ */
+function DetailSlideImage({
+  fullSrc,
+  isActive,
+  eager,
+  fetchPriority,
+  onPainted,
+}: {
+  fullSrc: string;
+  isActive: boolean;
+  eager: boolean;
+  fetchPriority: "high" | "auto";
+  onPainted: () => void;
+}) {
+  const thumbSrc = derivePostImageThumbUrl(fullSrc);
+  const useThumbFirst = isActive && !!thumbSrc && thumbSrc !== fullSrc;
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const [fullReady, setFullReady] = useState(!useThumbFirst);
+  const paintedRef = useRef(false);
+
+  useEffect(() => {
+    paintedRef.current = false;
+    setThumbFailed(false);
+    setFullReady(!(isActive && !!thumbSrc && thumbSrc !== fullSrc));
+  }, [fullSrc, isActive, thumbSrc]);
+
+  const notifyPainted = useCallback(() => {
+    if (paintedRef.current) return;
+    paintedRef.current = true;
+    onPainted();
+  }, [onPainted]);
+
+  const showThumb = useThumbFirst && !thumbFailed;
+  const layerStyle = {
+    position: "absolute" as const,
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    objectFit: "cover" as const,
+    display: "block" as const,
+  };
+
+  return (
+    <div style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+      {showThumb ? (
+        <img
+          src={thumbSrc}
+          alt=""
+          className="feedPostMediaImg"
+          style={layerStyle}
+          draggable={false}
+          decoding="async"
+          loading="eager"
+          fetchPriority={fetchPriority}
+          onLoad={notifyPainted}
+          onError={() => setThumbFailed(true)}
+        />
+      ) : null}
+      <img
+        src={fullSrc}
+        alt=""
+        className="feedPostMediaImg"
+        style={{
+          ...layerStyle,
+          opacity: fullReady || !showThumb ? 1 : 0,
+        }}
+        draggable={false}
+        decoding="async"
+        loading={(eager ? "eager" : "lazy") as "eager" | "lazy"}
+        fetchPriority={fetchPriority}
+        onLoad={() => {
+          setFullReady(true);
+          notifyPainted();
+        }}
+        ref={(el) => {
+          if (el && el.complete && el.naturalWidth > 0) {
+            setFullReady(true);
+            notifyPainted();
+          }
+        }}
+      />
+    </div>
+  );
 }
 
 export function FeedPostMedia({
@@ -404,22 +493,24 @@ export function FeedPostMedia({
           return (
             <div key={`${src}-${i}`} className="feedPostMediaSlide" data-slide-index={i}>
               {shouldLoad ? (
-                <img
-                  src={src}
-                  alt=""
-                  className="feedPostMediaImg"
-                  draggable={false}
-                  decoding="async"
-                  {...(variant === "detail"
-                    ? {
-                        loading: (eager ? "eager" : "lazy") as "eager" | "lazy",
-                        fetchPriority: (i === activeIndex ? "high" : "auto") as
-                          | "high"
-                          | "auto",
-                        onLoad: () => markFirstPixelAndWiden(i),
-                      }
-                    : { loading: "lazy" as const })}
-                />
+                variant === "detail" ? (
+                  <DetailSlideImage
+                    fullSrc={src}
+                    isActive={i === activeIndex}
+                    eager={eager}
+                    fetchPriority={(i === activeIndex ? "high" : "auto") as "high" | "auto"}
+                    onPainted={() => markFirstPixelAndWiden(i)}
+                  />
+                ) : (
+                  <img
+                    src={src}
+                    alt=""
+                    className="feedPostMediaImg"
+                    draggable={false}
+                    decoding="async"
+                    loading="lazy"
+                  />
+                )
               ) : (
                 <div className="feedPostMediaImg feedPostMediaImgSkeleton" aria-hidden />
               )}
