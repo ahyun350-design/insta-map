@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { companionTagDisplayLabel, isCompanionTag, type CompanionTag } from "@/lib/companionTag";
 import {
@@ -8,7 +8,10 @@ import {
   type FeedPostCategory,
   type PhotoPlaceTag,
 } from "@/lib/feedPost";
-import { formatDisplayCategoriesForUi } from "@/lib/categoryUtil";
+import {
+  formatDisplayCategoriesForUi,
+  projectPostForCategoryFilter,
+} from "@/lib/categoryUtil";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { getDisplayPlaceForPhoto, type PlaceRefForPhotoTagMatch } from "@/lib/photoPlaceTag";
 import type { SavedCourse } from "@/lib/courses";
@@ -67,6 +70,11 @@ type Props = {
   ensureCourseLoaded?: (courseId: string) => Promise<SavedCourse | null>;
   onOpenLinkedCourse?: (course: SavedCourse, readOnly: boolean) => void;
   onLinkedCourseUnavailable?: () => void;
+  /**
+   * 홈 카테고리 필터(가). "all"/생략 시 원본과 동일.
+   * 필터 시 매칭 사진만 캐러셀·뱃지 표시. 좋아요/댓글은 그대로.
+   */
+  categoryFilter?: "all" | FeedPostCategory;
 };
 
 const CAPTION_PREVIEW_LEN = 100;
@@ -404,6 +412,7 @@ export function FeedPostCardComponent({
   ensureCourseLoaded,
   onOpenLinkedCourse,
   onLinkedCourseUnavailable,
+  categoryFilter = "all",
 }: Props) {
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const [likePop, setLikePop] = useState(false);
@@ -416,11 +425,53 @@ export function FeedPostCardComponent({
     captionExpanded || !needsCaptionExpand
       ? commentText
       : `${commentText.slice(0, CAPTION_PREVIEW_LEN).trimEnd()}…`;
+
+  const filterView = useMemo(
+    () =>
+      projectPostForCategoryFilter(
+        {
+          category: post.category,
+          categories: post.categories,
+          images: post.images,
+          photoPlaceTags: post.photoPlaceTags,
+          placeName: post.placeName,
+          address: post.address ?? "",
+        },
+        categoryFilter,
+      ),
+    [
+      categoryFilter,
+      post.category,
+      post.categories,
+      post.images,
+      post.photoPlaceTags,
+      post.placeName,
+      post.address,
+    ],
+  );
+
+  const displayImages = filterView.images;
+  const displayPlaceSource = useMemo(
+    () => ({
+      placeName: filterView.narrowed ? filterView.placeName || post.placeName : post.placeName,
+      address: filterView.narrowed ? filterView.address || post.address : post.address,
+      category: post.category,
+      lat: post.lat,
+      lng: post.lng,
+      photoPlaceTags: filterView.photoPlaceTags,
+    }),
+    [filterView, post.placeName, post.address, post.category, post.lat, post.lng],
+  );
+
   const { visible: visibleCategories, extraCount: extraCategoryCount } =
-    formatDisplayCategoriesForUi(post);
+    formatDisplayCategoriesForUi(filterView.visibleCategories);
   const companionLabel =
     post.companionTag && isCompanionTag(post.companionTag)
       ? companionTagDisplayLabel(post.companionTag)
+      : null;
+  const otherPlacesHint =
+    categoryFilter !== "all" && filterView.narrowed && filterView.otherPlaceCount > 0
+      ? `이 큐레이션에 다른 장소 ${filterView.otherPlaceCount}곳이 더 있어요`
       : null;
 
   const handleLike = useCallback(
@@ -474,8 +525,8 @@ export function FeedPostCardComponent({
       </header>
 
       <FeedPostMedia
-        images={post.images}
-        placeSource={post}
+        images={displayImages}
+        placeSource={displayPlaceSource}
         aspectRatio={post.aspectRatio}
         onMediaClick={handleMediaClick}
         onPlaceOverlayClick={onPlaceOverlayClick}
@@ -549,6 +600,19 @@ export function FeedPostCardComponent({
               </button>
             )}
           </p>
+        )}
+
+        {otherPlacesHint && (
+          <button
+            type="button"
+            className="feedPostOtherPlacesHint"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCardClick();
+            }}
+          >
+            {otherPlacesHint}
+          </button>
         )}
 
         {post.courseId && ensureCourseLoaded && onOpenLinkedCourse && (

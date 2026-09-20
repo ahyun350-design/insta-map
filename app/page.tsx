@@ -191,7 +191,7 @@ import { CompanionTagFilterChips } from "@/components/CompanionTagFilterChips";
 import { HomeFeedTopBar } from "@/components/HomeFeedTopBar";
 import { HomeSearchScreen } from "@/components/HomeSearchScreen";
 import { feedPostMatchesHomeSearch } from "@/lib/homeFeedSearch";
-import { feedPostMatchesCategoryFilter, getDisplayCategories } from "@/lib/categoryUtil";
+import { getDisplayCategories, projectPostForCategoryFilter } from "@/lib/categoryUtil";
 import {
   FEED_POST_CATEGORIES,
   type FeedPostCategory,
@@ -11362,10 +11362,17 @@ function HomePageContent() {
     if (selectedCompanionTag !== "all") {
       result = result.filter((p) => p.companionTag === selectedCompanionTag);
     }
-    if (selectedHomeCategory !== "all") {
-      result = result.filter((p) => feedPostMatchesCategoryFilter(p, selectedHomeCategory));
+    if (selectedHomeCategory === "all") {
+      return result.map((post) => ({
+        post,
+        view: projectPostForCategoryFilter(post, "all"),
+      }));
     }
-    return result;
+    const projected = result.map((post) => ({
+      post,
+      view: projectPostForCategoryFilter(post, selectedHomeCategory),
+    }));
+    return projected.filter((row) => row.view.include);
   }, [visibleFeedPosts, selectedCompanionTag, selectedHomeCategory]);
 
   /** SAVED 목록 필터·그룹·정렬 — 렌더와 분리 (DOM은 JSX에서 동일하게 그림).
@@ -11489,6 +11496,27 @@ function HomePageContent() {
     io.observe(target);
     return () => io.disconnect();
   }, [activeTab, filteredHomeFeedPosts.length, feedHasMore, loading, homeLoadError]);
+
+  /**
+   * 카테고리/동행 필터로 카드가 제외되면 한 페이지분량이 비게 된다.
+   * 필터된 목록이 FEED_PAGE_SIZE 미만이고 더 있으면 자동으로 다음 페이지를 채운다.
+   */
+  useEffect(() => {
+    if (activeTab !== "home") return;
+    if (selectedHomeCategory === "all" && selectedCompanionTag === "all") return;
+    if (loading || homeLoadError || feedLoadingMore || !feedHasMore) return;
+    if (filteredHomeFeedPosts.length >= FEED_PAGE_SIZE) return;
+    void loadMoreFeedPosts();
+  }, [
+    activeTab,
+    selectedHomeCategory,
+    selectedCompanionTag,
+    filteredHomeFeedPosts.length,
+    feedHasMore,
+    feedLoadingMore,
+    loading,
+    homeLoadError,
+  ]);
 
   const homeSearchResultPosts = useMemo(() => {
     const q = debouncedHomeSearchQuery.trim();
@@ -13812,24 +13840,43 @@ function HomePageContent() {
               )}
               {filteredHomeFeedPosts.length > 0 && (
                 <PostGrid columns={2} className="homeFeedGrid">
-                  {filteredHomeFeedPosts.map((post) => {
+                  {filteredHomeFeedPosts.map(({ post, view }) => {
+                    const filterActive = selectedHomeCategory !== "all";
+                    const narrowed = filterActive && view.narrowed;
                     const repPlace = getRepresentativePlaceForPost(post);
+                    const placeName = narrowed
+                      ? view.placeName || repPlace.placeName
+                      : repPlace.placeName;
+                    const address = narrowed
+                      ? view.address || repPlace.address
+                      : repPlace.address;
+                    const catKey = view.visibleCategories[0] as Category | undefined;
+                    const categoryBadge =
+                      narrowed && catKey
+                        ? `${CATEGORY_PIN[catKey]?.emoji ?? "📍"} ${catKey}`
+                        : null;
+                    const otherPlacesHint =
+                      narrowed && view.otherPlaceCount > 0
+                        ? `이 큐레이션에 다른 장소 ${view.otherPlaceCount}곳이 더 있어요`
+                        : null;
                     return (
                     <PostGridCell
                       key={post.id}
                       variant="home"
-                      imageUrl={post.images[0]}
-                      titleLine={(post.title || post.comment || repPlace.placeName || "").trim()}
-                      placeName={repPlace.placeName}
-                      address={repPlace.address}
+                      imageUrl={view.images[0]}
+                      titleLine={(post.title || post.comment || placeName || "").trim()}
+                      placeName={placeName}
+                      address={address}
                       likeCount={post.likes_count}
-                      imageCount={post.images.length}
+                      imageCount={view.images.length}
                       showUsername
                       showMultiIcon
                       username={post.user}
                       postId={post.id}
                       onSelect={handlePostGridSelect}
                       onSelectProfile={handleHomeFeedProfileSelect}
+                      categoryBadge={categoryBadge}
+                      otherPlacesHint={otherPlacesHint}
                     />
                     );
                   })}

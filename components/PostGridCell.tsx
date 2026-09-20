@@ -22,6 +22,10 @@ type PostGridCellProps = {
   imageCount?: number;
   showMultiIcon?: boolean;
   onProfileClick?: () => void;
+  /** 홈 카테고리 필터 활성 시 표시할 단일 카테고리 라벨 (예: "☕ 카페") */
+  categoryBadge?: string | null;
+  /** 필터로 가려진 다른 장소 안내 (탭 = 카드와 동일하게 상세) */
+  otherPlacesHint?: string | null;
 };
 
 function MultiImageIcon() {
@@ -49,6 +53,8 @@ function PostGridCellComponent({
   imageCount = 1,
   showMultiIcon = false,
   onProfileClick,
+  categoryBadge = null,
+  otherPlacesHint = null,
 }: PostGridCellProps) {
   const isHome = variant === "home";
   const thumb = imageUrl?.trim();
@@ -161,6 +167,28 @@ function PostGridCellComponent({
             <MultiImageIcon />
           </span>
         )}
+        {categoryBadge ? (
+          <span
+            style={{
+              position: "absolute",
+              top: 8,
+              left: 8,
+              maxWidth: "70%",
+              padding: "3px 8px",
+              borderRadius: 999,
+              background: "rgba(26, 42, 122, 0.88)",
+              color: "#fff",
+              fontSize: 10,
+              fontWeight: 600,
+              lineHeight: 1.2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {categoryBadge}
+          </span>
+        ) : null}
         {likeCount > 0 && (
           <span
             style={{
@@ -227,6 +255,19 @@ function PostGridCellComponent({
           <>
             {homePlaceLine ? <p style={homeMetaLineStyle}>{homePlaceLine}</p> : null}
             <p className="postGridCellHomeTitle">{primaryLabel}</p>
+            {otherPlacesHint ? (
+              <p
+                className="postGridCellOtherPlacesHint"
+                style={{
+                  margin: "4px 0 0",
+                  fontSize: 10,
+                  color: "#6b7288",
+                  lineHeight: 1.35,
+                }}
+              >
+                {otherPlacesHint}
+              </p>
+            ) : null}
           </>
         ) : (
           <p
