@@ -476,9 +476,7 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(page).toHaveURL(/\/profile\//, { timeout: 20_000 });
     await edgeSwipeBack(page);
     await expect(page).not.toHaveURL(/\/profile\//, { timeout: 15_000 });
-    await expect(tabButton(page, "home").or(tabButton(page, "message"))).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(tabButton(page, "home")).toBeVisible({ timeout: 15_000 });
     return "pass";
   });
 
