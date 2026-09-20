@@ -98,7 +98,7 @@ function clampPhotoIndex(raw: number, count: number): number {
   return Math.min(Math.floor(raw), count - 1);
 }
 
-/** list: 0(+1). detail: center ±1 only (no hardcoded 0..2). */
+/** list: 0(+1). detail: active only until firstPixel (neighbors expand after). */
 function initialLoadIndices(
   variant: FeedPostMediaVariant,
   count: number,
@@ -107,10 +107,7 @@ function initialLoadIndices(
   const s = new Set<number>();
   if (count <= 0) return s;
   if (variant === "detail") {
-    const c = clampPhotoIndex(center, count);
-    for (const i of [c - 1, c, c + 1]) {
-      if (i >= 0 && i < count) s.add(i);
-    }
+    s.add(clampPhotoIndex(center, count));
     return s;
   }
   s.add(0);
@@ -216,9 +213,11 @@ export function FeedPostMedia({
     applyScrollLeftNow(scrollRef.current, idx);
   }, [variant, images.join("\0"), initialIndex, clampIndex, applyScrollLeftNow]);
 
+  // Swipe / post-firstPixel: keep neighbor preload. Do NOT expand before firstPixel on detail.
   useEffect(() => {
+    if (variant === "detail" && !firstPixelLoggedRef.current) return;
     expandLoadIndices(activeIndex, 1);
-  }, [activeIndex, expandLoadIndices]);
+  }, [activeIndex, expandLoadIndices, variant]);
 
   const markFirstPixelAndWiden = useCallback(
     (i: number) => {
@@ -244,6 +243,8 @@ export function FeedPostMedia({
         index: i,
         ms,
       });
+      // Bandwidth: active done → ±1 now, then ±2 next frame.
+      expandLoadIndices(activeIndex, 1);
       if (!widenedBeyondNeighborRef.current) {
         widenedBeyondNeighborRef.current = true;
         requestAnimationFrame(() => {
@@ -267,7 +268,7 @@ export function FeedPostMedia({
     }
   }, [variant, activeIndex, loadIndices, markFirstPixelAndWiden]);
 
-  /** 상세: 가로 스크롤 IO로 여유(400px) 있게 미리 마운트 — native lazy 대신 */
+  /** 상세: firstPixel 이후 스와이프 IO로 여유(400px) 미리 마운트 — native lazy 대신 */
   useEffect(() => {
     if (variant !== "detail") return;
     const root = scrollRef.current;
@@ -276,6 +277,8 @@ export function FeedPostMedia({
     if (slides.length === 0) return;
     const io = new IntersectionObserver(
       (entries) => {
+        // Neighbors must not steal bandwidth before the active photo paints.
+        if (!firstPixelLoggedRef.current) return;
         for (const entry of entries) {
           if (!entry.isIntersecting) continue;
           const raw = (entry.target as HTMLElement).dataset.slideIndex;
