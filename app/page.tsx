@@ -224,6 +224,10 @@ import { Coachmark } from "@/components/Coachmark";
 import { nextCoachToShow, setCoachSeen, COACHMARK_DEFS } from "@/lib/coachmarks";
 import { WhatsNewModal } from "@/components/WhatsNewModal";
 import {
+  EDGE_SWIPE_PRIORITY,
+  useEdgeSwipeBack,
+} from "@/lib/useEdgeSwipeBack";
+import {
   isAccountOldEnoughForWhatsNew,
   nextWhatsNewPackToShow,
   type WhatsNewPack,
@@ -11533,6 +11537,84 @@ function HomePageContent() {
     setHomeSearchQuery("");
     setDebouncedHomeSearchQuery("");
   }, []);
+
+  // ── Left-edge swipe-back (Instagram-style) — stack closes top overlay only ──
+  useEdgeSwipeBack({
+    id: "confirm-saved-bulk-delete",
+    enabled: savedBulkDeleteConfirm,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => {
+      if (!savedBulkDeleting) setSavedBulkDeleteConfirm(false);
+    },
+  });
+  useEdgeSwipeBack({
+    id: "confirm-saved-bulk-delete-retry",
+    enabled: !!savedBulkDeleteRetry && !savedBulkDeleting,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => setSavedBulkDeleteRetry(null),
+  });
+  useEdgeSwipeBack({
+    id: "confirm-course-delete",
+    enabled: showCourseDeleteConfirm && !!courseActionTarget,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => {
+      if (!courseDeleting) setShowCourseDeleteConfirm(false);
+    },
+  });
+  useEdgeSwipeBack({
+    id: "confirm-delete-account",
+    enabled: showDeleteAccountModal,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => setShowDeleteAccountModal(false),
+  });
+  useEdgeSwipeBack({
+    id: "confirm-delete-account-final",
+    enabled: showDeleteAccountFinalModal,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => setShowDeleteAccountFinalModal(false),
+  });
+  useEdgeSwipeBack({
+    id: "curation-detail",
+    enabled: !!detailPostId,
+    priority: EDGE_SWIPE_PRIORITY.CURATION_DETAIL,
+    onClose: closeDetailPost,
+  });
+  useEdgeSwipeBack({
+    id: "place-sheet-selected",
+    enabled: !!selectedPlace && !mapExpanded,
+    priority: EDGE_SWIPE_PRIORITY.PLACE_SHEET,
+    onClose: closeCompactPlaceSheet,
+  });
+  useEdgeSwipeBack({
+    id: "place-sheet-home",
+    enabled: !!homePlaceSheet,
+    priority: EDGE_SWIPE_PRIORITY.PLACE_SHEET,
+    onClose: () => setHomePlaceSheet(null),
+  });
+  useEdgeSwipeBack({
+    id: "my-lists",
+    enabled: showMyListsScreen,
+    priority: EDGE_SWIPE_PRIORITY.MY_LISTS,
+    onClose: () => setShowMyListsScreen(false),
+  });
+  useEdgeSwipeBack({
+    id: "saved-select-mode",
+    enabled: savedSelectMode,
+    priority: EDGE_SWIPE_PRIORITY.SAVED_SELECT,
+    onClose: exitSavedSelectMode,
+  });
+  useEdgeSwipeBack({
+    id: "whats-new",
+    enabled: !!whatsNewPack,
+    priority: EDGE_SWIPE_PRIORITY.WHATS_NEW,
+    onClose: () => setWhatsNewPack(null),
+  });
+  useEdgeSwipeBack({
+    id: "home-search",
+    enabled: isHomeSearchOpen && activeTab === "home",
+    priority: EDGE_SWIPE_PRIORITY.HOME_SEARCH,
+    onClose: closeHomeSearch,
+  });
 
   const handleBottomTabChange = useCallback((id: TabId) => {
     track(TAB_TRACK_EVENT[id]);

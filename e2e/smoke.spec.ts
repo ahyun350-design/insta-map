@@ -8,6 +8,7 @@ import {
   dismissCoachmarks,
   dismissSavedOverlays,
   dismissWhatsNewIfPresent,
+  edgeSwipeBack,
   gotoTab,
   loginEmailInput,
   loginPasswordInput,
@@ -463,6 +464,66 @@ test("production smoke — major tabs (continue on failure)", async ({
       await safeClick(page.locator(".subpageHeader button").first());
     }
     await expect(tabButton(page, "home")).toBeVisible({ timeout: 20_000 });
+  });
+
+  // ── 6b. Edge swipe — home search close ─────────────────────
+  await runner.step("6b. 가장자리 스와이프 — 홈 검색 닫기", async () => {
+    await gotoTab(page, "home");
+    await waitForHomeFeed(page);
+    await safeClick(
+      page
+        .locator(".homeFeedSearchInput")
+        .or(page.getByPlaceholder("장소·키워드 검색"))
+        .first(),
+    );
+    const searchScreen = page.locator(".homeSearchScreen");
+    await expect(searchScreen).toBeVisible({ timeout: 10_000 });
+    await edgeSwipeBack(page);
+    await expect(searchScreen).toBeHidden({ timeout: 8_000 });
+  });
+
+  // ── 6c. Edge swipe — curation detail close + non-edge no-op ─
+  await runner.stepOptional("6c. 가장자리 스와이프 — 큐레이션 상세 닫기", async () => {
+    await gotoTab(page, "home");
+    await waitForHomeFeed(page);
+
+    const cell = page.locator(".homeFeedGrid .postGridCell, .homeFeedGrid button").first();
+    if (!(await cell.isVisible().catch(() => false))) {
+      return "skip";
+    }
+    await safeClick(cell);
+
+    const overlay = page.locator(".curationDetailOverlay");
+    await expect(overlay).toBeVisible({ timeout: 25_000 });
+
+    // Center horizontal swipe must NOT close
+    await edgeSwipeBack(page, { startX: 180, startY: 420, dx: 100, dy: 0 });
+    await expect(overlay).toBeVisible({ timeout: 3_000 });
+
+    // Mostly vertical move must NOT close
+    await edgeSwipeBack(page, { startX: 12, startY: 420, dx: 40, dy: 120 });
+    await expect(overlay).toBeVisible({ timeout: 3_000 });
+
+    // Left-edge swipe closes
+    await edgeSwipeBack(page);
+    await expect(overlay).toBeHidden({ timeout: 10_000 });
+    return "pass";
+  });
+
+  // ── 6d. Edge swipe — place sheet close (SAVED) ─────────────
+  await runner.stepOptional("6d. 가장자리 스와이프 — 장소 시트 닫기", async () => {
+    await gotoTab(page, "saved");
+    await dismissSavedOverlays(page);
+    const items = page.locator("article.savedItem");
+    if ((await items.count()) === 0) {
+      return "skip";
+    }
+    await safeClick(items.first());
+    const sheet = page.locator(".placeDetailSheet").first();
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+    await edgeSwipeBack(page);
+    await expect(page.locator(".placeDetailSheet")).toHaveCount(0, { timeout: 10_000 });
+    return "pass";
   });
 
   // ── 7. Logout ─────────────────────────────────────────────

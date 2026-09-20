@@ -28,6 +28,10 @@ import {
 } from "@/components/ListColorSwatches";
 import type { ListColorPresetId } from "@/lib/listColors";
 import { LIST_COLOR_PRESETS } from "@/lib/listColors";
+import {
+  EDGE_SWIPE_PRIORITY,
+  useEdgeSwipeBack,
+} from "@/lib/useEdgeSwipeBack";
 
 type Category = FeedPostCategory;
 
@@ -148,6 +152,13 @@ export function MyListsScreen({
   /** 지도에서 보기 등으로 잠시 닫힐 때 스크롤·상세 복원용 */
   const detailScrollTopRef = useRef(0);
   const preserveDetailOnHideRef = useRef(false);
+
+  useEdgeSwipeBack({
+    id: "my-lists-confirm-delete",
+    enabled: open && confirmDelete,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => setConfirmDelete(false),
+  });
 
   const LISTS_TTL_MS = 30_000;
 

@@ -330,3 +330,58 @@ export async function assertHomeFeedContent(page: Page): Promise<void> {
     "HOME 피드: 그리드 / 빈 상태 / 에러 / 상단바 중 하나",
   ).toBeTruthy();
 }
+
+/**
+ * Dispatch a left-edge → right swipe on `document` (matches useEdgeSwipeBack).
+ * Uses TouchEvent so it works even when Playwright pointer APIs differ.
+ */
+export async function edgeSwipeBack(
+  page: Page,
+  opts?: { startX?: number; startY?: number; dx?: number; dy?: number },
+): Promise<void> {
+  const startX = opts?.startX ?? 12;
+  const startY = opts?.startY ?? 360;
+  const dx = opts?.dx ?? 80;
+  const dy = opts?.dy ?? 0;
+  await page.evaluate(
+    ({ startX: sx, startY: sy, dx: moveX, dy: moveY }) => {
+      const fire = (
+        type: "touchstart" | "touchmove" | "touchend",
+        x: number,
+        y: number,
+        touching: boolean,
+      ) => {
+        const target = document.documentElement;
+        const touch = new Touch({
+          identifier: 1,
+          target,
+          clientX: x,
+          clientY: y,
+          pageX: x,
+          pageY: y,
+          screenX: x,
+          screenY: y,
+          radiusX: 1,
+          radiusY: 1,
+          rotationAngle: 0,
+          force: touching ? 1 : 0,
+        });
+        const list = touching ? [touch] : [];
+        target.dispatchEvent(
+          new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            touches: list,
+            targetTouches: list,
+            changedTouches: [touch],
+          }),
+        );
+      };
+      fire("touchstart", sx, sy, true);
+      fire("touchmove", sx + moveX * 0.4, sy + moveY * 0.4, true);
+      fire("touchmove", sx + moveX, sy + moveY, true);
+      fire("touchend", sx + moveX, sy + moveY, false);
+    },
+    { startX, startY, dx, dy },
+  );
+}

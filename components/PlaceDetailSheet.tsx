@@ -11,6 +11,10 @@ import {
   FEED_POST_CATEGORIES,
   type FeedPostCategory,
 } from "@/lib/feedPost";
+import {
+  EDGE_SWIPE_PRIORITY,
+  useEdgeSwipeBack,
+} from "@/lib/useEdgeSwipeBack";
 
 type DirectionsMode = "car" | "walk";
 
@@ -161,6 +165,13 @@ export function PlaceDetailSheet({
   useEffect(() => {
     if (!canEditCategory && categoryPickerOpen) setCategoryPickerOpen(false);
   }, [canEditCategory, categoryPickerOpen]);
+
+  useEdgeSwipeBack({
+    id: "category-picker",
+    enabled: categoryPickerOpen,
+    priority: EDGE_SWIPE_PRIORITY.CATEGORY_PICKER,
+    onClose: () => setCategoryPickerOpen(false),
+  });
 
   const selectCategory = (cat: FeedPostCategory) => {
     setCategoryPickerOpen(false);
