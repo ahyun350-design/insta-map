@@ -136,12 +136,14 @@ function DetailSlideImage({
   const thumbSrc = derivePostImageThumbUrl(fullSrc);
   const useThumbFirst = isActive && !!thumbSrc && thumbSrc !== fullSrc;
   const [thumbFailed, setThumbFailed] = useState(false);
+  const [thumbReady, setThumbReady] = useState(false);
   const [fullReady, setFullReady] = useState(!useThumbFirst);
   const paintedRef = useRef(false);
 
   useEffect(() => {
     paintedRef.current = false;
     setThumbFailed(false);
+    setThumbReady(false);
     setFullReady(!(isActive && !!thumbSrc && thumbSrc !== fullSrc));
   }, [fullSrc, isActive, thumbSrc]);
 
@@ -168,12 +170,15 @@ function DetailSlideImage({
           src={thumbSrc}
           alt=""
           className="feedPostMediaImg"
-          style={layerStyle}
+          style={{ ...layerStyle, opacity: thumbReady && !fullReady ? 1 : 0 }}
           draggable={false}
           decoding="async"
           loading="eager"
           fetchPriority={fetchPriority}
-          onLoad={notifyPainted}
+          onLoad={() => {
+            setThumbReady(true);
+            notifyPainted();
+          }}
           onError={() => setThumbFailed(true)}
         />
       ) : null}

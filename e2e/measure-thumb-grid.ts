@@ -50,6 +50,17 @@ async function main() {
   await dismissCoachmarks(page);
   await dismissWhatsNewIfPresent(page, 2000);
 
+  // Fresh network accounting for grid scroll
+  imageBytes.length = 0;
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.clearBrowserCache");
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await gotoTab(page, "home");
+  await waitForHomeFeed(page);
+  await dismissCoachmarks(page);
+
   // Chip switch timings: 전체 → 카페 → 맛집
   const chipTimes: Record<string, number> = {};
   async function switchChip(label: string) {
@@ -68,18 +79,21 @@ async function main() {
   imageBytes.length = 0;
   await switchChip("전체");
   // scroll grid to load more images
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
     await page.evaluate(() => {
       const sc = document.querySelector(".homeFeedScroll, .screen.homeFeed");
-      if (sc) sc.scrollBy(0, 600);
-      else window.scrollBy(0, 600);
+      if (sc) sc.scrollBy(0, 700);
+      else window.scrollBy(0, 700);
     });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(500);
   }
+  await page.waitForTimeout(1000);
   const afterScrollBytes = imageBytes.reduce((a, b) => a + b.bytes, 0);
   const afterScrollCount = imageBytes.length;
   const thumbReqs = imageBytes.filter((x) => x.url.includes("_thumb")).length;
   const fullReqs = afterScrollCount - thumbReqs;
+
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: false });
 
   await switchChip("카페");
   await switchChip("맛집");
