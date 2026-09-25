@@ -62,15 +62,17 @@ function PostGridCellComponent({
 }: PostGridCellProps) {
   const isHome = variant === "home";
   const fullUrl = imageUrl?.trim() || "";
-  const thumbCandidate = fullUrl ? derivePostImageThumbUrl(fullUrl) : "";
-  const [displaySrc, setDisplaySrc] = useState(thumbCandidate || fullUrl);
+  const thumbUrl = fullUrl ? derivePostImageThumbUrl(fullUrl) : "";
+  /** Thumb request failed for *this* fullUrl → show original. Reset when imageUrl changes. */
+  const [thumbFailed, setThumbFailed] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
   useEffect(() => {
+    setThumbFailed(false);
     setImgFailed(false);
-    const nextThumb = fullUrl ? derivePostImageThumbUrl(fullUrl) : "";
-    setDisplaySrc(nextThumb || fullUrl);
   }, [fullUrl]);
-  const thumb = !imgFailed ? displaySrc : "";
+  // Prefer thumb; never keep a sticky displaySrc that stale onError can overwrite after chip change.
+  const displaySrc = imgFailed ? "" : thumbFailed || !thumbUrl ? fullUrl : thumbUrl;
+  const thumb = displaySrc;
   const region = extractRegion(address);
   const trimmedPlaceName = placeName.trim();
   const primaryLabel = (titleLine.trim() || trimmedPlaceName || "").trim() || "—";
@@ -142,14 +144,15 @@ function PostGridCellComponent({
       >
         {thumb ? (
           <img
+            key={fullUrl}
             src={thumb}
             alt=""
             loading="lazy"
             decoding="async"
             onError={() => {
-              // No HEAD probe: if thumb 404s, fall back to full once; then placeholder.
-              if (displaySrc && fullUrl && displaySrc !== fullUrl) {
-                setDisplaySrc(fullUrl);
+              // No HEAD: thumb miss → original once. key={fullUrl} drops stale errors from prior chip.
+              if (!thumbFailed && thumbUrl && thumbUrl !== fullUrl) {
+                setThumbFailed(true);
                 return;
               }
               setImgFailed(true);
