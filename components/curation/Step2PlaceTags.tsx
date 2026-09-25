@@ -18,6 +18,7 @@ import {
   type CurationAspectRatio,
 } from "@/lib/curationAspectRatio";
 import { resolveCurationTagCategory } from "@/lib/curationPlaceCategory";
+import { resolveKakaoSubcategory } from "@/lib/kakaoSubcategory";
 import { supabase } from "@/lib/supabase";
 
 type PendingPin = {
@@ -165,12 +166,17 @@ export function Step2PlaceTags({
     pin: PendingPin,
     category: FeedPostCategory,
   ) => {
+    const subcategory = resolveKakaoSubcategory(
+      category,
+      place.category_name ?? null,
+    );
     const tag: PhotoPlaceTag = {
       photoIndex: pin.photoIndex,
       placeId: place.id || null,
       placeName: place.place_name,
       address: place.road_address_name || place.address_name || "",
       category,
+      ...(subcategory ? { subcategory } : {}),
       lat: coords.lat,
       lng: coords.lng,
       x: pin.x,

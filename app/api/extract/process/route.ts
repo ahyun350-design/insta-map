@@ -11,6 +11,7 @@ import {
   searchKakaoPlaceWithDiag,
 } from "@/app/api/extract/_shared";
 import { resolveExtractPlaceCategory } from "@/lib/kakaoCategory";
+import { resolveKakaoSubcategory } from "@/lib/kakaoSubcategory";
 import { maskCaption } from "@/lib/maskCaption";
 import {
   classifyCaption,
@@ -195,6 +196,7 @@ async function waitForApifyConcurrencySlot(
 type ResolvedPlace = {
   name: string;
   category: Place["category"];
+  subcategory?: string | null;
   address: string;
   lat: number;
   lng: number;
@@ -588,11 +590,16 @@ export async function POST(req: Request) {
           claudeCategory: item.category,
           poiRawCategory: poiRaw,
         });
+        const subcategory = resolveKakaoSubcategory(
+          category,
+          kakaoResult.category_name,
+        );
         if (poiResolved.ok) {
           console.log(formatPlaceSourceLog("poi", item.name));
           resolved.push({
             name: item.name,
             category,
+            subcategory,
             address: poiResolved.address,
             lat: poiResolved.lat,
             lng: poiResolved.lng,
@@ -614,6 +621,7 @@ export async function POST(req: Request) {
         resolved.push({
           name: item.name,
           category,
+          subcategory,
           address: kakaoResult.roadAddress || kakaoResult.address,
           lat: kakaoResult.lat,
           lng: kakaoResult.lng,
@@ -826,6 +834,7 @@ export async function POST(req: Request) {
       name: p.name,
       address: p.address,
       category: p.category,
+      subcategory: p.subcategory ?? null,
       lat: p.lat,
       lng: p.lng,
       source: p.source,

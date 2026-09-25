@@ -204,6 +204,7 @@ import {
 } from "@/lib/categoryAppearance";
 import { resolveListColor } from "@/lib/listColors";
 import { updatePlaceCategory } from "@/lib/placeCategory";
+import { resolveKakaoSubcategory } from "@/lib/kakaoSubcategory";
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
@@ -382,6 +383,8 @@ type Place = {
   name: string;
   address: string;
   category: Category;
+  /** Fine category under category — place detail only */
+  subcategory?: string | null;
   lat?: number;
   lng?: number;
   created_at?: string;
@@ -551,6 +554,7 @@ function mapPlaceRow(p: {
   name: string;
   address: string;
   category: string;
+  subcategory?: unknown;
   lat?: unknown;
   lng?: unknown;
   created_at?: unknown;
@@ -567,11 +571,16 @@ function mapPlaceRow(p: {
       : p.listColor === null
         ? null
         : undefined;
+  const subcategoryRaw =
+    typeof p.subcategory === "string" ? p.subcategory.trim() : p.subcategory === null ? null : undefined;
+  const subcategory =
+    subcategoryRaw === undefined ? undefined : subcategoryRaw ? subcategoryRaw : null;
   return {
     id: p.id,
     name: p.name,
     address: p.address,
     category: p.category as Category,
+    ...(subcategory !== undefined ? { subcategory } : {}),
     ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
     ...(createdAt ? { created_at: createdAt } : {}),
     ...(memo !== undefined ? { memo } : {}),
@@ -2297,9 +2306,11 @@ function HomePageContent() {
       const previous = savedPlacesRef.current.find((p) => p.id === placeId);
       if (!previous || previous.category === nextCategory) return;
 
-      const applyLocal = (category: Category) => {
+      const applyLocal = (category: Category, subcategory: string | null = null) => {
         setSavedPlaces((prev) => {
-          const next = prev.map((p) => (p.id === placeId ? { ...p, category } : p));
+          const next = prev.map((p) =>
+            p.id === placeId ? { ...p, category, subcategory } : p,
+          );
           savedPlacesRef.current = next;
           const uid = userIdRef.current;
           if (uid) void writeCachedPlaces(uid, next);
@@ -2307,23 +2318,23 @@ function HomePageContent() {
         });
         setSelectedPlace((prev: PlaceSheetData | null) => {
           if (!prev || prev._savedPlaceId !== placeId) return prev;
-          return { ...prev, category_name: category };
+          return { ...prev, category_name: category, subcategory };
         });
         setHomePlaceSheet((prev: PlaceSheetData | null) => {
           if (!prev || prev._savedPlaceId !== placeId) return prev;
-          return { ...prev, category_name: category };
+          return { ...prev, category_name: category, subcategory };
         });
         setSelectedMapPlace((prev: Place | null) => {
           if (!prev || prev.id !== placeId) return prev;
-          return { ...prev, category };
+          return { ...prev, category, subcategory };
         });
       };
 
-      applyLocal(nextCategory);
+      applyLocal(nextCategory, null);
       void (async () => {
         const { error, notFound } = await updatePlaceCategory(placeId, nextCategory);
         if (error) {
-          applyLocal(previous.category);
+          applyLocal(previous.category, previous.subcategory ?? null);
           if (!notFound) showToast(error, "error");
         }
       })();
@@ -3492,6 +3503,7 @@ function HomePageContent() {
     return {
       place_name: place.name,
       category_name: place.category,
+      ...(place.subcategory ? { subcategory: place.subcategory } : { subcategory: null }),
       road_address_name: place.address,
       address_name: place.address,
       phone: "",
@@ -8546,6 +8558,9 @@ function HomePageContent() {
         setSelectedPlace({
           place_name: place.name,
           category_name: place.category,
+          ...(place.subcategory
+            ? { subcategory: place.subcategory }
+            : { subcategory: null }),
           road_address_name: place.address,
           phone: "",
           place_url: "",
@@ -11884,12 +11899,18 @@ function HomePageContent() {
       return false;
     }
     const category = inferCategoryFromKakaoCategoryName(placeData.category_name) as Category;
+    const subcategory =
+      (typeof placeData.subcategory === "string" && placeData.subcategory.trim()
+        ? placeData.subcategory.trim()
+        : null) ??
+      resolveKakaoSubcategory(category, placeData.category_name ?? null);
     const heartCoords = kakaoYXToLatLng(placeData.y, placeData.x);
     const placeToAdd = {
       id: Math.random().toString(36).substring(2) + Date.now().toString(36),
       name: placeData.place_name,
       address: placeData.road_address_name || placeData.address_name || "",
       category,
+      ...(subcategory ? { subcategory } : { subcategory: null }),
       ...(heartCoords ? { lat: heartCoords.lat, lng: heartCoords.lng } : {}),
     };
     if (heartCoords) {
@@ -14872,6 +14893,9 @@ function HomePageContent() {
                               setSelectedPlace({
                                 place_name: full.name,
                                 category_name: full.category,
+                                ...(full.subcategory
+                                  ? { subcategory: full.subcategory }
+                                  : { subcategory: null }),
                                 road_address_name: full.address,
                                 address_name: full.address,
                                 phone: "",

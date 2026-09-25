@@ -11,6 +11,7 @@ import {
   FEED_POST_CATEGORIES,
   type FeedPostCategory,
 } from "@/lib/feedPost";
+import { formatCategoryWithSubcategory } from "@/lib/kakaoSubcategory";
 import {
   EDGE_SWIPE_PRIORITY,
   useEdgeSwipeBack,
@@ -153,6 +154,12 @@ export function PlaceDetailSheet({
   // 저장됨(하트) + 본인 places id + 핸들러 있을 때만 칩. id만 있고 미저장이면 텍스트.
   const canEditCategory = Boolean(isSaved && savedPlaceId && onCategoryChange);
   const currentCategory = place.category_name?.trim() || "";
+  const currentSubcategory =
+    typeof place.subcategory === "string" ? place.subcategory.trim() : "";
+  const categoryLabel = formatCategoryWithSubcategory(
+    currentCategory,
+    currentSubcategory || null,
+  );
   const pinStyle = categoryPin?.[currentCategory];
   const chipBg = pinStyle?.color ?? "#888";
   const chipFg = LIGHT_PIN_CATEGORIES.has(currentCategory) ? "#333" : "#fff";
@@ -208,7 +215,7 @@ export function PlaceDetailSheet({
               >
                 <span>
                   {pinStyle?.emoji ? `${pinStyle.emoji} ` : ""}
-                  {currentCategory}
+                  {categoryLabel}
                 </span>
                 <span
                   className={
@@ -262,7 +269,7 @@ export function PlaceDetailSheet({
               ) : null}
             </div>
           ) : currentCategory ? (
-            <p className="placeDetailSheetCategory">{currentCategory}</p>
+            <p className="placeDetailSheetCategory">{categoryLabel}</p>
           ) : null}
         </div>
         <div className="placeDetailSheetHeaderActions">

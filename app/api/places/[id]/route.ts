@@ -35,7 +35,8 @@ async function authenticateBearer(req: Request) {
   return { authUser };
 }
 
-/** places.category only — never touch name/address/lat/lng/poi_id/source */
+/** places.category only — never touch name/address/lat/lng/poi_id/source.
+ *  Clears subcategory when category changes (parent/child consistency). */
 export async function PATCH(req: Request, context: RouteContext) {
   try {
     const { id: rawId } = await context.params;
@@ -92,6 +93,7 @@ export async function PATCH(req: Request, context: RouteContext) {
       .from("places")
       .update({
         category,
+        subcategory: null,
         category_edited_by_user: true,
       })
       .eq("id", placeId)

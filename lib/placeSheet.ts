@@ -23,6 +23,8 @@ export type PlaceSheetFeedPost = {
 export type PlaceSheetData = {
   place_name: string;
   category_name?: string;
+  /** Fine category under category_name — place detail only */
+  subcategory?: string | null;
   road_address_name?: string;
   address_name?: string;
   phone?: string;

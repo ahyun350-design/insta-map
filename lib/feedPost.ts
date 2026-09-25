@@ -36,6 +36,8 @@ export type PhotoPlaceTag = {
   placeName: string;
   address: string;
   category: string;
+  /** Fine category under `category` — optional; absent when Kakao unmatched */
+  subcategory?: string | null;
   lat: number;
   lng: number;
   x: number;
@@ -218,12 +220,17 @@ function parsePhotoPlaceTagItem(raw: unknown): PhotoPlaceTag | null {
 
   const isManual = item.isManual === true;
 
+  const subcategoryRaw =
+    typeof item.subcategory === "string" ? item.subcategory.trim() : "";
+  const subcategory = subcategoryRaw || null;
+
   return {
     photoIndex,
     placeId,
     placeName,
     address,
     category: categoryRaw,
+    ...(subcategory ? { subcategory } : {}),
     lat: latLng.lat,
     lng: latLng.lng,
     x: clamp01(x),

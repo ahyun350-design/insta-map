@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { FEED_POST_CATEGORIES } from "@/lib/feedPost";
+import { FEED_POST_CATEGORIES, type FeedPostCategory } from "@/lib/feedPost";
+import { isSubCategory } from "@/lib/kakaoSubcategory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,7 @@ export async function POST(req: Request) {
       name?: string;
       address?: string;
       category?: string;
+      subcategory?: string | null;
       lat?: number | string | null;
       lng?: number | string | null;
     };
@@ -47,6 +49,8 @@ export async function POST(req: Request) {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const address = typeof body.address === "string" ? body.address.trim() : "";
     const category = typeof body.category === "string" ? body.category.trim() : "";
+    const subcategoryRaw =
+      typeof body.subcategory === "string" ? body.subcategory.trim() : "";
     const latRaw = body.lat;
     const lngRaw = body.lng;
     const lat = typeof latRaw === "number" ? latRaw : latRaw != null ? parseFloat(String(latRaw)) : NaN;
@@ -58,6 +62,10 @@ export async function POST(req: Request) {
     if (!CATEGORIES.has(category)) {
       return NextResponse.json({ error: "유효하지 않은 카테고리입니다." }, { status: 400 });
     }
+    const subcategory =
+      subcategoryRaw && isSubCategory(category as FeedPostCategory, subcategoryRaw)
+        ? subcategoryRaw
+        : null;
 
     let admin;
     try {
@@ -73,6 +81,7 @@ export async function POST(req: Request) {
       name,
       address,
       category,
+      subcategory,
       lat: hasCoords ? lat : null,
       lng: hasCoords ? lng : null,
     });
