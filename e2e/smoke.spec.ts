@@ -60,6 +60,59 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(tabButton(page, "home")).toBeVisible({ timeout: 15_000 });
   });
 
+  await runner.step("1c. 온보딩 Share Extension 슬라이드", async () => {
+    await page.goto("/onboarding", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(".onboardingRoot, .onboardingRootFinal")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const nextBtn = page.getByRole("button", { name: "다음" });
+    // Slides 0→1→2→3 (share)
+    for (let i = 0; i < 3; i++) {
+      await expect(nextBtn).toBeVisible();
+      await safeClick(nextBtn);
+      await page.waitForTimeout(350);
+    }
+
+    await expect(page.getByRole("heading", { name: "인스타에서 바로 저장" })).toBeVisible();
+    await expect(page.getByTestId("steps-carousel")).toBeVisible();
+    const track = page.getByTestId("steps-carousel-track");
+    const progress = page.getByTestId("steps-carousel-progress");
+    await expect(progress).toHaveText("1 / 4");
+
+    await track.evaluate((el) => {
+      const node = el as HTMLElement;
+      node.scrollLeft = node.clientWidth * 3;
+    });
+    await page.waitForTimeout(400);
+    await expect(progress).toHaveText("4 / 4");
+
+    // Extra swipe / scroll past last step — stay on share slide
+    const box = await track.boundingBox();
+    expect(box).toBeTruthy();
+    if (box) {
+      await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.4);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width * 0.1, box.y + box.height * 0.4, { steps: 14 });
+      await page.mouse.up();
+      await page.waitForTimeout(400);
+    }
+    await track.evaluate((el) => {
+      const node = el as HTMLElement;
+      node.scrollLeft = node.clientWidth * 6;
+    });
+    await page.waitForTimeout(300);
+
+    await expect(progress).toHaveText("4 / 4");
+    await expect(page.getByRole("heading", { name: "인스타에서 바로 저장" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "이제 시작해볼까요" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "시작하기" })).toHaveCount(0);
+
+    await safeClick(nextBtn);
+    await page.waitForTimeout(350);
+    await expect(page.getByRole("heading", { name: "이제 시작해볼까요" })).toBeVisible();
+  });
+
   // ── 1b. Whats New (optional — may already be seen) ────────
   await runner.stepOptional("1b. Whats New 모달 표시 및 닫기", async () => {
     // Map-first landing waits for compact map + ~900ms before showing

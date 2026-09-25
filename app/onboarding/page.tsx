@@ -4,10 +4,23 @@ import { useCallback, useRef, useState, type CSSProperties, type ReactNode } fro
 import { useRouter } from "next/navigation";
 import { setOnboardingSeen } from "@/lib/onboarding";
 import { track } from "@/lib/track";
+import { WHATS_NEW_PACK_V1, type WhatsNewStep } from "@/lib/whatsNew";
+import { StepsCarousel } from "@/components/StepsCarousel";
 
 const NAVY = "#1B2A6B";
 
-const SLIDES = [
+const SHARE_EXTENSION_STEPS: WhatsNewStep[] =
+  WHATS_NEW_PACK_V1.slides.find((s) => s.id === "share_extension")?.steps ?? [];
+
+type OnboardingSlide = {
+  title: string;
+  description: string;
+  toneClass: string;
+  Illustration?: () => ReactNode;
+  steps?: WhatsNewStep[];
+};
+
+const SLIDES: OnboardingSlide[] = [
   {
     title: "릴스 속 그곳, 지도에 저장",
     description: "링크만 붙여넣으면 가게 이름·위치까지 알아서",
@@ -27,12 +40,19 @@ const SLIDES = [
     toneClass: "onboardingTone3",
   },
   {
+    title: "인스타에서 바로 저장",
+    description: "앱을 열지 않아도 공유 버튼 한 번이면 끝나요",
+    steps: SHARE_EXTENSION_STEPS,
+    toneClass: "onboardingToneShare",
+  },
+  {
     title: "이제 시작해볼까요",
     description: "인스타에서 저장해둔 릴스 하나만 가져와 보세요",
     Illustration: Slide4Illustration,
     toneClass: "",
   },
-] as const;
+];
+
 
 function MapPinIcon({ size = 24, color = "currentColor" }: { size?: number; color?: string }) {
   return (
@@ -492,7 +512,13 @@ export default function OnboardingPage() {
 
       <div className={slideAreaClass} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <div key={index} className="onboardingIllustrationWrap onboardingIllustrationWrapAnim">
-          <slide.Illustration />
+          {slide.steps && slide.steps.length > 0 ? (
+            <div className="onboardingShareCarouselWrap">
+              <StepsCarousel steps={slide.steps} ariaLabel="공유 저장 단계" />
+            </div>
+          ) : slide.Illustration ? (
+            <slide.Illustration />
+          ) : null}
         </div>
         <h1 className={isLast ? "onboardingTitle onboardingTitleFinal" : "onboardingTitle"}>{slide.title}</h1>
         <p className={isLast ? "onboardingDescription onboardingDescriptionFinal" : "onboardingDescription"}>

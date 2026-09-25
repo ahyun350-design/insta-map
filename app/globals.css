@@ -5998,6 +5998,18 @@ select:focus-visible {
   background: linear-gradient(165deg, #e9f4f2 0%, #f5faf9 48%, #e6eef8 100%);
 }
 
+.onboardingToneShare {
+  background: linear-gradient(165deg, #eef3fb 0%, #f7f8fc 48%, #ebe6f5 100%);
+}
+
+.onboardingShareCarouselWrap {
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  text-align: left;
+  min-width: 0;
+}
+
 .onboardingSlideAreaFinal {
   background: transparent;
   margin: 0;

@@ -71,7 +71,7 @@ async function dismissOnboardingIfPresent(page: Page): Promise<void> {
     await safeClick(skipBtn);
     return;
   }
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
     if (await isLoginFormVisible(page)) return;
     if (await isHomeReady(page)) return;
     if (await startBtn.isVisible().catch(() => false)) {
