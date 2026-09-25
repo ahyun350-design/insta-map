@@ -57,7 +57,6 @@ export function tryMapKakaoCategoryName(
     n.includes("가전") ||
     n.includes("꽃집") ||
     n.includes("생활용품점") ||
-    n.includes("반려동물") ||
     (n.includes("판매") && !n.includes("음식"))
   ) {
     return "쇼핑";
