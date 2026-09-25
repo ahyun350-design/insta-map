@@ -66,7 +66,7 @@ test("production smoke — major tabs (continue on failure)", async ({
       timeout: 15_000,
     });
 
-    const nextBtn = page.getByRole("button", { name: "다음" });
+    const nextBtn = page.locator("button.onboardingPrimary", { hasText: "다음" });
     // Slides 0→1→2→3 (share)
     for (let i = 0; i < 3; i++) {
       await expect(nextBtn).toBeVisible();
@@ -111,6 +111,12 @@ test("production smoke — major tabs (continue on failure)", async ({
     await safeClick(nextBtn);
     await page.waitForTimeout(350);
     await expect(page.getByRole("heading", { name: "이제 시작해볼까요" })).toBeVisible();
+
+    // Leave onboarding so later steps see the app shell
+    await safeClick(page.getByRole("button", { name: "시작하기" }));
+    await page.waitForTimeout(500);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(tabBar(page)).toBeVisible({ timeout: 20_000 });
   });
 
   // ── 1b. Whats New (optional — may already be seen) ────────
