@@ -108,10 +108,11 @@ select:focus-visible {
 }
 
 /* 큐레이션 상세 — 메인 위 전체화면 오버레이 (메인 언마운트 방지) */
+/* Above home search (100000); below extract/coach/whatsNew/place sheet/toasts */
 .curationDetailOverlay {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 100005;
   background: #fff;
   display: flex;
   flex-direction: column;

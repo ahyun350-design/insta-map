@@ -16977,14 +16977,20 @@ function HomePageContent() {
         />,
         document.body,
       )}
-    {placePostsList && (
-      <PlacePostsListScreen
-        data={placePostsList}
-        onClose={closePlacePostsList}
-        onPostClick={handlePlacePostsListPostClick}
-      />
-    )}
-    {curationDetailOverlayEl}
+    {placePostsList &&
+      typeof document !== "undefined" &&
+      createPortal(
+        <PlacePostsListScreen
+          data={placePostsList}
+          onClose={closePlacePostsList}
+          onPostClick={handlePlacePostsListPostClick}
+        />,
+        document.body,
+      )}
+    {/* Portal to body so z-index competes with HomeSearchScreen (also body portal) */}
+    {curationDetailOverlayEl &&
+      typeof document !== "undefined" &&
+      createPortal(curationDetailOverlayEl, document.body)}
     </>
   );
 }

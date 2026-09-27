@@ -613,6 +613,111 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(searchScreen).toBeHidden({ timeout: 8_000 });
   });
 
+  // ── 6b2. Home search → detail above search → back keeps query ─
+  await runner.step("6b2. 홈 검색 → 상세 위 → 검색 유지", async () => {
+    await gotoTab(page, "home");
+    await waitForHomeFeed(page);
+
+    // Keyword from a visible home cell title/place line
+    const homeCell = page.locator(".homeFeedGrid .postGridCell").first();
+    await expect(homeCell).toBeVisible({ timeout: 20_000 });
+    const keywordRaw = (
+      (await homeCell.locator(".postGridCellHomeTitle").first().textContent()) ||
+      (await homeCell.textContent()) ||
+      ""
+    ).trim();
+    const keyword = keywordRaw.replace(/\s+/g, " ").slice(0, 12);
+    if (keyword.length < 1) {
+      throw new Error("home feed cell has no searchable text");
+    }
+
+    await safeClick(
+      page
+        .locator(".homeFeedSearchInput")
+        .or(page.getByPlaceholder("장소·키워드 검색"))
+        .first(),
+    );
+    const searchScreen = page.locator(".homeSearchScreen");
+    await expect(searchScreen).toBeVisible({ timeout: 10_000 });
+
+    const searchInput = searchScreen
+      .locator("input")
+      .or(page.getByPlaceholder("장소·키워드 검색"))
+      .first();
+    await searchInput.fill(keyword);
+    await page.waitForTimeout(600);
+
+    const resultCell = searchScreen
+      .locator(".homeSearchFeedGrid .postGridCell, .homeFeedGrid .postGridCell")
+      .first();
+    await expect(resultCell).toBeVisible({ timeout: 20_000 });
+    await safeClick(resultCell);
+
+    const overlay = page.locator(".curationDetailOverlay");
+    await expect(overlay).toBeVisible({ timeout: 25_000 });
+    // Detail must paint above search (search stays mounted)
+    await expect(searchScreen).toBeAttached();
+
+    const closeBtn = page
+      .getByTestId("curation-detail-close")
+      .or(overlay.getByRole("button", { name: "뒤로가기" }))
+      .or(overlay.locator(".subpageHeader button").first());
+    await safeClick(closeBtn.first());
+    await expect(overlay).toHaveCount(0, { timeout: 10_000 });
+
+    await expect(searchScreen).toBeVisible({ timeout: 8_000 });
+    await expect(searchInput).toHaveValue(keyword);
+
+    // Swipe closes search (detail already closed)
+    await edgeSwipeBack(page);
+    await expect(searchScreen).toBeHidden({ timeout: 8_000 });
+    await expect(tabButton(page, "home")).toBeVisible({ timeout: 10_000 });
+  });
+
+  // ── 6b3. Search + detail: swipe closes detail first, then search ─
+  await runner.stepOptional("6b3. 홈 검색+상세 스와이프 순서", async () => {
+    await gotoTab(page, "home");
+    await waitForHomeFeed(page);
+    const homeCell = page.locator(".homeFeedGrid .postGridCell").first();
+    if (!(await homeCell.isVisible().catch(() => false))) return "skip";
+    const keywordRaw = (
+      (await homeCell.locator(".postGridCellHomeTitle").first().textContent()) ||
+      (await homeCell.textContent()) ||
+      ""
+    ).trim();
+    const keyword = keywordRaw.replace(/\s+/g, " ").slice(0, 12);
+    if (keyword.length < 1) return "skip";
+
+    await safeClick(
+      page
+        .locator(".homeFeedSearchInput")
+        .or(page.getByPlaceholder("장소·키워드 검색"))
+        .first(),
+    );
+    const searchScreen = page.locator(".homeSearchScreen");
+    await expect(searchScreen).toBeVisible({ timeout: 10_000 });
+    const searchInput = searchScreen.locator("input").first();
+    await searchInput.fill(keyword);
+    await page.waitForTimeout(600);
+    const resultCell = searchScreen
+      .locator(".homeSearchFeedGrid .postGridCell, .homeFeedGrid .postGridCell")
+      .first();
+    if (!(await resultCell.isVisible().catch(() => false))) return "skip";
+    await safeClick(resultCell);
+
+    const overlay = page.locator(".curationDetailOverlay");
+    await expect(overlay).toBeVisible({ timeout: 25_000 });
+
+    await edgeSwipeBack(page);
+    await expect(overlay).toHaveCount(0, { timeout: 10_000 });
+    await expect(searchScreen).toBeVisible({ timeout: 5_000 });
+    await expect(searchInput).toHaveValue(keyword);
+
+    await edgeSwipeBack(page);
+    await expect(searchScreen).toBeHidden({ timeout: 8_000 });
+    return "pass";
+  });
+
   // ── 6c. Edge swipe — curation detail close + non-edge no-op ─
   await runner.stepOptional("6c. 가장자리 스와이프 — 큐레이션 상세 닫기", async () => {
     await gotoTab(page, "home");
