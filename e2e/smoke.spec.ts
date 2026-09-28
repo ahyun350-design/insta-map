@@ -619,37 +619,35 @@ test("production smoke — major tabs (continue on failure)", async ({
     await waitForHomeFeed(page);
 
     // Keyword from a visible home cell title/place line
-    const homeCell = page.locator(".homeFeedGrid .postGridCell").first();
+    const homeCell = page
+      .locator(".homeFeedGrid .postGridCell")
+      .filter({ has: page.locator(".postGridCellHomeTitle") })
+      .first();
     await expect(homeCell).toBeVisible({ timeout: 20_000 });
     const keywordRaw = (
       (await homeCell.locator(".postGridCellHomeTitle").first().textContent()) ||
-      (await homeCell.textContent()) ||
       ""
     ).trim();
-    const keyword = keywordRaw.replace(/\s+/g, " ").slice(0, 12);
+    // Prefer a short token that will match search (avoid trailing spaces)
+    const keyword =
+      keywordRaw.split(/\s+/).find((t) => t.length >= 2)?.slice(0, 12) ||
+      keywordRaw.replace(/\s+/g, "").slice(0, 8);
     if (keyword.length < 1) {
       throw new Error("home feed cell has no searchable text");
     }
 
-    await safeClick(
-      page
-        .locator(".homeFeedSearchInput")
-        .or(page.getByPlaceholder("장소·키워드 검색"))
-        .first(),
-    );
+    // Open via the readonly home bar input (not the overlay input)
+    await safeClick(page.locator(".homeFeedToolbar .homeFeedSearchInput").first());
     const searchScreen = page.locator(".homeSearchScreen");
     await expect(searchScreen).toBeVisible({ timeout: 10_000 });
 
-    const searchInput = searchScreen
-      .locator("input")
-      .or(page.getByPlaceholder("장소·키워드 검색"))
-      .first();
+    // Must stay scoped to overlay — page-level placeholder also matches readonly bar
+    const searchInput = searchScreen.locator("input.homeFeedSearchInput");
+    await expect(searchInput).toBeEditable({ timeout: 5_000 });
     await searchInput.fill(keyword);
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(700);
 
-    const resultCell = searchScreen
-      .locator(".homeSearchFeedGrid .postGridCell, .homeFeedGrid .postGridCell")
-      .first();
+    const resultCell = searchScreen.locator(".homeSearchFeedGrid .postGridCell").first();
     await expect(resultCell).toBeVisible({ timeout: 20_000 });
     await safeClick(resultCell);
 
@@ -676,32 +674,37 @@ test("production smoke — major tabs (continue on failure)", async ({
 
   // ── 6b3. Search + detail: swipe closes detail first, then search ─
   await runner.stepOptional("6b3. 홈 검색+상세 스와이프 순서", async () => {
+    // Ensure leftover search overlay is gone
+    const leftover = page.locator(".homeSearchScreen");
+    if (await leftover.isVisible().catch(() => false)) {
+      await safeClick(leftover.getByRole("button", { name: "취소" }));
+      await expect(leftover).toBeHidden({ timeout: 8_000 });
+    }
+
     await gotoTab(page, "home");
     await waitForHomeFeed(page);
-    const homeCell = page.locator(".homeFeedGrid .postGridCell").first();
+    const homeCell = page
+      .locator(".homeFeedGrid .postGridCell")
+      .filter({ has: page.locator(".postGridCellHomeTitle") })
+      .first();
     if (!(await homeCell.isVisible().catch(() => false))) return "skip";
     const keywordRaw = (
       (await homeCell.locator(".postGridCellHomeTitle").first().textContent()) ||
-      (await homeCell.textContent()) ||
       ""
     ).trim();
-    const keyword = keywordRaw.replace(/\s+/g, " ").slice(0, 12);
+    const keyword =
+      keywordRaw.split(/\s+/).find((t) => t.length >= 2)?.slice(0, 12) ||
+      keywordRaw.replace(/\s+/g, "").slice(0, 8);
     if (keyword.length < 1) return "skip";
 
-    await safeClick(
-      page
-        .locator(".homeFeedSearchInput")
-        .or(page.getByPlaceholder("장소·키워드 검색"))
-        .first(),
-    );
+    await safeClick(page.locator(".homeFeedToolbar .homeFeedSearchInput").first());
     const searchScreen = page.locator(".homeSearchScreen");
     await expect(searchScreen).toBeVisible({ timeout: 10_000 });
-    const searchInput = searchScreen.locator("input").first();
+    const searchInput = searchScreen.locator("input.homeFeedSearchInput");
+    await expect(searchInput).toBeEditable({ timeout: 5_000 });
     await searchInput.fill(keyword);
-    await page.waitForTimeout(600);
-    const resultCell = searchScreen
-      .locator(".homeSearchFeedGrid .postGridCell, .homeFeedGrid .postGridCell")
-      .first();
+    await page.waitForTimeout(700);
+    const resultCell = searchScreen.locator(".homeSearchFeedGrid .postGridCell").first();
     if (!(await resultCell.isVisible().catch(() => false))) return "skip";
     await safeClick(resultCell);
 
@@ -720,6 +723,12 @@ test("production smoke — major tabs (continue on failure)", async ({
 
   // ── 6c. Edge swipe — curation detail close + non-edge no-op ─
   await runner.stepOptional("6c. 가장자리 스와이프 — 큐레이션 상세 닫기", async () => {
+    const leftoverSearch = page.locator(".homeSearchScreen");
+    if (await leftoverSearch.isVisible().catch(() => false)) {
+      await safeClick(leftoverSearch.getByRole("button", { name: "취소" }));
+      await expect(leftoverSearch).toBeHidden({ timeout: 8_000 });
+    }
+
     await gotoTab(page, "home");
     await waitForHomeFeed(page);
 
