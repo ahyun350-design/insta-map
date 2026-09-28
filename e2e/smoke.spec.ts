@@ -560,9 +560,7 @@ test("production smoke — major tabs (continue on failure)", async ({
     await page.unroute("**/api/places/bulk-delete").catch(() => null);
     // Client-only removal (API mocked) — reload restores B from server
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(tabButton(page, "saved").or(tabButton(page, "home"))).toBeVisible({
-      timeout: 45_000,
-    });
+    await expect(tabButton(page, "home")).toBeVisible({ timeout: 45_000 });
     await gotoTab(page, "saved");
     await dismissSavedOverlays(page);
   });
