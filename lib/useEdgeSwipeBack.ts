@@ -5,6 +5,8 @@ import { useEffect, useRef } from "react";
 export const EDGE_SWIPE_PRIORITY = {
   CONFIRM_MODAL: 1,
   CATEGORY_PICKER: 2,
+  /** Place-sheet fullscreen photo viewer — closes before place sheet */
+  PHOTO_VIEWER: 3,
   CURATION_DETAIL: 3,
   PLACE_SHEET: 4,
   MY_LISTS: 5,

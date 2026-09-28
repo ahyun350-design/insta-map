@@ -297,6 +297,78 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(savedMyListsButton(page)).toBeVisible({ timeout: 15_000 });
   });
 
+  await runner.step("4c2. 장소 시트 → 사진 뷰어 → 큐레이션", async () => {
+    await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
+    const items = page.locator("article.savedItem");
+    await expect(items.first()).toBeVisible({ timeout: 15_000 });
+    const count = await items.count();
+
+    let opened = false;
+    for (let i = 0; i < Math.min(count, 12); i++) {
+      await dismissSavedOverlays(page);
+      await gotoTab(page, "saved");
+      await safeClick(items.nth(i));
+      const sheet = page.locator(".placeDetailSheet");
+      await expect(sheet).toBeVisible({ timeout: 15_000 });
+      const img = sheet.getByTestId("place-detail-curation-image").first();
+      if (!(await img.isVisible().catch(() => false))) {
+        await safeClick(
+          sheet
+            .getByRole("button", { name: "닫기" })
+            .or(sheet.locator(".placeDetailSheetCloseBtn"))
+            .first(),
+        );
+        continue;
+      }
+      await safeClick(img);
+      const viewer = page.getByTestId("place-sheet-photo-viewer");
+      await expect(viewer).toBeVisible({ timeout: 10_000 });
+      await expect(sheet).toBeVisible();
+
+      // Multi-photo: swipe track if page indicator present
+      const pageLabel = viewer.locator(".placeSheetPhotoViewerPage");
+      if (await pageLabel.isVisible().catch(() => false)) {
+        const track = viewer.locator(".placeSheetPhotoViewerTrack");
+        const box = await track.boundingBox();
+        if (box) {
+          await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
+          await page.mouse.down();
+          await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5, {
+            steps: 12,
+          });
+          await page.mouse.up();
+          await page.waitForTimeout(350);
+        }
+      }
+
+      // Edge swipe closes viewer only — sheet remains
+      await edgeSwipeBack(page);
+      await expect(viewer).toHaveCount(0, { timeout: 8_000 });
+      await expect(sheet).toBeVisible({ timeout: 5_000 });
+
+      // Re-open viewer → 큐레이션 보기
+      await safeClick(sheet.getByTestId("place-detail-curation-image").first());
+      await expect(viewer).toBeVisible({ timeout: 10_000 });
+      await safeClick(page.getByTestId("place-sheet-photo-viewer-curation"));
+      const overlay = page.locator(".curationDetailOverlay");
+      await expect(overlay).toBeVisible({ timeout: 25_000 });
+      await safeClick(
+        page
+          .getByTestId("curation-detail-close")
+          .or(overlay.getByRole("button", { name: "뒤로가기" }))
+          .or(overlay.locator(".subpageHeader button").first()),
+      );
+      await expect(overlay).toHaveCount(0, { timeout: 10_000 });
+      opened = true;
+      break;
+    }
+    if (!opened) {
+      throw new Error("큐레이션 사진이 있는 저장 장소를 찾지 못함");
+    }
+    await dismissSavedOverlays(page);
+  });
+
   await runner.step("4d. SAVED — 내 목록 생성·담기·순서·삭제", async () => {
     // 시트가 탭바를 가리면 gotoTab 실패 → 먼저 정리 후 SAVED 로 이동
     await dismissSavedOverlays(page);

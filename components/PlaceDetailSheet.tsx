@@ -13,6 +13,10 @@ import {
 } from "@/lib/feedPost";
 import { formatCategoryWithSubcategory } from "@/lib/kakaoSubcategory";
 import {
+  PlaceSheetPhotoViewer,
+  type PlaceSheetPhotoViewerEntry,
+} from "@/components/PlaceSheetPhotoViewer";
+import {
   EDGE_SWIPE_PRIORITY,
   useEdgeSwipeBack,
 } from "@/lib/useEdgeSwipeBack";
@@ -81,6 +85,7 @@ function PlaceDetailCurationImages({
         <img
           src={entries[0].src}
           alt=""
+          data-testid="place-detail-curation-image"
           loading="lazy"
           decoding="async"
           onClick={(ev) => {
@@ -100,6 +105,7 @@ function PlaceDetailCurationImages({
             key={`${entry.src}-${entry.photoIndex}`}
             src={entry.src}
             alt=""
+            data-testid="place-detail-curation-image"
             className="placeDetailSheetCurationCarouselImg"
             decoding="async"
             onClick={(ev) => {
@@ -148,6 +154,11 @@ export function PlaceDetailSheet({
   const lng = parseFloat(String(place.x ?? ""));
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  const [photoViewer, setPhotoViewer] = useState<{
+    postId: string;
+    entries: PlaceSheetPhotoViewerEntry[];
+    initialEntryIndex: number;
+  } | null>(null);
 
   const savedPlaceId =
     typeof place._savedPlaceId === "string" ? place._savedPlaceId.trim() : "";
@@ -167,6 +178,7 @@ export function PlaceDetailSheet({
   // 장소가 바뀌면 펼침 상태 초기화 (이전 시트 잔존 방지)
   useEffect(() => {
     setCategoryPickerOpen(false);
+    setPhotoViewer(null);
   }, [savedPlaceId, place.place_name, place.road_address_name, place.y, place.x]);
 
   useEffect(() => {
@@ -421,9 +433,14 @@ export function PlaceDetailSheet({
                 <p className="placeDetailSheetCurationTitle">{post.title || post.placeName}</p>
                 <PlaceDetailCurationImages
                   entries={entries}
-                  onImageSelect={(photoIndex) =>
-                    onCurationClick(post.id, photoIndex, { forceDetail: true })
-                  }
+                  onImageSelect={(photoIndex) => {
+                    const entryIndex = entries.findIndex((e) => e.photoIndex === photoIndex);
+                    setPhotoViewer({
+                      postId: post.id,
+                      entries,
+                      initialEntryIndex: entryIndex >= 0 ? entryIndex : 0,
+                    });
+                  }}
                 />
                 <p className="placeDetailSheetCurationComment">{post.comment}</p>
                 <div className="placeDetailSheetCurationStats">
@@ -439,6 +456,19 @@ export function PlaceDetailSheet({
           <p>아직 큐레이션이 없어요</p>
         </div>
       )}
+
+      {photoViewer ? (
+        <PlaceSheetPhotoViewer
+          entries={photoViewer.entries}
+          initialEntryIndex={photoViewer.initialEntryIndex}
+          onClose={() => setPhotoViewer(null)}
+          onOpenCuration={(photoIndex) => {
+            const postId = photoViewer.postId;
+            setPhotoViewer(null);
+            onCurationClick(postId, photoIndex, { forceDetail: true });
+          }}
+        />
+      ) : null}
 
     </div>
   );
