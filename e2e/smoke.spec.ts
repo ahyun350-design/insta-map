@@ -424,6 +424,138 @@ test("production smoke — major tabs (continue on failure)", async ({
     await dismissSavedOverlays(page);
   });
 
+  await runner.step("4c3. 추출 완료 리뷰 — 1곳 / 2곳+", async () => {
+    await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
+    const savedItems = page.getByTestId("saved-place-item");
+    await expect(savedItems.first()).toBeVisible({ timeout: 15_000 });
+    const savedCount = await savedItems.count();
+    if (savedCount < 2) {
+      throw new Error("추출 리뷰 E2E에 저장 장소 2개 이상 필요");
+    }
+
+    const placeA = {
+      id: (await savedItems.nth(0).getAttribute("data-place-id"))!,
+      name: ((await savedItems.nth(0).locator(".savedName").innerText()) || "A").trim(),
+      address: "e2e-addr-a",
+      category: "맛집",
+      subcategory: null as string | null,
+    };
+    const placeB = {
+      id: (await savedItems.nth(1).getAttribute("data-place-id"))!,
+      name: ((await savedItems.nth(1).locator(".savedName").innerText()) || "B").trim(),
+      address: "e2e-addr-b",
+      category: "카페",
+      subcategory: null as string | null,
+    };
+
+    // —— 1곳: 자동 닫힘 + 「목록에 담기」
+    await page.evaluate(
+      ({ key, payload }) => {
+        localStorage.setItem(key, JSON.stringify(payload));
+      },
+      {
+        key: "pindmap_extract_review_pending",
+        payload: {
+          jobId: `e2e-single-${Date.now()}`,
+          places: [placeA],
+          at: Date.now(),
+          allowSingle: true,
+        },
+      },
+    );
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(tabButton(page, "home")).toBeVisible({ timeout: 45_000 });
+    const single = page.getByTestId("extract-review-single");
+    await expect(single).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("extract-review-add-to-list")).toBeVisible();
+    await expect(page.getByTestId("extract-loading-overlay")).toHaveCount(0, {
+      timeout: 5_000,
+    });
+
+    // —— 2곳+: × 닫기 → 전부 유지
+    await page.evaluate(
+      ({ key, payload }) => {
+        localStorage.setItem(key, JSON.stringify(payload));
+      },
+      {
+        key: "pindmap_extract_review_pending",
+        payload: {
+          jobId: `e2e-multi-x-${Date.now()}`,
+          places: [placeA, placeB],
+          at: Date.now(),
+        },
+      },
+    );
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(tabButton(page, "home")).toBeVisible({ timeout: 45_000 });
+    const multi = page.getByTestId("extract-review-multi");
+    await expect(multi).toBeVisible({ timeout: 20_000 });
+    await safeClick(page.getByTestId("extract-overlay-close"));
+    await expect(page.getByTestId("extract-loading-overlay")).toHaveCount(0, {
+      timeout: 8_000,
+    });
+    await gotoTab(page, "saved");
+    await expect(page.locator(`[data-place-id="${placeA.id}"]`)).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.locator(`[data-place-id="${placeB.id}"]`)).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // —— 2곳+: 1개 체크 해제 → 완료 → 해당 장소 저장 탭에서 사라짐 (API mock)
+    await page.evaluate(
+      ({ key, payload }) => {
+        localStorage.setItem(key, JSON.stringify(payload));
+      },
+      {
+        key: "pindmap_extract_review_pending",
+        payload: {
+          jobId: `e2e-multi-del-${Date.now()}`,
+          places: [placeA, placeB],
+          at: Date.now(),
+        },
+      },
+    );
+    await page.route("**/api/places/bulk-delete", async (route) => {
+      const body = route.request().postDataJSON() as { ids?: string[] };
+      const ids = Array.isArray(body?.ids) ? body.ids : [];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ deleted: ids.length, deletedIds: ids }),
+      });
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(tabButton(page, "home")).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByTestId("extract-review-multi")).toBeVisible({ timeout: 20_000 });
+    const checkB = page.locator(
+      `input[data-testid="extract-review-check"][data-place-id="${placeB.id}"]`,
+    );
+    await expect(checkB).toBeVisible();
+    await checkB.click();
+    await expect(page.getByTestId("extract-review-hint")).toContainText("1곳");
+    await safeClick(page.getByTestId("extract-review-confirm"));
+    await expect(page.getByTestId("extract-loading-overlay")).toHaveCount(0, {
+      timeout: 10_000,
+    });
+    await gotoTab(page, "saved");
+    await expect(page.locator(`[data-place-id="${placeA.id}"]`)).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.locator(`[data-place-id="${placeB.id}"]`)).toHaveCount(0, {
+      timeout: 10_000,
+    });
+    await page.unroute("**/api/places/bulk-delete").catch(() => null);
+    // Client-only removal (API mocked) — reload restores B from server
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(tabButton(page, "saved").or(tabButton(page, "home"))).toBeVisible({
+      timeout: 45_000,
+    });
+    await gotoTab(page, "saved");
+    await dismissSavedOverlays(page);
+  });
+
   await runner.step("4d. SAVED — 내 목록 생성·담기·순서·삭제", async () => {
     // 시트가 탭바를 가리면 gotoTab 실패 → 먼저 정리 후 SAVED 로 이동
     await dismissSavedOverlays(page);

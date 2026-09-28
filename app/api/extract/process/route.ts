@@ -849,6 +849,7 @@ export async function POST(req: Request) {
       name: r.name,
       address: r.address,
       category: r.category,
+      subcategory: r.subcategory ?? null,
       lat: r.lat,
       lng: r.lng,
       source: r.source,

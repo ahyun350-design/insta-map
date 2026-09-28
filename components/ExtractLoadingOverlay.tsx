@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { formatCategoryWithSubcategory } from "@/lib/kakaoSubcategory";
+import type { ExtractReviewPlace } from "@/lib/extractReviewPending";
 
 const PROGRESS_MESSAGES = [
   "맛집 냄새 맡는 중 🐕",
@@ -95,6 +97,8 @@ export type ExtractOverlayCompleteVariant = "success" | "all_saved";
 /** 배타적 UI 모드 — 진행/백그라운드/완료/실패가 한 카드에 겹치지 않게 */
 export type ExtractOverlayMode = "loading" | "background" | "complete" | "error";
 
+export type { ExtractReviewPlace };
+
 type Props = {
   open: boolean;
   complete?: boolean;
@@ -105,12 +109,19 @@ type Props = {
   errorMessage?: string | null;
   /** extract_jobs.error_message 원문 — 사유 분기용 */
   errorRaw?: string | null;
+  /** Newly inserted places for complete UI (1 = add-to-list line, 2+ = checklist) */
+  reviewPlaces?: ExtractReviewPlace[] | null;
   onDismiss: () => void;
   onRetry?: () => void;
   /** all_saved 시 「지도에서 보기」 */
   onViewMap?: () => void;
   /** 캡션 실패 시 「직접 찾아보기」→ 지도 검색 */
   onManualSearch?: () => void;
+  /** 「목록에 담기」 — checked (or single) place ids */
+  onAddToList?: (placeIds: string[]) => void;
+  /** 2+ 「완료」— keepIds stay, removeIds deleted by parent */
+  onConfirmReview?: (keepIds: string[], removeIds: string[]) => void | Promise<void>;
+  reviewConfirming?: boolean;
 };
 
 export function ExtractLoadingOverlay({
@@ -120,10 +131,14 @@ export function ExtractLoadingOverlay({
   backgroundWaiting = false,
   errorMessage = null,
   errorRaw = null,
+  reviewPlaces = null,
   onDismiss,
   onRetry,
   onViewMap,
   onManualSearch,
+  onAddToList,
+  onConfirmReview,
+  reviewConfirming = false,
 }: Props) {
   const [progressIndex, setProgressIndex] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
@@ -131,6 +146,20 @@ export function ExtractLoadingOverlay({
     NO_PLACE_VARIANTS[0],
   );
   const tip = TIPS[tipIndex];
+
+  const places = useMemo(
+    () => (Array.isArray(reviewPlaces) ? reviewPlaces : []),
+    [reviewPlaces],
+  );
+  const multiReview = complete && completeVariant === "success" && places.length >= 2;
+  const singleReview = complete && completeVariant === "success" && places.length === 1;
+
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (!multiReview) return;
+    setCheckedIds(new Set(places.map((p) => p.id)));
+  }, [multiReview, places]);
 
   // Priority: error > complete > background > loading (never mix)
   const mode: ExtractOverlayMode = errorMessage
@@ -178,16 +207,44 @@ export function ExtractLoadingOverlay({
 
   if (!open) return null;
 
+  const checkedCount = places.reduce((n, p) => n + (checkedIds.has(p.id) ? 1 : 0), 0);
+  const uncheckedCount = places.length - checkedCount;
+  const allUnchecked = multiReview && checkedCount === 0;
+  const allChecked = multiReview && checkedCount === places.length;
+
+  const togglePlace = (id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (allChecked) setCheckedIds(new Set());
+    else setCheckedIds(new Set(places.map((p) => p.id)));
+  };
+
+  const handleConfirm = () => {
+    if (!onConfirmReview || reviewConfirming) return;
+    const keepIds = places.filter((p) => checkedIds.has(p.id)).map((p) => p.id);
+    const removeIds = places.filter((p) => !checkedIds.has(p.id)).map((p) => p.id);
+    void onConfirmReview(keepIds, removeIds);
+  };
+
   const ariaLabel =
     mode === "error"
       ? "추출 실패"
       : showAllSaved
         ? "이미 저장한 장소"
-        : mode === "complete"
-          ? "추출 완료"
-          : mode === "background"
-            ? "백그라운드 저장 중"
-            : "장소 추출 중";
+        : multiReview
+          ? "추출 장소 선택"
+          : mode === "complete"
+            ? "추출 완료"
+            : mode === "background"
+              ? "백그라운드 저장 중"
+              : "장소 추출 중";
 
   const footerNote =
     mode === "error" && captionTipError
@@ -198,7 +255,9 @@ export function ExtractLoadingOverlay({
           ? "알림이 오면 지도에서 확인해 주세요"
           : mode === "loading"
             ? "앱을 닫아도 계속 저장돼요 · 여러 개 OK"
-            : null;
+            : multiReview
+              ? null
+              : null;
 
   return (
     <div
@@ -206,10 +265,13 @@ export function ExtractLoadingOverlay({
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel}
-      onClick={onDismiss}
+      data-testid="extract-loading-overlay"
+      onClick={multiReview || reviewConfirming ? undefined : onDismiss}
     >
       <div
-        className="extractLoadingCard"
+        className={
+          multiReview ? "extractLoadingCard extractLoadingCardReview" : "extractLoadingCard"
+        }
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -217,6 +279,8 @@ export function ExtractLoadingOverlay({
           className="extractLoadingCloseBtn"
           onClick={onDismiss}
           aria-label="닫기"
+          data-testid="extract-overlay-close"
+          disabled={reviewConfirming}
         >
           ✕
         </button>
@@ -379,6 +443,101 @@ export function ExtractLoadingOverlay({
             >
               {onViewMap ? "지도에서 보기" : "확인"}
             </button>
+          </div>
+        ) : multiReview ? (
+          <div className="extractReview" data-testid="extract-review-multi">
+            <p className="extractReviewTitle">{places.length}곳 찾았어요</p>
+            <div className="extractReviewHeaderRow">
+              <button
+                type="button"
+                className="extractReviewSelectAll"
+                onClick={toggleAll}
+                data-testid="extract-review-select-all"
+              >
+                {allChecked ? "전체 해제" : "전체 선택"}
+              </button>
+              <span className="extractReviewCheckedCount">{checkedCount}/{places.length}</span>
+            </div>
+            <ul className="extractReviewList" data-testid="extract-review-list">
+              {places.map((p) => {
+                const checked = checkedIds.has(p.id);
+                const catLabel = formatCategoryWithSubcategory(p.category, p.subcategory);
+                return (
+                  <li key={p.id}>
+                    <label className="extractReviewRow">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => togglePlace(p.id)}
+                        data-testid="extract-review-check"
+                        data-place-id={p.id}
+                      />
+                      <span className="extractReviewRowText">
+                        <span className="extractReviewName">{p.name}</span>
+                        {catLabel ? (
+                          <span className="extractReviewMeta">{catLabel}</span>
+                        ) : null}
+                        <span className="extractReviewAddr">{p.address}</span>
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+            {uncheckedCount > 0 ? (
+              <p className="extractReviewHint" data-testid="extract-review-hint">
+                선택하지 않은 {uncheckedCount}곳은 저장되지 않아요
+              </p>
+            ) : (
+              <p className="extractReviewHint extractReviewHintSpacer" aria-hidden>
+                &nbsp;
+              </p>
+            )}
+            <div className="extractReviewActions">
+              <button
+                type="button"
+                className="extractLoadingSecondaryBtn"
+                disabled={checkedCount === 0 || reviewConfirming}
+                data-testid="extract-review-add-to-list"
+                onClick={() => {
+                  if (!onAddToList || checkedCount === 0) return;
+                  onAddToList(places.filter((p) => checkedIds.has(p.id)).map((p) => p.id));
+                }}
+              >
+                목록에 담기
+              </button>
+              <button
+                type="button"
+                className="extractLoadingDismissBtn"
+                disabled={reviewConfirming}
+                data-testid="extract-review-confirm"
+                onClick={handleConfirm}
+              >
+                {reviewConfirming
+                  ? "처리 중…"
+                  : allUnchecked
+                    ? "모두 저장 안 함"
+                    : "완료"}
+              </button>
+            </div>
+          </div>
+        ) : singleReview ? (
+          <div className="extractLoadingComplete" data-testid="extract-review-single">
+            <p className="extractLoadingCompleteEmoji" aria-hidden>
+              ✨
+            </p>
+            <p className="extractLoadingCompleteTitle">추출 완료!</p>
+            <p className="extractLoadingCompleteSub">곧 지도에 핀이 추가돼요</p>
+            {onAddToList ? (
+              <button
+                type="button"
+                className="extractLoadingSecondaryBtn extractReviewSingleListBtn"
+                data-testid="extract-review-add-to-list"
+                onClick={() => onAddToList([places[0]!.id])}
+              >
+                목록에 담기
+              </button>
+            ) : null}
           </div>
         ) : mode === "complete" ? (
           <div className="extractLoadingComplete">

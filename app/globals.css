@@ -6534,6 +6534,142 @@ select:focus-visible {
   color: #666;
 }
 
+.extractLoadingCardReview {
+  width: min(400px, 100%);
+  max-height: min(85vh, 720px);
+  padding: 28px 20px 20px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.extractReview {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.extractReviewTitle {
+  margin: 0 8px 12px 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a2a7a;
+  letter-spacing: -0.02em;
+  text-align: left;
+}
+
+.extractReviewHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.extractReviewSelectAll {
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3182f6;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.extractReviewCheckedCount {
+  font-size: 11px;
+  color: #999;
+}
+
+.extractReviewList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  flex: 1;
+  min-height: 120px;
+  max-height: min(48vh, 420px);
+  border-top: 0.5px solid #f0f0f0;
+  border-bottom: 0.5px solid #f0f0f0;
+}
+
+.extractReviewRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 0.5px solid #f7f7f7;
+  cursor: pointer;
+}
+
+.extractReviewRow input {
+  margin-top: 3px;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  accent-color: #1a2a7a;
+}
+
+.extractReviewRowText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.extractReviewName {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+  line-height: 1.3;
+}
+
+.extractReviewMeta {
+  font-size: 11px;
+  color: #6b7a99;
+}
+
+.extractReviewAddr {
+  font-size: 11px;
+  color: #999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extractReviewHint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #a0a8b8;
+  text-align: center;
+  min-height: 16px;
+}
+
+.extractReviewHintSpacer {
+  visibility: hidden;
+}
+
+.extractReviewActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.extractReviewActions .extractLoadingDismissBtn,
+.extractReviewActions .extractLoadingSecondaryBtn {
+  width: 100%;
+}
+
+.extractReviewSingleListBtn {
+  width: 100%;
+  margin-top: 4px;
+}
+
 /* ── Coachmark (spotlight tip) ── */
 .coachmarkRoot {
   position: fixed;

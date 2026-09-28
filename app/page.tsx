@@ -39,6 +39,13 @@ import { loadBootFailReport, type BootFailReport } from "@/lib/webviewRecovery";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay, EXTRACT_EMPTY_RESULT_RAW } from "@/components/ExtractLoadingOverlay";
+import {
+  clearExtractReviewPending,
+  getFreshExtractReviewPending,
+  markExtractReviewDone,
+  writeExtractReviewPending,
+  type ExtractReviewPlace,
+} from "@/lib/extractReviewPending";
 import { mapExtractErrorToUserMessage } from "@/lib/extractUserError";
 import { toUserMessage } from "@/lib/userErrorMessage";
 import {
@@ -1701,6 +1708,10 @@ function HomePageContent() {
   const [extractOverlayCompleteVariant, setExtractOverlayCompleteVariant] = useState<
     "success" | "all_saved"
   >("success");
+  /** Newly inserted places for complete UI (1 = list CTA, 2+ = checklist) */
+  const [extractReviewPlaces, setExtractReviewPlaces] = useState<ExtractReviewPlace[] | null>(null);
+  const [extractReviewJobId, setExtractReviewJobId] = useState<string | null>(null);
+  const [extractReviewConfirming, setExtractReviewConfirming] = useState(false);
   const [extractRetryUrl, setExtractRetryUrl] = useState<string | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
   const selectedPlaceRef = useRef<any>(null);
@@ -5085,19 +5096,141 @@ function HomePageContent() {
     window.localStorage.setItem(ACTIVE_JOBS_STORAGE_KEY, JSON.stringify(incomplete));
   }, [activeJobs]);
 
+  const resetExtractOverlayUi = useCallback(() => {
+    setShowExtractOverlay(false);
+    setExtractOverlayComplete(false);
+    setExtractOverlayError(null);
+    setExtractOverlayErrorRaw(null);
+    setExtractOverlayBackground(false);
+    setExtractOverlayCompleteVariant("success");
+    setExtractRetryUrl(null);
+    setExtractReviewPlaces(null);
+    setExtractReviewJobId(null);
+    setExtractReviewConfirming(false);
+  }, []);
+
+  /** × / backdrop — keep all places; mark multi-review done so it won't reappear */
+  const dismissExtractOverlay = useCallback(() => {
+    if (extractReviewJobId && (extractReviewPlaces?.length ?? 0) >= 2) {
+      markExtractReviewDone(extractReviewJobId);
+    } else {
+      clearExtractReviewPending();
+    }
+    resetExtractOverlayUi();
+  }, [extractReviewJobId, extractReviewPlaces, resetExtractOverlayUi]);
+
+  const presentExtractReview = useCallback((jobId: string, places: ExtractReviewPlace[]) => {
+    if (places.length === 0) return;
+    setExtractReviewJobId(jobId);
+    setExtractReviewPlaces(places);
+    setExtractOverlayError(null);
+    setExtractOverlayErrorRaw(null);
+    setExtractOverlayBackground(false);
+    setExtractOverlayCompleteVariant("success");
+    setExtractOverlayComplete(true);
+    setShowExtractOverlay(true);
+  }, []);
+
+  const tryRestoreExtractReview = useCallback(() => {
+    if (showExtractOverlay && extractOverlayComplete && (extractReviewPlaces?.length ?? 0) > 0) {
+      return;
+    }
+    const pending = getFreshExtractReviewPending();
+    if (!pending) return;
+    // Multi pending stays in storage until confirm/×; single flash (e2e) is one-shot
+    if (pending.places.length === 1) {
+      clearExtractReviewPending();
+    }
+    presentExtractReview(pending.jobId, pending.places);
+  }, [
+    showExtractOverlay,
+    extractOverlayComplete,
+    extractReviewPlaces,
+    presentExtractReview,
+  ]);
+
+  const confirmExtractReview = useCallback(
+    async (keepIds: string[], removeIds: string[]) => {
+      if (extractReviewConfirming) return;
+      const jobId = extractReviewJobId;
+      setExtractReviewConfirming(true);
+      try {
+        if (removeIds.length > 0) {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          if (!session?.access_token) throw new Error("세션 만료");
+
+          const chunks = chunkPlaceIds(removeIds, PLACES_BULK_DELETE_MAX);
+          const deletedAll: string[] = [];
+          for (const chunk of chunks) {
+            const res = await fetch("/api/places/bulk-delete", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ ids: chunk }),
+            });
+            if (!res.ok) {
+              const data = (await res.json().catch(() => ({}))) as { error?: string };
+              throw new Error(data.error || "delete_failed");
+            }
+            const data = (await res.json()) as { deletedIds?: string[] };
+            if (Array.isArray(data.deletedIds)) {
+              for (const id of data.deletedIds) {
+                if (typeof id === "string" && id) deletedAll.push(id);
+              }
+            }
+          }
+          if (deletedAll.length > 0) {
+            const deletedSet = new Set(deletedAll);
+            setSavedPlaces((prev) => {
+              const next = prev.filter((p) => !deletedSet.has(p.id));
+              savedPlacesRef.current = next;
+              const uid = userIdRef.current;
+              if (uid) void writeCachedPlaces(uid, next);
+              return next;
+            });
+            for (const id of deletedAll) {
+              delete savedPlaceCoordsRef.current[id];
+            }
+            void refreshSavedPlaceListColors();
+          }
+        }
+        if (jobId) markExtractReviewDone(jobId);
+        else clearExtractReviewPending();
+        resetExtractOverlayUi();
+        if (removeIds.length > 0 && keepIds.length === 0) {
+          showToast("저장을 취소했어요", "info");
+        } else if (removeIds.length > 0) {
+          showToast(`${keepIds.length}곳만 저장했어요`, "success");
+        }
+      } catch (err) {
+        showToast(toUserMessage(err, "처리에 실패했어요"), "error");
+      } finally {
+        setExtractReviewConfirming(false);
+      }
+    },
+    [
+      extractReviewConfirming,
+      extractReviewJobId,
+      resetExtractOverlayUi,
+      refreshSavedPlaceListColors,
+      showToast,
+    ],
+  );
+
   useEffect(() => {
-    // all_saved / background 는 사용자가 닫을 때까지 유지
+    // all_saved / background / 2+ review — 사용자가 닫을 때까지 유지
     if (!showExtractOverlay || !extractOverlayComplete || extractOverlayError) return;
     if (extractOverlayBackground) return;
     if (extractOverlayCompleteVariant === "all_saved") return;
+    if ((extractReviewPlaces?.length ?? 0) >= 2) return;
+    // 목록 시트 연 동안 자동 닫힘 보류
+    if (addToListTarget) return;
     const timer = window.setTimeout(() => {
-      setShowExtractOverlay(false);
-      setExtractOverlayComplete(false);
-      setExtractOverlayError(null);
-      setExtractOverlayErrorRaw(null);
-      setExtractOverlayBackground(false);
-      setExtractOverlayCompleteVariant("success");
-      setExtractRetryUrl(null);
+      resetExtractOverlayUi();
     }, 1800);
     return () => window.clearTimeout(timer);
   }, [
@@ -5106,6 +5239,9 @@ function HomePageContent() {
     extractOverlayError,
     extractOverlayBackground,
     extractOverlayCompleteVariant,
+    extractReviewPlaces,
+    addToListTarget,
+    resetExtractOverlayUi,
   ]);
 
   useEffect(() => {
@@ -5143,6 +5279,11 @@ function HomePageContent() {
       setExtractOverlayCompleteVariant(variant);
       setExtractOverlayComplete(true);
       setShowExtractOverlay(true);
+      if (variant === "all_saved") {
+        setExtractReviewPlaces(null);
+        setExtractReviewJobId(null);
+        clearExtractReviewPending();
+      }
     };
 
     const applyOverlayError = (userMsg: string, raw: string | null, failedUrl: string | null) => {
@@ -5152,6 +5293,8 @@ function HomePageContent() {
       setExtractOverlayError(userMsg);
       setExtractOverlayErrorRaw(raw);
       setExtractRetryUrl(failedUrl);
+      setExtractReviewPlaces(null);
+      setExtractReviewJobId(null);
       setShowExtractOverlay(true);
     };
 
@@ -5259,15 +5402,25 @@ function HomePageContent() {
               typeof p.id === "string" && p.id.trim().length > 0
                 ? p.id.trim()
                 : `${Math.random().toString(36).substring(2)}${Date.now().toString(36)}`;
+            const subRaw =
+              typeof (p as { subcategory?: unknown }).subcategory === "string"
+                ? String((p as { subcategory: string }).subcategory).trim()
+                : (p as { subcategory?: unknown }).subcategory === null
+                  ? null
+                  : undefined;
             return {
               id,
               name: p.name,
               address: p.address,
               category: p.category as Category,
+              ...(subRaw !== undefined ? { subcategory: subRaw || null } : {}),
               ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
             };
           });
-          const newlyAddedCount = merged.filter((m) => !existingIds.has(m.id)).length;
+          // Server already omitted duplicates — prefer ids not already in local cache
+          const newlyAdded = merged.filter((m) => !existingIds.has(m.id));
+          const reviewSource = newlyAdded.length > 0 ? newlyAdded : merged;
+          const newlyAddedCount = newlyAdded.length;
           const displayCount = newlyAddedCount > 0 ? newlyAddedCount : merged.length;
           const mergedIds = new Set(merged.map((m) => m.id));
           setSavedPlaces((prev) => [...merged, ...prev.filter((p) => !mergedIds.has(p.id))]);
@@ -5284,6 +5437,21 @@ function HomePageContent() {
           }
           showToast(`✨ ${displayCount}개 장소를 추가했어요`, "success");
           setStatus("");
+
+          const reviewPlaces: ExtractReviewPlace[] = reviewSource.map((p) => ({
+            id: p.id,
+            name: p.name,
+            address: p.address,
+            category: p.category,
+            subcategory: p.subcategory ?? null,
+          }));
+          setExtractReviewJobId(jobId);
+          setExtractReviewPlaces(reviewPlaces);
+          if (reviewPlaces.length >= 2) {
+            writeExtractReviewPending({ jobId, places: reviewPlaces, at: Date.now() });
+          } else {
+            clearExtractReviewPending();
+          }
           applyOverlaySuccess("success");
           devLog("[PindMap:url] extraction message hidden (success)", {
             resultPlaces: places.length,
@@ -8878,7 +9046,14 @@ function HomePageContent() {
     if (!sessionChecked || userLoading) return;
     if (!user?.id) return;
     void consumeAppGroupShareAndExtract();
-  }, [sessionChecked, userLoading, user?.id, consumeAppGroupShareAndExtract]);
+    tryRestoreExtractReview();
+  }, [
+    sessionChecked,
+    userLoading,
+    user?.id,
+    consumeAppGroupShareAndExtract,
+    tryRestoreExtractReview,
+  ]);
 
   // One-shot: confirm native plugin is registered (Safari Web Inspector).
   useEffect(() => {
@@ -8900,6 +9075,7 @@ function HomePageContent() {
       if (cancelled || !state.isActive) return;
       // Session may still be restoring on first activate — effect above retries when ready.
       void consumeAppGroupShareAndExtract();
+      tryRestoreExtractReview();
     }).then((handle) => {
       if (cancelled) {
         void handle.remove();
@@ -8911,7 +9087,7 @@ function HomePageContent() {
       cancelled = true;
       void stateListener?.remove();
     };
-  }, [consumeAppGroupShareAndExtract]);
+  }, [consumeAppGroupShareAndExtract, tryRestoreExtractReview]);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
@@ -15411,6 +15587,8 @@ function HomePageContent() {
           <article
             key={place.id}
             className={`savedItem${selected && savedSelectMode ? " savedItemSelected" : ""}`}
+            data-place-id={place.id}
+            data-testid="saved-place-item"
             style={{
               cursor: "pointer",
               borderLeft: `3px solid ${color}`,
@@ -16938,22 +17116,32 @@ function HomePageContent() {
           backgroundWaiting={extractOverlayBackground}
           errorMessage={extractOverlayError}
           errorRaw={extractOverlayErrorRaw}
-          onDismiss={() => {
-            setShowExtractOverlay(false);
-            setExtractOverlayComplete(false);
-            setExtractOverlayError(null);
-            setExtractOverlayErrorRaw(null);
-            setExtractOverlayBackground(false);
-            setExtractOverlayCompleteVariant("success");
+          reviewPlaces={extractReviewPlaces}
+          reviewConfirming={extractReviewConfirming}
+          onDismiss={dismissExtractOverlay}
+          onConfirmReview={confirmExtractReview}
+          onAddToList={(placeIds) => {
+            if (!userIdRef.current) {
+              showToast("로그인 후 이용해주세요", "info");
+              return;
+            }
+            if (placeIds.length === 0) return;
+            // 1곳: 오버레이 닫고 목록 시트 (자동 닫힘 타이머도 멈춤)
+            if ((extractReviewPlaces?.length ?? 0) < 2) {
+              resetExtractOverlayUi();
+            }
+            setAddToListTarget({
+              placeIds,
+              placeName:
+                placeIds.length === 1
+                  ? extractReviewPlaces?.find((p) => p.id === placeIds[0])?.name ??
+                    savedPlacesRef.current.find((p) => p.id === placeIds[0])?.name
+                  : undefined,
+            });
           }}
           onViewMap={undefined}
           onManualSearch={() => {
-            setShowExtractOverlay(false);
-            setExtractOverlayComplete(false);
-            setExtractOverlayError(null);
-            setExtractOverlayErrorRaw(null);
-            setExtractOverlayBackground(false);
-            setExtractOverlayCompleteVariant("success");
+            dismissExtractOverlay();
             setActiveTab("map");
             setMapExpanded(true);
             window.setTimeout(() => {
@@ -16964,12 +17152,7 @@ function HomePageContent() {
             extractRetryUrl
               ? () => {
                   const url = extractRetryUrl;
-                  setExtractOverlayError(null);
-                  setExtractOverlayErrorRaw(null);
-                  setExtractOverlayComplete(false);
-                  setExtractOverlayBackground(false);
-                  setExtractOverlayCompleteVariant("success");
-                  setShowExtractOverlay(false);
+                  resetExtractOverlayUi();
                   void handleAddFromInstagram(url, { forceRetry: true });
                 }
               : undefined
