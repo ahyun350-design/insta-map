@@ -529,13 +529,24 @@ test("production smoke — major tabs (continue on failure)", async ({
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(tabButton(page, "home")).toBeVisible({ timeout: 45_000 });
     await expect(page.getByTestId("extract-review-multi")).toBeVisible({ timeout: 20_000 });
+    // Let home bootstrap places fetch settle so it cannot overwrite the optimistic delete
+    await page.waitForTimeout(2500);
+    await expect(page.getByTestId("extract-review-multi")).toBeVisible();
     const checkB = page.locator(
       `input[data-testid="extract-review-check"][data-place-id="${placeB.id}"]`,
     );
     await expect(checkB).toBeVisible();
-    await checkB.click();
+    await checkB.uncheck();
     await expect(page.getByTestId("extract-review-hint")).toContainText("1곳");
+    const deleteWait = page.waitForRequest(
+      (req) =>
+        req.url().includes("/api/places/bulk-delete") && req.method() === "POST",
+      { timeout: 15_000 },
+    );
     await safeClick(page.getByTestId("extract-review-confirm"));
+    const delReq = await deleteWait;
+    const delBody = delReq.postDataJSON() as { ids?: string[] };
+    expect(delBody.ids ?? []).toContain(placeB.id);
     await expect(page.getByTestId("extract-loading-overlay")).toHaveCount(0, {
       timeout: 10_000,
     });

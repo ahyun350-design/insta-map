@@ -2080,6 +2080,8 @@ function HomePageContent() {
   const feedPostsRef = useRef<FeedPost[]>(feedPosts);
   feedPostsRef.current = feedPosts;
   const savedPlacesRef = useRef<Place[]>(savedPlaces);
+  /** Extract-review removals — ignore brief bootstrap refetch resurrecting deleted rows */
+  const recentlyRemovedPlaceIdsRef = useRef<Map<string, number>>(new Map());
   savedPlacesRef.current = savedPlaces;
   const hiddenIdsRef = useRef<Set<string>>(hiddenIds);
   hiddenIdsRef.current = hiddenIds;
@@ -4368,6 +4370,16 @@ function HomePageContent() {
             `[listColors] source=${listColorsRes.source} elapsedMs=${listColorsRes.elapsedMs.toFixed(1)} coloredPlaces=${Object.keys(listColorsRes.data).length}`,
           );
         }
+        const removedAt = recentlyRemovedPlaceIdsRef.current;
+        if (removedAt.size > 0) {
+          const cutoff = Date.now() - 60_000;
+          for (const [id, at] of removedAt) {
+            if (at < cutoff) removedAt.delete(id);
+          }
+          if (removedAt.size > 0) {
+            mappedPlaces = mappedPlaces.filter((p) => !removedAt.has(p.id));
+          }
+        }
         mappedPlaces.forEach((place) => {
           const coords = latLngFromRow(place);
           if (coords) savedPlaceCoordsRef.current[place.id] = coords;
@@ -5154,15 +5166,30 @@ function HomePageContent() {
       if (extractReviewConfirming) return;
       const jobId = extractReviewJobId;
       setExtractReviewConfirming(true);
+      const previousPlaces = savedPlacesRef.current.slice();
       try {
         if (removeIds.length > 0) {
+          const removeSet = new Set(removeIds);
+          const now = Date.now();
+          for (const id of removeIds) {
+            recentlyRemovedPlaceIdsRef.current.set(id, now);
+            delete savedPlaceCoordsRef.current[id];
+          }
+          // Optimistic — avoid bootstrap refetch resurrecting rows before DELETE returns
+          setSavedPlaces((prev) => {
+            const next = prev.filter((p) => !removeSet.has(p.id));
+            savedPlacesRef.current = next;
+            const uid = userIdRef.current;
+            if (uid) void writeCachedPlaces(uid, next);
+            return next;
+          });
+
           const {
             data: { session },
           } = await supabase.auth.getSession();
           if (!session?.access_token) throw new Error("세션 만료");
 
           const chunks = chunkPlaceIds(removeIds, PLACES_BULK_DELETE_MAX);
-          const deletedAll: string[] = [];
           for (const chunk of chunks) {
             const res = await fetch("/api/places/bulk-delete", {
               method: "POST",
@@ -5176,27 +5203,9 @@ function HomePageContent() {
               const data = (await res.json().catch(() => ({}))) as { error?: string };
               throw new Error(data.error || "delete_failed");
             }
-            const data = (await res.json()) as { deletedIds?: string[] };
-            if (Array.isArray(data.deletedIds)) {
-              for (const id of data.deletedIds) {
-                if (typeof id === "string" && id) deletedAll.push(id);
-              }
-            }
+            await res.json().catch(() => null);
           }
-          if (deletedAll.length > 0) {
-            const deletedSet = new Set(deletedAll);
-            setSavedPlaces((prev) => {
-              const next = prev.filter((p) => !deletedSet.has(p.id));
-              savedPlacesRef.current = next;
-              const uid = userIdRef.current;
-              if (uid) void writeCachedPlaces(uid, next);
-              return next;
-            });
-            for (const id of deletedAll) {
-              delete savedPlaceCoordsRef.current[id];
-            }
-            void refreshSavedPlaceListColors();
-          }
+          void refreshSavedPlaceListColors();
         }
         if (jobId) markExtractReviewDone(jobId);
         else clearExtractReviewPending();
@@ -5207,6 +5216,15 @@ function HomePageContent() {
           showToast(`${keepIds.length}곳만 저장했어요`, "success");
         }
       } catch (err) {
+        for (const id of removeIds) {
+          recentlyRemovedPlaceIdsRef.current.delete(id);
+        }
+        setSavedPlaces(() => {
+          savedPlacesRef.current = previousPlaces;
+          const uid = userIdRef.current;
+          if (uid) void writeCachedPlaces(uid, previousPlaces);
+          return previousPlaces;
+        });
         showToast(toUserMessage(err, "처리에 실패했어요"), "error");
       } finally {
         setExtractReviewConfirming(false);
