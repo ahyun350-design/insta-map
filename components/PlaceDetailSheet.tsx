@@ -418,19 +418,23 @@ export function PlaceDetailSheet({
           <p className="placeDetailSheetCurationsTitle">큐레이션 {relatedPosts.length}</p>
           {relatedPosts.map((post) => {
             const entries = getRelatedPostImageEntriesForPlace(post, placeRef);
+            const openCuration = () =>
+              onCurationClick(post.id, getFirstMatchingPhotoIndex(post, placeRef));
             return (
-              <button
-                key={post.id}
-                type="button"
-                className="placeDetailSheetCurationItem"
-                onClick={() => onCurationClick(post.id, getFirstMatchingPhotoIndex(post, placeRef))}
-              >
-                <div className="placeDetailSheetCurationTop">
-                  <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={26} fontSize={11} />
-                  <span className="placeDetailSheetCurationUser">{post.user}</span>
-                  <span className="placeDetailSheetCurationTime">{timeAgoLabel(post.createdAt)}</span>
-                </div>
-                <p className="placeDetailSheetCurationTitle">{post.title || post.placeName}</p>
+              <div key={post.id} className="placeDetailSheetCurationItem">
+                {/* Body only — must NOT wrap photos (iOS activates nested <button> and opens curation) */}
+                <button
+                  type="button"
+                  className="placeDetailSheetCurationBodyBtn"
+                  onClick={openCuration}
+                >
+                  <div className="placeDetailSheetCurationTop">
+                    <ProfileAvatar avatarUrl={post.userAvatarUrl} username={post.user} size={26} fontSize={11} />
+                    <span className="placeDetailSheetCurationUser">{post.user}</span>
+                    <span className="placeDetailSheetCurationTime">{timeAgoLabel(post.createdAt)}</span>
+                  </div>
+                  <p className="placeDetailSheetCurationTitle">{post.title || post.placeName}</p>
+                </button>
                 <PlaceDetailCurationImages
                   entries={entries}
                   onImageSelect={(photoIndex) => {
@@ -442,12 +446,18 @@ export function PlaceDetailSheet({
                     });
                   }}
                 />
-                <p className="placeDetailSheetCurationComment">{post.comment}</p>
-                <div className="placeDetailSheetCurationStats">
-                  <span style={{ color: post.liked_by_me ? "#e05555" : "#ccc" }}>♥ {post.likes_count}</span>
-                  <span>💬 {post.comments.length}</span>
-                </div>
-              </button>
+                <button
+                  type="button"
+                  className="placeDetailSheetCurationBodyBtn"
+                  onClick={openCuration}
+                >
+                  <p className="placeDetailSheetCurationComment">{post.comment}</p>
+                  <div className="placeDetailSheetCurationStats">
+                    <span style={{ color: post.liked_by_me ? "#e05555" : "#ccc" }}>♥ {post.likes_count}</span>
+                    <span>💬 {post.comments.length}</span>
+                  </div>
+                </button>
+              </div>
             );
           })}
         </div>

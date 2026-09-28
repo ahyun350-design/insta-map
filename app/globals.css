@@ -2291,9 +2291,23 @@ select:focus-visible {
   border: none;
   border-top: 0.5px solid #f8f8f8;
   background: transparent;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+/* User/title/comment — separate from photos so photo tap cannot activate card navigation */
+.placeDetailSheetCurationBodyBtn {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
   cursor: pointer;
   font-family: inherit;
   box-sizing: border-box;
+  color: inherit;
 }
 
 .placeDetailSheetCurationTop {

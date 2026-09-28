@@ -351,10 +351,21 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(sheet).toBeVisible({ timeout: 15_000 });
     const img = sheet.getByTestId("place-detail-curation-image").first();
     await expect(img).toBeVisible({ timeout: 15_000 });
-    await safeClick(img);
 
+    // Guard: photo must not live inside a curation <button> (iOS activates it → detail, no viewer)
+    const photoInsideCurationButton = await img.evaluate(
+      (el) => !!el.closest("button.placeDetailSheetCurationItem, button.placeDetailSheetCurationBodyBtn"),
+    );
+    expect(photoInsideCurationButton).toBe(false);
+
+    // Real-device path: tap photo → viewer opens, sheet stays (onCurationClick would unmount sheet)
+    await safeClick(img);
     const viewer = page.getByTestId("place-sheet-photo-viewer");
     await expect(viewer).toBeVisible({ timeout: 10_000 });
+    await expect(sheet).toBeVisible({ timeout: 5_000 });
+    // Must not jump to curation-only: sheet remains under viewer
+    await page.waitForTimeout(400);
+    await expect(viewer).toBeVisible();
     await expect(sheet).toBeVisible();
 
     // Edge swipe closes viewer only — sheet remains
@@ -365,6 +376,7 @@ test("production smoke — major tabs (continue on failure)", async ({
     // Re-open → swipe (if multi) → 큐레이션 보기 at that photoIndex
     await safeClick(sheet.getByTestId("place-detail-curation-image").first());
     await expect(viewer).toBeVisible({ timeout: 10_000 });
+    await expect(sheet).toBeVisible();
 
     let slideIndex = 0;
     const pageLabel = viewer.locator(".placeSheetPhotoViewerPage");
