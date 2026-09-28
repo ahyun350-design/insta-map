@@ -168,6 +168,7 @@ export function PlaceSheetPhotoViewer({
             key={`${entry.src}-${entry.photoIndex}`}
             className="placeSheetPhotoViewerSlide"
             data-slide-index={i}
+            data-photo-index={entry.photoIndex}
           >
             <ViewerSlideImage
               fullSrc={entry.src}

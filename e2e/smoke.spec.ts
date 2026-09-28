@@ -298,74 +298,117 @@ test("production smoke — major tabs (continue on failure)", async ({
   });
 
   await runner.step("4c2. 장소 시트 → 사진 뷰어 → 큐레이션", async () => {
-    await dismissSavedOverlays(page);
-    await gotoTab(page, "saved");
-    const items = page.locator("article.savedItem");
-    await expect(items.first()).toBeVisible({ timeout: 15_000 });
-    const count = await items.count();
-
-    let opened = false;
-    for (let i = 0; i < Math.min(count, 12); i++) {
+    // Home feed → detail → place overlay → sheet (guarantees related curation images)
+    const closeCurationDetail = async () => {
+      const v = page.getByTestId("place-sheet-photo-viewer");
+      if (await v.isVisible().catch(() => false)) {
+        await safeClick(page.getByTestId("place-sheet-photo-viewer-close"));
+        await expect(v).toHaveCount(0, { timeout: 5_000 }).catch(() => null);
+      }
       await dismissSavedOverlays(page);
-      await gotoTab(page, "saved");
-      await safeClick(items.nth(i));
-      const sheet = page.locator(".placeDetailSheet");
-      await expect(sheet).toBeVisible({ timeout: 15_000 });
-      const img = sheet.getByTestId("place-detail-curation-image").first();
-      if (!(await img.isVisible().catch(() => false))) {
+      const d = page.locator(".curationDetailOverlay");
+      if (await d.isVisible().catch(() => false)) {
         await safeClick(
-          sheet
-            .getByRole("button", { name: "닫기" })
-            .or(sheet.locator(".placeDetailSheetCloseBtn"))
-            .first(),
+          page
+            .getByTestId("curation-detail-close")
+            .or(d.getByRole("button", { name: "뒤로가기" }))
+            .or(d.locator(".subpageHeader button").first()),
         );
+        await expect(d).toHaveCount(0, { timeout: 10_000 }).catch(() => null);
+      }
+    };
+
+    await closeCurationDetail();
+    await gotoTab(page, "home");
+    await waitForHomeFeed(page);
+
+    const cells = page.locator(".homeFeedGrid .postGridCell");
+    await expect(cells.first()).toBeVisible({ timeout: 20_000 });
+    const cellCount = await cells.count();
+    let openedDetail = false;
+    for (let i = 0; i < Math.min(cellCount, 10); i++) {
+      await closeCurationDetail();
+      await gotoTab(page, "home");
+      await waitForHomeFeed(page);
+      await safeClick(cells.nth(i));
+      const detailTry = page.locator(".curationDetailOverlay");
+      await expect(detailTry).toBeVisible({ timeout: 25_000 });
+      const placeOverlay = detailTry.locator(".feedPostMediaOverlayPlace").first();
+      if (!(await placeOverlay.isVisible().catch(() => false))) {
+        await closeCurationDetail();
         continue;
       }
-      await safeClick(img);
-      const viewer = page.getByTestId("place-sheet-photo-viewer");
-      await expect(viewer).toBeVisible({ timeout: 10_000 });
-      await expect(sheet).toBeVisible();
-
-      // Multi-photo: swipe track if page indicator present
-      const pageLabel = viewer.locator(".placeSheetPhotoViewerPage");
-      if (await pageLabel.isVisible().catch(() => false)) {
-        const track = viewer.locator(".placeSheetPhotoViewerTrack");
-        const box = await track.boundingBox();
-        if (box) {
-          await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
-          await page.mouse.down();
-          await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5, {
-            steps: 12,
-          });
-          await page.mouse.up();
-          await page.waitForTimeout(350);
-        }
-      }
-
-      // Edge swipe closes viewer only — sheet remains
-      await edgeSwipeBack(page);
-      await expect(viewer).toHaveCount(0, { timeout: 8_000 });
-      await expect(sheet).toBeVisible({ timeout: 5_000 });
-
-      // Re-open viewer → 큐레이션 보기
-      await safeClick(sheet.getByTestId("place-detail-curation-image").first());
-      await expect(viewer).toBeVisible({ timeout: 10_000 });
-      await safeClick(page.getByTestId("place-sheet-photo-viewer-curation"));
-      const overlay = page.locator(".curationDetailOverlay");
-      await expect(overlay).toBeVisible({ timeout: 25_000 });
-      await safeClick(
-        page
-          .getByTestId("curation-detail-close")
-          .or(overlay.getByRole("button", { name: "뒤로가기" }))
-          .or(overlay.locator(".subpageHeader button").first()),
-      );
-      await expect(overlay).toHaveCount(0, { timeout: 10_000 });
-      opened = true;
+      await safeClick(placeOverlay);
+      openedDetail = true;
       break;
     }
-    if (!opened) {
-      throw new Error("큐레이션 사진이 있는 저장 장소를 찾지 못함");
+    if (!openedDetail) {
+      throw new Error("장소 오버레이가 있는 홈 피드를 찾지 못함");
     }
+
+    const detail = page.locator(".curationDetailOverlay");
+    const sheet = page.locator(".placeDetailSheet");
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+    const img = sheet.getByTestId("place-detail-curation-image").first();
+    await expect(img).toBeVisible({ timeout: 15_000 });
+    await safeClick(img);
+
+    const viewer = page.getByTestId("place-sheet-photo-viewer");
+    await expect(viewer).toBeVisible({ timeout: 10_000 });
+    await expect(sheet).toBeVisible();
+
+    // Edge swipe closes viewer only — sheet remains
+    await edgeSwipeBack(page);
+    await expect(viewer).toHaveCount(0, { timeout: 8_000 });
+    await expect(sheet).toBeVisible({ timeout: 5_000 });
+
+    // Re-open → swipe (if multi) → 큐레이션 보기 at that photoIndex
+    await safeClick(sheet.getByTestId("place-detail-curation-image").first());
+    await expect(viewer).toBeVisible({ timeout: 10_000 });
+
+    let slideIndex = 0;
+    const pageLabel = viewer.locator(".placeSheetPhotoViewerPage");
+    if (await pageLabel.isVisible().catch(() => false)) {
+      const track = viewer.locator(".placeSheetPhotoViewerTrack");
+      const box = await track.boundingBox();
+      if (box) {
+        await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5, {
+          steps: 12,
+        });
+        await page.mouse.up();
+        await page.waitForTimeout(400);
+      }
+      const labelText = await pageLabel.innerText().catch(() => "1/1");
+      const m = labelText.match(/^(\d+)\//);
+      if (m) slideIndex = Math.max(0, Number(m[1]) - 1);
+    }
+    const expectedPhotoIndex = Number(
+      (await viewer
+        .locator(`.placeSheetPhotoViewerSlide[data-slide-index="${slideIndex}"]`)
+        .getAttribute("data-photo-index")) ?? "0",
+    );
+
+    await safeClick(page.getByTestId("place-sheet-photo-viewer-curation"));
+    await expect(detail).toBeVisible({ timeout: 25_000 });
+    await expect(viewer).toHaveCount(0, { timeout: 5_000 });
+
+    const detailPage = detail.locator(".feedPostMediaOverlayPage");
+    if (await detailPage.isVisible().catch(() => false)) {
+      await expect(detailPage).toHaveText(
+        new RegExp(`^${expectedPhotoIndex + 1}/`),
+        { timeout: 8_000 },
+      );
+    }
+
+    await safeClick(
+      page
+        .getByTestId("curation-detail-close")
+        .or(detail.getByRole("button", { name: "뒤로가기" }))
+        .or(detail.locator(".subpageHeader button").first()),
+    );
+    await expect(detail).toHaveCount(0, { timeout: 10_000 });
     await dismissSavedOverlays(page);
   });
 
