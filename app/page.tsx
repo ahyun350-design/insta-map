@@ -245,6 +245,7 @@ import {
 } from "@/lib/whatsNew";
 import {
   buildCourseWalkNavigationFromTmap,
+  cacheCourseWalkNavigationIfReady,
   isStraightLineCourseNavigation,
   parseTmapWalkGeoJsonToPath,
   readTmapWalkTotals,
@@ -3001,23 +3002,32 @@ function HomePageContent() {
       return;
     }
 
-    const isSessionStillValid = () =>
-      sessionId === fullscreenCourseRouteSessionRef.current &&
-      mapExpandedLiveRef.current &&
-      Boolean(fullscreenCourseRef.current?.length);
+    /** Abort only when the user left fullscreen — not on sessionId races during Tmap wait. */
+    const isMapStillOpen = () => mapExpandedLiveRef.current;
 
     const applyRouteAndRefreshMarkers = async (path: LatLng[], label: string) => {
-      if (!isSessionStillValid()) {
+      if (!isMapStillOpen()) {
         // TEMP crs-debug
-        devLog("[crs] skip route draw — session invalid", label, "session", sessionId);
+        devLog("[crs] skip route draw — map closed", label, "session", sessionId);
+        return false;
+      }
+      // Re-arm readiness: first setRoute used to be preview-straight right after present;
+      // without it, a delayed setRoute can no-op if the native VC is not ready yet.
+      await waitForFullscreenNativeMapReady();
+      if (!isMapStillOpen()) {
+        devLog("[crs] skip route draw — map closed after ready wait", label);
         return false;
       }
       // TEMP crs-debug
-      devLog("[crs] setRoute call path", path.length, "mode course", label);
+      devLog("[crs] setRoute call path", path.length, "mode course", label, {
+        sessionId,
+        currentSession: fullscreenCourseRouteSessionRef.current,
+        hasCourseRef: Boolean(fullscreenCourseRef.current?.length),
+      });
       await setFullscreenNativeRoute({ path, mode: "course" }, { silent: false });
-      if (!isSessionStillValid()) {
+      if (!isMapStillOpen()) {
         // TEMP crs-debug
-        devLog("[crs] skip marker refresh — session invalid after setRoute", label);
+        devLog("[crs] skip marker refresh — map closed after setRoute", label);
         return false;
       }
       await updateFullscreenNativeMarkers(
@@ -3030,6 +3040,9 @@ function HomePageContent() {
     };
 
     beginCourseRouteLoading();
+    const coursePlacesSnapshot = fullscreenCourseRef.current
+      ? fullscreenCourseRef.current.map((p) => ({ ...p }))
+      : null;
     try {
       if (courseRoutePath.length > FULLSCREEN_COURSE_DIRECTIONS_WARN_STOPS) {
         console.warn(
@@ -3043,16 +3056,34 @@ function HomePageContent() {
       }
 
       // Markers/bounds already on map — no straight preview before Tmap
-      const coursePlaces = fullscreenCourseRef.current;
       const stopNames =
-        coursePlaces?.length === courseRoutePath.length
-          ? coursePlaces.map((place) => place.name)
+        coursePlacesSnapshot?.length === courseRoutePath.length
+          ? coursePlacesSnapshot.map((place) => place.name)
           : courseRoutePath.map((_, index) => `장소 ${index + 1}`);
+      devLog("[crs] tmap start", {
+        stops: courseRoutePath.length,
+        sessionId,
+        currentSession: fullscreenCourseRouteSessionRef.current,
+      });
       const navigation = await buildCourseWalkNavigationFromTmap(courseRoutePath, stopNames);
-      if (!isSessionStillValid()) {
+      devLog("[crs] tmap done", {
+        merged: navigation.mergedPath.length,
+        segments: navigation.segments.length,
+        straight: isStraightLineCourseNavigation(navigation),
+        mapOpen: isMapStillOpen(),
+        sessionId,
+        currentSession: fullscreenCourseRouteSessionRef.current,
+        hasCourseRef: Boolean(fullscreenCourseRef.current?.length),
+      });
+      if (!isMapStillOpen()) {
         // TEMP crs-debug
-        devLog("[crs] skip after tmap — session invalid", sessionId);
+        devLog("[crs] skip after tmap — map closed", sessionId);
         return;
+      }
+      // Spurious dismiss during Tmap can clear course ref / bump session — restore for paint
+      if (!fullscreenCourseRef.current?.length && coursePlacesSnapshot?.length) {
+        fullscreenCourseRef.current = coursePlacesSnapshot;
+        devLog("[crs] restored course ref after tmap");
       }
       fullscreenCourseNavigationRef.current = navigation;
       setCourseNavigation(navigation);
@@ -3062,12 +3093,25 @@ function HomePageContent() {
       const usedStraightFallback = isStraightLineCourseNavigation(navigation);
       const routePath =
         navigation.mergedPath.length >= 2 ? navigation.mergedPath : courseRoutePath;
-      await applyRouteAndRefreshMarkers(
+      const painted = await applyRouteAndRefreshMarkers(
         routePath,
         usedStraightFallback ? "fallback-straight" : "walk-final",
       );
+      if (!painted) {
+        devLog("[crs] walk-final paint failed — retry once");
+        const retried = await applyRouteAndRefreshMarkers(
+          routePath,
+          usedStraightFallback ? "fallback-straight-retry" : "walk-final-retry",
+        );
+        if (!retried) {
+          console.error("[crs] setRoute failed after retry", { pathLen: routePath.length });
+          return;
+        }
+      }
       if (usedStraightFallback) {
         showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
+      } else {
+        cacheCourseWalkNavigationIfReady(courseRoutePath, navigation, "walk");
       }
       await setFullscreenNativeCourseNavigation(
         courseNavigationToNativePayload(navigation),
@@ -3075,14 +3119,17 @@ function HomePageContent() {
       );
     } catch (err) {
       console.error("[course] failed", err);
-      if (!isSessionStillValid()) {
+      if (!isMapStillOpen()) {
         // TEMP crs-debug
-        devLog("[crs] skip fallback — session invalid", sessionId);
+        devLog("[crs] skip fallback — map closed", sessionId);
         return;
       }
       try {
         // TEMP crs-debug
         devLog("[crs] setRoute fallback call path", courseRoutePath.length);
+        if (!fullscreenCourseRef.current?.length && coursePlacesSnapshot?.length) {
+          fullscreenCourseRef.current = coursePlacesSnapshot;
+        }
         await applyRouteAndRefreshMarkers(courseRoutePath, "fallback-straight");
         showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
       } catch (setRouteErr) {
@@ -8556,9 +8603,11 @@ function HomePageContent() {
     fullscreenCourseNavigationRef.current = null;
     setCourseDesignPath(null);
     setActiveTab("map");
+    // Sync before effects — Tmap can finish before the mapExpanded effect flips the ref
+    mapExpandedLiveRef.current = true;
+    fullscreenCourseRef.current = [...courseResult];
     if (nativeAvail && !useAdminCourseMapDesign) {
       logAdminCourseMap(uid, "showCourseOnMap → native branch");
-      fullscreenCourseRef.current = [...courseResult];
       setMapExpanded(true);
       return;
     }
@@ -8786,6 +8835,8 @@ function HomePageContent() {
         setCourseDesignPath(navigation.mergedPath);
         if (isStraightLineCourseNavigation(navigation)) {
           showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
+        } else {
+          cacheCourseWalkNavigationIfReady(stops, navigation, "walk");
         }
         logAdminCourseMap(uid, "drawCourseRoute admin: tmap path applied", {
           merged: navigation.mergedPath.length,
@@ -8919,8 +8970,24 @@ function HomePageContent() {
     // Markers + bounds already drawn — polyline only after Tmap (no straight preview)
     beginCourseRouteLoading();
     try {
+      devLog("[crs] web tmap start", { stops: stops.length });
       const navigation = await buildCourseWalkNavigationFromTmap(stops, stopNames);
-      if (!expandedMapRef.current || !courseResult) return;
+      devLog("[crs] web tmap done", {
+        merged: navigation.mergedPath.length,
+        hasMap: Boolean(expandedMapRef.current),
+        hasCourse: Boolean(courseResult),
+      });
+      if (!courseResult) return;
+      // Map can lag first open — wait briefly rather than dropping the paint
+      if (!expandedMapRef.current || !window.kakao?.maps) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 400);
+        });
+      }
+      if (!expandedMapRef.current || !window.kakao?.maps) {
+        console.error("[crs] web map missing after tmap — cannot paint route");
+        return;
+      }
 
       fullscreenCourseNavigationRef.current = navigation;
       setCourseNavigation(navigation);
@@ -8930,7 +8997,10 @@ function HomePageContent() {
       applyWebCourseRoutePath(navigation.mergedPath);
       if (isStraightLineCourseNavigation(navigation)) {
         showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
+      } else {
+        cacheCourseWalkNavigationIfReady(stops, navigation, "walk");
       }
+      devLog("[crs] web route painted", navigation.mergedPath.length);
     } catch (err) {
       console.error("[course] web route failed", err);
       applyWebCourseRoutePath(stops);
@@ -13518,6 +13588,7 @@ function HomePageContent() {
 
                                       <button
                                         type="button"
+                                        data-testid="course-generate-manual"
                                         onClick={() => { void generateCourse(); }}
                                         disabled={courseLoading || courseSelectedById.size === 0}
                                         style={{
@@ -13633,6 +13704,7 @@ function HomePageContent() {
                                     )}
                                     <button
                                       type="button"
+                                      data-testid="course-show-on-map"
                                       onClick={showCourseOnMap}
                                       style={{
                                         width: "100%",
@@ -13693,7 +13765,7 @@ function HomePageContent() {
                                         장소 직접 고르기
                                       </button>
                                     </div>
-                                    <button type="button" onClick={showCourseOnMap} style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
+                                    <button type="button" data-testid="course-show-on-map" onClick={showCourseOnMap} style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "none", background: "#1a2a7a", color: "#fff", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>🗺️ 지도에서 경로 보기</button>
                                   </>
                                 )}
                               </>
@@ -15386,6 +15458,7 @@ function HomePageContent() {
       <button
         type="button"
         data-coach="course_create"
+        data-testid="course-create-open"
         onClick={() => {
           track("course_create_open");
           resetCourseCreatePicker();
