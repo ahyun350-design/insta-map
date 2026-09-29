@@ -732,6 +732,10 @@ test("production smoke — major tabs (continue on failure)", async ({
     const listId = await myLists.getByTestId("list-public-row").getAttribute("data-list-id");
     if (!listId) throw new Error("list-public-row missing data-list-id");
 
+    const detailName = myLists.locator(".myListsDetailItem .savedName").first();
+    await expect(detailName).toBeVisible({ timeout: 20_000 });
+    const placeName = (await detailName.textContent())?.trim() ?? "";
+
     // Enable public — confirm dialog required
     await safeClick(myLists.getByTestId("list-public-toggle"));
     await expect(myLists.getByTestId("list-public-confirm")).toBeVisible({ timeout: 5_000 });
@@ -743,10 +747,6 @@ test("production smoke — major tabs (continue on failure)", async ({
       { timeout: 10_000 },
     );
     await expect(myLists.getByTestId("list-share-btn")).toBeVisible({ timeout: 5_000 });
-
-    const placeName =
-      (await myLists.locator(".myListsDetailItem .savedName").first().textContent())?.trim() ??
-      "";
 
     const { userId, username } = await fetchE2EUsername();
     // RPC = what any authenticated viewer sees for this owner
