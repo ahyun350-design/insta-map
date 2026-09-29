@@ -47,18 +47,38 @@ function tmapErrorMessage(data: unknown): string | null {
 }
 
 export async function POST(req: Request) {
+  const routeT0 = Date.now();
+  let authMs = 0;
+  let tmapMs = 0;
+  const withTimings = (res: NextResponse) => {
+    const totalMs = Date.now() - routeT0;
+    res.headers.set(
+      "Server-Timing",
+      `auth;dur=${authMs}, tmap;dur=${tmapMs}, total;dur=${totalMs}`,
+    );
+    res.headers.set(
+      "x-walk-timings",
+      JSON.stringify({ authMs, tmapMs, totalMs }),
+    );
+    return res;
+  };
+
   try {
+    const authT0 = Date.now();
     const auth = await requireBearerUser(req);
-    if ("error" in auth) return auth.error;
+    authMs = Date.now() - authT0;
+    if ("error" in auth) return withTimings(auth.error);
 
     let body: unknown;
     try {
       body = await req.json();
     } catch (parseErr) {
       console.error("[walk-api] invalid request JSON", parseErr);
-      return NextResponse.json(
-        { error: "invalid_request_json", message: "요청 JSON 파싱 실패" },
-        { status: 400 },
+      return withTimings(
+        NextResponse.json(
+          { error: "invalid_request_json", message: "요청 JSON 파싱 실패" },
+          { status: 400 },
+        ),
       );
     }
 
@@ -74,26 +94,30 @@ export async function POST(req: Request) {
         origin: originRaw,
         destination: destinationRaw,
       });
-      return NextResponse.json(
-        {
-          error: "invalid_coordinates",
-          message: "origin/destination 좌표가 유효하지 않습니다",
-          origin: originRaw ?? null,
-          destination: destinationRaw ?? null,
-        },
-        { status: 400 },
+      return withTimings(
+        NextResponse.json(
+          {
+            error: "invalid_coordinates",
+            message: "origin/destination 좌표가 유효하지 않습니다",
+            origin: originRaw ?? null,
+            destination: destinationRaw ?? null,
+          },
+          { status: 400 },
+        ),
       );
     }
 
     if (coordsTooClose(origin, destination)) {
       console.warn("[walk-api] coords too close — skip Tmap", { origin, destination });
-      return NextResponse.json(
-        {
-          error: "coords_too_close",
-          message: "출발지와 도착지가 너무 가깝습니다",
-          fallback: "straight_line",
-        },
-        { status: 422 },
+      return withTimings(
+        NextResponse.json(
+          {
+            error: "coords_too_close",
+            message: "출발지와 도착지가 너무 가깝습니다",
+            fallback: "straight_line",
+          },
+          { status: 422 },
+        ),
       );
     }
 
@@ -104,9 +128,11 @@ export async function POST(req: Request) {
         hasRaw: Boolean(appKeyRaw),
         rawLength: appKeyRaw?.length ?? 0,
       });
-      return NextResponse.json(
-        { error: "missing_tmap_key", message: "TMAP_APP_KEY 없음" },
-        { status: 500 },
+      return withTimings(
+        NextResponse.json(
+          { error: "missing_tmap_key", message: "TMAP_APP_KEY 없음" },
+          { status: 500 },
+        ),
       );
     }
 
@@ -123,6 +149,7 @@ export async function POST(req: Request) {
       sort: "index",
     };
 
+    const tmapT0 = Date.now();
     let res: Response;
     try {
       res = await fetch(TMAP_PEDESTRIAN_URL, {
@@ -136,28 +163,34 @@ export async function POST(req: Request) {
         signal: AbortSignal.timeout(15_000),
       });
     } catch (fetchErr) {
+      tmapMs = Date.now() - tmapT0;
       console.error("[walk-api] tmap fetch failed", fetchErr);
-      return NextResponse.json(
-        {
-          error: "tmap_fetch_failed",
-          message: fetchErr instanceof Error ? fetchErr.message : "Tmap 요청 실패",
-        },
-        { status: 502 },
+      return withTimings(
+        NextResponse.json(
+          {
+            error: "tmap_fetch_failed",
+            message: fetchErr instanceof Error ? fetchErr.message : "Tmap 요청 실패",
+          },
+          { status: 502 },
+        ),
       );
     }
 
     const responseText = await res.text();
+    tmapMs = Date.now() - tmapT0;
 
     if (!res.ok) {
       console.error("[walk-api] tmap status", res.status, "body", responseText);
-      return NextResponse.json(
-        {
-          error: "tmap_error",
-          message: `Tmap API HTTP ${res.status}`,
-          tmapStatus: res.status,
-          tmapBody: responseText.slice(0, 500),
-        },
-        { status: 502 },
+      return withTimings(
+        NextResponse.json(
+          {
+            error: "tmap_error",
+            message: `Tmap API HTTP ${res.status}`,
+            tmapStatus: res.status,
+            tmapBody: responseText.slice(0, 500),
+          },
+          { status: 502 },
+        ),
       );
     }
 
@@ -171,37 +204,43 @@ export async function POST(req: Request) {
         "body",
         responseText.slice(0, 500),
       );
-      return NextResponse.json(
-        {
-          error: "tmap_invalid_json",
-          message: "Tmap 응답 JSON 파싱 실패",
-          tmapBody: responseText.slice(0, 500),
-        },
-        { status: 502 },
+      return withTimings(
+        NextResponse.json(
+          {
+            error: "tmap_invalid_json",
+            message: "Tmap 응답 JSON 파싱 실패",
+            tmapBody: responseText.slice(0, 500),
+          },
+          { status: 502 },
+        ),
       );
     }
 
     const businessError = tmapErrorMessage(data);
     if (businessError) {
       console.error("[walk-api] tmap business error", businessError, data);
-      return NextResponse.json(
-        {
-          error: "tmap_business_error",
-          message: businessError,
-        },
-        { status: 502 },
+      return withTimings(
+        NextResponse.json(
+          {
+            error: "tmap_business_error",
+            message: businessError,
+          },
+          { status: 502 },
+        ),
       );
     }
 
-    return NextResponse.json(data);
+    return withTimings(NextResponse.json(data));
   } catch (e) {
     console.error("[walk-api] unhandled", e);
-    return NextResponse.json(
-      {
-        error: "internal_error",
-        message: e instanceof Error ? e.message : "오류 발생",
-      },
-      { status: 500 },
+    return withTimings(
+      NextResponse.json(
+        {
+          error: "internal_error",
+          message: e instanceof Error ? e.message : "오류 발생",
+        },
+        { status: 500 },
+      ),
     );
   }
 }
