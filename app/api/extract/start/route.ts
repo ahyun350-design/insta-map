@@ -13,13 +13,35 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
     const missingEnv: string[] = [];
     if (!supabaseUrl) missingEnv.push("NEXT_PUBLIC_SUPABASE_URL");
+    if (!anonKey) missingEnv.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
     if (!serviceKey) missingEnv.push("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceKey) {
+    if (!supabaseUrl || !anonKey || !serviceKey) {
       return NextResponse.json({ error: `서버 환경변수 미설정: ${missingEnv.join(", ")}` }, { status: 500 });
     }
+
+    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
+    if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+      return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
+    }
+    const jwt = authHeader.slice(7).trim();
+    if (!jwt) {
+      return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
+    }
+
+    const userClient = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+    });
+    const { data: authData, error: authError } = await userClient.auth.getUser(jwt);
+    const authUser = authData?.user;
+    if (authError || !authUser?.id) {
+      return NextResponse.json({ error: "유효하지 않은 세션입니다." }, { status: 401 });
+    }
+    const userId = authUser.id;
 
     const adminClient = createClient(
       supabaseUrl,
@@ -29,26 +51,16 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as {
       instagramUrl?: string;
-      userId?: string;
       forceRetry?: boolean;
     };
     const instagramUrl = body.instagramUrl?.trim();
-    const userId = body.userId?.trim();
     const forceRetry = body.forceRetry === true;
 
     if (!instagramUrl) {
       return NextResponse.json({ error: "instagramUrl이 필요합니다." }, { status: 400 });
     }
-    if (!userId) {
-      return NextResponse.json({ error: "userId가 필요합니다." }, { status: 400 });
-    }
     if (!isValidInstagramPostUrl(instagramUrl)) {
       return NextResponse.json({ error: "유효한 Instagram 게시물 URL을 입력해주세요." }, { status: 400 });
-    }
-
-    const { data: userData, error: userError } = await adminClient.auth.admin.getUserById(userId);
-    if (userError || !userData.user) {
-      return NextResponse.json({ error: "유효하지 않은 사용자" }, { status: 401 });
     }
 
     // 신규 추출 전에 이 유저의 오래된 멈춤 job 정리 (크론 대용)

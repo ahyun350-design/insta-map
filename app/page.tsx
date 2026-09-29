@@ -8895,15 +8895,24 @@ function HomePageContent() {
     let timeout: number | undefined;
     try {
       timeout = window.setTimeout(() => controller.abort(), 10000);
-      devLog("[PindMap:url] /api/extract/start request", { url: trimmedUrl, userId: user.id });
+      const {
+        data: { session: extractSession },
+      } = await supabase.auth.getSession();
+      const extractToken = extractSession?.access_token;
+      if (!extractToken) {
+        throw new Error("세션이 만료됐어요. 다시 로그인해 주세요.");
+      }
+      devLog("[PindMap:url] /api/extract/start request", { url: trimmedUrl });
       dlog.perf.fetchStart(perfScreen);
       const response = await fetch("/api/extract/start", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${extractToken}`,
+        },
         credentials: "include",
         body: JSON.stringify({
           instagramUrl: trimmedUrl,
-          userId: user.id,
           forceRetry: opts?.forceRetry === true,
         }),
         signal: controller.signal,
