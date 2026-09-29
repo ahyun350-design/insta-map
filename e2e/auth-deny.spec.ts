@@ -19,7 +19,12 @@ const UNAUTH_CASES: DenyCase[] = [
   { name: "places/upsert", method: "POST", url: "/api/places/upsert", data: { id: "e2e-auth-deny", name: "x", category: "카페" } },
   { name: "search", method: "GET", url: "/api/search?query=test" },
   { name: "kakao-keyword", method: "GET", url: "/api/kakao-keyword?query=test" },
-  { name: "naver-images", method: "GET", url: "/api/naver-images?query=test" },
+  {
+    name: "places/bulk-delete",
+    method: "POST",
+    url: "/api/places/bulk-delete",
+    data: { ids: ["00000000-0000-0000-0000-000000000001"] },
+  },
   {
     name: "directions",
     method: "POST",

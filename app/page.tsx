@@ -245,6 +245,7 @@ import {
 } from "@/lib/whatsNew";
 import {
   buildCourseWalkNavigationFromTmap,
+  isStraightLineCourseNavigation,
   parseTmapWalkGeoJsonToPath,
   readTmapWalkTotals,
   type CourseWalkNavigation,
@@ -1811,6 +1812,9 @@ function HomePageContent() {
   const messageUserSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedMapPlace, setSelectedMapPlace] = useState<Place | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
+  /** Course route: hint only after 200ms so cache hits do not flash */
+  const [courseRouteLoadingVisible, setCourseRouteLoadingVisible] = useState(false);
+  const courseRouteLoadingTimerRef = useRef<number | null>(null);
   const [directionsInfo, setDirectionsInfo] = useState<{
     duration: number;
     distance: number;
@@ -2963,6 +2967,29 @@ function HomePageContent() {
     }, 400);
   }, []);
 
+  const beginCourseRouteLoading = useCallback(() => {
+    setDirectionsLoading(true);
+    if (courseRouteLoadingTimerRef.current != null) {
+      window.clearTimeout(courseRouteLoadingTimerRef.current);
+    }
+    courseRouteLoadingTimerRef.current = window.setTimeout(() => {
+      setCourseRouteLoadingVisible(true);
+      // Cap native map covers the WebView — toast is the visible hint there
+      if (isNativeMapAvailable()) {
+        showToast("경로를 계산하고 있어요", "info");
+      }
+    }, 200);
+  }, [showToast]);
+
+  const endCourseRouteLoading = useCallback(() => {
+    if (courseRouteLoadingTimerRef.current != null) {
+      window.clearTimeout(courseRouteLoadingTimerRef.current);
+      courseRouteLoadingTimerRef.current = null;
+    }
+    setCourseRouteLoadingVisible(false);
+    setDirectionsLoading(false);
+  }, []);
+
   const drawFullscreenNativeCourseRoute = useCallback(async (
     courseRoutePath: LatLng[],
     courseMarkers: FullscreenSearchMarkerSnapshot[],
@@ -3002,7 +3029,7 @@ function HomePageContent() {
       return true;
     };
 
-    setDirectionsLoading(true);
+    beginCourseRouteLoading();
     try {
       if (courseRoutePath.length > FULLSCREEN_COURSE_DIRECTIONS_WARN_STOPS) {
         console.warn(
@@ -3015,8 +3042,7 @@ function HomePageContent() {
         );
       }
 
-      await applyRouteAndRefreshMarkers(courseRoutePath, "preview-straight");
-
+      // Markers/bounds already on map — no straight preview before Tmap
       const coursePlaces = fullscreenCourseRef.current;
       const stopNames =
         coursePlaces?.length === courseRoutePath.length
@@ -3033,9 +3059,16 @@ function HomePageContent() {
       setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
       setCourseNavFocusMode(false);
       setCourseNavStepIndex(navigation.segments[0]?.steps.length ? 0 : null);
+      const usedStraightFallback = isStraightLineCourseNavigation(navigation);
       const routePath =
         navigation.mergedPath.length >= 2 ? navigation.mergedPath : courseRoutePath;
-      await applyRouteAndRefreshMarkers(routePath, "walk-final");
+      await applyRouteAndRefreshMarkers(
+        routePath,
+        usedStraightFallback ? "fallback-straight" : "walk-final",
+      );
+      if (usedStraightFallback) {
+        showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
+      }
       await setFullscreenNativeCourseNavigation(
         courseNavigationToNativePayload(navigation),
         { silent: false },
@@ -3051,13 +3084,14 @@ function HomePageContent() {
         // TEMP crs-debug
         devLog("[crs] setRoute fallback call path", courseRoutePath.length);
         await applyRouteAndRefreshMarkers(courseRoutePath, "fallback-straight");
+        showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
       } catch (setRouteErr) {
         console.error("[course] setRoute failed", setRouteErr);
       }
     } finally {
-      setDirectionsLoading(false);
+      endCourseRouteLoading();
     }
-  }, [showToast]);
+  }, [beginCourseRouteLoading, endCourseRouteLoading, showToast]);
 
   const restoreFullscreenNativeMyLocation = useCallback(async () => {
     const stored = myLocationLatLngRef.current;
@@ -8738,7 +8772,7 @@ function HomePageContent() {
       expandedMapRef.current.setBounds(bounds);
       if (stops.length < 2) return;
 
-      setDirectionsLoading(true);
+      beginCourseRouteLoading();
       try {
         const navigation = await buildCourseWalkNavigationFromTmap(stops, stopNames);
         if (!expandedMapRef.current || !courseResult) return;
@@ -8750,6 +8784,9 @@ function HomePageContent() {
           navigation.segments[0]?.steps.length ? 0 : null,
         );
         setCourseDesignPath(navigation.mergedPath);
+        if (isStraightLineCourseNavigation(navigation)) {
+          showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
+        }
         logAdminCourseMap(uid, "drawCourseRoute admin: tmap path applied", {
           merged: navigation.mergedPath.length,
           segments: navigation.segments.length,
@@ -8757,9 +8794,10 @@ function HomePageContent() {
       } catch (err) {
         console.error("[course] web route failed", err);
         setCourseDesignPath(stops);
+        showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
         logAdminCourseMap(uid, "drawCourseRoute admin: tmap failed, fallback stops", err);
       } finally {
-        setDirectionsLoading(false);
+        endCourseRouteLoading();
       }
       return;
     }
@@ -8878,10 +8916,9 @@ function HomePageContent() {
 
     if (stops.length < 2) return;
 
-    setDirectionsLoading(true);
+    // Markers + bounds already drawn — polyline only after Tmap (no straight preview)
+    beginCourseRouteLoading();
     try {
-      applyWebCourseRoutePath(stops, false);
-
       const navigation = await buildCourseWalkNavigationFromTmap(stops, stopNames);
       if (!expandedMapRef.current || !courseResult) return;
 
@@ -8891,11 +8928,15 @@ function HomePageContent() {
       setCourseNavFocusMode(false);
       setCourseNavStepIndex(navigation.segments[0]?.steps.length ? 0 : null);
       applyWebCourseRoutePath(navigation.mergedPath);
+      if (isStraightLineCourseNavigation(navigation)) {
+        showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
+      }
     } catch (err) {
       console.error("[course] web route failed", err);
       applyWebCourseRoutePath(stops);
+      showToast("정확한 경로를 못 찾았어요. 직선 거리로 표시합니다", "info");
     } finally {
-      setDirectionsLoading(false);
+      endCourseRouteLoading();
     }
   };
 
@@ -15022,6 +15063,30 @@ function HomePageContent() {
                       </button>
                       <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
                     </div>
+                    {showCourseRoute && courseRouteLoadingVisible && (
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        style={{
+                          position: "absolute",
+                          top: "calc(56px + env(safe-area-inset-top, 0px))",
+                          left: "50%",
+                          transform: "translateX(-50%)",
+                          zIndex: 5,
+                          background: "rgba(26, 42, 122, 0.92)",
+                          color: "#fff",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          padding: "8px 14px",
+                          borderRadius: 999,
+                          boxShadow: "0 2px 10px rgba(0,0,0,0.18)",
+                          pointerEvents: "none",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        경로를 계산하고 있어요
+                      </div>
+                    )}
                     {!showCourseRoute && (
                     <div
                       style={{
