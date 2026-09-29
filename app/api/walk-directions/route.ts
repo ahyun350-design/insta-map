@@ -241,6 +241,8 @@ export async function POST(req: Request) {
 
     const bodyRecord = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
     const segmentsRaw = bodyRecord.segments;
+    /** Ops/measure only: skip in-process L1 so L2 path can be timed after warm writes. */
+    const bypassL1 = req.headers.get("x-walk-bypass-l1") === "1";
 
     const appKeyRaw = process.env.TMAP_APP_KEY;
     const appKey = appKeyRaw?.trim() ?? "";
@@ -304,16 +306,18 @@ export async function POST(req: Request) {
           };
           continue;
         }
-        const l1 = l1Get(slot.key);
-        if (l1) {
-          l1Hits += 1;
-          results[i] = {
-            ok: true,
-            data: cachedRouteToGeoJson(l1),
-            cache: "l1",
-            tmapMs: 0,
-          };
-          continue;
+        if (!bypassL1) {
+          const l1 = l1Get(slot.key);
+          if (l1) {
+            l1Hits += 1;
+            results[i] = {
+              ok: true,
+              data: cachedRouteToGeoJson(l1),
+              cache: "l1",
+              tmapMs: 0,
+            };
+            continue;
+          }
         }
         needL2Keys.push(slot.key);
         needL2Indexes.push(i);
@@ -446,11 +450,13 @@ export async function POST(req: Request) {
     }
 
     const cacheKey = walkRouteCacheKey(origin, destination);
-    const l1Hit = l1Get(cacheKey);
-    if (l1Hit) {
-      return withTimings(NextResponse.json(cachedRouteToGeoJson(l1Hit)), {
-        cache: { l1: 1, l2: 0, tmap: 0 },
-      });
+    if (!bypassL1) {
+      const l1Hit = l1Get(cacheKey);
+      if (l1Hit) {
+        return withTimings(NextResponse.json(cachedRouteToGeoJson(l1Hit)), {
+          cache: { l1: 1, l2: 0, tmap: 0 },
+        });
+      }
     }
 
     {
