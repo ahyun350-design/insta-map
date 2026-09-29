@@ -48,6 +48,23 @@ export function getCourseShareUrl(courseId: string): string {
   return `${getSiteOrigin()}/course/${encodeURIComponent(courseId)}`;
 }
 
+/** 공개 장소 목록 웹 공유 페이지 URL */
+export function getListShareUrl(listId: string): string {
+  return `${getSiteOrigin()}/list/${encodeURIComponent(listId)}`;
+}
+
+/** user_events.meta.domain 용 호스트명 */
+export function getTrackDomain(): string {
+  if (typeof window !== "undefined" && window.location?.hostname) {
+    return window.location.hostname;
+  }
+  try {
+    return new URL(getSiteOrigin()).hostname;
+  } catch {
+    return "unknown";
+  }
+}
+
 /** 클립보드 복사 — clipboard API 우선, 실패 시 textarea fallback */
 export type NavigatorShareResult = "shared" | "cancelled" | "unsupported";
 

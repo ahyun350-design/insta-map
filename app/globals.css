@@ -4282,6 +4282,26 @@ select:focus-visible {
   color: #999;
 }
 
+.myListsPublicRowActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.myListsShareBtn {
+  border: 1px solid #1a2a7a;
+  background: #fff;
+  color: #1a2a7a;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .myListsPublicSwitch {
   position: relative;
   width: 48px;
@@ -4633,6 +4653,25 @@ select:focus-visible {
   color: #999;
 }
 
+.publicPlaceListHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.publicPlaceListShareBtn {
+  border: 1px solid #1a2a7a;
+  background: #fff;
+  color: #1a2a7a;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
 .publicPlaceListHeaderMeta {
   font-size: 12px;
   color: #999;
@@ -4795,6 +4834,180 @@ select:focus-visible {
   margin: 4px 0 0;
   font-size: 13px;
   color: #666;
+  line-height: 1.4;
+}
+
+.publicListSharePage {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #1a1a2e;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-sizing: border-box;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.publicListShareNotFound {
+  align-items: center;
+  justify-content: center;
+  background: #0a0a0a;
+  color: #fff;
+  padding: 40px 24px;
+}
+
+.publicListShareNotFoundMain {
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+}
+
+.publicListShareNotFound .publicListShareTitle {
+  color: #fff;
+}
+
+.publicListShareNotFound .publicListShareSub {
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 8px;
+}
+
+.publicListShareHeader {
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 14px;
+  border-bottom: 0.5px solid #efefef;
+  flex-shrink: 0;
+}
+
+.publicListShareBrand {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #1a2a7a;
+}
+
+.publicListShareTitle {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #1a1a2e;
+  font-family: "Playfair Display", Georgia, serif;
+}
+
+.publicListShareSub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #888;
+}
+
+.publicListShareMapWrap {
+  height: min(42vw, 220px);
+  min-height: 160px;
+  flex-shrink: 0;
+  background: #f3f3f6;
+  border-bottom: 0.5px solid #efefef;
+  position: relative;
+}
+
+.publicListShareMap {
+  width: 100%;
+  height: 100%;
+}
+
+.publicListShareMapFallback {
+  margin: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #999;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.publicListShareBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 16px 16px;
+  box-sizing: border-box;
+}
+
+.publicListShareHint {
+  margin: 0;
+  padding: 40px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #999;
+}
+
+.publicListShareItems {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.publicListShareItem {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  border-bottom: 0.5px solid #efefef;
+  padding: 14px 4px;
+}
+
+.publicListShareItemBar {
+  width: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.publicListShareItemText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.publicListShareItemName {
+  font-size: 15px;
+  font-weight: 500;
+  color: #1a1a2e;
+  font-family: "Playfair Display", Georgia, serif;
+}
+
+.publicListShareItemMeta {
+  font-size: 11px;
+  color: #1a2a7a;
+}
+
+.publicListShareItemAddr {
+  font-size: 11px;
+  color: #999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publicListShareFooter {
+  flex-shrink: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: 0.5px solid #efefef;
+  background: #0a0a0a;
+}
+
+.publicListShareFooter .courseShareAppCta {
+  background: #fff;
+}
+
+.publicListShareFooterNote {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+  text-align: center;
   line-height: 1.4;
 }
 

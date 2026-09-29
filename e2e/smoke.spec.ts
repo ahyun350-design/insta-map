@@ -57,6 +57,9 @@ test("production smoke — major tabs (continue on failure)", async ({
 
   const listTitle = `E2E ${Date.now()}`;
   const publicListTitle = `E2E Public ${Date.now()}`;
+  let publicWebListId = "";
+  let publicWebListTitle = "";
+  let publicWebPlaceName = "";
 
   // ── 1. Login ──────────────────────────────────────────────
   await runner.step("1. 로그인", async () => {
@@ -739,6 +742,11 @@ test("production smoke — major tabs (continue on failure)", async ({
       "true",
       { timeout: 10_000 },
     );
+    await expect(myLists.getByTestId("list-share-btn")).toBeVisible({ timeout: 5_000 });
+
+    const placeName =
+      (await myLists.locator(".myListsDetailItem .savedName").first().textContent())?.trim() ??
+      "";
 
     const { userId, username } = await fetchE2EUsername();
     // RPC = what any authenticated viewer sees for this owner
@@ -762,11 +770,14 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(publicScreen.locator(".myListsDragHandle")).toHaveCount(0);
     await expect(publicScreen.getByTestId("list-item-menu")).toHaveCount(0);
     await expect(publicScreen.getByText("메모")).toHaveCount(0);
+    await expect(publicScreen.getByTestId("public-place-list-share")).toBeVisible({
+      timeout: 5_000,
+    });
 
     await safeClick(publicScreen.getByTestId("public-place-list-back"));
     await expect(publicScreen).toHaveCount(0, { timeout: 10_000 });
 
-    // Back to my lists — turn private (no confirm)
+    // Back to my lists — turn private (no confirm), then public again for web share e2e
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(tabBar(page)).toBeVisible({ timeout: 20_000 });
     await gotoTab(page, "saved");
@@ -789,11 +800,113 @@ test("production smoke — major tabs (continue on failure)", async ({
     const publicWhenOff = await fetchPublicListsViaRpc(userId);
     expect(publicWhenOff.some((l) => l.id === listId)).toBeFalsy();
 
+    // Re-enable public for 4d3 web page (keep list until cleanup there)
+    await safeClick(myLists.getByTestId("list-public-toggle"));
+    await expect(myLists.getByTestId("list-public-confirm")).toBeVisible({ timeout: 5_000 });
+    await safeClick(myLists.getByTestId("list-public-confirm-ok"));
+    await expect(myLists.getByTestId("list-public-row")).toHaveAttribute(
+      "data-is-public",
+      "true",
+      { timeout: 10_000 },
+    );
+
+    publicWebListId = listId;
+    publicWebListTitle = publicListTitle;
+    publicWebPlaceName = placeName;
+
+    await safeClick(myLists.getByRole("button", { name: "←" }).first()).catch(() => null);
+    await safeClick(myLists.getByRole("button", { name: "닫기" })).catch(() => null);
+    await expect(myLists).toBeHidden({ timeout: 10_000 }).catch(() => null);
+  });
+
+  // ── 4d3. Public list web share page (anon) ──
+  await runner.step("4d3. 공개 목록 웹 페이지 — 비로그인/비공개/메모 없음", async () => {
+    if (!publicWebListId) {
+      throw new Error("4d2 에서 공개 목록 id 를 남기지 못함");
+    }
+
+    const browser = page.context().browser();
+    if (!browser) throw new Error("browser missing");
+    const anon = await browser.newContext();
+    const anonPage = await anon.newPage();
+
+    try {
+      await anonPage.goto(`/list/${encodeURIComponent(publicWebListId)}`, {
+        waitUntil: "domcontentloaded",
+      });
+      const sharePage = anonPage.getByTestId("public-list-share-page");
+      await expect(sharePage).toBeVisible({ timeout: 20_000 });
+      await expect(anonPage.getByTestId("public-list-share-title")).toHaveText(
+        publicWebListTitle,
+        { timeout: 10_000 },
+      );
+      if (publicWebPlaceName) {
+        await expect(
+          anonPage.getByTestId("public-list-share-place-name").filter({
+            hasText: publicWebPlaceName,
+          }),
+        ).toBeVisible({ timeout: 10_000 });
+      } else {
+        await expect(anonPage.getByTestId("public-list-share-items")).toBeVisible({
+          timeout: 10_000,
+        });
+      }
+      await expect(anonPage.getByText("메모")).toHaveCount(0);
+      const bodyText = (await anonPage.locator("body").innerText()).toLowerCase();
+      expect(bodyText.includes("memo")).toBeFalsy();
+
+      // Missing / private-equivalent UUID → not found copy
+      await anonPage.goto(`/list/00000000-0000-4000-8000-000000000099`, {
+        waitUntil: "domcontentloaded",
+      });
+      await expect(anonPage.getByTestId("public-list-not-found")).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(anonPage.getByText("찾을 수 없는 목록")).toBeVisible();
+    } finally {
+      await anon.close();
+    }
+
+    // Turn private → same id also not found for anon
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(tabBar(page)).toBeVisible({ timeout: 20_000 });
+    await gotoTab(page, "saved");
+    await safeClick(savedMyListsButton(page));
+    const myLists = page.locator(".myListsScreen");
+    await expect(myLists).toBeVisible({ timeout: 15_000 });
+    await safeClick(myLists.locator(".myListsListItem", { hasText: publicWebListTitle }));
+    await expect(myLists.getByTestId("list-public-row")).toHaveAttribute(
+      "data-is-public",
+      "true",
+      { timeout: 10_000 },
+    );
+    await safeClick(myLists.getByTestId("list-public-toggle"));
+    await expect(myLists.getByTestId("list-public-row")).toHaveAttribute(
+      "data-is-public",
+      "false",
+      { timeout: 10_000 },
+    );
+
+    const anon2 = await browser.newContext();
+    const anonPage2 = await anon2.newPage();
+    try {
+      await anonPage2.goto(`/list/${encodeURIComponent(publicWebListId)}`, {
+        waitUntil: "domcontentloaded",
+      });
+      await expect(anonPage2.getByTestId("public-list-not-found")).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(anonPage2.getByText("찾을 수 없는 목록")).toBeVisible();
+      await expect(anonPage2.getByText("메모")).toHaveCount(0);
+    } finally {
+      await anon2.close();
+    }
+
     // Cleanup
     await safeClick(myLists.getByRole("button", { name: "목록 삭제" }));
     await expect(myLists.locator(".myListsConfirmDialog")).toBeVisible();
     await safeClick(myLists.locator(".myListsConfirmDelete"));
-    await expect(myLists.getByText(publicListTitle)).toHaveCount(0, { timeout: 15_000 });
+    await expect(myLists.getByText(publicWebListTitle)).toHaveCount(0, { timeout: 15_000 });
     await safeClick(myLists.getByRole("button", { name: "닫기" }));
     await expect(myLists).toBeHidden({ timeout: 10_000 });
   });

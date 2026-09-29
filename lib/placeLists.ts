@@ -21,6 +21,11 @@ export type PublicPlaceListSummary = {
   place_count: number;
 };
 
+/** Single public list (SECURITY DEFINER RPC) — includes owner username */
+export type PublicPlaceListDetail = PublicPlaceListSummary & {
+  owner_username: string | null;
+};
+
 export type PublicPlaceListPlace = {
   place_id: string;
   name: string;
@@ -200,6 +205,47 @@ export async function updateListPublic(
   }
 
   return { data: mapListRow(data as Record<string, unknown>), error: null };
+}
+
+/** One public list by id (SECURITY DEFINER RPC — anon-safe) */
+export async function fetchPublicPlaceList(
+  listId: string,
+): Promise<{ data: PublicPlaceListDetail | null; error: string | null }> {
+  const { data, error } = await supabase.rpc("get_public_place_list", {
+    p_list_id: listId,
+  });
+
+  if (error) {
+    return { data: null, error: mapDbError(error, "목록을 불러오지 못했어요.") };
+  }
+
+  const rows = Array.isArray(data) ? data : data != null ? [data] : [];
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (!row?.id) {
+    return { data: null, error: null };
+  }
+
+  const countRaw = row.place_count;
+  const place_count =
+    typeof countRaw === "number"
+      ? countRaw
+      : typeof countRaw === "string"
+        ? Number(countRaw) || 0
+        : 0;
+
+  return {
+    data: {
+      id: String(row.id ?? ""),
+      title: String(row.title ?? ""),
+      color: normalizeListColor(typeof row.color === "string" ? row.color : null),
+      place_count,
+      owner_username:
+        typeof row.owner_username === "string" && row.owner_username.trim()
+          ? row.owner_username.trim()
+          : null,
+    },
+    error: null,
+  };
 }
 
 /** Public lists for a profile (SECURITY DEFINER RPC) */

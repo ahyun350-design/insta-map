@@ -34,6 +34,13 @@ import {
   EDGE_SWIPE_PRIORITY,
   useEdgeSwipeBack,
 } from "@/lib/useEdgeSwipeBack";
+import {
+  copyTextToClipboard,
+  getListShareUrl,
+  getTrackDomain,
+  shareViaNavigatorShare,
+} from "@/lib/pindmapLinks";
+import { trackPublicListEvent } from "@/lib/track";
 
 type Category = FeedPostCategory;
 
@@ -665,6 +672,27 @@ export function MyListsScreen({
     setConfirmPublic(true);
   };
 
+  const handleShareList = async () => {
+    if (!detailList || detailList.is_public !== true) return;
+    const url = getListShareUrl(detailList.id);
+    trackPublicListEvent("list_share_click", {
+      list_id: detailList.id,
+      domain: getTrackDomain(),
+    });
+    const result = await shareViaNavigatorShare({
+      title: detailList.title,
+      text: `PindMap에서 ${detailList.title} 목록 보기`,
+      url,
+    });
+    if (result === "shared" || result === "cancelled") return;
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
+      showToast("링크를 복사했어요", "success");
+    } else {
+      showToast("복사할 수 없어요", "error");
+    }
+  };
+
   const handleDeleteList = async () => {
     if (!detailList || deletingList) return;
     const deleted = detailList;
@@ -903,18 +931,31 @@ export function MyListsScreen({
                 : "나만 볼 수 있어요"}
             </p>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={detailList.is_public === true}
-            aria-label="목록 공개"
-            data-testid="list-public-toggle"
-            className={`myListsPublicSwitch${detailList.is_public === true ? " isOn" : ""}`}
-            disabled={savingPublic}
-            onClick={handlePublicToggleClick}
-          >
-            <span className="myListsPublicSwitchThumb" />
-          </button>
+          <div className="myListsPublicRowActions">
+            {detailList.is_public === true ? (
+              <button
+                type="button"
+                className="myListsShareBtn"
+                data-testid="list-share-btn"
+                aria-label="목록 공유"
+                onClick={() => void handleShareList()}
+              >
+                공유
+              </button>
+            ) : null}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={detailList.is_public === true}
+              aria-label="목록 공개"
+              data-testid="list-public-toggle"
+              className={`myListsPublicSwitch${detailList.is_public === true ? " isOn" : ""}`}
+              disabled={savingPublic}
+              onClick={handlePublicToggleClick}
+            >
+              <span className="myListsPublicSwitchThumb" />
+            </button>
+          </div>
         </div>
       ) : null}
       {detailList && !detailLoading && places.length > 0 ? (

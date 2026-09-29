@@ -14,6 +14,13 @@ import {
   EDGE_SWIPE_PRIORITY,
   useEdgeSwipeBack,
 } from "@/lib/useEdgeSwipeBack";
+import {
+  copyTextToClipboard,
+  getListShareUrl,
+  getTrackDomain,
+  shareViaNavigatorShare,
+} from "@/lib/pindmapLinks";
+import { trackPublicListEvent } from "@/lib/track";
 
 type Props = {
   open: boolean;
@@ -76,6 +83,27 @@ export function PublicPlaceListScreen({
     }
     void load();
   }, [open, list, load]);
+
+  const handleShare = async () => {
+    if (!list) return;
+    const url = getListShareUrl(list.id);
+    trackPublicListEvent("list_share_click", {
+      list_id: list.id,
+      domain: getTrackDomain(),
+    });
+    const result = await shareViaNavigatorShare({
+      title: list.title,
+      text: `PindMap에서 ${list.title} 목록 보기`,
+      url,
+    });
+    if (result === "shared" || result === "cancelled") return;
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
+      showToast("링크를 복사했어요", "success");
+    } else {
+      showToast("복사할 수 없어요", "error");
+    }
+  };
 
   useEffect(() => {
     if (!open || !list || loading || places.length === 0) return;
@@ -201,7 +229,20 @@ export function PublicPlaceListScreen({
             <p className="publicPlaceListOwner">{ownerLabel}</p>
           ) : null}
         </div>
-        <span className="publicPlaceListHeaderMeta">{places.length || list.place_count}곳</span>
+        <div className="publicPlaceListHeaderActions">
+          <button
+            type="button"
+            className="publicPlaceListShareBtn"
+            data-testid="public-place-list-share"
+            aria-label="목록 공유"
+            onClick={() => void handleShare()}
+          >
+            공유
+          </button>
+          <span className="publicPlaceListHeaderMeta">
+            {places.length || list.place_count}곳
+          </span>
+        </div>
       </header>
 
       <div className="publicPlaceListMapWrap" aria-hidden={mapError}>
