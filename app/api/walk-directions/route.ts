@@ -215,7 +215,7 @@ export async function POST(req: Request) {
     );
     res.headers.set(
       "x-walk-timings",
-      JSON.stringify({ authMs, l2Ms, tmapMs, totalMs, ...extra }),
+      JSON.stringify({ authMs, l2Ms, tmapMs, totalMs, v: 3, ...extra }),
     );
     return res;
   };
