@@ -75,6 +75,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "server_misconfigured" }, { status: 500 });
     }
 
+    const { data: existing, error: existingErr } = await admin
+      .from("places")
+      .select("id, user_id")
+      .eq("id", id)
+      .maybeSingle<{ id: string; user_id: string }>();
+    if (existingErr) {
+      console.error("[places/upsert] ownership lookup", existingErr);
+      return NextResponse.json({ error: "save_failed" }, { status: 500 });
+    }
+    if (existing && existing.user_id !== authUser.id) {
+      return NextResponse.json({ error: "권한이 없습니다." }, { status: 403 });
+    }
+
     const { error } = await admin.from("places").upsert({
       id,
       user_id: authUser.id,
