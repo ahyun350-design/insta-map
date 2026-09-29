@@ -622,6 +622,13 @@ test("production smoke — major tabs (continue on failure)", async ({
       },
     );
     await expect(expandedDialog).toBeHidden({ timeout: 15_000 }).catch(() => null);
+
+    // Closing course map returns to the course sheet — dismiss it so later SAVED steps work
+    const courseClose = page.getByTestId("course-modal-close");
+    if (await courseClose.isVisible().catch(() => false)) {
+      await safeClick(courseClose);
+      await expect(page.locator(".courseModalBackdrop")).toBeHidden({ timeout: 10_000 });
+    }
     await dismissSavedOverlays(page);
   });
 

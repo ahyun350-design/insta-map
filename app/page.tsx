@@ -13219,6 +13219,8 @@ function HomePageContent() {
                               </div>
                               <button
                                 type="button"
+                                data-testid="course-modal-close"
+                                aria-label="코스 모달 닫기"
                                 onClick={closeCourseModal}
                                 style={{ border: "none", background: "transparent", fontSize: "20px", color: "#bbb", cursor: "pointer", flexShrink: 0, padding: 0, lineHeight: 1 }}
                               >
