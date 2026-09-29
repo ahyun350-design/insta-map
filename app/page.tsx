@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, Sus
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { getAccessToken, supabase } from "@/lib/supabase";
 import { debugLog, dlog, logPerf, perfNow } from "@/lib/debugLog";
 import { withAutoRetry, withAutoRetryAndMessageSendRecovery } from "@/lib/connectionRecovery";
 import { useUser } from "@/lib/useUser";
@@ -1225,9 +1225,14 @@ async function fetchDirectionsSegmentPath(
   destination: LatLng,
 ): Promise<LatLng[]> {
   try {
+    const token = await getAccessToken();
+    if (!token) return straightLineSegmentPath(origin, destination);
     const res = await fetch("/api/directions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({ origin, destination, mode: "car" }),
     });
     const data = (await res.json()) as {
@@ -2752,9 +2757,17 @@ function HomePageContent() {
       }
 
       const fetchAndDrawWalkRoute = async (origin: { lat: number; lng: number }) => {
+        const token = await getAccessToken();
+        if (!token) {
+          showToast("세션이 만료됐어요. 다시 로그인해 주세요.", "error");
+          return;
+        }
         const res = await fetch("/api/walk-directions", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ origin, destination: { lat: destLat, lng: destLng } }),
         });
         if (!res.ok) {
@@ -7552,9 +7565,17 @@ function HomePageContent() {
               showToast("현재 위치를 가져올 수 없어요", "error");
               return;
             }
+            const token = await getAccessToken();
+            if (!token) {
+              showToast("세션이 만료됐어요. 다시 로그인해 주세요.", "error");
+              return;
+            }
             const res = await fetch("/api/directions", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
               body: JSON.stringify({
                 origin,
                 destination: { lat, lng },
@@ -7680,10 +7701,19 @@ function HomePageContent() {
           return;
         }
 
+        const dirToken = await getAccessToken();
+        if (!dirToken) {
+          showToast("세션이 만료됐어요. 다시 로그인해 주세요.", "error");
+          return;
+        }
+
         if (mode === "walk") {
           const res = await fetch("/api/walk-directions", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${dirToken}`,
+            },
             body: JSON.stringify({
               origin,
               destination: { lat, lng },
@@ -7728,7 +7758,10 @@ function HomePageContent() {
 
         const res = await fetch("/api/directions", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${dirToken}`,
+          },
           body: JSON.stringify({
             origin,
             destination: { lat, lng },
@@ -10239,11 +10272,20 @@ function HomePageContent() {
         expandedMapRef.current.setBounds(bounds);
       };
 
+      const expandedDirToken = await getAccessToken();
+      if (!expandedDirToken) {
+        showToast("세션이 만료됐어요. 다시 로그인해 주세요.", "error");
+        return;
+      }
+
       if (mode === "walk") {
         // 카카오 /api/directions 는 자동차 전용 — 도보는 Tmap
         const res = await fetch("/api/walk-directions", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${expandedDirToken}`,
+          },
           body: JSON.stringify({
             origin,
             destination: { lat: destLat, lng: destLng },
@@ -10285,7 +10327,10 @@ function HomePageContent() {
 
       const res = await fetch("/api/directions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${expandedDirToken}`,
+        },
         body: JSON.stringify({
           origin,
           destination: { lat: destLat, lng: destLng },

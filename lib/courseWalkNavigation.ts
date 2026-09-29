@@ -1,3 +1,5 @@
+import { getAccessToken } from "@/lib/supabase";
+
 export type LatLng = { lat: number; lng: number };
 
 export type CourseWalkStep = {
@@ -264,9 +266,32 @@ async function fetchWalkDirectionsSegment(
   index: number,
 ): Promise<CourseWalkSegment> {
   try {
+    const token = await getAccessToken();
+    if (!token) {
+      const distanceM = Math.round(haversineMeters(origin, destination));
+      return {
+        index,
+        fromName,
+        toName,
+        fromLat: origin.lat,
+        fromLng: origin.lng,
+        toLat: destination.lat,
+        toLng: destination.lng,
+        distanceM,
+        timeSec: estimateWalkTimeSec(distanceM),
+        path: straightLineSegmentPath(origin, destination),
+        steps: [
+          { description: `${fromName} 출발`, lat: origin.lat, lng: origin.lng, pointType: "SP" },
+          { description: `${toName} 도착`, lat: destination.lat, lng: destination.lng, pointType: "EP" },
+        ],
+      };
+    }
     const res = await fetch("/api/walk-directions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({ origin, destination }),
     });
     if (!res.ok) {

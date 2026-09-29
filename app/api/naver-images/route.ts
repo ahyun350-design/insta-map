@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
+import { requireBearerUser } from "@/lib/requireBearerUser";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  const auth = await requireBearerUser(req);
+  if ("error" in auth) return auth.error;
+
   const { searchParams } = new URL(req.url);
   const query = searchParams.get("query")?.trim();
   if (!query) return NextResponse.json({ images: [] });

@@ -3,6 +3,7 @@ import {
   mapKakaoCategoryGroupCode,
   tryMapKakaoCategoryName,
 } from "@/lib/kakaoCategory";
+import { requireBearerUser } from "@/lib/requireBearerUser";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,9 @@ async function getNaverImage(query: string): Promise<string | null> {
 }
 
 export async function GET(req: Request) {
+  const auth = await requireBearerUser(req);
+  if ("error" in auth) return auth.error;
+
   const { searchParams } = new URL(req.url);
   const query = searchParams.get("query")?.trim();
 
