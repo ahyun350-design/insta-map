@@ -9,6 +9,14 @@ import { ProfileAvatar } from "@/components/ProfileAvatar";
 import { FollowListModal, type FollowListType } from "@/components/FollowListModal";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
+import { PublicPlaceListScreen } from "@/components/PublicPlaceListScreen";
+import { ListColorDot } from "@/components/ListColorSwatches";
+import {
+  fetchPublicPlaceLists,
+  type PublicPlaceListSummary,
+} from "@/lib/placeLists";
+import { buildCategoryColorsRecord } from "@/lib/categoryAppearance";
+import { notifyToast } from "@/components/Toast";
 import {
   readProfilePageCache,
   updateProfilePageScroll,
@@ -22,6 +30,8 @@ import {
   useEdgeSwipeBack,
 } from "@/lib/useEdgeSwipeBack";
 import { pushInAppRoute, safeRouterBack } from "@/lib/safeRouterBack";
+
+const PROFILE_CATEGORY_COLORS = buildCategoryColorsRecord();
 
 type ProfileUser = ProfilePageCacheUser;
 type ProfilePost = ProfilePageCachePost;
@@ -91,7 +101,17 @@ export default function ProfilePage() {
   const [friendRooms, setFriendRooms] = useState<FriendRoom[]>([]);
   const [shareLoading, setShareLoading] = useState(false);
 
+  const [publicLists, setPublicLists] = useState<PublicPlaceListSummary[]>([]);
+  const [openPublicList, setOpenPublicList] = useState<PublicPlaceListSummary | null>(null);
+
   const isOwnProfile = !!user && !!profile && user.id === profile.id;
+
+  const showToast = useCallback(
+    (message: string, type?: "success" | "error" | "info") => {
+      notifyToast(message, type ?? "info");
+    },
+    [],
+  );
 
   /** SSR 직후 클라이언트에서 sessionStorage 캐시를 paint 전에 복원 */
   useLayoutEffect(() => {
@@ -282,6 +302,51 @@ export default function ProfilePage() {
     if (!sessionChecked || userLoading || !user) return;
     void loadProfile();
   }, [user, userLoading, sessionChecked, routeUsername]);
+
+  /** Other profiles: public place lists (hide section when empty) */
+  useEffect(() => {
+    if (!profile?.id || isOwnProfile) {
+      setPublicLists([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await fetchPublicPlaceLists(profile.id);
+      if (cancelled) return;
+      if (error) {
+        setPublicLists([]);
+        return;
+      }
+      setPublicLists(data);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id, isOwnProfile]);
+
+  /** Deep link / e2e: ?publicList=<id> opens read-only detail (works on own profile too) */
+  useEffect(() => {
+    if (!profile?.id || typeof window === "undefined") return;
+    const listId = new URLSearchParams(window.location.search).get("publicList")?.trim();
+    if (!listId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await fetchPublicPlaceLists(profile.id);
+      if (cancelled) return;
+      const found = data.find((l) => l.id === listId);
+      setOpenPublicList(
+        found ?? {
+          id: listId,
+          title: "공개 목록",
+          color: null,
+          place_count: 0,
+        },
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id, routeUsername]);
 
   /** 상세에서 돌아올 때 스크롤 복원 */
   useEffect(() => {
@@ -708,6 +773,42 @@ export default function ProfilePage() {
                 </div>
               </article>
 
+              {!isOwnProfile && publicLists.length > 0 ? (
+                <section
+                  className="profilePublicLists"
+                  style={{ marginTop: "18px" }}
+                  data-testid="profile-public-lists"
+                >
+                  <p
+                    style={{
+                      margin: "0 0 10px",
+                      fontSize: "12px",
+                      color: "#1a2a7a",
+                      letterSpacing: "1px",
+                    }}
+                  >
+                    공개 목록
+                  </p>
+                  <ul className="profilePublicListsUl" data-testid="profile-public-lists-ul">
+                    {publicLists.map((list) => (
+                      <li key={list.id}>
+                        <button
+                          type="button"
+                          className="profilePublicListRow"
+                          data-testid="profile-public-list-row"
+                          data-list-id={list.id}
+                          onClick={() => setOpenPublicList(list)}
+                        >
+                          <ListColorDot color={list.color} size={12} />
+                          <span className="profilePublicListTitle">{list.title}</span>
+                          <span className="profilePublicListMeta">{list.place_count}곳</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
               <section style={{ marginTop: "18px" }}>
                 <p style={{ margin: "0 0 10px", fontSize: "12px", color: "#1a2a7a", letterSpacing: "1px" }}>큐레이션 {postCount}</p>
                 <PostGrid empty={posts.length === 0}>
@@ -803,6 +904,24 @@ export default function ProfilePage() {
           </div>
         )}
       </section>
+
+      <PublicPlaceListScreen
+        open={!!openPublicList}
+        list={openPublicList}
+        ownerLabel={profile ? `${profile.username}` : undefined}
+        categoryColors={PROFILE_CATEGORY_COLORS}
+        onClose={() => {
+          setOpenPublicList(null);
+          if (typeof window !== "undefined") {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has("publicList")) {
+              url.searchParams.delete("publicList");
+              window.history.replaceState(null, "", url.pathname + url.search);
+            }
+          }
+        }}
+        showToast={showToast}
+      />
     </main>
   );
 }

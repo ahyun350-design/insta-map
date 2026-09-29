@@ -18,7 +18,7 @@ function formatLoginError(error: AuthError): string {
     code === "invalid_credentials" ||
     /invalid login credentials|invalid email or password|invalid_credentials/i.test(raw)
   ) {
-    return "이메일 또는 비밀번호가 올바르지 않아요.";
+    return "이메일 또는 비밀번호를 확인해 주세요.";
   }
   if (
     /already.*(authenticated|signed)|user already signed|session exists|already logged/i.test(raw) ||
@@ -168,6 +168,13 @@ export default function LoginPage() {
     };
   }, [router]);
 
+  /** Prefill from /login?email= (signup existing-email CTA) */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = new URLSearchParams(window.location.search).get("email")?.trim();
+    if (raw) setEmail(raw);
+  }, []);
+
   const handleRealInputFocus = () => {
     userFocusedRealInputRef.current = true;
   };
@@ -181,34 +188,42 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    setLoading(false);
+      if (error) {
+        setError(formatLoginError(error));
+        return;
+      }
 
-    if (error) {
-      setError(formatLoginError(error));
-      return;
+      router.push("/");
+      router.refresh();
+    } catch {
+      setError("네트워크가 불안정해요. 다시 시도해 주세요.");
+    } finally {
+      setLoading(false);
     }
-
-    router.push("/");
-    router.refresh();
   };
 
   const handleKakaoLogin = async () => {
     setError("");
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "kakao",
-      options: {
-        redirectTo: `${getSiteOrigin()}/auth/callback`,
-        scopes: "profile_nickname",
-      },
-    });
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "kakao",
+        options: {
+          redirectTo: `${getSiteOrigin()}/auth/callback`,
+          scopes: "profile_nickname",
+        },
+      });
 
-    if (error) {
-      setError("카카오 로그인에 실패했어요. 다시 시도해주세요.");
+      if (error) {
+        setError("카카오 로그인에 실패했어요. 다시 시도해주세요.");
+      }
+    } catch {
+      setError("네트워크가 불안정해요. 다시 시도해 주세요.");
     }
   };
 

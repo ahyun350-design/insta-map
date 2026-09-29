@@ -15,6 +15,8 @@ export const EDGE_SWIPE_PRIORITY = {
   HOME_SEARCH: 8,
   /** React-state chat room (messages tab) — above router screens */
   CHAT_ROOM: 9,
+  /** Public place list detail (on profile) — closes before router profile (20) */
+  PUBLIC_PLACE_LIST: 10,
   /** Next.js App Router pages (profile, /course/[id], …) — last */
   ROUTER_SCREEN: 20,
 } as const;

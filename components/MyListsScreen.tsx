@@ -17,6 +17,7 @@ import {
   renameList,
   reorderListPlaces,
   updateListColor,
+  updateListPublic,
   type PlaceListPlace,
   type PlaceListSummary,
 } from "@/lib/placeLists";
@@ -141,6 +142,8 @@ export function MyListsScreen({
   const [menuClosing, setMenuClosing] = useState(false);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [savingColor, setSavingColor] = useState(false);
+  const [confirmPublic, setConfirmPublic] = useState(false);
+  const [savingPublic, setSavingPublic] = useState(false);
 
   const placesRef = useRef(places);
   placesRef.current = places;
@@ -159,6 +162,13 @@ export function MyListsScreen({
     enabled: open && confirmDelete,
     priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
     onClose: () => setConfirmDelete(false),
+  });
+
+  useEdgeSwipeBack({
+    id: "my-lists-confirm-public",
+    enabled: open && confirmPublic,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => setConfirmPublic(false),
   });
 
   const LISTS_TTL_MS = 30_000;
@@ -214,6 +224,7 @@ export function MyListsScreen({
       setTitleDraft(list.title);
       setEditingTitle(false);
       setConfirmDelete(false);
+      setConfirmPublic(false);
       setDetailSearchQuery("");
       setDetailSort("region");
       setDetailSortMenuOpen(false);
@@ -239,6 +250,7 @@ export function MyListsScreen({
         setPlaces([]);
         setEditingTitle(false);
         setConfirmDelete(false);
+        setConfirmPublic(false);
         setDeletingList(false);
         setRemovingPlaceId(null);
         setDetailSearchQuery("");
@@ -614,6 +626,44 @@ export function MyListsScreen({
     void loadLists({ force: true, silent: true });
   };
 
+  const applyPublic = async (next: boolean) => {
+    if (!detailList || savingPublic) return;
+    const listId = detailList.id;
+    const prev = detailList.is_public === true;
+    setSavingPublic(true);
+    setConfirmPublic(false);
+    setDetailList((d) => (d ? { ...d, is_public: next } : d));
+    setLists((prevLists) =>
+      prevLists.map((l) => (l.id === listId ? { ...l, is_public: next } : l)),
+    );
+
+    const { data, error } = await updateListPublic(listId, next);
+    setSavingPublic(false);
+    if (error || !data) {
+      showToast(error || "공개 설정을 바꾸지 못했어요.", "error");
+      setDetailList((d) => (d ? { ...d, is_public: prev } : d));
+      setLists((prevLists) =>
+        prevLists.map((l) => (l.id === listId ? { ...l, is_public: prev } : l)),
+      );
+      return;
+    }
+    setDetailList(data);
+    setLists((prevLists) =>
+      prevLists.map((l) => (l.id === data.id ? { ...l, is_public: data.is_public } : l)),
+    );
+    listsFetchedAtRef.current = 0;
+    void loadLists({ force: true, silent: true });
+  };
+
+  const handlePublicToggleClick = () => {
+    if (!detailList || savingPublic) return;
+    if (detailList.is_public === true) {
+      void applyPublic(false);
+      return;
+    }
+    setConfirmPublic(true);
+  };
+
   const handleDeleteList = async () => {
     if (!detailList || deletingList) return;
     const deleted = detailList;
@@ -746,6 +796,7 @@ export function MyListsScreen({
                 setDetailList(null);
                 setPlaces([]);
                 setConfirmDelete(false);
+                setConfirmPublic(false);
                 setEditingTitle(false);
                 setDetailSearchQuery("");
                 setDetailSort("region");
@@ -834,6 +885,35 @@ export function MyListsScreen({
             size="md"
             aria-label="목록 색 선택"
           />
+        </div>
+      ) : null}
+      {detailList ? (
+        <div
+          className="myListsPublicRow"
+          data-testid="list-public-row"
+          data-list-id={detailList.id}
+          data-is-public={detailList.is_public === true ? "true" : "false"}
+        >
+          <div className="myListsPublicRowText">
+            <p className="myListsPublicLabel">공개 목록</p>
+            <p className="myListsPublicHint">
+              {detailList.is_public === true
+                ? "프로필에 이 목록이 보여요"
+                : "나만 볼 수 있어요"}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={detailList.is_public === true}
+            aria-label="목록 공개"
+            data-testid="list-public-toggle"
+            className={`myListsPublicSwitch${detailList.is_public === true ? " isOn" : ""}`}
+            disabled={savingPublic}
+            onClick={handlePublicToggleClick}
+          >
+            <span className="myListsPublicSwitchThumb" />
+          </button>
         </div>
       ) : null}
       {detailList && !detailLoading && places.length > 0 ? (
@@ -1290,6 +1370,44 @@ export function MyListsScreen({
                 onClick={() => void handleDeleteList()}
               >
                 {deletingList ? "삭제 중…" : "삭제"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmPublic && detailList && (
+        <div
+          className="myListsConfirmOverlay"
+          role="presentation"
+          onClick={() => setConfirmPublic(false)}
+        >
+          <div
+            className="myListsConfirmDialog"
+            role="alertdialog"
+            aria-labelledby="my-lists-public-title"
+            data-testid="list-public-confirm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p id="my-lists-public-title" className="myListsConfirmTitle">
+              목록을 공개할까요?
+            </p>
+            <p className="myListsConfirmDesc">누구나 이 목록을 볼 수 있어요</p>
+            <div className="myListsConfirmActions">
+              <button
+                type="button"
+                onClick={() => setConfirmPublic(false)}
+                disabled={savingPublic}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="myListsConfirmPrimary"
+                data-testid="list-public-confirm-ok"
+                disabled={savingPublic}
+                onClick={() => void applyPublic(true)}
+              >
+                {savingPublic ? "설정 중…" : "공개하기"}
               </button>
             </div>
           </div>

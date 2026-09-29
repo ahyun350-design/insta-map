@@ -1,6 +1,6 @@
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { requireE2ECredentials } from "./helpers/env";
+import { loadEnvLocal, requireE2ECredentials } from "./helpers/env";
 import { attachCollectors } from "./helpers/collectors";
 import { createSoftRunner } from "./helpers/softRunner";
 import {
@@ -18,6 +18,10 @@ import {
   waitForHomeFeed,
 } from "./helpers/nav";
 import { ensureLoggedIn } from "./helpers/login";
+import {
+  fetchE2EUsername,
+  fetchPublicListsViaRpc,
+} from "./helpers/supabaseRpc";
 
 const ARTIFACTS = path.resolve(process.cwd(), "e2e/artifacts");
 const SCREENSHOTS = path.join(ARTIFACTS, "screenshots");
@@ -52,6 +56,7 @@ test("production smoke — major tabs (continue on failure)", async ({
   });
 
   const listTitle = `E2E ${Date.now()}`;
+  const publicListTitle = `E2E Public ${Date.now()}`;
 
   // ── 1. Login ──────────────────────────────────────────────
   await runner.step("1. 로그인", async () => {
@@ -694,6 +699,105 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(myLists).toBeHidden({ timeout: 10_000 });
   });
 
+  // ── 4d2. Public place lists (toggle + RPC + read-only detail) ──
+  await runner.step("4d2. SAVED — 목록 공개/비공개 · 공개 상세", async () => {
+    await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
+
+    const items = page.locator("article.savedItem");
+    await expect(items.first()).toBeVisible({ timeout: 20_000 });
+    await safeClick(items.first());
+    const sheet = page.locator(".placeDetailSheet");
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+    await safeClick(sheet.getByRole("button", { name: "목록에 추가" }));
+    const addSheet = page.locator(".placeListSheet");
+    await expect(addSheet).toBeVisible();
+    await safeClick(addSheet.getByRole("button", { name: /새 목록 만들기/ }));
+    await addSheet.locator(".placeListSheetCreateInput").fill(publicListTitle);
+    await safeClick(addSheet.getByRole("button", { name: "만들기" }));
+    await expect(addSheet.getByText(publicListTitle)).toBeVisible({ timeout: 15_000 });
+    await safeClick(addSheet.getByRole("button", { name: "닫기" }));
+    await safeClick(sheet.getByRole("button", { name: "닫기" })).catch(() => null);
+    await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
+
+    await safeClick(savedMyListsButton(page));
+    const myLists = page.locator(".myListsScreen");
+    await expect(myLists).toBeVisible({ timeout: 15_000 });
+    await safeClick(myLists.locator(".myListsListItem", { hasText: publicListTitle }));
+    await expect(myLists.getByTestId("list-public-toggle")).toBeVisible({ timeout: 10_000 });
+    const listId = await myLists.getByTestId("list-public-row").getAttribute("data-list-id");
+    if (!listId) throw new Error("list-public-row missing data-list-id");
+
+    // Enable public — confirm dialog required
+    await safeClick(myLists.getByTestId("list-public-toggle"));
+    await expect(myLists.getByTestId("list-public-confirm")).toBeVisible({ timeout: 5_000 });
+    await expect(myLists.getByText("누구나 이 목록을 볼 수 있어요")).toBeVisible();
+    await safeClick(myLists.getByTestId("list-public-confirm-ok"));
+    await expect(myLists.getByTestId("list-public-row")).toHaveAttribute(
+      "data-is-public",
+      "true",
+      { timeout: 10_000 },
+    );
+
+    const { userId, username } = await fetchE2EUsername();
+    // RPC = what any authenticated viewer sees for this owner
+    const publicWhenOn = await fetchPublicListsViaRpc(userId);
+    expect(publicWhenOn.some((l) => l.id === listId && l.title === publicListTitle)).toBeTruthy();
+
+    // Own profile hides the section; deep-link opens read-only detail
+    await safeClick(myLists.getByRole("button", { name: "←" }).first()).catch(() => null);
+    await safeClick(myLists.getByRole("button", { name: "닫기" })).catch(() => null);
+    await expect(myLists).toBeHidden({ timeout: 10_000 }).catch(() => null);
+
+    await page.goto(
+      `/profile/${encodeURIComponent(username)}?publicList=${encodeURIComponent(listId)}`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const publicScreen = page.getByTestId("public-place-list-screen");
+    await expect(publicScreen).toBeVisible({ timeout: 20_000 });
+    await expect(publicScreen.getByRole("button", { name: "목록 삭제" })).toHaveCount(0);
+    await expect(publicScreen.getByRole("button", { name: "삭제" })).toHaveCount(0);
+    await expect(publicScreen.locator(".myListsHeaderDanger")).toHaveCount(0);
+    await expect(publicScreen.locator(".myListsDragHandle")).toHaveCount(0);
+    await expect(publicScreen.getByTestId("list-item-menu")).toHaveCount(0);
+    await expect(publicScreen.getByText("메모")).toHaveCount(0);
+
+    await safeClick(publicScreen.getByTestId("public-place-list-back"));
+    await expect(publicScreen).toHaveCount(0, { timeout: 10_000 });
+
+    // Back to my lists — turn private (no confirm)
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(tabBar(page)).toBeVisible({ timeout: 20_000 });
+    await gotoTab(page, "saved");
+    await safeClick(savedMyListsButton(page));
+    await expect(myLists).toBeVisible({ timeout: 15_000 });
+    await safeClick(myLists.locator(".myListsListItem", { hasText: publicListTitle }));
+    await expect(myLists.getByTestId("list-public-row")).toHaveAttribute(
+      "data-is-public",
+      "true",
+      { timeout: 10_000 },
+    );
+    await safeClick(myLists.getByTestId("list-public-toggle"));
+    await expect(myLists.getByTestId("list-public-confirm")).toHaveCount(0);
+    await expect(myLists.getByTestId("list-public-row")).toHaveAttribute(
+      "data-is-public",
+      "false",
+      { timeout: 10_000 },
+    );
+
+    const publicWhenOff = await fetchPublicListsViaRpc(userId);
+    expect(publicWhenOff.some((l) => l.id === listId)).toBeFalsy();
+
+    // Cleanup
+    await safeClick(myLists.getByRole("button", { name: "목록 삭제" }));
+    await expect(myLists.locator(".myListsConfirmDialog")).toBeVisible();
+    await safeClick(myLists.locator(".myListsConfirmDelete"));
+    await expect(myLists.getByText(publicListTitle)).toHaveCount(0, { timeout: 15_000 });
+    await safeClick(myLists.getByRole("button", { name: "닫기" }));
+    await expect(myLists).toBeHidden({ timeout: 10_000 });
+  });
+
   // ── 4e. SAVED places as map pins (compact + fullscreen) ───
   await runner.step("4e. SAVED — 저장 핀 미니맵/전체지도", async () => {
     await dismissSavedOverlays(page);
@@ -1048,6 +1152,62 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(
       page.getByTestId("login-email").or(page.getByPlaceholder("이메일")).first(),
     ).toBeVisible({ timeout: 30_000 });
+  });
+
+  // ── 7b. Signup validation UX (after logout) ───────────────
+  await runner.step("7b. 회원가입 — 기존 이메일·형식·짧은 비번", async () => {
+    loadEnvLocal();
+    const { email: existingEmail } = requireE2ECredentials();
+
+    await page.goto("/signup", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "회원가입" })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const username = page.getByTestId("signup-username");
+    const emailInput = page.getByTestId("signup-email");
+    const passwordInput = page.getByTestId("signup-password");
+    const submit = page.getByTestId("signup-submit");
+
+    // Agree required consents
+    await page.locator('label:has-text("만 14세") input[type="checkbox"]').check();
+    await page.locator("#signup-agree-terms").check();
+    await page.locator("#signup-agree-privacy").check();
+
+    // Short password (client check runs before username API; noValidate form)
+    await username.fill(`e2e${Date.now().toString(36).slice(-6)}`);
+    await username.blur();
+    await emailInput.fill("valid-format@example.com");
+    await passwordInput.fill("123");
+    await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await safeClick(submit);
+    await expect(page.getByTestId("signup-error")).toContainText("비밀번호는 6자 이상", {
+      timeout: 5_000,
+    });
+    await expect(page.getByRole("heading", { name: "이메일을 확인해주세요" })).toHaveCount(0);
+
+    // Invalid email format
+    await passwordInput.fill("123456");
+    await emailInput.fill("not-an-email");
+    await expect(submit).toBeEnabled({ timeout: 5_000 });
+    await safeClick(submit);
+    await expect(page.getByTestId("signup-error")).toContainText("이메일 주소를 다시 확인해 주세요", {
+      timeout: 5_000,
+    });
+    await expect(page.getByRole("heading", { name: "이메일을 확인해주세요" })).toHaveCount(0);
+
+    // Existing confirmed email (E2E account)
+    await emailInput.fill(existingEmail);
+    await passwordInput.fill("wrong-but-long-enough");
+    await expect(submit).toBeEnabled({ timeout: 5_000 });
+    await safeClick(submit);
+    await expect(page.getByTestId("signup-error")).toContainText("이미 가입된 이메일", {
+      timeout: 20_000,
+    });
+    await expect(page.getByTestId("signup-existing-email-actions")).toBeVisible();
+    await expect(page.getByTestId("signup-go-login")).toBeVisible();
+    await expect(page.getByTestId("signup-go-forgot")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "이메일을 확인해주세요" })).toHaveCount(0);
   });
 
   runner.writeReport(

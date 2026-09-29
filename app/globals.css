@@ -4253,6 +4253,79 @@ select:focus-visible {
   background: #fafafa;
 }
 
+.myListsPublicRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid #efefef;
+  flex-shrink: 0;
+  background: #fafafa;
+}
+
+.myListsPublicRowText {
+  flex: 1;
+  min-width: 0;
+}
+
+.myListsPublicLabel {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.myListsPublicHint {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #999;
+}
+
+.myListsPublicSwitch {
+  position: relative;
+  width: 48px;
+  height: 28px;
+  border-radius: 14px;
+  border: none;
+  padding: 0;
+  background: #d0d0d8;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.18s ease;
+}
+
+.myListsPublicSwitch.isOn {
+  background: #1a2a7a;
+}
+
+.myListsPublicSwitch:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.myListsPublicSwitchThumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.18s ease;
+}
+
+.myListsPublicSwitch.isOn .myListsPublicSwitchThumb {
+  transform: translateX(20px);
+}
+
+.myListsConfirmPrimary {
+  border: none !important;
+  background: #1a2a7a !important;
+  color: #fff !important;
+}
+
 .myListsMapRow {
   margin: 0 0 10px;
 }
@@ -4501,6 +4574,273 @@ select:focus-visible {
   border: none !important;
   background: #c62828 !important;
   color: #fff !important;
+}
+
+/* Public place list — same layer as myLists (100040); below place sheet 100045 */
+.publicPlaceListScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100040;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
+}
+
+.publicPlaceListHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid #efefef;
+  flex-shrink: 0;
+}
+
+.publicPlaceListBack {
+  border: none;
+  background: transparent;
+  color: #1a2a7a;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 6px 4px;
+  flex-shrink: 0;
+}
+
+.publicPlaceListHeaderText {
+  flex: 1;
+  min-width: 0;
+}
+
+.publicPlaceListTitle {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publicPlaceListOwner {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #999;
+}
+
+.publicPlaceListHeaderMeta {
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.publicPlaceListMapWrap {
+  height: 180px;
+  flex-shrink: 0;
+  background: #f3f3f6;
+  border-bottom: 0.5px solid #efefef;
+  position: relative;
+}
+
+.publicPlaceListMap {
+  width: 100%;
+  height: 100%;
+}
+
+.publicPlaceListMapFallback {
+  margin: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #999;
+}
+
+.publicPlaceListBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 16px 24px;
+  box-sizing: border-box;
+}
+
+.publicPlaceListHint {
+  margin: 0;
+  padding: 40px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #999;
+}
+
+.publicPlaceListItems {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.publicPlaceListItem {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  border: none;
+  background: transparent;
+  border-bottom: 0.5px solid #efefef;
+  padding: 14px 4px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.publicPlaceListItemBar {
+  width: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.publicPlaceListItemText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.publicPlaceListItemName {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1a1a2e;
+  font-family: "Playfair Display", serif;
+}
+
+.publicPlaceListItemMeta {
+  font-size: 11px;
+  color: #1a2a7a;
+}
+
+.publicPlaceListItemAddr {
+  font-size: 11px;
+  color: #999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publicPlaceListPlaceSheet {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.publicPlaceListPlaceBackdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.publicPlaceListPlaceCard {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 480px;
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  padding: 18px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.publicPlaceListPlaceCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.publicPlaceListPlaceName {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1a1a2e;
+  font-family: "Playfair Display", serif;
+}
+
+.publicPlaceListPlaceClose {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  color: #999;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.publicPlaceListPlaceCat {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #1a2a7a;
+}
+
+.publicPlaceListPlaceAddr {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.profilePublicListsUl {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 0.5px solid #efefef;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.profilePublicListRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  border-bottom: 0.5px solid #efefef;
+  background: transparent;
+  padding: 14px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.profilePublicListsUl li:last-child .profilePublicListRow {
+  border-bottom: none;
+}
+
+.profilePublicListTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1a1a2e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profilePublicListMeta {
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
 }
 
 .savedBody {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getSiteOrigin } from "@/lib/pindmapLinks";
@@ -11,23 +11,33 @@ export default function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = new URLSearchParams(window.location.search).get("email")?.trim();
+    if (raw) setEmail(raw);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${getSiteOrigin()}/reset-password`,
-    });
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${getSiteOrigin()}/reset-password`,
+      });
 
-    setLoading(false);
+      if (error) {
+        setError("재설정 메일을 보내지 못했어요. 이메일을 다시 확인해주세요.");
+        return;
+      }
 
-    if (error) {
-      setError("재설정 메일을 보내지 못했어요. 이메일을 다시 확인해주세요.");
-      return;
+      setSent(true);
+    } catch {
+      setError("네트워크가 불안정해요. 다시 시도해 주세요.");
+    } finally {
+      setLoading(false);
     }
-
-    setSent(true);
   };
 
   if (sent) {
@@ -114,7 +124,13 @@ export default function ForgotPasswordPage() {
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           <input
             type="email"
+            inputMode="email"
+            autoComplete="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             placeholder="이메일"
+            data-testid="forgot-email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required

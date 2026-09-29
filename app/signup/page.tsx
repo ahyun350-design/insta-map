@@ -11,18 +11,28 @@ type UsernameGate = "idle" | "checking" | "available" | "taken" | "error";
 
 const USERNAME_CHECK_TIMEOUT_MS = 5_000;
 
+const EXISTING_EMAIL_MESSAGE = "이미 가입된 이메일이에요. 로그인해 주세요.";
+
+function isValidEmailFormat(value: string): boolean {
+  const t = value.trim();
+  if (!t) return false;
+  // Practical client check — HTML type=email + this before submit
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
+}
+
 /** AuthError.code / status 기준 — 메시지 문자열에 의존하지 않음 */
 function mapSignupAuthError(err: {
   code?: string;
   status?: number;
-}): { message: string; reason: string } {
+}): { message: string; reason: string; existingEmail?: boolean } {
   const code = err.code ?? "";
   const status = err.status;
 
   if (code === "user_already_exists" || code === "email_exists") {
     return {
-      message: "이미 가입된 이메일이에요. 로그인해 주세요",
+      message: EXISTING_EMAIL_MESSAGE,
       reason: code,
+      existingEmail: true,
     };
   }
   if (code === "email_address_invalid") {
@@ -92,6 +102,8 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  /** Existing confirmed email — show login / forgot-password actions */
+  const [existingEmail, setExistingEmail] = useState(false);
   const [usernameGate, setUsernameGate] = useState<UsernameGate>("idle");
   /** 마지막으로 서버 검사한 trim 닉 — 한글 IME onChange가 taken을 지우지 않게 */
   const lastCheckedRef = useRef<{ value: string; gate: UsernameGate } | null>(null);
@@ -191,9 +203,16 @@ export default function SignupPage() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setExistingEmail(false);
 
     if (!agreeAge || !agreeTerms || !agreePrivacy) {
       setError("필수 항목에 동의해주세요.");
+      return;
+    }
+
+    const trimmedEmail = email.trim();
+    if (!isValidEmailFormat(trimmedEmail)) {
+      setError("이메일 주소를 다시 확인해 주세요");
       return;
     }
 
@@ -217,46 +236,59 @@ export default function SignupPage() {
 
     setLoading(true);
 
-    // 제출 직전 재확인 — 중복(false)만 차단. API 실패(null)는 가입 허용 (DB unique 방어)
-    const available = await runUsernameCheck(trimmedUsername);
-    if (available === false) {
-      setLoading(false);
-      setError("이미 사용 중인 닉네임이에요");
-      return;
-    }
+    try {
+      // 제출 직전 재확인 — 중복(false)만 차단. API 실패(null)는 가입 허용 (DB unique 방어)
+      const available = await runUsernameCheck(trimmedUsername);
+      if (available === false) {
+        setError("이미 사용 중인 닉네임이에요");
+        return;
+      }
 
-    const marketingChecked = agreeMarketing;
+      const marketingChecked = agreeMarketing;
 
-    // Supabase에 회원가입 요청
-    const { error: signupError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${getSiteOrigin()}/auth/callback?next=/welcome`,
-        data: {
-          username: trimmedUsername,
-          terms_agreed: true,
-          privacy_agreed: true,
-          is_adult: true,
-          marketing_agreed: marketingChecked,
+      const { data, error: signupError } = await supabase.auth.signUp({
+        email: trimmedEmail,
+        password,
+        options: {
+          emailRedirectTo: `${getSiteOrigin()}/auth/callback?next=/welcome`,
+          data: {
+            username: trimmedUsername,
+            terms_agreed: true,
+            privacy_agreed: true,
+            is_adult: true,
+            marketing_agreed: marketingChecked,
+          },
         },
-      },
-    });
-
-    setLoading(false);
-
-    if (signupError) {
-      console.error("SIGNUP ERROR DETAIL:", JSON.stringify(signupError, null, 2));
-      const mapped = mapSignupAuthError({
-        code: signupError.code,
-        status: signupError.status,
       });
-      track("signup_failed", { reason: mapped.reason });
-      setError(mapped.message);
-      return;
-    }
 
-    setSuccess(true);
+      if (signupError) {
+        console.error("SIGNUP ERROR DETAIL:", JSON.stringify(signupError, null, 2));
+        const mapped = mapSignupAuthError({
+          code: signupError.code,
+          status: signupError.status,
+        });
+        track("signup_failed", { reason: mapped.reason });
+        setError(mapped.message);
+        if (mapped.existingEmail) setExistingEmail(true);
+        return;
+      }
+
+      // Confirm-email on: existing confirmed address → fake user, empty identities, no mail
+      const identities = data.user?.identities;
+      if (data.user && Array.isArray(identities) && identities.length === 0) {
+        track("signup_failed", { reason: "existing_email_identities_empty" });
+        setError(EXISTING_EMAIL_MESSAGE);
+        setExistingEmail(true);
+        return;
+      }
+
+      setSuccess(true);
+    } catch {
+      track("signup_failed", { reason: "network" });
+      setError("네트워크가 불안정해요. 다시 시도해 주세요.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const consentReady = agreeAge && agreeTerms && agreePrivacy;
@@ -370,10 +402,15 @@ export default function SignupPage() {
         </div>
 
         {/* 회원가입 폼 */}
-        <form onSubmit={handleSignup} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        <form
+          onSubmit={handleSignup}
+          noValidate
+          style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+        >
           <input
             type="text"
             placeholder="닉네임 (2자 이상)"
+            data-testid="signup-username"
             value={username}
             autoComplete="off"
             autoCorrect="off"
@@ -408,15 +445,19 @@ export default function SignupPage() {
             <p style={{ margin: "-4px 0 0", fontSize: "11px", color: "#e07070" }}>이미 사용 중인 닉네임이에요</p>
           )}
           <input
-            type="text"
+            type="email"
             inputMode="email"
             autoComplete="email"
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
             placeholder="이메일"
+            data-testid="signup-email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (existingEmail) setExistingEmail(false);
+            }}
             required
             style={inputStyle}
           />
@@ -426,6 +467,7 @@ export default function SignupPage() {
             autoCapitalize="none"
             autoCorrect="off"
             placeholder="비밀번호 (6자 이상)"
+            data-testid="signup-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
@@ -517,10 +559,64 @@ export default function SignupPage() {
           </div>
 
           {error && (
-            <p style={{ margin: 0, fontSize: "11px", color: "#e07070", textAlign: "center" }}>{error}</p>
+            <p
+              style={{ margin: 0, fontSize: "11px", color: "#e07070", textAlign: "center" }}
+              data-testid="signup-error"
+            >
+              {error}
+            </p>
+          )}
+          {existingEmail && (
+            <div
+              data-testid="signup-existing-email-actions"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                marginTop: "2px",
+              }}
+            >
+              <Link
+                href={`/login?email=${encodeURIComponent(email.trim())}`}
+                data-testid="signup-go-login"
+                style={{
+                  display: "block",
+                  textAlign: "center",
+                  padding: "12px",
+                  background: "#1a1a1a",
+                  color: "#fff",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  textDecoration: "none",
+                  fontFamily: "'Playfair Display', serif",
+                  letterSpacing: "1px",
+                }}
+              >
+                로그인하기
+              </Link>
+              <Link
+                href={`/forgot-password?email=${encodeURIComponent(email.trim())}`}
+                data-testid="signup-go-forgot"
+                style={{
+                  display: "block",
+                  textAlign: "center",
+                  padding: "12px",
+                  background: "#fff",
+                  color: "#1a1a1a",
+                  border: "0.5px solid #e0e0e0",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  textDecoration: "none",
+                  fontFamily: "inherit",
+                }}
+              >
+                비밀번호 찾기
+              </Link>
+            </div>
           )}
           <button
             type="submit"
+            data-testid="signup-submit"
             disabled={submitDisabled}
             style={{
               border: "none",

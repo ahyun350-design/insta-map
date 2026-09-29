@@ -7,9 +7,29 @@ export type PlaceListSummary = {
   title: string;
   /** Preset id or null (null → category pin colors) */
   color: string | null;
+  /** Owner-only field from place_lists; public RPC rows omit this */
+  is_public?: boolean;
   place_count: number;
   created_at: string;
   updated_at: string;
+};
+
+export type PublicPlaceListSummary = {
+  id: string;
+  title: string;
+  color: string | null;
+  place_count: number;
+};
+
+export type PublicPlaceListPlace = {
+  place_id: string;
+  name: string;
+  address: string;
+  lat?: number;
+  lng?: number;
+  category: string;
+  subcategory?: string | null;
+  list_color: string | null;
 };
 
 export type PlaceListPlace = {
@@ -39,7 +59,7 @@ const LIST_COLOR_PRESET_IDS = [
 export type PlaceListColorPresetId = (typeof LIST_COLOR_PRESET_IDS)[number];
 
 const PLACE_LIST_SELECT =
-  "id, user_id, title, color, created_at, updated_at, place_list_items(count)";
+  "id, user_id, title, color, is_public, created_at, updated_at, place_list_items(count)";
 
 function mapDbError(error: { code?: string; message?: string }, fallback: string): string {
   return toUserMessage(error, fallback);
@@ -78,6 +98,7 @@ function mapListRow(row: Record<string, unknown>): PlaceListSummary {
     user_id: String(row.user_id ?? ""),
     title: String(row.title ?? ""),
     color: normalizeListColor(typeof row.color === "string" ? row.color : null),
+    is_public: row.is_public === true,
     place_count: placeCount,
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
@@ -160,6 +181,98 @@ export async function renameList(
   }
 
   return { data: mapListRow(data as Record<string, unknown>), error: null };
+}
+
+/** Public / private toggle (owner RLS) */
+export async function updateListPublic(
+  listId: string,
+  isPublic: boolean,
+): Promise<{ data: PlaceListSummary | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from("place_lists")
+    .update({ is_public: isPublic, updated_at: new Date().toISOString() })
+    .eq("id", listId)
+    .select(PLACE_LIST_SELECT)
+    .single();
+
+  if (error) {
+    return { data: null, error: mapDbError(error, "공개 설정을 바꾸지 못했어요.") };
+  }
+
+  return { data: mapListRow(data as Record<string, unknown>), error: null };
+}
+
+/** Public lists for a profile (SECURITY DEFINER RPC) */
+export async function fetchPublicPlaceLists(
+  ownerId: string,
+): Promise<{ data: PublicPlaceListSummary[]; error: string | null }> {
+  const { data, error } = await supabase.rpc("get_public_place_lists", {
+    p_owner_id: ownerId,
+  });
+
+  if (error) {
+    return { data: [], error: mapDbError(error, "공개 목록을 불러오지 못했어요.") };
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  return {
+    data: rows.map((row) => {
+      const r = row as Record<string, unknown>;
+      const countRaw = r.place_count;
+      const place_count =
+        typeof countRaw === "number"
+          ? countRaw
+          : typeof countRaw === "string"
+            ? Number(countRaw) || 0
+            : 0;
+      return {
+        id: String(r.id ?? ""),
+        title: String(r.title ?? ""),
+        color: normalizeListColor(typeof r.color === "string" ? r.color : null),
+        place_count,
+      };
+    }),
+    error: null,
+  };
+}
+
+/** Places in a public list (SECURITY DEFINER RPC — no memo) */
+export async function fetchPublicPlaceListPlaces(
+  listId: string,
+): Promise<{ data: PublicPlaceListPlace[]; error: string | null }> {
+  const { data, error } = await supabase.rpc("get_public_place_list_places", {
+    p_list_id: listId,
+  });
+
+  if (error) {
+    return { data: [], error: mapDbError(error, "목록 장소를 불러오지 못했어요.") };
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const places: PublicPlaceListPlace[] = [];
+  for (const row of rows) {
+    const r = row as Record<string, unknown>;
+    const place_id = String(r.place_id ?? "").trim();
+    if (!place_id) continue;
+    const lat = typeof r.lat === "number" ? r.lat : Number(r.lat);
+    const lng = typeof r.lng === "number" ? r.lng : Number(r.lng);
+    places.push({
+      place_id,
+      name: String(r.name ?? ""),
+      address: String(r.address ?? ""),
+      category: String(r.category ?? ""),
+      subcategory:
+        typeof r.subcategory === "string"
+          ? r.subcategory
+          : r.subcategory === null
+            ? null
+            : undefined,
+      list_color: normalizeListColor(typeof r.list_color === "string" ? r.list_color : null),
+      ...(Number.isFinite(lat) ? { lat } : {}),
+      ...(Number.isFinite(lng) ? { lng } : {}),
+    });
+  }
+  return { data: places, error: null };
 }
 
 /** 목록 색만 변경 (이름과 분리) */
