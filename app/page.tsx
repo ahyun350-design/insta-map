@@ -1343,6 +1343,19 @@ function waitForFullscreenNativeMapReady(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, 400));
 }
 
+/** Always-on Safari Web Inspector breadcrumbs for course route (do not gate on isDev). */
+function logCourseRoute(step: string, detail?: Record<string, unknown>) {
+  if (detail !== undefined) {
+    console.log(`[course.route] ${step}`, detail);
+  } else {
+    console.log(`[course.route] ${step}`);
+  }
+}
+
+function courseRouteStopsKey(stops: { lat: number; lng: number }[]): string {
+  return stops.map((s) => `${Number(s.lat).toFixed(6)},${Number(s.lng).toFixed(6)}`).join("|");
+}
+
 function buildCourseFullscreenMarkers(coursePlaces: CoursePlace[]): FullscreenSearchMarkerSnapshot[] {
   return coursePlaces.flatMap((place, index) => {
     if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) return [];
@@ -2969,6 +2982,7 @@ function HomePageContent() {
     sessionId: number,
   ) => {
     if (courseRoutePath.length < 2) {
+      logCourseRoute("paint.skip", { reason: "path_too_short", stopCount: courseRoutePath.length });
       // TEMP crs-debug
       devLog("[crs] drawCourseRoute skip path too short", courseRoutePath.length);
       return;
@@ -2981,14 +2995,29 @@ function HomePageContent() {
 
     const applyRouteAndRefreshMarkers = async (path: LatLng[], label: string) => {
       if (!isSessionStillValid()) {
+        logCourseRoute("paint.skip", {
+          reason: "session_invalid_before_paint",
+          source: label,
+          sessionId,
+          currentSession: fullscreenCourseRouteSessionRef.current,
+          mapExpanded: mapExpandedLiveRef.current,
+          hasCourseRef: Boolean(fullscreenCourseRef.current?.length),
+        });
         // TEMP crs-debug
         devLog("[crs] skip route draw — session invalid", label, "session", sessionId);
         return false;
       }
+      logCourseRoute("paint.call", { source: label, pathLength: path.length, sessionId });
       // TEMP crs-debug
       devLog("[crs] setRoute call path", path.length, "mode course", label);
       await setFullscreenNativeRoute({ path, mode: "course" }, { silent: false });
       if (!isSessionStillValid()) {
+        logCourseRoute("paint.skip", {
+          reason: "session_invalid_after_setRoute",
+          source: label,
+          sessionId,
+          currentSession: fullscreenCourseRouteSessionRef.current,
+        });
         // TEMP crs-debug
         devLog("[crs] skip marker refresh — session invalid after setRoute", label);
         return false;
@@ -2997,6 +3026,7 @@ function HomePageContent() {
         { markers: courseMarkers.map((marker) => ({ ...marker })) },
         { silent: false },
       );
+      logCourseRoute("paint.done", { source: label, pathLength: path.length });
       // TEMP crs-debug
       devLog("[crs] setRoute resolved path", path.length, label, "markers", courseMarkers.length);
       return true;
@@ -3015,6 +3045,12 @@ function HomePageContent() {
         );
       }
 
+      // No route cache in this build (reverted) — still log for first vs second open comparison
+      logCourseRoute("cache", {
+        hit: false,
+        key: `walk:${courseRouteStopsKey(courseRoutePath)}`,
+      });
+
       await applyRouteAndRefreshMarkers(courseRoutePath, "preview-straight");
 
       const coursePlaces = fullscreenCourseRef.current;
@@ -3022,8 +3058,22 @@ function HomePageContent() {
         coursePlaces?.length === courseRoutePath.length
           ? coursePlaces.map((place) => place.name)
           : courseRoutePath.map((_, index) => `장소 ${index + 1}`);
+      logCourseRoute("tmap.start", { stopCount: courseRoutePath.length, sessionId });
+      const tmapT0 = Date.now();
       const navigation = await buildCourseWalkNavigationFromTmap(courseRoutePath, stopNames);
+      logCourseRoute("tmap.done", {
+        ms: Date.now() - tmapT0,
+        pathLength: navigation.mergedPath.length,
+        segments: navigation.segments.length,
+      });
       if (!isSessionStillValid()) {
+        logCourseRoute("paint.skip", {
+          reason: "session_invalid_after_tmap",
+          sessionId,
+          currentSession: fullscreenCourseRouteSessionRef.current,
+          mapExpanded: mapExpandedLiveRef.current,
+          hasCourseRef: Boolean(fullscreenCourseRef.current?.length),
+        });
         // TEMP crs-debug
         devLog("[crs] skip after tmap — session invalid", sessionId);
         return;
@@ -3042,6 +3092,11 @@ function HomePageContent() {
       );
     } catch (err) {
       console.error("[course] failed", err);
+      logCourseRoute("paint.skip", {
+        reason: "exception",
+        message: err instanceof Error ? err.message : String(err),
+        sessionId,
+      });
       if (!isSessionStillValid()) {
         // TEMP crs-debug
         devLog("[crs] skip fallback — session invalid", sessionId);
@@ -3313,7 +3368,15 @@ function HomePageContent() {
         { silent: false },
       );
 
+      const mapReadyT0 = Date.now();
       await waitForFullscreenNativeMapReady();
+      if (isFullscreenCourseMode) {
+        logCourseRoute("map.ready", {
+          ready: true,
+          waitedMs: Date.now() - mapReadyT0,
+          stopCount: courseRoutePath.length,
+        });
+      }
 
       const focusAtPresent = focusPlaceCoordsRef.current;
       if (focusAtPresent) {
@@ -3338,8 +3401,20 @@ function HomePageContent() {
 
       if (isFullscreenCourseMode && courseRoutePath.length >= 2) {
         const courseSessionId = ++fullscreenCourseRouteSessionRef.current;
+        logCourseRoute("open", {
+          isNative: true,
+          sessionId: courseSessionId,
+          courseId: viewingSavedCourseIdRef.current ?? savedCourseId ?? null,
+          stopCount: courseRoutePath.length,
+          phase: "native_draw_start",
+        });
         const courseMarkersForRoute = initialMarkers.map((marker) => ({ ...marker })) as FullscreenSearchMarkerSnapshot[];
         await drawFullscreenNativeCourseRoute(courseRoutePath, courseMarkersForRoute, courseSessionId);
+      } else if (isFullscreenCourseMode) {
+        logCourseRoute("paint.skip", {
+          reason: "course_path_lt_2",
+          stopCount: courseRoutePath.length,
+        });
       }
 
       void restoreFullscreenNativeMyLocation();
@@ -8502,6 +8577,13 @@ function HomePageContent() {
     const nativeAvail = isNativeMapAvailable();
     // 네온/다크 코스맵 실험 비활성 — 관리자도 일반 사용자와 동일 경로
     const useAdminCourseMapDesign = false;
+    logCourseRoute("open", {
+      isNative: nativeAvail && !useAdminCourseMapDesign,
+      sessionId: fullscreenCourseRouteSessionRef.current,
+      courseId: viewingSavedCourseIdRef.current ?? savedCourseId ?? null,
+      stopCount: courseResult.length,
+      phase: "showCourseOnMap",
+    });
     logAdminCourseMap(uid, "showCourseOnMap", {
       uid,
       uidLen: uid.length,
@@ -8876,23 +8958,59 @@ function HomePageContent() {
 
     expandedMapRef.current.setBounds(bounds);
 
-    if (stops.length < 2) return;
+    if (stops.length < 2) {
+      logCourseRoute("paint.skip", { reason: "web_stops_lt_2", stopCount: stops.length });
+      return;
+    }
 
     setDirectionsLoading(true);
     try {
+      logCourseRoute("cache", { hit: false, key: `walk:${courseRouteStopsKey(stops)}` });
+      logCourseRoute("map.ready", {
+        ready: Boolean(expandedMapRef.current && window.kakao?.maps),
+        waitedMs: 800,
+        branch: "web",
+      });
+      logCourseRoute("paint.call", { source: "preview-straight", pathLength: stops.length });
       applyWebCourseRoutePath(stops, false);
+      logCourseRoute("paint.done", { source: "preview-straight", pathLength: stops.length });
 
+      logCourseRoute("tmap.start", { stopCount: stops.length, branch: "web" });
+      const tmapT0 = Date.now();
       const navigation = await buildCourseWalkNavigationFromTmap(stops, stopNames);
-      if (!expandedMapRef.current || !courseResult) return;
+      logCourseRoute("tmap.done", {
+        ms: Date.now() - tmapT0,
+        pathLength: navigation.mergedPath.length,
+        segments: navigation.segments.length,
+        branch: "web",
+      });
+      if (!expandedMapRef.current || !courseResult) {
+        logCourseRoute("paint.skip", {
+          reason: !expandedMapRef.current ? "web_map_missing_after_tmap" : "web_courseResult_null",
+        });
+        return;
+      }
 
       fullscreenCourseNavigationRef.current = navigation;
       setCourseNavigation(navigation);
       setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
       setCourseNavFocusMode(false);
       setCourseNavStepIndex(navigation.segments[0]?.steps.length ? 0 : null);
+      logCourseRoute("paint.call", {
+        source: "walk-final",
+        pathLength: navigation.mergedPath.length,
+      });
       applyWebCourseRoutePath(navigation.mergedPath);
+      logCourseRoute("paint.done", {
+        source: "walk-final",
+        pathLength: navigation.mergedPath.length,
+      });
     } catch (err) {
       console.error("[course] web route failed", err);
+      logCourseRoute("paint.skip", {
+        reason: "web_exception",
+        message: err instanceof Error ? err.message : String(err),
+      });
       applyWebCourseRoutePath(stops);
     } finally {
       setDirectionsLoading(false);
