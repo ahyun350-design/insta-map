@@ -44,6 +44,11 @@ import {
   formatPoiReresolveMissLog,
   resolvePlaceViaPoi,
 } from "@/lib/resolvePlaceViaPoi";
+import {
+  EXTRACT_INTERNAL_HEADER,
+  getExtractInternalSecret,
+  isValidExtractInternalSecret,
+} from "@/app/api/extract/_internalAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -316,6 +321,15 @@ export async function POST(req: Request) {
   let diagPendingPlaces: PendingPlaceJson[] | null = null;
 
   try {
+    const expectedSecret = getExtractInternalSecret();
+    if (!expectedSecret) {
+      return NextResponse.json({ error: "서버 환경변수 미설정" }, { status: 500 });
+    }
+    const providedSecret = req.headers.get(EXTRACT_INTERNAL_HEADER);
+    if (!isValidExtractInternalSecret(providedSecret, expectedSecret)) {
+      return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
+    }
+
     const body = (await req.json()) as { jobId?: string; bypassCache?: boolean };
     jobId = body.jobId?.trim() ?? "";
     const bypassCache = body.bypassCache === true;

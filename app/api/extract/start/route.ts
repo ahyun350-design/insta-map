@@ -6,6 +6,10 @@ import {
   markExtractJobFailed,
   reclaimStaleExtractJobs,
 } from "@/app/api/extract/_reclaim";
+import {
+  EXTRACT_INTERNAL_HEADER,
+  getExtractInternalSecret,
+} from "@/app/api/extract/_internalAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,11 +90,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "서버 base URL을 확인할 수 없습니다." }, { status: 500 });
     }
     const processUrl = new URL("/api/extract/process", baseUrl).toString();
+    const internalSecret = getExtractInternalSecret();
+    if (!internalSecret) {
+      return NextResponse.json({ error: "서버 환경변수 미설정: EXTRACT_INTERNAL_SECRET" }, { status: 500 });
+    }
 
     const triggerProcess = async () => {
       const res = await fetch(processUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          [EXTRACT_INTERNAL_HEADER]: internalSecret,
+        },
         body: JSON.stringify({ jobId, bypassCache: forceRetry }),
       });
       if (!res.ok) {
