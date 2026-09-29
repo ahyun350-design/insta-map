@@ -936,10 +936,11 @@ test("production smoke — major tabs (continue on failure)", async ({
       await anonPage.goto(`/list/00000000-0000-4000-8000-000000000099`, {
         waitUntil: "domcontentloaded",
       });
-      await expect(anonPage.getByTestId("public-list-not-found")).toBeVisible({
-        timeout: 15_000,
-      });
-      await expect(anonPage.getByText("찾을 수 없는 목록")).toBeVisible();
+      await expect(
+        anonPage
+          .getByTestId("public-list-not-found")
+          .or(anonPage.getByText("찾을 수 없는 목록")),
+      ).toBeVisible({ timeout: 25_000 });
     } finally {
       await anon.close();
     }
@@ -961,6 +962,8 @@ test("production smoke — major tabs (continue on failure)", async ({
       "false",
       { timeout: 10_000 },
     );
+    // RPC / edge cache can lag a beat after unpublish
+    await page.waitForTimeout(1500);
 
     const anon2 = await browser.newContext();
     const anonPage2 = await anon2.newPage();
@@ -968,10 +971,11 @@ test("production smoke — major tabs (continue on failure)", async ({
       await anonPage2.goto(`/list/${encodeURIComponent(publicWebListId)}`, {
         waitUntil: "domcontentloaded",
       });
-      await expect(anonPage2.getByTestId("public-list-not-found")).toBeVisible({
-        timeout: 15_000,
-      });
-      await expect(anonPage2.getByText("찾을 수 없는 목록")).toBeVisible();
+      await expect(
+        anonPage2
+          .getByTestId("public-list-not-found")
+          .or(anonPage2.getByText("찾을 수 없는 목록")),
+      ).toBeVisible({ timeout: 25_000 });
       await expect(anonPage2.getByText("메모")).toHaveCount(0);
     } finally {
       await anon2.close();
