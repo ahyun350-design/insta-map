@@ -132,6 +132,12 @@ export async function dismissWhatsNewIfPresent(
 export async function dismissSavedOverlays(page: Page): Promise<void> {
   await dismissCoachmarks(page);
 
+  // Prefer places segment so subsequent steps see article.savedItem
+  const placesSeg = page.getByTestId("saved-segment-places");
+  if (await placesSeg.isVisible().catch(() => false)) {
+    await placesSeg.click({ force: true }).catch(() => null);
+  }
+
   const addSheet = page.locator(".placeListSheet");
   if (await addSheet.isVisible().catch(() => false)) {
     const close = addSheet.getByRole("button", { name: "닫기" });
@@ -188,11 +194,31 @@ export async function dismissSavedOverlays(page: Page): Promise<void> {
   }
 }
 
+/** Saved-tab 「목록」 segment (in-tab panel, not MyListsScreen). */
+export function savedListsSegment(page: Page): Locator {
+  return page.getByTestId("saved-segment-lists");
+}
+
+/** Open lists segment; optionally open a list detail via MyListsScreen. */
+export async function openSavedListsSegment(
+  page: Page,
+  listTitle?: string,
+): Promise<void> {
+  await safeClick(savedListsSegment(page));
+  await expect(page.getByTestId("saved-lists-panel")).toBeVisible({
+    timeout: 15_000,
+  });
+  if (listTitle) {
+    await safeClick(
+      page.getByTestId("saved-list-row").filter({ hasText: listTitle }),
+    );
+    await expect(page.locator(".myListsScreen")).toBeVisible({ timeout: 15_000 });
+  }
+}
+
+/** @deprecated Use savedListsSegment / openSavedListsSegment — pill removed. */
 export function savedMyListsButton(page: Page): Locator {
-  return page
-    .getByTestId("saved-my-lists")
-    .or(page.locator("button.savedMyListsPill"))
-    .or(page.getByRole("button", { name: "내 목록", exact: true }));
+  return savedListsSegment(page);
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   ListColorSwatches,
 } from "@/components/ListColorSwatches";
 import type { ListColorPresetId } from "@/lib/listColors";
+import { track } from "@/lib/track";
 
 type Props = {
   open: boolean;
@@ -254,6 +255,10 @@ export function AddToListSheet({
     listsFetchedAtRef.current = 0;
     void load({ force: true });
 
+    track("list_create_done", {
+      list_id: data.id,
+      place_count: placeIds.length,
+    });
     showToast(
       bulk ? `새 목록에 ${placeIds.length}곳을 담았어요` : "새 목록에 담았어요",
       "success",
@@ -302,6 +307,7 @@ export function AddToListSheet({
               className="placeListSheetCreateBtn"
               disabled={createBusy}
               onClick={() => {
+                track("list_create_start");
                 setNewColor(DEFAULT_LIST_COLOR_PRESET);
                 setCreating(true);
               }}

@@ -221,6 +221,7 @@ import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import { AddToListSheet } from "@/components/AddToListSheet";
 import { PlaceMemoSheet } from "@/components/PlaceMemoSheet";
 import { MyListsScreen } from "@/components/MyListsScreen";
+import { SavedListsPanel } from "@/components/SavedListsPanel";
 import { CourseMapDesignOverlay } from "@/components/CourseMapDesignOverlay";
 import {
   PlacePostsListScreen,
@@ -1825,6 +1826,11 @@ function HomePageContent() {
   const [savedNearLocating, setSavedNearLocating] = useState(false);
   const [savedNearDenied, setSavedNearDenied] = useState(false);
   const [showMyListsScreen, setShowMyListsScreen] = useState(false);
+  const [savedSegment, setSavedSegment] = useState<"places" | "lists">("places");
+  const [myListsInitialDetail, setMyListsInitialDetail] = useState<PlaceListSummary | null>(
+    null,
+  );
+  const [savedListsRefreshKey, setSavedListsRefreshKey] = useState(0);
   const [addToListTarget, setAddToListTarget] = useState<{
     placeIds: string[];
     placeName?: string;
@@ -15248,8 +15254,8 @@ function HomePageContent() {
     }}
   >
   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-    <p className="screenTitle" style={{ margin: 0 }}>저장한 장소</p>
-    {savedPlaces.length > 0 && (
+    <p className="screenTitle" style={{ margin: 0 }}>저장</p>
+    {savedPlaces.length > 0 && savedSegment === "places" && (
       <button
         type="button"
         data-coach="course_create"
@@ -15282,7 +15288,58 @@ function HomePageContent() {
       </button>
     )}
   </div>
-  {savedPlaces.length === 0 && (
+  <div
+    className="savedSegmentRow"
+    role="tablist"
+    aria-label="저장 보기"
+    data-testid="saved-segment"
+  >
+    <button
+      type="button"
+      role="tab"
+      aria-selected={savedSegment === "places"}
+      className={`savedSegmentBtn${savedSegment === "places" ? " isActive" : ""}`}
+      data-testid="saved-segment-places"
+      onClick={() => setSavedSegment("places")}
+    >
+      장소
+    </button>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={savedSegment === "lists"}
+      className={`savedSegmentBtn${savedSegment === "lists" ? " isActive" : ""}`}
+      data-testid="saved-segment-lists"
+      onClick={() => {
+        if (!userIdRef.current) {
+          showToast("로그인 후 이용해주세요", "info");
+          return;
+        }
+        exitSavedSelectMode();
+        setSavedSegment("lists");
+        track("saved_segment_lists");
+      }}
+    >
+      목록
+    </button>
+  </div>
+  {savedSegment === "lists" && user?.id ? (
+    <SavedListsPanel
+      userId={user.id}
+      categoryColors={CATEGORY_COLORS}
+      refreshKey={savedListsRefreshKey}
+      showToast={showToast}
+      onListsChanged={() => {
+        setSavedListsRefreshKey((k) => k + 1);
+        void refreshSavedPlaceListColors();
+      }}
+      onOpenList={(list) => {
+        setMyListsInitialDetail(list);
+        setShowMyListsScreen(true);
+      }}
+    />
+  ) : null}
+  {savedSegment === "places" && savedPlaces.length === 0 && (
   <EmptyState
     icon="🔖"
     title="저장한 장소가 없어요"
@@ -15290,7 +15347,7 @@ function HomePageContent() {
     action={{ label: "지도 보러가기", onClick: () => setActiveTab("map") }}
   />
 )}
-    {savedPlaces.length > 0 && (
+    {savedSegment === "places" && savedPlaces.length > 0 && (
       <>
         <div style={{ position: "relative", marginBottom: "10px" }}>
           <input
@@ -15368,21 +15425,6 @@ function HomePageContent() {
               </ul>
             )}
           </div>
-          <button
-            type="button"
-            className="savedMyListsPill"
-            data-testid="saved-my-lists"
-            onClick={() => {
-              if (!userIdRef.current) {
-                showToast("로그인 후 이용해주세요", "info");
-                return;
-              }
-              exitSavedSelectMode();
-              setShowMyListsScreen(true);
-            }}
-          >
-            내 목록
-          </button>
           {savedSelectMode && (
             <>
               <button
@@ -15413,7 +15455,7 @@ function HomePageContent() {
         </div>
       </>
     )}
-    {savedSelectMode && savedPlaces.length > 0 && (
+    {savedSegment === "places" && savedSelectMode && savedPlaces.length > 0 && (
       <div className="savedSelectBar" role="toolbar" aria-label="선택 모드">
         <span className="savedSelectBarCount">{savedSelectedIds.size}개 선택됨</span>
         <button
@@ -15529,7 +15571,7 @@ function HomePageContent() {
         </div>
       </div>
     )}
-    {savedPlaces.length > 0 && (() => {
+    {savedSegment === "places" && savedPlaces.length > 0 && (() => {
       const model = savedPlacesListModel;
 
       const toggleSavedSelection = (placeId: string) => {
@@ -16469,7 +16511,13 @@ function HomePageContent() {
             memoByPlaceId={Object.fromEntries(
               savedPlaces.map((p) => [p.id, p.memo ?? null] as const),
             )}
-            onClose={() => setShowMyListsScreen(false)}
+            initialDetailList={myListsInitialDetail}
+            onInitialDetailConsumed={() => setMyListsInitialDetail(null)}
+            onClose={() => {
+              setShowMyListsScreen(false);
+              setMyListsInitialDetail(null);
+              setSavedListsRefreshKey((k) => k + 1);
+            }}
             onOpenPlace={(place) => {
               const fromSaved = savedPlacesRef.current.find((p) => p.id === place.id);
               handleSavedPlaceClick(
@@ -16515,6 +16563,7 @@ function HomePageContent() {
               showListOnMap(list, places);
             }}
             onListsChanged={() => {
+              setSavedListsRefreshKey((k) => k + 1);
               void refreshSavedPlaceListColors();
             }}
             onOpenMemo={(place) => {
@@ -16548,6 +16597,7 @@ function HomePageContent() {
             onClose={() => setAddToListTarget(null)}
             onChanged={() => {
               if (savedSelectMode) exitSavedSelectMode();
+              setSavedListsRefreshKey((k) => k + 1);
               void refreshSavedPlaceListColors();
             }}
             showToast={showToast}

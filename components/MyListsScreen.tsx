@@ -40,7 +40,7 @@ import {
   getTrackDomain,
   shareViaNavigatorShare,
 } from "@/lib/pindmapLinks";
-import { trackPublicListEvent } from "@/lib/track";
+import { track, trackPublicListEvent } from "@/lib/track";
 
 type Category = FeedPostCategory;
 
@@ -111,6 +111,9 @@ type Props = {
   onListsChanged?: () => void;
   onOpenMemo: (place: PlaceListPlace) => void;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
+  /** Open directly into this list detail (saved-tab segment row). */
+  initialDetailList?: PlaceListSummary | null;
+  onInitialDetailConsumed?: () => void;
 };
 
 export function MyListsScreen({
@@ -126,6 +129,8 @@ export function MyListsScreen({
   onListsChanged,
   onOpenMemo,
   showToast,
+  initialDetailList = null,
+  onInitialDetailConsumed,
 }: Props) {
   const [lists, setLists] = useState<PlaceListSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -238,6 +243,10 @@ export function MyListsScreen({
       setMenuPlaceId(null);
       setDetailLoading(true);
       setColorPickerOpen(false);
+      track("list_detail_open", {
+        list_id: list.id,
+        place_count: list.place_count,
+      });
       const { data, error } = await fetchListPlaces(list.id);
       setDetailLoading(false);
       if (error) {
@@ -282,6 +291,20 @@ export function MyListsScreen({
     }
   }, [open, loadLists]);
 
+  const initialDetailHandledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) {
+      initialDetailHandledRef.current = null;
+      return;
+    }
+    const list = initialDetailList;
+    if (!list?.id) return;
+    if (initialDetailHandledRef.current === list.id) return;
+    initialDetailHandledRef.current = list.id;
+    onInitialDetailConsumed?.();
+    void openDetail(list);
+  }, [open, initialDetailList, openDetail, onInitialDetailConsumed]);
+
   const handleClose = useCallback(() => {
     preserveDetailOnHideRef.current = false;
     detailScrollTopRef.current = 0;
@@ -319,6 +342,10 @@ export function MyListsScreen({
       showToast("지도에 표시할 장소가 없어요", "info");
       return;
     }
+    track("list_map_view", {
+      list_id: detailList.id,
+      place_count: mappable.length,
+    });
     detailScrollTopRef.current = detailBodyRef.current?.scrollTop ?? 0;
     preserveDetailOnHideRef.current = true;
     setColorPickerOpen(false);

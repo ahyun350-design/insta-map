@@ -110,6 +110,50 @@ function mapListRow(row: Record<string, unknown>): PlaceListSummary {
   };
 }
 
+/** Preview tiles for saved-tab list rows (category only — no names in UI meta) */
+export type ListPlacePreview = {
+  category: string;
+};
+
+/** Up to 3 place categories per list, in sort_order (for colored thumb tiles). */
+export async function fetchListsPlacePreviews(
+  listIds: string[],
+): Promise<{ data: Record<string, ListPlacePreview[]>; error: string | null }> {
+  const ids = [...new Set(listIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return { data: {}, error: null };
+
+  const { data, error } = await supabase
+    .from("place_list_items")
+    .select("list_id, sort_order, places ( category )")
+    .in("list_id", ids)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    return { data: {}, error: mapDbError(error, "목록 미리보기를 불러오지 못했어요.") };
+  }
+
+  const out: Record<string, ListPlacePreview[]> = {};
+  for (const id of ids) out[id] = [];
+
+  for (const row of data ?? []) {
+    const r = row as {
+      list_id?: string;
+      places?: { category?: string } | { category?: string }[] | null;
+    };
+    const listId = typeof r.list_id === "string" ? r.list_id : "";
+    if (!listId || !out[listId] || out[listId]!.length >= 3) continue;
+    const raw = Array.isArray(r.places) ? r.places[0] : r.places;
+    const category =
+      raw && typeof raw.category === "string" && raw.category.trim()
+        ? raw.category.trim()
+        : "";
+    if (!category) continue;
+    out[listId]!.push({ category });
+  }
+
+  return { data: out, error: null };
+}
+
 /** 내 목록 전체 + 각 목록의 장소 수 */
 export async function fetchMyLists(
   userId: string,

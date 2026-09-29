@@ -11,7 +11,8 @@ import {
   edgeSwipeBack,
   gotoTab,
   safeClick,
-  savedMyListsButton,
+  openSavedListsSegment,
+  savedListsSegment,
   suppressCoachmarks,
   tabBar,
   tabButton,
@@ -302,7 +303,7 @@ test("production smoke — major tabs (continue on failure)", async ({
     });
     await dismissSavedOverlays(page);
     await gotoTab(page, "saved");
-    await expect(savedMyListsButton(page)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("saved-segment")).toBeVisible({ timeout: 15_000 });
   });
 
   await runner.step("4c2. 장소 시트 → 사진 뷰어 → 큐레이션", async () => {
@@ -573,13 +574,23 @@ test("production smoke — major tabs (continue on failure)", async ({
     await dismissSavedOverlays(page);
   });
 
+  await runner.step("4d0. SAVED — 장소|목록 세그먼트", async () => {
+    await dismissSavedOverlays(page);
+    await gotoTab(page, "saved");
+    // 세그먼트는 저장 장소 0이어도 항상 노출 (필 제거 회귀 방지)
+    await expect(page.getByTestId("saved-segment")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("saved-segment-places")).toBeVisible();
+    await expect(savedListsSegment(page)).toBeVisible();
+    await safeClick(savedListsSegment(page));
+    await expect(page.getByTestId("saved-lists-panel")).toBeVisible({ timeout: 15_000 });
+    await safeClick(page.getByTestId("saved-segment-places"));
+  });
+
   await runner.step("4d. SAVED — 내 목록 생성·담기·순서·삭제", async () => {
     // 시트가 탭바를 가리면 gotoTab 실패 → 먼저 정리 후 SAVED 로 이동
     await dismissSavedOverlays(page);
     await gotoTab(page, "saved");
-
-    const myListsBtn = savedMyListsButton(page);
-    await expect(myListsBtn).toBeVisible({ timeout: 20_000 });
+    await safeClick(page.getByTestId("saved-segment-places"));
 
     const items = page.locator("article.savedItem");
     await expect(items.first()).toBeVisible({ timeout: 20_000 });
@@ -600,10 +611,15 @@ test("production smoke — major tabs (continue on failure)", async ({
     await addSheet.locator(".placeListSheetCreateInput").fill(listTitle);
     await safeClick(addSheet.getByRole("button", { name: "만들기" }));
     await expect(addSheet.getByText(listTitle)).toBeVisible({ timeout: 15_000 });
+    // createList + addPlace 완료까지 대기
+    await expect(addSheet.getByRole("button", { name: "목록 저장 중…" })).toHaveCount(0, {
+      timeout: 20_000,
+    });
     await safeClick(addSheet.getByRole("button", { name: "닫기" }));
     await safeClick(sheet.getByRole("button", { name: "닫기" })).catch(() => null);
     await dismissSavedOverlays(page);
     await gotoTab(page, "saved");
+    await safeClick(page.getByTestId("saved-segment-places"));
 
     // 다중 담기는 장소 2개 이상일 때만
     const itemsAfter = page.locator("article.savedItem");
@@ -624,16 +640,14 @@ test("production smoke — major tabs (continue on failure)", async ({
       await safeClick(sheet2.getByRole("button", { name: "닫기" })).catch(() => null);
       await dismissSavedOverlays(page);
       await gotoTab(page, "saved");
+      await safeClick(page.getByTestId("saved-segment-places"));
     } else {
       // eslint-disable-next-line no-console
       console.log("  (info) 장소 1개 — 두 번째 담기 스킵");
     }
 
-    await expect(myListsBtn).toBeVisible({ timeout: 15_000 });
-    await safeClick(myListsBtn);
+    await openSavedListsSegment(page, listTitle);
     const myLists = page.locator(".myListsScreen");
-    await expect(myLists).toBeVisible({ timeout: 15_000 });
-    await safeClick(myLists.locator(".myListsListItem", { hasText: listTitle }));
     await expect(myLists.locator(".myListsDetailItem").first()).toBeVisible({
       timeout: 15_000,
     });
@@ -706,6 +720,7 @@ test("production smoke — major tabs (continue on failure)", async ({
   await runner.step("4d2. SAVED — 목록 공개/비공개 · 공개 상세", async () => {
     await dismissSavedOverlays(page);
     await gotoTab(page, "saved");
+    await safeClick(page.getByTestId("saved-segment-places"));
 
     const items = page.locator("article.savedItem");
     await expect(items.first()).toBeVisible({ timeout: 20_000 });
@@ -733,10 +748,8 @@ test("production smoke — major tabs (continue on failure)", async ({
     await dismissSavedOverlays(page);
     await gotoTab(page, "saved");
 
-    await safeClick(savedMyListsButton(page));
+    await openSavedListsSegment(page, publicListTitle);
     const myLists = page.locator(".myListsScreen");
-    await expect(myLists).toBeVisible({ timeout: 15_000 });
-    await safeClick(myLists.locator(".myListsListItem", { hasText: publicListTitle }));
     await expect(myLists.getByTestId("list-public-toggle")).toBeVisible({ timeout: 10_000 });
     const listId = await myLists.getByTestId("list-public-row").getAttribute("data-list-id");
     if (!listId) throw new Error("list-public-row missing data-list-id");
@@ -789,9 +802,7 @@ test("production smoke — major tabs (continue on failure)", async ({
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(tabBar(page)).toBeVisible({ timeout: 20_000 });
     await gotoTab(page, "saved");
-    await safeClick(savedMyListsButton(page));
-    await expect(myLists).toBeVisible({ timeout: 15_000 });
-    await safeClick(myLists.locator(".myListsListItem", { hasText: publicListTitle }));
+    await openSavedListsSegment(page, publicListTitle);
     await expect(myLists.getByTestId("list-public-row")).toHaveAttribute(
       "data-is-public",
       "true",
@@ -879,10 +890,8 @@ test("production smoke — major tabs (continue on failure)", async ({
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(tabBar(page)).toBeVisible({ timeout: 20_000 });
     await gotoTab(page, "saved");
-    await safeClick(savedMyListsButton(page));
+    await openSavedListsSegment(page, publicWebListTitle);
     const myLists = page.locator(".myListsScreen");
-    await expect(myLists).toBeVisible({ timeout: 15_000 });
-    await safeClick(myLists.locator(".myListsListItem", { hasText: publicWebListTitle }));
     await expect(myLists.getByTestId("list-public-row")).toHaveAttribute(
       "data-is-public",
       "true",
