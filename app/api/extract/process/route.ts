@@ -80,6 +80,35 @@ function createServiceSupabase() {
   });
 }
 
+/** Push via DB trigger (push-on-notification → swift-worker). Never throw. */
+async function notifyExtractComplete(
+  supabase: ReturnType<typeof createServiceSupabase>,
+  job: { id: string; user_id: string },
+  insertedCount: number,
+): Promise<void> {
+  if (insertedCount < 1) return;
+  try {
+    const id =
+      typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const { error } = await supabase.from("notifications").insert({
+      id,
+      user_id: job.user_id,
+      type: "extract_complete",
+      actor_id: job.user_id,
+      actor_username: "",
+      target_id: job.id,
+      target_text: String(insertedCount),
+    });
+    if (error) {
+      console.error("[extract] notify extract_complete failed", error.message);
+    }
+  } catch (e) {
+    console.error("[extract] notify extract_complete failed", e);
+  }
+}
+
 function truncateCaption(caption: string): string {
   if (caption.length <= CAPTION_MAX_CHARS) return caption;
   return caption.slice(0, CAPTION_MAX_CHARS);
@@ -871,6 +900,10 @@ export async function POST(req: Request) {
       })
       .eq("id", jobId);
     if (doneError) throw doneError;
+
+    // New places only — skip all_saved / failed (those return earlier or catch)
+    await notifyExtractComplete(supabase, job, rows.length);
+
     console.log(`[PindMap:perf] extract.process.db ${Date.now() - dbT0}ms`);
     console.log(`[PindMap:perf] extract.process.total ${Date.now() - routeT0}ms`);
     return NextResponse.json({ ok: true, inserted: rows.length });

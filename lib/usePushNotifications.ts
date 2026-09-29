@@ -60,14 +60,25 @@ export function usePushNotifications(userId: string | undefined) {
           if (event.token) await saveFcmToken(userId, event.token);
         });
 
+        // Foreground banners: capacitor.config FirebaseMessaging.presentationOptions: []
         notificationReceivedListener = await FirebaseMessaging.addListener("notificationReceived", (event) => {
+          const data = event.notification?.data as { type?: string } | undefined;
+          if (data?.type === "extract_complete") {
+            // App already shows extract UI when foreground — ignore
+            return;
+          }
           console.log("[push] 도착", event.notification);
         });
 
         notificationActionListener = await FirebaseMessaging.addListener("notificationActionPerformed", (event) => {
           console.log("[push] 클릭", event.notification?.data);
           const data = event.notification?.data as
-            | { type?: string; room_id?: string; post_id?: string; actor_username?: string }
+            | {
+                type?: string;
+                room_id?: string;
+                post_id?: string;
+                actor_username?: string;
+              }
             | undefined;
           if (data?.type === "message" && data?.room_id) {
             window.location.href = `/?openChatRoom=${encodeURIComponent(data.room_id)}`;
@@ -75,6 +86,9 @@ export function usePushNotifications(userId: string | undefined) {
             window.location.href = `/?postId=${encodeURIComponent(data.post_id)}`;
           } else if (data?.type === "follow" && data?.actor_username) {
             window.location.href = `/profile/${encodeURIComponent(data.actor_username)}`;
+          } else if (data?.type === "extract_complete") {
+            // Saved tab — places land there; extract review may also resume from storage
+            window.location.href = "/?tab=saved";
           }
         });
       } catch (e) {

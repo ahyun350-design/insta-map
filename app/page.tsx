@@ -4682,6 +4682,7 @@ function HomePageContent() {
               .from("notifications")
               .select("*")
               .eq("user_id", uid)
+              .in("type", ["like", "comment", "follow", "message"])
               .order("created_at", { ascending: false })
               .limit(50),
           ),
@@ -6662,6 +6663,15 @@ function HomePageContent() {
           },
           (payload) => {
             const newNotification = payload.new as Notification;
+            // System / push-only types — never list or in-app toast
+            if (
+              newNotification.type !== "like" &&
+              newNotification.type !== "comment" &&
+              newNotification.type !== "follow" &&
+              newNotification.type !== "message"
+            ) {
+              return;
+            }
             void (async () => {
               await userAvatarCacheRef.current.prefetchByIds([newNotification.actor_id]);
               const actorAvatarUrl = userAvatarCacheRef.current.getByUserId(newNotification.actor_id);
@@ -10716,6 +10726,10 @@ function HomePageContent() {
     }
     if (searchParams?.get("tab") === "messages") {
       setActiveTab("messages");
+      window.history.replaceState({}, "", "/");
+    }
+    if (searchParams?.get("tab") === "saved") {
+      setActiveTab("saved");
       window.history.replaceState({}, "", "/");
     }
     if (searchParams?.get("tab") === "home" && !searchParams?.get("postId")) {
