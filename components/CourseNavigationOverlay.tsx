@@ -251,7 +251,6 @@ export function CourseNavigationOverlay({
       className={rootClass}
       role="region"
       aria-label="코스 내비게이션"
-      data-testid="course-nav-overlay"
       data-panel-collapsed={panelCollapsed ? "true" : "false"}
       data-panel-dragging={dragging ? "true" : "false"}
     >

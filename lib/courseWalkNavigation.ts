@@ -408,23 +408,18 @@ export async function buildCourseWalkNavigationFromTmap(
   const totalDistanceM = segmentResults.reduce((sum, seg) => sum + seg.distanceM, 0);
   const totalTimeSec = segmentResults.reduce((sum, seg) => sum + seg.timeSec, 0);
 
-  return {
+  const navigation: CourseWalkNavigation = {
     segments: segmentResults,
     totalDistanceM,
     totalTimeSec,
     placeCount: stops.length,
     mergedPath: merged.length >= 2 ? merged : stops,
   };
-}
-
-/** Call only after the route was successfully painted (never cache a skipped draw). */
-export function cacheCourseWalkNavigationIfReady(
-  stops: LatLng[],
-  navigation: CourseWalkNavigation,
-  mode: string = "walk",
-): void {
-  if (isStraightLineCourseNavigation(navigation)) return;
-  setCachedCourseWalkNavigation(stops, navigation, mode);
+  // Do not cache straight fallbacks — allow a later retry to hit Tmap again
+  if (!isStraightLineCourseNavigation(navigation)) {
+    setCachedCourseWalkNavigation(stops, navigation, "walk");
+  }
+  return navigation;
 }
 
 /** @deprecated path-only — use buildCourseWalkNavigationFromTmap */

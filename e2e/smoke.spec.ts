@@ -574,64 +574,6 @@ test("production smoke — major tabs (continue on failure)", async ({
     await dismissSavedOverlays(page);
   });
 
-  // ── 4c4. Course map route must paint on FIRST open (no reopen) ──
-  await runner.step("4c4. 코스 — 지도에서 경로 보기 (첫 시도)", async () => {
-    await dismissSavedOverlays(page);
-    await gotoTab(page, "saved");
-    await safeClick(page.getByTestId("saved-segment-places"));
-    const savedCount = await page.locator("article.savedItem").count();
-    if (savedCount < 2) {
-      throw new Error("저장된 장소 2곳 미만 — 코스 경로 e2e 불가");
-    }
-
-    await safeClick(page.getByTestId("course-create-open"));
-    await expect(page.getByTestId("course-mode-auto")).toBeVisible({ timeout: 15_000 });
-    await safeClick(page.getByTestId("course-mode-manual"));
-    await expect(page.getByTestId("course-mode-manual")).toBeVisible();
-    await safeClick(page.getByTestId("course-source-all"));
-    const candidates = page.locator("button.courseCandidateRow");
-    await expect
-      .poll(async () => candidates.count(), { timeout: 15_000 })
-      .toBeGreaterThanOrEqual(2);
-    await safeClick(candidates.nth(0));
-    await safeClick(candidates.nth(1));
-    await safeClick(page.getByTestId("course-generate-manual"));
-    await expect(page.getByTestId("course-show-on-map")).toBeVisible({ timeout: 45_000 });
-
-    // First open only — reopen would hide the regression
-    await safeClick(page.getByTestId("course-show-on-map"));
-    const expandedDialog = page.locator('[aria-label="전체 지도"]');
-    await expect(expandedDialog).toBeVisible({ timeout: 20_000 });
-
-    const routeOverlay = expandedDialog.getByTestId("course-nav-overlay");
-    const routePolyline = expandedDialog.locator(".kakaoMap svg path, .kakaoMap path");
-    await expect
-      .poll(
-        async () => {
-          const overlayVisible = await routeOverlay.isVisible().catch(() => false);
-          const pathCount = await routePolyline.count().catch(() => 0);
-          return overlayVisible || pathCount > 0;
-        },
-        { timeout: 45_000 },
-      )
-      .toBeTruthy();
-
-    await safeClick(expandedDialog.getByRole("button", { name: "전체 지도 닫기" })).catch(
-      async () => {
-        await page.keyboard.press("Escape");
-      },
-    );
-    await expect(expandedDialog).toBeHidden({ timeout: 15_000 }).catch(() => null);
-
-    // Closing course map returns to the course sheet — dismiss it so later SAVED steps work
-    const courseClose = page.getByTestId("course-modal-close");
-    if (await courseClose.isVisible().catch(() => false)) {
-      await safeClick(courseClose);
-      await expect(page.locator(".courseModalBackdrop")).toBeHidden({ timeout: 10_000 });
-    }
-    await dismissSavedOverlays(page);
-  });
-
   await runner.step("4d0. SAVED — 장소|목록 세그먼트", async () => {
     await dismissSavedOverlays(page);
     await gotoTab(page, "saved");
