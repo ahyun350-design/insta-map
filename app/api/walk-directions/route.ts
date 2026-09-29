@@ -242,7 +242,7 @@ export async function POST(req: Request) {
     const bodyRecord = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
     const segmentsRaw = bodyRecord.segments;
     /** Ops/measure only: skip in-process L1 so L2 path can be timed after warm writes. */
-    const bypassL1 = req.headers.get("x-walk-bypass-l1") === "1";
+    const bypassL1 = bodyRecord.bypassL1 === true;
 
     const appKeyRaw = process.env.TMAP_APP_KEY;
     const appKey = appKeyRaw?.trim() ?? "";
