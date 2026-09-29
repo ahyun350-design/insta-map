@@ -18,13 +18,35 @@ type ExtractJobStatusRow = {
 export async function GET(req: Request) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
     const missingEnv: string[] = [];
     if (!supabaseUrl) missingEnv.push("NEXT_PUBLIC_SUPABASE_URL");
+    if (!anonKey) missingEnv.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
     if (!serviceKey) missingEnv.push("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceKey) {
+    if (!supabaseUrl || !anonKey || !serviceKey) {
       return NextResponse.json({ error: `서버 환경변수 미설정: ${missingEnv.join(", ")}` }, { status: 500 });
     }
+
+    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
+    if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+      return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
+    }
+    const jwt = authHeader.slice(7).trim();
+    if (!jwt) {
+      return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
+    }
+
+    const userClient = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+    });
+    const { data: authData, error: authError } = await userClient.auth.getUser(jwt);
+    const authUser = authData?.user;
+    if (authError || !authUser?.id) {
+      return NextResponse.json({ error: "유효하지 않은 세션입니다." }, { status: 401 });
+    }
+    const userId = authUser.id;
 
     const adminClient = createClient(
       supabaseUrl,
@@ -34,18 +56,12 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url);
     const jobId = url.searchParams.get("jobId")?.trim();
-    const userId = url.searchParams.get("userId")?.trim();
     if (!jobId) return NextResponse.json({ error: "jobId가 필요합니다." }, { status: 400 });
-    if (!userId) return NextResponse.json({ error: "userId가 필요합니다." }, { status: 400 });
-
-    const { data: userData, error: userError } = await adminClient.auth.admin.getUserById(userId);
-    if (userError || !userData.user) {
-      return NextResponse.json({ error: "유효하지 않은 사용자" }, { status: 401 });
-    }
 
     // 폴링마다 해당 유저의 10분+ 멈춤 job을 failed로 (현재 job 포함)
     await reclaimStaleExtractJobs(adminClient, { userId });
 
+    // Scoped to JWT sub — wrong owner → same 404 as missing (no existence leak)
     const { data, error } = await adminClient
       .from("extract_jobs")
       .select("id, status, progress_step, result_places, error_message")

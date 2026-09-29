@@ -5369,14 +5369,22 @@ function HomePageContent() {
       pollInFlightRef.current.add(jobId);
       try {
         const cacheBust = Date.now();
+        const {
+          data: { session: pollSession },
+        } = await supabase.auth.getSession();
+        const pollToken = pollSession?.access_token;
+        if (!pollToken) {
+          throw new Error("세션이 만료됐어요. 다시 로그인해 주세요.");
+        }
         const res = await fetch(
-          `/api/extract/status?jobId=${encodeURIComponent(jobId)}&userId=${encodeURIComponent(user.id)}&_t=${cacheBust}`,
+          `/api/extract/status?jobId=${encodeURIComponent(jobId)}&_t=${cacheBust}`,
           {
             credentials: "include",
             cache: "no-store",
             headers: {
               "Cache-Control": "no-cache, no-store, must-revalidate",
               Pragma: "no-cache",
+              Authorization: `Bearer ${pollToken}`,
             },
           },
         );
