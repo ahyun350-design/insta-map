@@ -249,6 +249,11 @@ import {
   readTmapWalkTotals,
   type CourseWalkNavigation,
 } from "@/lib/courseWalkNavigation";
+import {
+  courseWalkSessionCacheKey,
+  getCourseWalkSessionCache,
+  getOrBuildCourseWalkNavigation,
+} from "@/lib/courseWalkSessionCache";
 import { feedPostToPlaceSheet, placeRefFromPlaceSheet, type PlaceSheetData } from "@/lib/placeSheet";
 import { PostGrid } from "@/components/PostGrid";
 import { PostGridCell } from "@/components/PostGridCell";
@@ -4272,6 +4277,45 @@ function HomePageContent() {
   useEffect(() => {
     if (viewingSavedCourseIdRef.current) return;
     setSavedCourseId(null);
+  }, [courseResult]);
+
+  /** Prefetch walk route 300ms after course detail opens (detail only — not list). */
+  useEffect(() => {
+    if (!courseResult || courseResult.length < 2) return;
+    const stops = courseResult.map((p) => ({ lat: p.lat, lng: p.lng }));
+    const stopNames = courseResult.map((p) => p.name);
+    const key = courseWalkSessionCacheKey(stops);
+    if (getCourseWalkSessionCache(key)) {
+      logCourseRoute("prefetch.skip", { reason: "cache_hit", key, stopCount: stops.length });
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      logCourseRoute("prefetch.start", { key, stopCount: stops.length });
+      const t0 = Date.now();
+      void getOrBuildCourseWalkNavigation(stops, stopNames)
+        .then((nav) => {
+          if (cancelled) return;
+          logCourseRoute("prefetch.done", {
+            ms: Date.now() - t0,
+            pathLength: nav.mergedPath.length,
+            segments: nav.segments.length,
+            key,
+          });
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          logCourseRoute("prefetch.fail", {
+            message: err instanceof Error ? err.message : String(err),
+            key,
+          });
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [courseResult]);
 
   useEffect(() => {
