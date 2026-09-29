@@ -263,7 +263,8 @@ export function MyListsScreen({
       setMenuClosing(false);
       return;
     }
-    void loadLists({ silent: hasListsRef.current });
+    // Always refetch on open — placeListSheet may have created/renamed lists while closed
+    void loadLists({ force: true, silent: hasListsRef.current });
     const scrollTop = detailScrollTopRef.current;
     if (scrollTop > 0) {
       requestAnimationFrame(() => {
