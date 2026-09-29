@@ -258,85 +258,37 @@ export function formatSegmentWalkSummary(segment: CourseWalkSegment): string {
   return `도보 ${formatWalkDuration(segment.timeSec)} · ${formatWalkDistance(segment.distanceM)}`;
 }
 
-async function fetchWalkDirectionsSegment(
+function straightLineFallbackSegment(
   origin: LatLng,
   destination: LatLng,
   fromName: string,
   toName: string,
   index: number,
-): Promise<CourseWalkSegment> {
-  try {
-    const token = await getAccessToken();
-    if (!token) {
-      const distanceM = Math.round(haversineMeters(origin, destination));
-      return {
-        index,
-        fromName,
-        toName,
-        fromLat: origin.lat,
-        fromLng: origin.lng,
-        toLat: destination.lat,
-        toLng: destination.lng,
-        distanceM,
-        timeSec: estimateWalkTimeSec(distanceM),
-        path: straightLineSegmentPath(origin, destination),
-        steps: [
-          { description: `${fromName} 출발`, lat: origin.lat, lng: origin.lng, pointType: "SP" },
-          { description: `${toName} 도착`, lat: destination.lat, lng: destination.lng, pointType: "EP" },
-        ],
-      };
-    }
-    const res = await fetch("/api/walk-directions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ origin, destination }),
-    });
-    if (!res.ok) {
-      const distanceM = Math.round(haversineMeters(origin, destination));
-      return {
-        index,
-        fromName,
-        toName,
-        fromLat: origin.lat,
-        fromLng: origin.lng,
-        toLat: destination.lat,
-        toLng: destination.lng,
-        distanceM,
-        timeSec: estimateWalkTimeSec(distanceM),
-        path: straightLineSegmentPath(origin, destination),
-        steps: [
-          { description: `${fromName} 출발`, lat: origin.lat, lng: origin.lng, pointType: "SP" },
-          { description: `${toName} 도착`, lat: destination.lat, lng: destination.lng, pointType: "EP" },
-        ],
-      };
-    }
-    const data = (await res.json()) as TmapWalkGeoJson;
-    return parseTmapWalkGeoJsonToSegment(data, origin, destination, fromName, toName, index);
-  } catch {
-    const distanceM = Math.round(haversineMeters(origin, destination));
-    return {
-      index,
-      fromName,
-      toName,
-      fromLat: origin.lat,
-      fromLng: origin.lng,
-      toLat: destination.lat,
-      toLng: destination.lng,
-      distanceM,
-      timeSec: estimateWalkTimeSec(distanceM),
-      path: straightLineSegmentPath(origin, destination),
-      steps: [
-        { description: `${fromName} 출발`, lat: origin.lat, lng: origin.lng, pointType: "SP" },
-        { description: `${toName} 도착`, lat: destination.lat, lng: destination.lng, pointType: "EP" },
-      ],
-    };
-  }
+): CourseWalkSegment {
+  const distanceM = Math.round(haversineMeters(origin, destination));
+  return {
+    index,
+    fromName,
+    toName,
+    fromLat: origin.lat,
+    fromLng: origin.lng,
+    toLat: destination.lat,
+    toLng: destination.lng,
+    distanceM,
+    timeSec: estimateWalkTimeSec(distanceM),
+    path: straightLineSegmentPath(origin, destination),
+    steps: [
+      { description: `${fromName} 출발`, lat: origin.lat, lng: origin.lng, pointType: "SP" },
+      { description: `${toName} 도착`, lat: destination.lat, lng: destination.lng, pointType: "EP" },
+    ],
+  };
 }
 
-/** 코스 장소 순서대로 Tmap 보행 경로 + 구간별 안내 데이터 생성 */
+type BatchWalkResultItem =
+  | { ok: true; data: TmapWalkGeoJson }
+  | { ok: false; error?: string; message?: string; fallback?: string };
+
+/** 코스 장소 순서대로 Tmap 보행 경로 + 구간별 안내 데이터 생성 (배치 API, auth 1회) */
 export async function buildCourseWalkNavigationFromTmap(
   stops: LatLng[],
   stopNames: string[],
@@ -351,17 +303,59 @@ export async function buildCourseWalkNavigationFromTmap(
     };
   }
 
-  const segmentResults = await Promise.all(
-    Array.from({ length: stops.length - 1 }, (_, i) =>
-      fetchWalkDirectionsSegment(
-        stops[i]!,
-        stops[i + 1]!,
-        stopNames[i] ?? `장소 ${i + 1}`,
-        stopNames[i + 1] ?? `장소 ${i + 2}`,
-        i,
-      ),
-    ),
-  );
+  const pairs = Array.from({ length: stops.length - 1 }, (_, i) => ({
+    from: stops[i]!,
+    to: stops[i + 1]!,
+    fromName: stopNames[i] ?? `장소 ${i + 1}`,
+    toName: stopNames[i + 1] ?? `장소 ${i + 2}`,
+    index: i,
+  }));
+
+  const fallbackAll = () =>
+    pairs.map((p) =>
+      straightLineFallbackSegment(p.from, p.to, p.fromName, p.toName, p.index),
+    );
+
+  let segmentResults: CourseWalkSegment[];
+  try {
+    const token = await getAccessToken();
+    if (!token) {
+      segmentResults = fallbackAll();
+    } else {
+      const res = await fetch("/api/walk-directions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          segments: pairs.map((p) => ({ from: p.from, to: p.to })),
+        }),
+      });
+      if (!res.ok) {
+        segmentResults = fallbackAll();
+      } else {
+        const body = (await res.json()) as { results?: BatchWalkResultItem[] };
+        const results = Array.isArray(body.results) ? body.results : [];
+        segmentResults = pairs.map((p, i) => {
+          const item = results[i];
+          if (item && item.ok && item.data) {
+            return parseTmapWalkGeoJsonToSegment(
+              item.data,
+              p.from,
+              p.to,
+              p.fromName,
+              p.toName,
+              p.index,
+            );
+          }
+          return straightLineFallbackSegment(p.from, p.to, p.fromName, p.toName, p.index);
+        });
+      }
+    }
+  } catch {
+    segmentResults = fallbackAll();
+  }
 
   const merged: LatLng[] = [];
   for (const segment of segmentResults) {
