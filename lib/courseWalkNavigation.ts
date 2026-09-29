@@ -32,39 +32,6 @@ export type CourseWalkNavigation = {
   mergedPath: LatLng[];
 };
 
-/** Session-scoped memory cache — same stop order + mode skips Tmap. */
-const courseWalkNavCache = new Map<string, CourseWalkNavigation>();
-
-/** Round coords so tiny float noise does not bust the key; order is part of the key. */
-export function courseWalkCacheKey(stops: LatLng[], mode: string = "walk"): string {
-  const coords = stops
-    .map((s) => `${Number(s.lat).toFixed(6)},${Number(s.lng).toFixed(6)}`)
-    .join("|");
-  return `${mode}:${coords}`;
-}
-
-export function getCachedCourseWalkNavigation(
-  stops: LatLng[],
-  mode: string = "walk",
-): CourseWalkNavigation | null {
-  const hit = courseWalkNavCache.get(courseWalkCacheKey(stops, mode));
-  return hit ? structuredClone(hit) : null;
-}
-
-export function setCachedCourseWalkNavigation(
-  stops: LatLng[],
-  navigation: CourseWalkNavigation,
-  mode: string = "walk",
-): void {
-  courseWalkNavCache.set(courseWalkCacheKey(stops, mode), structuredClone(navigation));
-}
-
-/** True when every segment is a 2-point stop-to-stop line (API miss / no token). */
-export function isStraightLineCourseNavigation(navigation: CourseWalkNavigation): boolean {
-  if (navigation.segments.length === 0) return navigation.mergedPath.length <= 2;
-  return navigation.segments.every((seg) => seg.path.length <= 2);
-}
-
 type TmapWalkFeature = {
   geometry?: { type?: string; coordinates?: number[] | number[][] };
   properties?: {
@@ -384,9 +351,6 @@ export async function buildCourseWalkNavigationFromTmap(
     };
   }
 
-  const cached = getCachedCourseWalkNavigation(stops, "walk");
-  if (cached) return cached;
-
   const segmentResults = await Promise.all(
     Array.from({ length: stops.length - 1 }, (_, i) =>
       fetchWalkDirectionsSegment(
@@ -408,18 +372,13 @@ export async function buildCourseWalkNavigationFromTmap(
   const totalDistanceM = segmentResults.reduce((sum, seg) => sum + seg.distanceM, 0);
   const totalTimeSec = segmentResults.reduce((sum, seg) => sum + seg.timeSec, 0);
 
-  const navigation: CourseWalkNavigation = {
+  return {
     segments: segmentResults,
     totalDistanceM,
     totalTimeSec,
     placeCount: stops.length,
     mergedPath: merged.length >= 2 ? merged : stops,
   };
-  // Do not cache straight fallbacks — allow a later retry to hit Tmap again
-  if (!isStraightLineCourseNavigation(navigation)) {
-    setCachedCourseWalkNavigation(stops, navigation, "walk");
-  }
-  return navigation;
 }
 
 /** @deprecated path-only — use buildCourseWalkNavigationFromTmap */
