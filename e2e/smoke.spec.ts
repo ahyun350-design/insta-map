@@ -709,6 +709,8 @@ test("production smoke — major tabs (continue on failure)", async ({
 
     const items = page.locator("article.savedItem");
     await expect(items.first()).toBeVisible({ timeout: 20_000 });
+    const placeName =
+      (await items.first().locator(".savedName").textContent())?.trim() ?? "";
     await safeClick(items.first());
     const sheet = page.locator(".placeDetailSheet");
     await expect(sheet).toBeVisible({ timeout: 15_000 });
@@ -719,6 +721,13 @@ test("production smoke — major tabs (continue on failure)", async ({
     await addSheet.locator(".placeListSheetCreateInput").fill(publicListTitle);
     await safeClick(addSheet.getByRole("button", { name: "만들기" }));
     await expect(addSheet.getByText(publicListTitle)).toBeVisible({ timeout: 15_000 });
+    // createList + addPlace 완료까지 대기 (닫기 레이스로 빈 목록 되는 것 방지)
+    await expect(addSheet.getByRole("button", { name: "목록 저장 중…" })).toHaveCount(0, {
+      timeout: 20_000,
+    });
+    await expect(addSheet.getByRole("button", { name: "+ 새 목록 만들기" })).toBeVisible({
+      timeout: 10_000,
+    });
     await safeClick(addSheet.getByRole("button", { name: "닫기" }));
     await safeClick(sheet.getByRole("button", { name: "닫기" })).catch(() => null);
     await dismissSavedOverlays(page);
@@ -731,10 +740,9 @@ test("production smoke — major tabs (continue on failure)", async ({
     await expect(myLists.getByTestId("list-public-toggle")).toBeVisible({ timeout: 10_000 });
     const listId = await myLists.getByTestId("list-public-row").getAttribute("data-list-id");
     if (!listId) throw new Error("list-public-row missing data-list-id");
-
-    const detailName = myLists.locator(".myListsDetailItem .savedName").first();
-    await expect(detailName).toBeVisible({ timeout: 20_000 });
-    const placeName = (await detailName.textContent())?.trim() ?? "";
+    await expect(myLists.locator(".myListsDetailItem").first()).toBeVisible({
+      timeout: 20_000,
+    });
 
     // Enable public — confirm dialog required
     await safeClick(myLists.getByTestId("list-public-toggle"));
