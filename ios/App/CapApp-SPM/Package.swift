@@ -19,9 +19,9 @@ let package = Package(
         .package(name: "CapacitorKeyboard", path: "../../../node_modules/@capacitor/keyboard"),
         .package(name: "CapacitorPreferences", path: "../../../node_modules/@capacitor/preferences"),
         .package(name: "CapacitorSplashScreen", path: "../../../node_modules/@capacitor/splash-screen"),
+        .package(name: "PindmapAuthSession", path: "../../../plugins/pindmap-auth-session"),
         .package(name: "PindmapNativeMap", path: "../../../spike/v7-native-map/plugin"),
-        .package(name: "PindmapShare", path: "../../../plugins/pindmap-share"),
-        .package(name: "PindmapAuthSession", path: "../../../plugins/pindmap-auth-session")
+        .package(name: "PindmapShare", path: "../../../plugins/pindmap-share")
     ],
     targets: [
         .target(
@@ -36,9 +36,9 @@ let package = Package(
                 .product(name: "CapacitorKeyboard", package: "CapacitorKeyboard"),
                 .product(name: "CapacitorPreferences", package: "CapacitorPreferences"),
                 .product(name: "CapacitorSplashScreen", package: "CapacitorSplashScreen"),
+                .product(name: "PindmapAuthSession", package: "PindmapAuthSession"),
                 .product(name: "PindmapNativeMap", package: "PindmapNativeMap"),
-                .product(name: "PindmapShare", package: "PindmapShare"),
-                .product(name: "PindmapAuthSession", package: "PindmapAuthSession")
+                .product(name: "PindmapShare", package: "PindmapShare")
             ]
         )
     ]

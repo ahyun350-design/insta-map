@@ -29,3 +29,8 @@ scripts/localdata/.db_url
 scripts/localdata/raw_c/
 .xcode-derived/
 .worktrees/
+
+# Xcode / SPM / TS build noise
+**/xcuserdata/
+plugins/**/.swiftpm/
+tsconfig.tsbuildinfo
