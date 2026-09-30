@@ -244,7 +244,6 @@ import {
   type WhatsNewPack,
 } from "@/lib/whatsNew";
 import {
-  buildCourseWalkNavigationFromTmap,
   parseTmapWalkGeoJsonToPath,
   readTmapWalkTotals,
   type CourseWalkNavigation,
@@ -1355,10 +1354,6 @@ function logCourseRoute(step: string, detail?: Record<string, unknown>) {
   } else {
     console.log(`[course.route] ${step}`);
   }
-}
-
-function courseRouteStopsKey(stops: { lat: number; lng: number }[]): string {
-  return stops.map((s) => `${Number(s.lat).toFixed(6)},${Number(s.lng).toFixed(6)}`).join("|");
 }
 
 function buildCourseFullscreenMarkers(coursePlaces: CoursePlace[]): FullscreenSearchMarkerSnapshot[] {
@@ -3050,10 +3045,11 @@ function HomePageContent() {
         );
       }
 
-      // No route cache in this build (reverted) — still log for first vs second open comparison
+      const sessionKey = courseWalkSessionCacheKey(courseRoutePath);
+      const sessionHit = getCourseWalkSessionCache(sessionKey);
       logCourseRoute("cache", {
-        hit: false,
-        key: `walk:${courseRouteStopsKey(courseRoutePath)}`,
+        hit: Boolean(sessionHit),
+        key: sessionKey,
       });
 
       await applyRouteAndRefreshMarkers(courseRoutePath, "preview-straight");
@@ -3063,13 +3059,18 @@ function HomePageContent() {
         coursePlaces?.length === courseRoutePath.length
           ? coursePlaces.map((place) => place.name)
           : courseRoutePath.map((_, index) => `장소 ${index + 1}`);
-      logCourseRoute("tmap.start", { stopCount: courseRoutePath.length, sessionId });
+      logCourseRoute("tmap.start", {
+        stopCount: courseRoutePath.length,
+        sessionId,
+        sessionHit: Boolean(sessionHit),
+      });
       const tmapT0 = Date.now();
-      const navigation = await buildCourseWalkNavigationFromTmap(courseRoutePath, stopNames);
+      const navigation = await getOrBuildCourseWalkNavigation(courseRoutePath, stopNames);
       logCourseRoute("tmap.done", {
         ms: Date.now() - tmapT0,
         pathLength: navigation.mergedPath.length,
         segments: navigation.segments.length,
+        sessionHit: Boolean(sessionHit),
       });
       if (!isSessionStillValid()) {
         logCourseRoute("paint.skip", {
@@ -8866,7 +8867,7 @@ function HomePageContent() {
 
       setDirectionsLoading(true);
       try {
-        const navigation = await buildCourseWalkNavigationFromTmap(stops, stopNames);
+        const navigation = await getOrBuildCourseWalkNavigation(stops, stopNames);
         if (!expandedMapRef.current || !courseResult) return;
         fullscreenCourseNavigationRef.current = navigation;
         setCourseNavigation(navigation);
@@ -9009,24 +9010,31 @@ function HomePageContent() {
 
     setDirectionsLoading(true);
     try {
-      logCourseRoute("cache", { hit: false, key: `walk:${courseRouteStopsKey(stops)}` });
+      const sessionKey = courseWalkSessionCacheKey(stops);
+      const sessionHit = getCourseWalkSessionCache(sessionKey);
+      logCourseRoute("cache", { hit: Boolean(sessionHit), key: sessionKey });
       logCourseRoute("map.ready", {
         ready: Boolean(expandedMapRef.current && window.kakao?.maps),
         waitedMs: 800,
         branch: "web",
       });
       logCourseRoute("paint.call", { source: "preview-straight", pathLength: stops.length });
-      applyWebCourseRoutePath(stops, false);
+      applyWebCourseRoutePath(stops, false, { preview: true });
       logCourseRoute("paint.done", { source: "preview-straight", pathLength: stops.length });
 
-      logCourseRoute("tmap.start", { stopCount: stops.length, branch: "web" });
+      logCourseRoute("tmap.start", {
+        stopCount: stops.length,
+        branch: "web",
+        sessionHit: Boolean(sessionHit),
+      });
       const tmapT0 = Date.now();
-      const navigation = await buildCourseWalkNavigationFromTmap(stops, stopNames);
+      const navigation = await getOrBuildCourseWalkNavigation(stops, stopNames);
       logCourseRoute("tmap.done", {
         ms: Date.now() - tmapT0,
         pathLength: navigation.mergedPath.length,
         segments: navigation.segments.length,
         branch: "web",
+        sessionHit: Boolean(sessionHit),
       });
       if (!expandedMapRef.current || !courseResult) {
         logCourseRoute("paint.skip", {
@@ -9044,7 +9052,7 @@ function HomePageContent() {
         source: "walk-final",
         pathLength: navigation.mergedPath.length,
       });
-      applyWebCourseRoutePath(navigation.mergedPath);
+      applyWebCourseRoutePath(navigation.mergedPath, true, { preview: false });
       logCourseRoute("paint.done", {
         source: "walk-final",
         pathLength: navigation.mergedPath.length,
@@ -9055,7 +9063,7 @@ function HomePageContent() {
         reason: "web_exception",
         message: err instanceof Error ? err.message : String(err),
       });
-      applyWebCourseRoutePath(stops);
+      applyWebCourseRoutePath(stops, true, { preview: true });
     } finally {
       setDirectionsLoading(false);
     }
@@ -10285,8 +10293,13 @@ function HomePageContent() {
     setDirectionsChosen(false);
   };
 
-  const applyWebCourseRoutePath = useCallback((path: LatLng[], fitBounds = true) => {
+  const applyWebCourseRoutePath = useCallback((
+    path: LatLng[],
+    fitBounds = true,
+    opts?: { preview?: boolean },
+  ) => {
     if (!expandedMapRef.current || !window.kakao?.maps || path.length < 2) return;
+    const preview = opts?.preview === true;
     // 관리자 실험: 카카오 Polyline 대신 HTML 오버레이 경로 갱신
     if (courseMapDesignActiveRef.current) {
       if (routePolylineRef.current) {
@@ -10310,10 +10323,10 @@ function HomePageContent() {
     );
     routePolylineRef.current = new window.kakao.maps.Polyline({
       path: kakaoPath,
-      strokeWeight: 3,
-      strokeColor: "#1a2a7a",
-      strokeOpacity: 0.7,
-      strokeStyle: "shortdash",
+      strokeWeight: preview ? 3 : 4,
+      strokeColor: preview ? "#c5cad3" : "#1a2a7a",
+      strokeOpacity: preview ? 0.55 : 0.95,
+      strokeStyle: preview ? "shortdash" : "solid",
     });
     routePolylineRef.current.setMap(expandedMapRef.current);
     if (fitBounds) {
@@ -15358,6 +15371,30 @@ function HomePageContent() {
                         </>
                       )}
                       <MapResearchAreaButton visible={showMapResearchButton} onResearch={handleResearchThisArea} />
+                      {showCourseRoute && directionsLoading && !courseNavigation && (
+                        <div
+                          role="status"
+                          aria-live="polite"
+                          style={{
+                            position: "absolute",
+                            top: "max(12px, env(safe-area-inset-top))",
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            zIndex: 25,
+                            padding: "8px 14px",
+                            borderRadius: 8,
+                            background: "rgba(255,255,255,0.92)",
+                            color: "#5b6470",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            boxShadow: "0 1px 4px rgba(0,0,0,0.12)",
+                            pointerEvents: "none",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          경로를 계산하고 있어요
+                        </div>
+                      )}
                       {showCourseRoute && courseNavigation && (
                         <CourseNavigationOverlay
                           navigation={courseNavigation}
