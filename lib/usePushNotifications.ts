@@ -87,7 +87,7 @@ export function usePushNotifications(userId: string | undefined) {
           } else if (data?.type === "follow" && data?.actor_username) {
             window.location.href = `/profile/${encodeURIComponent(data.actor_username)}`;
           } else if (data?.type === "extract_complete") {
-            // Saved tab — places land there; extract review may also resume from storage
+            // Saved tab — places land there; extract review resumes via /api/extract/pending-review
             window.location.href = "/?tab=saved";
           }
         });

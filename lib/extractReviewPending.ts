@@ -1,4 +1,7 @@
-/** Pending extract complete review (2+ newly inserted places). Client-only. */
+/**
+ * Extract complete review helpers.
+ * Pending/done localStorage is a cache; server `extract_jobs.reviewed_at` is source of truth.
+ */
 
 export type ExtractReviewPlace = {
   id: string;
@@ -139,4 +142,71 @@ export function getFreshExtractReviewPending(now = Date.now()): ExtractReviewPen
   if (pending.places.length === 1 && pending.allowSingle) return pending;
   clearExtractReviewPending();
   return null;
+}
+
+/** Server: latest completed & unreviewed job (24h, places ≥ 1). */
+export async function fetchPendingExtractReview(
+  accessToken: string,
+): Promise<ExtractReviewPending | null> {
+  const token = accessToken.trim();
+  if (!token) return null;
+  try {
+    const res = await fetch("/api/extract/pending-review", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      jobId?: string | null;
+      places?: ExtractReviewPlace[];
+      at?: number | null;
+    };
+    const jobId = typeof data.jobId === "string" ? data.jobId.trim() : "";
+    if (!jobId || !Array.isArray(data.places) || data.places.length < 1) return null;
+    const places = data.places.filter(
+      (p): p is ExtractReviewPlace =>
+        !!p &&
+        typeof p.id === "string" &&
+        p.id.trim().length > 0 &&
+        typeof p.name === "string" &&
+        typeof p.address === "string" &&
+        typeof p.category === "string",
+    );
+    if (places.length < 1) return null;
+    const at =
+      typeof data.at === "number" && Number.isFinite(data.at) ? data.at : Date.now();
+    if (!isExtractReviewFresh(at)) return null;
+    return {
+      jobId,
+      places,
+      at,
+      ...(places.length === 1 ? { allowSingle: true } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Server: set extract_jobs.reviewed_at (idempotent). */
+export async function markExtractReviewReviewedOnServer(
+  accessToken: string,
+  jobId: string,
+): Promise<boolean> {
+  const token = accessToken.trim();
+  const id = jobId.trim();
+  if (!token || !id) return false;
+  try {
+    const res = await fetch("/api/extract/mark-reviewed", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ jobId: id }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

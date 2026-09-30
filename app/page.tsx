@@ -41,8 +41,11 @@ import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay, EXTRACT_EMPTY_RESULT_RAW } from "@/components/ExtractLoadingOverlay";
 import {
   clearExtractReviewPending,
+  fetchPendingExtractReview,
   getFreshExtractReviewPending,
+  isExtractReviewDone,
   markExtractReviewDone,
+  markExtractReviewReviewedOnServer,
   writeExtractReviewPending,
   type ExtractReviewPlace,
 } from "@/lib/extractReviewPending";
@@ -5264,15 +5267,42 @@ function HomePageContent() {
     setExtractReviewConfirming(false);
   }, []);
 
-  /** × / backdrop — keep all places; mark multi-review done so it won't reappear */
+  const showExtractOverlayRef = useRef(showExtractOverlay);
+  showExtractOverlayRef.current = showExtractOverlay;
+  const activeJobsRef = useRef(activeJobs);
+  activeJobsRef.current = activeJobs;
+  const extractReviewRestoreInFlightRef = useRef(false);
+
+  /** Local + server reviewed_at — source of truth is server. */
+  const completeExtractReview = useCallback(async (jobId: string | null | undefined) => {
+    const id = typeof jobId === "string" ? jobId.trim() : "";
+    if (!id) {
+      clearExtractReviewPending();
+      return;
+    }
+    markExtractReviewDone(id);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (token) await markExtractReviewReviewedOnServer(token, id);
+    } catch {
+      /* local done already; next restore may retry server mark */
+    }
+  }, []);
+
+  /** × / backdrop — keep all places; mark review done so it won't reappear */
   const dismissExtractOverlay = useCallback(() => {
-    if (extractReviewJobId && (extractReviewPlaces?.length ?? 0) >= 2) {
-      markExtractReviewDone(extractReviewJobId);
+    const jobId = extractReviewJobId;
+    const placeCount = extractReviewPlaces?.length ?? 0;
+    if (jobId && placeCount >= 1) {
+      void completeExtractReview(jobId);
     } else {
       clearExtractReviewPending();
     }
     resetExtractOverlayUi();
-  }, [extractReviewJobId, extractReviewPlaces, resetExtractOverlayUi]);
+  }, [extractReviewJobId, extractReviewPlaces, completeExtractReview, resetExtractOverlayUi]);
 
   const presentExtractReview = useCallback((jobId: string, places: ExtractReviewPlace[]) => {
     if (places.length === 0) return;
@@ -5286,23 +5316,85 @@ function HomePageContent() {
     setShowExtractOverlay(true);
   }, []);
 
+  /**
+   * Restore unreviewed complete job from server (24h, places ≥ 1).
+   * Skip when extract overlay is already open or an in-flight extract is tracked.
+   */
   const tryRestoreExtractReview = useCallback(() => {
-    if (showExtractOverlay && extractOverlayComplete && (extractReviewPlaces?.length ?? 0) > 0) {
-      return;
-    }
-    const pending = getFreshExtractReviewPending();
-    if (!pending) return;
-    // Multi pending stays in storage until confirm/×; single flash (e2e) is one-shot
-    if (pending.places.length === 1) {
-      clearExtractReviewPending();
-    }
-    presentExtractReview(pending.jobId, pending.places);
-  }, [
-    showExtractOverlay,
-    extractOverlayComplete,
-    extractReviewPlaces,
-    presentExtractReview,
-  ]);
+    if (showExtractOverlayRef.current) return;
+    const hasInFlight = activeJobsRef.current.some(
+      (job) => job.status === "pending" || job.status === "processing",
+    );
+    if (hasInFlight) return;
+    if (extractReviewRestoreInFlightRef.current) return;
+    extractReviewRestoreInFlightRef.current = true;
+
+    void (async () => {
+      try {
+        // Logged-out: never call /api/extract/pending-review
+        if (!userIdRef.current) {
+          if (showExtractOverlayRef.current) return;
+          const local = getFreshExtractReviewPending();
+          if (!local) return;
+          if (local.places.length === 1) clearExtractReviewPending();
+          presentExtractReview(local.jobId, local.places);
+          return;
+        }
+
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) {
+          // Session missing: localStorage only (no pending-review)
+          if (showExtractOverlayRef.current) return;
+          const local = getFreshExtractReviewPending();
+          if (!local) return;
+          if (local.places.length === 1) clearExtractReviewPending();
+          presentExtractReview(local.jobId, local.places);
+          return;
+        }
+
+        const pending = await fetchPendingExtractReview(token);
+        if (showExtractOverlayRef.current) return;
+        const stillInFlight = activeJobsRef.current.some(
+          (job) => job.status === "pending" || job.status === "processing",
+        );
+        if (stillInFlight) return;
+
+        if (!pending) {
+          const local = getFreshExtractReviewPending();
+          if (!local) return;
+          // Local-only pending: sync server mark if already done locally
+          if (isExtractReviewDone(local.jobId)) return;
+          writeExtractReviewPending({
+            ...local,
+            ...(local.places.length === 1 ? { allowSingle: true } : {}),
+          });
+          if (local.places.length === 1) clearExtractReviewPending();
+          presentExtractReview(local.jobId, local.places);
+          return;
+        }
+
+        // Already dismissed on this device before server column existed
+        if (isExtractReviewDone(pending.jobId)) {
+          await markExtractReviewReviewedOnServer(token, pending.jobId);
+          clearExtractReviewPending();
+          return;
+        }
+
+        writeExtractReviewPending({
+          jobId: pending.jobId,
+          places: pending.places,
+          at: pending.at,
+          ...(pending.places.length === 1 ? { allowSingle: true } : {}),
+        });
+        presentExtractReview(pending.jobId, pending.places);
+      } finally {
+        extractReviewRestoreInFlightRef.current = false;
+      }
+    })();
+  }, [presentExtractReview]);
 
   const confirmExtractReview = useCallback(
     async (keepIds: string[], removeIds: string[]) => {
@@ -5350,8 +5442,7 @@ function HomePageContent() {
           }
           void refreshSavedPlaceListColors();
         }
-        if (jobId) markExtractReviewDone(jobId);
-        else clearExtractReviewPending();
+        await completeExtractReview(jobId);
         resetExtractOverlayUi();
         if (removeIds.length > 0 && keepIds.length === 0) {
           showToast("저장을 취소했어요", "info");
@@ -5376,6 +5467,7 @@ function HomePageContent() {
     [
       extractReviewConfirming,
       extractReviewJobId,
+      completeExtractReview,
       resetExtractOverlayUi,
       refreshSavedPlaceListColors,
       showToast,
@@ -5390,7 +5482,10 @@ function HomePageContent() {
     if ((extractReviewPlaces?.length ?? 0) >= 2) return;
     // 목록 시트 연 동안 자동 닫힘 보류
     if (addToListTarget) return;
+    const jobId = extractReviewJobId;
     const timer = window.setTimeout(() => {
+      // 1곳 자동 닫힘도 서버 reviewed_at 기록 — 재진입 시 재표시 방지
+      if (jobId) void completeExtractReview(jobId);
       resetExtractOverlayUi();
     }, 1800);
     return () => window.clearTimeout(timer);
@@ -5401,7 +5496,9 @@ function HomePageContent() {
     extractOverlayBackground,
     extractOverlayCompleteVariant,
     extractReviewPlaces,
+    extractReviewJobId,
     addToListTarget,
+    completeExtractReview,
     resetExtractOverlayUi,
   ]);
 
@@ -10981,6 +11078,8 @@ function HomePageContent() {
     if (searchParams?.get("tab") === "saved") {
       setActiveTab("saved");
       window.history.replaceState({}, "", "/");
+      // Push extract_complete → /?tab=saved: restore server unreviewed review overlay
+      tryRestoreExtractReview();
     }
     if (searchParams?.get("tab") === "home" && !searchParams?.get("postId")) {
       setActiveTab("home");
@@ -10989,7 +11088,7 @@ function HomePageContent() {
       }
       window.history.replaceState({}, "", "/");
     }
-  }, [searchParams]);
+  }, [searchParams, tryRestoreExtractReview]);
 
   useLayoutEffect(() => {
     if (searchParams?.get("postId")) {
