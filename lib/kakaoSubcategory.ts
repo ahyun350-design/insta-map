@@ -23,6 +23,7 @@ export type SubCategory =
   | "이자카야"
   | "와인바"
   | "칵테일바"
+  | "포차"
   | "문화시설"
   | "관광명소"
   | "공원"
@@ -41,7 +42,7 @@ export const SUBCATEGORIES_BY_CATEGORY: Record<
   맛집: ["한식", "일식", "중식", "양식", "분식", "아시안", "치킨", "고기"],
   카페: ["커피", "베이커리", "디저트", "테마카페"],
   쇼핑: ["패션", "생활용품", "서점", "문구", "뷰티"],
-  술집: ["호프", "이자카야", "와인바", "칵테일바"],
+  술집: ["호프", "이자카야", "와인바", "칵테일바", "포차"],
   여행지: ["문화시설", "관광명소", "공원"],
   놀거리: ["사우나", "여가시설", "스포츠"],
   숙소: ["호텔", "펜션", "리조트", "게스트하우스"],
@@ -131,6 +132,9 @@ export function resolveKakaoSubcategory(
       if (l3 === "일본식주점") return accept(appCategory, "이자카야");
       if (l3 === "와인바") return accept(appCategory, "와인바");
       if (l3 === "칵테일바") return accept(appCategory, "칵테일바");
+      if (l3 === "실내포장마차" || l3 === "오뎅바") {
+        return accept(appCategory, "포차");
+      }
       return null;
     }
     case "여행지": {
