@@ -59,7 +59,7 @@ enum PindmapAuthKeychain {
       kSecAttrAccount as String: account,
       kSecAttrAccessGroup as String: accessGroup,
       kSecValueData as String: Data(value.utf8),
-      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
     ]
     let status = SecItemAdd(query as CFDictionary, nil)
     guard status == errSecSuccess else {
