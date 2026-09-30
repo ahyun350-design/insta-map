@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireBearerUser } from "@/lib/requireBearerUser";
+import { requireBearerClaims } from "@/lib/requireBearerClaims";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +15,7 @@ type KakaoKeywordDoc = {
 
 export async function GET(req: Request) {
   try {
-    const auth = await requireBearerUser(req);
+    const auth = await requireBearerClaims(req);
     if ("error" in auth) return auth.error;
 
     const { searchParams } = new URL(req.url);

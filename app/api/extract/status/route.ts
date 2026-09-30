@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { Place } from "@/app/api/extract/_shared";
 import { reclaimStaleExtractJobs } from "@/app/api/extract/_reclaim";
+import { requireBearerClaims } from "@/lib/requireBearerClaims";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,35 +19,17 @@ type ExtractJobStatusRow = {
 export async function GET(req: Request) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
     const missingEnv: string[] = [];
     if (!supabaseUrl) missingEnv.push("NEXT_PUBLIC_SUPABASE_URL");
-    if (!anonKey) missingEnv.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
     if (!serviceKey) missingEnv.push("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !anonKey || !serviceKey) {
+    if (!supabaseUrl || !serviceKey) {
       return NextResponse.json({ error: `서버 환경변수 미설정: ${missingEnv.join(", ")}` }, { status: 500 });
     }
 
-    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
-    if (!authHeader?.toLowerCase().startsWith("bearer ")) {
-      return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
-    }
-    const jwt = authHeader.slice(7).trim();
-    if (!jwt) {
-      return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
-    }
-
-    const userClient = createClient(supabaseUrl, anonKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: `Bearer ${jwt}` } },
-    });
-    const { data: authData, error: authError } = await userClient.auth.getUser(jwt);
-    const authUser = authData?.user;
-    if (authError || !authUser?.id) {
-      return NextResponse.json({ error: "유효하지 않은 세션입니다." }, { status: 401 });
-    }
-    const userId = authUser.id;
+    const auth = await requireBearerClaims(req);
+    if ("error" in auth) return auth.error;
+    const userId = auth.user.id;
 
     const adminClient = createClient(
       supabaseUrl,

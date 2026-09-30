@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireBearerUser } from "@/lib/requireBearerUser";
+import { requireBearerClaims } from "@/lib/requireBearerClaims";
 import {
   cachedRouteToGeoJson,
   extractRouteFromTmapGeoJson,
@@ -222,7 +222,7 @@ export async function POST(req: Request) {
 
   try {
     const authT0 = Date.now();
-    const auth = await requireBearerUser(req);
+    const auth = await requireBearerClaims(req);
     authMs = Date.now() - authT0;
     if ("error" in auth) return withTimings(auth.error);
 
