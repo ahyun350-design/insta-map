@@ -289,7 +289,10 @@ import {
   deepLinkTelemetry,
   parsePindmapDeepLink,
 } from "@/lib/pindmapDeepLink";
-import { consumePendingShareUrl } from "@/lib/pendingShare";
+import {
+  consumePendingShareUrl,
+  shouldSkipExtractAlreadyStartedByExtension,
+} from "@/lib/pendingShare";
 import { App } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 import { parseFeedPostFromRow, feedCommentCount, isOwnFeedAuthor, FEED_PAGE_SIZE, FEED_POST_LIST_SELECT, FEED_POST_DETAIL_SELECT, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
@@ -9223,9 +9226,13 @@ function HomePageContent() {
     const prev = recentShareExtractRef.current;
     if (prev && prev.url === cleaned && Date.now() - prev.at < 60_000) return;
     recentShareExtractRef.current = { url: cleaned, at: Date.now() };
-    console.log("pending_share|extract_start");
-    setActiveTab("home");
-    void handleAddFromInstagramRef.current(cleaned);
+    void (async () => {
+      // Extension already POSTed /api/extract/start — do not start again in app.
+      if (await shouldSkipExtractAlreadyStartedByExtension(cleaned)) return;
+      console.log("pending_share|extract_start");
+      setActiveTab("home");
+      void handleAddFromInstagramRef.current(cleaned);
+    })();
   }, []);
 
   const consumeAppGroupShareAndExtract = useCallback(async () => {

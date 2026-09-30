@@ -12,6 +12,10 @@ import {
   resolveUsernameForEnsure,
   upsertUserRowWithUniqueUsername,
 } from "./ensureUserProfile";
+import {
+  clearMirroredAuthSession,
+  startAuthSessionMirror,
+} from "./authSessionMirror";
 
 function promiseWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -380,6 +384,8 @@ export function useUser() {
     try {
       clearCachedUserProfile();
       void clearEnsureOk();
+      // Keychain mirror clear — write-only; does not touch watchdog / safeGetSession
+      void clearMirroredAuthSession();
       const { error } = await supabase.auth.signOut({ scope: "local" });
       if (error) {
         const status = (error as { status?: number }).status;
@@ -414,6 +420,8 @@ export function useUser() {
   }, []);
 
   useEffect(() => {
+    // Separate auth listener for Share Extension Keychain mirror (no-op without native).
+    const stopMirror = startAuthSessionMirror();
     setSessionChecked(false);
     const loadFinishedRef = { current: false };
     const listenerFiredRef = { current: false };
@@ -776,6 +784,7 @@ export function useUser() {
       reloadFromSessionRef.current = null;
       stopAuthWatchdog();
       subscription.unsubscribe();
+      stopMirror();
     };
   }, []);
 

@@ -1,0 +1,23 @@
+{
+  "name": "@pindmap/auth-session",
+  "version": "0.0.1",
+  "description": "Mirror Supabase session tokens to Shared Keychain for Share Extension",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src/",
+    "ios/Sources/",
+    "Package.swift"
+  ],
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  },
+  "author": "PindMap",
+  "license": "UNLICENSED",
+  "private": true,
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  }
+}

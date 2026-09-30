@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isValidInstagramPostUrl } from "@/app/api/extract/_shared";
+import { cleanInstagramUrl } from "@/lib/instagramUrl";
 import {
   EXTRACT_PROCESS_TRIGGER_FAILED,
   markExtractJobFailed,
@@ -57,18 +58,36 @@ export async function POST(req: Request) {
       instagramUrl?: string;
       forceRetry?: boolean;
     };
-    const instagramUrl = body.instagramUrl?.trim();
+    const rawUrl = body.instagramUrl?.trim();
     const forceRetry = body.forceRetry === true;
 
-    if (!instagramUrl) {
+    if (!rawUrl) {
       return NextResponse.json({ error: "instagramUrl이 필요합니다." }, { status: 400 });
     }
+    const instagramUrl = cleanInstagramUrl(rawUrl);
     if (!isValidInstagramPostUrl(instagramUrl)) {
       return NextResponse.json({ error: "유효한 Instagram 게시물 URL을 입력해주세요." }, { status: 400 });
     }
 
     // 신규 추출 전에 이 유저의 오래된 멈춤 job 정리 (크론 대용)
     void reclaimStaleExtractJobs(adminClient, { userId });
+
+    // Same user + same URL already pending/processing → return that job (Share Extension race).
+    if (!forceRetry) {
+      const { data: existing, error: existingErr } = await adminClient
+        .from("extract_jobs")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("instagram_url", instagramUrl)
+        .in("status", ["pending", "processing"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (existingErr) throw existingErr;
+      if (existing?.id) {
+        return NextResponse.json({ jobId: existing.id, deduped: true });
+      }
+    }
 
     if (forceRetry) {
       const { deleteReelCache } = await import("@/lib/reelCache");

@@ -23,6 +23,7 @@
     "@capacitor/keyboard": "^8.0.3",
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/splash-screen": "^8.0.1",
+    "@pindmap/auth-session": "file:./plugins/pindmap-auth-session",
     "@pindmap/native-map": "file:./spike/v7-native-map/plugin",
     "@pindmap/share": "file:plugins/pindmap-share",
     "@supabase/ssr": "^0.10.2",

@@ -20,6 +20,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
+      "@pindmap/auth-session": ["./plugins/pindmap-auth-session/src/index.ts"],
       "@pindmap/native-map": ["./spike/v7-native-map/plugin/src/index.ts"],
       "@pindmap/share": ["./plugins/pindmap-share/src/index.ts"]
     },
