@@ -4,6 +4,12 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>PindMap</string>
+	<key>PindmapAPIBaseURL</key>
+	<string>https://pindmap.com</string>
+	<key>PindmapSupabaseURL</key>
+	<string>https://hjukbmntyhqlrmvlfwvp.supabase.co</string>
+	<key>PindmapSupabaseAnonKey</key>
+	<string>sb_publishable_PT4CyFESthuz35cYwpGPaw_Yag5jXSX</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>
@@ -20,6 +26,11 @@
 		<string>com.apple.share-services</string>
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+	</dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
 	</dict>
 </dict>
 </plist>

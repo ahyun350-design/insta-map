@@ -2,7 +2,7 @@
 //  ShareViewController.swift
 //  ShareExtension
 //
-//  Instagram URL → App Group (+ best-effort pindmap:// open). No network.
+//  Instagram URL → POST /api/extract/start (Keychain JWT) or App Group fallback.
 //
 
 import UIKit
@@ -12,6 +12,8 @@ final class ShareViewController: UIViewController {
   private static let appGroupId = "group.com.pindmap.app"
   private static let pendingUrlKey = "pendingShareUrl"
   private static let pendingAtKey = "pendingShareAt"
+  private static let lastExtensionUrlKey = "lastExtensionStartedUrl"
+  private static let lastExtensionAtKey = "lastExtensionStartedAt"
 
   private let statusLabel = UILabel()
 
@@ -44,19 +46,38 @@ final class ShareViewController: UIViewController {
       return
     }
 
-    savePendingShare(urlString: urlString)
-
-    // Best-effort only. Apple scopes extensionContext.open primarily to Today;
-    // Share Extensions often get success=false for custom schemes. App Group remains.
-    await openMainAppIfPossible(instagramURL: urlString)
-
-    await showMessageAndFinish("PindMap에 저장했어요. 앱에서 추출됩니다")
+    let outcome = await ShareExtractClient.startExtract(instagramURL: urlString)
+    switch outcome {
+    case .started:
+      // Do not leave pendingShareUrl — app must not re-extract.
+      clearPendingShare()
+      markExtensionStarted(urlString: urlString)
+      await showMessageAndFinish("저장 중이에요. 다 되면 알려드릴게요")
+    case .fallbackToAppGroup:
+      savePendingShare(urlString: urlString)
+      await openMainAppIfPossible(instagramURL: urlString)
+      await showMessageAndFinish("PindMap에 저장했어요. 앱에서 추출됩니다")
+    }
   }
 
   private func savePendingShare(urlString: String) {
     guard let defaults = UserDefaults(suiteName: Self.appGroupId) else { return }
     defaults.set(urlString, forKey: Self.pendingUrlKey)
     defaults.set(Date().timeIntervalSince1970, forKey: Self.pendingAtKey)
+    defaults.synchronize()
+  }
+
+  private func clearPendingShare() {
+    guard let defaults = UserDefaults(suiteName: Self.appGroupId) else { return }
+    defaults.removeObject(forKey: Self.pendingUrlKey)
+    defaults.removeObject(forKey: Self.pendingAtKey)
+    defaults.synchronize()
+  }
+
+  private func markExtensionStarted(urlString: String) {
+    guard let defaults = UserDefaults(suiteName: Self.appGroupId) else { return }
+    defaults.set(urlString, forKey: Self.lastExtensionUrlKey)
+    defaults.set(Date().timeIntervalSince1970, forKey: Self.lastExtensionAtKey)
     defaults.synchronize()
   }
 
@@ -111,7 +132,9 @@ final class ShareViewController: UIViewController {
       if let url = value as? URL {
         return url.absoluteString
       }
-      if let data = value as? Data, let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+      if let data = value as? Data,
+         let s = String(data: data, encoding: .utf8)?
+          .trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
         return s
       }
       if let s = value as? String {

@@ -20,7 +20,8 @@ let package = Package(
         .package(name: "CapacitorPreferences", path: "../../../node_modules/@capacitor/preferences"),
         .package(name: "CapacitorSplashScreen", path: "../../../node_modules/@capacitor/splash-screen"),
         .package(name: "PindmapNativeMap", path: "../../../spike/v7-native-map/plugin"),
-        .package(name: "PindmapShare", path: "../../../plugins/pindmap-share")
+        .package(name: "PindmapShare", path: "../../../plugins/pindmap-share"),
+        .package(name: "PindmapAuthSession", path: "../../../plugins/pindmap-auth-session")
     ],
     targets: [
         .target(
@@ -36,7 +37,8 @@ let package = Package(
                 .product(name: "CapacitorPreferences", package: "CapacitorPreferences"),
                 .product(name: "CapacitorSplashScreen", package: "CapacitorSplashScreen"),
                 .product(name: "PindmapNativeMap", package: "PindmapNativeMap"),
-                .product(name: "PindmapShare", package: "PindmapShare")
+                .product(name: "PindmapShare", package: "PindmapShare"),
+                .product(name: "PindmapAuthSession", package: "PindmapAuthSession")
             ]
         )
     ]
