@@ -12,7 +12,6 @@ import {
 } from "@/app/api/extract/_shared";
 import { resolveExtractPlaceCategory } from "@/lib/kakaoCategory";
 import { resolveKakaoSubcategory } from "@/lib/kakaoSubcategory";
-import { maskCaption } from "@/lib/maskCaption";
 import {
   classifyCaption,
   kakaoBranchTagAcceptable,
@@ -53,7 +52,6 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const CAPTION_MAX_CHARS = 2000;
 /** Apify Starter 동시 32한도 — 여유 두고 soft limit (env로 조정 가능) */
 const APIFY_MAX_CONCURRENT = (() => {
   const raw = process.env.APIFY_MAX_CONCURRENT?.trim();
@@ -114,16 +112,6 @@ async function notifyExtractComplete(
   }
 }
 
-function truncateCaption(caption: string): string {
-  if (caption.length <= CAPTION_MAX_CHARS) return caption;
-  return caption.slice(0, CAPTION_MAX_CHARS);
-}
-
-/** 진단용: 식별정보 마스킹 후 길이 제한 */
-function toDiagCaption(raw: string): string {
-  return truncateCaption(maskCaption(raw));
-}
-
 type PendingPlaceJson = {
   name: string;
   region: string | null;
@@ -138,7 +126,6 @@ type PendingPlaceJson = {
 async function saveJobDiagnostics(
   jobId: string,
   patch: {
-    caption?: string | null;
     claude_places?: RawPlace[] | PlaceCandidateJson[] | null;
     kakao_misses?: string[] | null;
     pending_places?: PendingPlaceJson[] | null;
@@ -315,7 +302,6 @@ export async function POST(req: Request) {
   const routeT0 = Date.now();
   let jobId = "";
   /** 성공/실패 최종 UPDATE에도 포함 */
-  let diagCaption: string | null = null;
   let diagClaudePlaces: RawPlace[] | PlaceCandidateJson[] | null = null;
   let diagKakaoMisses: string[] | null = null;
   let diagPendingPlaces: PendingPlaceJson[] | null = null;
@@ -369,10 +355,8 @@ export async function POST(req: Request) {
         status: cached.status,
         error_code: cached.error_code,
       });
-      diagCaption = null;
       diagClaudePlaces = cached.claude_places;
       await saveJobDiagnostics(jobId, {
-        caption: diagCaption,
         claude_places: diagClaudePlaces,
       });
       throw new Error(reelCacheFailToErrorMessage(cached));
@@ -395,10 +379,8 @@ export async function POST(req: Request) {
           break;
         }
       }
-      diagCaption = null;
       diagClaudePlaces = rawPlaces;
       await saveJobDiagnostics(jobId, {
-        caption: diagCaption,
         claude_places: diagClaudePlaces,
       });
     } else {
@@ -441,8 +423,6 @@ export async function POST(req: Request) {
       }
 
       captionForHints = caption;
-      diagCaption = toDiagCaption(caption);
-      await saveJobDiagnostics(jobId, { caption: diagCaption });
 
       await updateJobProgress(jobId, "AI가 장소 분석하는 중");
       const aiT0 = Date.now();
@@ -835,7 +815,6 @@ export async function POST(req: Request) {
           progress_step: "완료|all_saved_already",
           result_places: [],
           error_message: null,
-          caption: diagCaption,
           claude_places: diagClaudePlaces,
           kakao_misses: diagKakaoMisses,
           pending_places: diagPendingPlaces,
@@ -905,7 +884,6 @@ export async function POST(req: Request) {
         progress_step: "완료",
         result_places: resultPlacesWithIds,
         error_message: null,
-        caption: diagCaption,
         claude_places: diagClaudePlaces,
         kakao_misses: diagKakaoMisses,
         pending_places: diagPendingPlaces,
@@ -952,7 +930,6 @@ export async function POST(req: Request) {
             status: "failed",
             error_message: message,
             progress_step: "실패",
-            caption: diagCaption,
             claude_places: diagClaudePlaces,
             kakao_misses: diagKakaoMisses,
             pending_places: diagPendingPlaces,

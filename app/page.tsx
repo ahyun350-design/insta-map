@@ -407,6 +407,8 @@ type Place = {
   lng?: number;
   created_at?: string;
   memo?: string | null;
+  /** 좌표 출처: kakao | user | poi */
+  source?: "kakao" | "user" | "poi" | null;
   /** 대표 목록 색 프리셋 id — 없으면 카테고리 핀 */
   listColor?: string | null;
 };
@@ -12469,6 +12471,7 @@ function HomePageContent() {
       category,
       ...(subcategory ? { subcategory } : { subcategory: null }),
       ...(heartCoords ? { lat: heartCoords.lat, lng: heartCoords.lng } : {}),
+      source: "kakao" as const,
     };
     if (heartCoords) {
       savedPlaceCoordsRef.current[placeToAdd.id] = heartCoords;

@@ -144,8 +144,14 @@ async function main() {
     process.exit(1);
   }
 
+  const hitCaption = String(hit.row.caption || "").trim();
+  if (!hitCaption) {
+    console.log("SKIP — extract_jobs.caption empty (captions no longer stored)");
+    process.exit(0);
+  }
+
   console.log(`job_id=${hit.row.id} prior_names=${hit.names.length} matched_tokens=${hit.matched.length}`);
-  const extracted = await callClaude(String(hit.row.caption));
+  const extracted = await callClaude(hitCaption);
   console.log(`caption_country=${extracted.captionCountry}`);
   console.log(`usage_in=${extracted.usage.input_tokens ?? "?"} usage_out=${extracted.usage.output_tokens ?? "?"}`);
 

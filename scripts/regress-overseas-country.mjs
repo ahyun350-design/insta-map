@@ -153,6 +153,10 @@ async function main() {
 
   const samples = (rows || []).filter((r) => String(r.caption || "").trim().length >= 10).slice(0, SAMPLE);
   console.log(`samples=${samples.length} (cap=${SAMPLE}, concurrency=${CONCURRENCY})`);
+  if (samples.length === 0) {
+    console.log("SKIP — no extract_jobs.caption samples (captions no longer stored)");
+    return;
+  }
 
   let totalPlaces = 0;
   let overseasPlaces = 0;

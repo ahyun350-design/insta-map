@@ -170,6 +170,9 @@ async function main() {
     real.push({ id: `R${real.length + 1}`, caption: c });
     if (real.length >= 22) break;
   }
+  if (real.length === 0) {
+    console.log("SKIP real captions — extract_jobs.caption empty (captions no longer stored); synthetic only");
+  }
 
   const samples = [...SYNTHETIC, ...real].slice(0, 30);
   console.log(`samples=${samples.length} (synthetic=${SYNTHETIC.length}, real=${samples.length - SYNTHETIC.length})`);
@@ -179,10 +182,15 @@ async function main() {
     same = 0,
     worse = 0;
   for (const s of samples) {
-    const oldNames = await callClaude(OLD_FIXED, s.caption);
+    const caption = String(s.caption || "").trim();
+    if (!caption) {
+      console.log(`${s.id} | SKIP empty caption`);
+      continue;
+    }
+    const oldNames = await callClaude(OLD_FIXED, caption);
     // small delay to be nice
     await new Promise((r) => setTimeout(r, 200));
-    const newNames = await callClaude(NEW_FIXED, s.caption);
+    const newNames = await callClaude(NEW_FIXED, caption);
     const verdict = judge(oldNames, newNames);
     if (verdict === "개선") improve++;
     else if (verdict === "악화") worse++;

@@ -1,5 +1,6 @@
 /**
  * Mark extract job review as done (reviewed_at = now()).
+ * Also strip lat/lng/address from result_places (keep id/name/category/…).
  * requireBearerUser + user_id scoped UPDATE; foreign/missing job → 404.
  */
 import { NextResponse } from "next/server";
@@ -8,6 +9,18 @@ import { requireBearerUser } from "@/lib/requireBearerUser";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function stripResultPlacesGeo(raw: unknown): unknown {
+  if (!Array.isArray(raw)) return raw ?? [];
+  return raw.map((elem) => {
+    if (!elem || typeof elem !== "object" || Array.isArray(elem)) return elem;
+    const obj = { ...(elem as Record<string, unknown>) };
+    delete obj.lat;
+    delete obj.lng;
+    delete obj.address;
+    return obj;
+  });
+}
 
 export async function POST(req: Request) {
   try {
@@ -33,7 +46,7 @@ export async function POST(req: Request) {
 
     const { data: existing, error: findError } = await admin
       .from("extract_jobs")
-      .select("id, reviewed_at")
+      .select("id, reviewed_at, result_places")
       .eq("id", jobId)
       .eq("user_id", userId)
       .maybeSingle();
@@ -46,9 +59,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, updated: false });
     }
 
+    const stripped = stripResultPlacesGeo(existing.result_places);
+
     const { data, error } = await admin
       .from("extract_jobs")
-      .update({ reviewed_at: new Date().toISOString() })
+      .update({
+        reviewed_at: new Date().toISOString(),
+        result_places: stripped,
+      })
       .eq("id", jobId)
       .eq("user_id", userId)
       .is("reviewed_at", null)

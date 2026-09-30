@@ -9,6 +9,9 @@ export const dynamic = "force-dynamic";
 const CATEGORIES = new Set<string>(FEED_POST_CATEGORIES);
 const MAX_ROWS = 50;
 
+type PlaceSource = "kakao" | "user" | "poi";
+const PLACE_SOURCES = new Set<string>(["kakao", "user", "poi"]);
+
 type InsertRow = {
   id: string;
   user_id: string;
@@ -17,6 +20,7 @@ type InsertRow = {
   category: string;
   lat?: number | null;
   lng?: number | null;
+  source?: PlaceSource | null;
 };
 
 export async function POST(req: Request) {
@@ -79,6 +83,13 @@ export async function POST(req: Request) {
       const lat = typeof latRaw === "number" ? latRaw : latRaw != null ? parseFloat(String(latRaw)) : NaN;
       const lng = typeof lngRaw === "number" ? lngRaw : lngRaw != null ? parseFloat(String(lngRaw)) : NaN;
       const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+      const sourceRaw = typeof (r as { source?: unknown }).source === "string"
+        ? String((r as { source: string }).source).trim()
+        : "";
+      const source =
+        sourceRaw && PLACE_SOURCES.has(sourceRaw)
+          ? (sourceRaw as PlaceSource)
+          : null;
       rows.push({
         id,
         user_id,
@@ -87,6 +98,7 @@ export async function POST(req: Request) {
         category,
         lat: hasCoords ? lat : null,
         lng: hasCoords ? lng : null,
+        ...(source ? { source } : {}),
       });
     }
 

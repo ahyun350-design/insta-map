@@ -227,8 +227,6 @@ async function readReelCacheLegacy(
 
 export type WriteReelCacheInput = {
   status: ReelCacheStatus;
-  /** @deprecated 개인정보 — upsert에 포함하지 않음 */
-  caption?: string | null;
   claudePlaces?: RawPlace[] | null;
   errorCode?: ReelCacheErrorCode | null;
   ruleVersion?: number;
