@@ -380,9 +380,30 @@ export function useUser() {
     try {
       clearCachedUserProfile();
       void clearEnsureOk();
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) {
+        const status = (error as { status?: number }).status;
+        const code = String((error as { code?: string }).code ?? "");
+        const message = String(error.message ?? "");
+        const ignorable =
+          status === 403 ||
+          code === "session_not_found" ||
+          /session_not_found|Session from session_id/i.test(message);
+        if (!ignorable) {
+          console.error("[PindMap:home][auth] signOut failed", error);
+        }
+      }
     } catch (err) {
-      console.error("[PindMap:home][auth] signOut failed", err);
+      const status = (err as { status?: number })?.status;
+      const code = String((err as { code?: string })?.code ?? "");
+      const message = String((err as { message?: string })?.message ?? "");
+      const ignorable =
+        status === 403 ||
+        code === "session_not_found" ||
+        /session_not_found|Session from session_id/i.test(message);
+      if (!ignorable) {
+        console.error("[PindMap:home][auth] signOut failed", err);
+      }
     } finally {
       const target = "/login";
       window.location.href = target;
