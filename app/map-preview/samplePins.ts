@@ -1,4 +1,5 @@
 import type { FeedPostCategory } from "@/lib/feedPost";
+import { FEED_POST_CATEGORIES } from "@/lib/feedPost";
 
 export type MapPreviewPin = {
   id: string;
@@ -52,3 +53,43 @@ export const MAP_PREVIEW_PINS: MapPreviewPin[] = [
 
 export const MAP_PREVIEW_CENTER: [number, number] = [127.055, 37.544]; // 성수
 export const MAP_PREVIEW_ZOOM = 14;
+
+/** Seoul bounding box for synthetic load tests (not real places). */
+const SEOUL_LNG_MIN = 126.82;
+const SEOUL_LNG_MAX = 127.18;
+const SEOUL_LAT_MIN = 37.45;
+const SEOUL_LAT_MAX = 37.70;
+
+function mulberry32(seed: number) {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Deterministic synthetic pins across Seoul for MapLibre perf tests.
+ * Never user / DB data.
+ */
+export function generateSeoulDemoPins(count: number): MapPreviewPin[] {
+  const n = Math.max(0, Math.min(5000, Math.floor(count)));
+  const rnd = mulberry32(20261004);
+  const cats = FEED_POST_CATEGORIES;
+  const out: MapPreviewPin[] = [];
+  for (let i = 0; i < n; i++) {
+    const lng = SEOUL_LNG_MIN + rnd() * (SEOUL_LNG_MAX - SEOUL_LNG_MIN);
+    const lat = SEOUL_LAT_MIN + rnd() * (SEOUL_LAT_MAX - SEOUL_LAT_MIN);
+    const category = cats[Math.floor(rnd() * cats.length)]!;
+    out.push({
+      id: `demo-${i}`,
+      name: `데모 ${i + 1}`,
+      lng: Math.round(lng * 1e6) / 1e6,
+      lat: Math.round(lat * 1e6) / 1e6,
+      category,
+    });
+  }
+  return out;
+}

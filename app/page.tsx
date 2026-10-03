@@ -17282,6 +17282,20 @@ function HomePageContent() {
               >
                 로그아웃
               </button>
+              {user?.id === ADMIN_USER_ID ? (
+                <button
+                  type="button"
+                  className="settingItem"
+                  data-testid="admin-map-preview-entry"
+                  style={{ width: "100%", padding: "16px 20px", color: "#1a2a7a" }}
+                  onClick={() => {
+                    setShowMypageSettingsSheet(false);
+                    pushInAppRoute(router, "/map-preview?pins=1000&fps=1");
+                  }}
+                >
+                  지도 시험(관리자)
+                </button>
+              ) : null}
             </div>
           </div>
         )}
