@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { haversineM } from "@/lib/poiMatch";
+import { rematchApplyRejectReason } from "@/lib/rematchApplyGuards";
 import {
   resolvePlaceViaPoi,
   resolvePlacesViaPoiBatch,
@@ -24,6 +25,7 @@ type PlaceRow = {
   lat: number | null;
   lng: number | null;
   address: string | null;
+  category: string | null;
   source: string | null;
   poi_id: number | null;
 };
@@ -84,7 +86,7 @@ async function fetchBySource(
 
   let query = admin
     .from("places")
-    .select("id, name, lat, lng, address, source, poi_id")
+    .select("id, name, lat, lng, address, category, source, poi_id")
     .order("id", { ascending: true })
     .limit(limit);
 
@@ -185,8 +187,9 @@ export async function POST(req: Request) {
     url.searchParams.get("dryRun") === "true" ||
     url.searchParams.get("dry_run") === "true";
   let batchSize = parseBatchSize(url.searchParams.get("batchSize"));
-  // Default: batch RPC (nearby_poi_batch). Set useBatchRpc:false to force sequential nearby_poi.
-  let useBatchRpc = true;
+  // Default sequential nearby_poi — nearby_poi_batch often times out after sangga load.
+  // Set useBatchRpc:true to force batch RPC.
+  let useBatchRpc = false;
   let includeResults = false;
 
   try {
@@ -242,14 +245,21 @@ export async function POST(req: Request) {
   let updateCalls = 0;
   const resultRows: Array<{
     placeId: string;
+    placeName?: string;
     matched: boolean;
     poiId: number | null;
+    poiSource?: string | null;
+    poiName?: string | null;
+    matchDistM?: number | null;
+    moveM?: number | null;
     reason?: string;
   }> = [];
+  const matchedBySource: Record<string, number> = {};
 
   type WorkItem = {
     place: PlaceRow;
     placeName: string;
+    placeCategory: string | null;
     lat: number;
     lng: number;
   };
@@ -267,6 +277,7 @@ export async function POST(req: Request) {
       if (includeResults) {
         resultRows.push({
           placeId: place.id,
+          placeName,
           matched: false,
           poiId: null,
           reason: "no_match",
@@ -274,7 +285,13 @@ export async function POST(req: Request) {
       }
       continue;
     }
-    work.push({ place, placeName, lat, lng });
+    work.push({
+      place,
+      placeName,
+      placeCategory: place.category ?? null,
+      lat,
+      lng,
+    });
   }
 
   // Resolve: batch RPC (≤50 origins/call) or legacy sequential nearby_poi.
@@ -288,6 +305,7 @@ export async function POST(req: Request) {
         placeName: w.placeName,
         originLat: w.lat,
         originLng: w.lng,
+        placeCategory: w.placeCategory,
       })),
     );
     for (const [id, r] of batchMap) resolvedById.set(id, r);
@@ -297,6 +315,7 @@ export async function POST(req: Request) {
         placeName: w.placeName,
         originLat: w.lat,
         originLng: w.lng,
+        placeCategory: w.placeCategory,
       });
       resolvedById.set(w.place.id, r);
     }
@@ -316,6 +335,7 @@ export async function POST(req: Request) {
       if (includeResults) {
         resultRows.push({
           placeId: w.place.id,
+          placeName: w.placeName,
           matched: false,
           poiId: null,
           reason: "no_match",
@@ -334,6 +354,7 @@ export async function POST(req: Request) {
       if (includeResults) {
         resultRows.push({
           placeId: w.place.id,
+          placeName: w.placeName,
           matched: false,
           poiId: null,
           reason,
@@ -349,20 +370,64 @@ export async function POST(req: Request) {
       if (includeResults) {
         resultRows.push({
           placeId: w.place.id,
+          placeName: w.placeName,
           matched: false,
           poiId: resolved.poiId,
+          poiSource: resolved.match.poi.source ?? null,
+          matchDistM: resolved.match.distM,
+          moveM,
           reason: "distance",
         });
       }
       continue;
     }
 
-    const poiSource = (resolved.match.poi.source || "poi").replace(/\|/g, "/");
+    const poi = resolved.match.poi;
+    const poiSource = (poi.source || "poi").replace(/\|/g, "/");
+    const poiAddress = (poi.road_address || poi.jibun_address || "").trim();
+    const applyReject = rematchApplyRejectReason({
+      placeName: w.placeName,
+      placeAddress: w.place.address,
+      poiName: poi.name,
+      poiAddress,
+      poiSource: poi.source,
+      matchDistM: resolved.match.distM,
+    });
+    if (applyReject) {
+      skipped += 1;
+      console.log(`rematch_run|skip|${w.placeName}|reason=${applyReject}`);
+      if (includeResults) {
+        resultRows.push({
+          placeId: w.place.id,
+          placeName: w.placeName,
+          matched: false,
+          poiId: resolved.poiId,
+          poiSource,
+          poiName: poi.name,
+          matchDistM: resolved.match.distM,
+          moveM,
+          reason: applyReject,
+        });
+      }
+      continue;
+    }
+
     console.log(
       `rematch_run|matched|${w.placeName}|source=${poiSource}|dist=${Math.round(moveM)}`,
     );
 
     if (!dryRun) {
+      // 변경 전 스냅샷 (테이블 없음 — 구조화 로그로 남김)
+      console.log(
+        `rematch_run|before|${JSON.stringify({
+          id: w.place.id,
+          lat: w.lat,
+          lng: w.lng,
+          address: w.place.address,
+          source: w.place.source,
+          poi_id: w.place.poi_id,
+        })}`,
+      );
       const tUpd = Date.now();
       const { error: updErr } = await admin
         .from("places")
@@ -387,6 +452,7 @@ export async function POST(req: Request) {
         if (includeResults) {
           resultRows.push({
             placeId: w.place.id,
+            placeName: w.placeName,
             matched: false,
             poiId: resolved.poiId,
             reason: "no_match",
@@ -397,11 +463,17 @@ export async function POST(req: Request) {
     }
 
     matched += 1;
+    matchedBySource[poiSource] = (matchedBySource[poiSource] || 0) + 1;
     if (includeResults) {
       resultRows.push({
         placeId: w.place.id,
+        placeName: w.placeName,
         matched: true,
         poiId: resolved.poiId,
+        poiSource,
+        poiName: poi.name,
+        matchDistM: resolved.match.distM,
+        moveM,
       });
     }
   }
@@ -430,6 +502,7 @@ export async function POST(req: Request) {
     processed,
     matched,
     skipped,
+    matchedBySource,
     batchSize,
     nextCursor: done ? null : nextCursor,
     done,

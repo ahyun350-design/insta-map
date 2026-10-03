@@ -127,7 +127,7 @@ async function main() {
   let totalMatched = 0;
 
   for (let n = 1; n <= maxBatches; n++) {
-    const body = { batchSize, dryRun };
+    const body = { batchSize, dryRun, useBatchRpc: false };
     if (cursor) body.cursor = cursor;
 
     let result = null;
