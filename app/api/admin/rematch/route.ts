@@ -81,6 +81,7 @@ async function fetchBySource(
   source: "kakao" | null,
   afterId: string | null,
   limit: number,
+  createdSinceIso: string | null,
 ): Promise<PlaceRow[]> {
   if (limit <= 0) return [];
 
@@ -94,6 +95,9 @@ async function fetchBySource(
     query = query.eq("source", "kakao");
   } else {
     query = query.is("source", null);
+  }
+  if (createdSinceIso) {
+    query = query.gte("created_at", createdSinceIso);
   }
   if (afterId) {
     query = query.gt("id", afterId);
@@ -114,12 +118,19 @@ async function fetchPriorityBatch(
   admin: SupabaseClient,
   cursorRaw: string | null,
   batchLimit: number,
+  createdSinceIso: string | null,
 ): Promise<{ places: PlaceRow[]; nextCursor: string | null; done: boolean }> {
   const { phase, afterId } = parseCursor(cursorRaw);
   const places: PlaceRow[] = [];
 
   if (phase === "kakao") {
-    const kakao = await fetchBySource(admin, "kakao", afterId, batchLimit);
+    const kakao = await fetchBySource(
+      admin,
+      "kakao",
+      afterId,
+      batchLimit,
+      createdSinceIso,
+    );
     places.push(...kakao);
     if (kakao.length === batchLimit) {
       return {
@@ -130,7 +141,13 @@ async function fetchPriorityBatch(
     }
     // kakao exhausted — fill remainder from null in this same batch
     const remaining = batchLimit - places.length;
-    const nulls = await fetchBySource(admin, null, null, remaining);
+    const nulls = await fetchBySource(
+      admin,
+      null,
+      null,
+      remaining,
+      createdSinceIso,
+    );
     places.push(...nulls);
     if (nulls.length === remaining && remaining > 0) {
       return {
@@ -143,7 +160,13 @@ async function fetchPriorityBatch(
   }
 
   // phase === null
-  const nulls = await fetchBySource(admin, null, afterId, batchLimit);
+  const nulls = await fetchBySource(
+    admin,
+    null,
+    afterId,
+    batchLimit,
+    createdSinceIso,
+  );
   places.push(...nulls);
   if (nulls.length === batchLimit) {
     return {
@@ -155,13 +178,31 @@ async function fetchPriorityBatch(
   return { places, nextCursor: null, done: true };
 }
 
+function parseCreatedSinceDays(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === false) return null;
+  const n =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string"
+        ? Number(raw.trim())
+        : NaN;
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(3650, Math.floor(n));
+}
+
+function createdSinceIsoFromDays(days: number | null): string | null {
+  if (days == null) return null;
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 /**
  * Daily / on-demand rematch for places with source null|kakao.
  * Reuses resolvePlaceViaPoi (= nearby_poi RPC + poiMatch rules).
  * Never overwrites name. Skips moves >= 100m.
  *
  * Auth: Authorization: Bearer $REMATCH_SECRET  (or x-rematch-secret)
- * Query/body: cursor?, dryRun?, batchSize? (default 150, max 500)
+ * Query/body: cursor?, dryRun?, batchSize? (default 150, max 500),
+ *   createdSinceDays? (e.g. 7), full? (true = ignore createdSinceDays)
  */
 export async function POST(req: Request) {
   const expected = process.env.REMATCH_SECRET?.trim();
@@ -191,6 +232,16 @@ export async function POST(req: Request) {
   // Set useBatchRpc:true to force batch RPC.
   let useBatchRpc = false;
   let includeResults = false;
+  // null = full scan (all source null|kakao). Daily runner sends createdSinceDays:7.
+  let createdSinceDays: number | null = parseCreatedSinceDays(
+    url.searchParams.get("createdSinceDays"),
+  );
+  if (
+    url.searchParams.get("full") === "true" ||
+    url.searchParams.get("full") === "1"
+  ) {
+    createdSinceDays = null;
+  }
 
   try {
     const body = (await req.json()) as {
@@ -199,6 +250,8 @@ export async function POST(req: Request) {
       batchSize?: unknown;
       useBatchRpc?: unknown;
       includeResults?: unknown;
+      createdSinceDays?: unknown;
+      full?: unknown;
     };
     if (typeof body.cursor === "string" && body.cursor.trim()) {
       cursor = body.cursor.trim();
@@ -209,9 +262,16 @@ export async function POST(req: Request) {
     }
     if (body.useBatchRpc === false) useBatchRpc = false;
     if (body.includeResults === true) includeResults = true;
+    if (body.full === true) {
+      createdSinceDays = null;
+    } else if (body.createdSinceDays !== undefined) {
+      createdSinceDays = parseCreatedSinceDays(body.createdSinceDays);
+    }
   } catch {
     /* empty body is fine */
   }
+
+  const createdSinceIso = createdSinceIsoFromDays(createdSinceDays);
 
   const t0 = Date.now();
   let places: PlaceRow[];
@@ -220,7 +280,12 @@ export async function POST(req: Request) {
   let fetchMs = 0;
   try {
     const tFetch = Date.now();
-    const batch = await fetchPriorityBatch(admin, cursor, batchSize);
+    const batch = await fetchPriorityBatch(
+      admin,
+      cursor,
+      batchSize,
+      createdSinceIso,
+    );
     fetchMs = Date.now() - tFetch;
     places = batch.places;
     nextCursor = batch.nextCursor;
@@ -232,7 +297,7 @@ export async function POST(req: Request) {
 
   const phaseInfo = parseCursor(cursor);
   console.log(
-    `rematch_run|start|target=${places.length}|batchSize=${batchSize}|phase=${phaseInfo.phase}|batchRpc=${useBatchRpc ? 1 : 0}${dryRun ? "|dryRun=1" : ""}`,
+    `rematch_run|start|target=${places.length}|batchSize=${batchSize}|phase=${phaseInfo.phase}|batchRpc=${useBatchRpc ? 1 : 0}|sinceDays=${createdSinceDays ?? "full"}${dryRun ? "|dryRun=1" : ""}`,
   );
 
   let matched = 0;
@@ -504,6 +569,7 @@ export async function POST(req: Request) {
     skipped,
     matchedBySource,
     batchSize,
+    createdSinceDays,
     nextCursor: done ? null : nextCursor,
     done,
     dryRun,

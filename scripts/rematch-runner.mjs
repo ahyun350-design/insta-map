@@ -10,6 +10,8 @@
  * Args:
  *   --maxBatches N  — default 130
  *   --dryRun        — pass dryRun:true (no DB writes)
+ *   --full          — scan all source null|kakao (no created_at window)
+ *   --sinceDays N   — override window (default 7; ignored with --full)
  *
  * Exit 0 on success / done; non-zero on auth or exhausted retries.
  */
@@ -17,16 +19,39 @@ import process from "node:process";
 
 const DEFAULT_MAX_BATCHES = 130;
 const DEFAULT_BATCH_SIZE = 150;
+const DEFAULT_SINCE_DAYS = 7;
 const MAX_ATTEMPTS = 3;
 const RETRY_WAIT_MS = 30_000;
 
 function parseArgs(argv) {
   let maxBatches = DEFAULT_MAX_BATCHES;
   let dryRun = false;
+  let full = false;
+  let sinceDays = DEFAULT_SINCE_DAYS;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dryRun" || a === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+    if (a === "--full") {
+      full = true;
+      continue;
+    }
+    if (a === "--sinceDays" || a === "--since-days") {
+      const n = Number(argv[++i]);
+      if (!Number.isFinite(n) || n < 1) {
+        throw new Error(`invalid --sinceDays value: ${argv[i]}`);
+      }
+      sinceDays = Math.floor(n);
+      continue;
+    }
+    if (a.startsWith("--sinceDays=")) {
+      const n = Number(a.slice("--sinceDays=".length));
+      if (!Number.isFinite(n) || n < 1) {
+        throw new Error(`invalid --sinceDays value: ${a}`);
+      }
+      sinceDays = Math.floor(n);
       continue;
     }
     if (a === "--maxBatches" || a === "--max-batches") {
@@ -52,7 +77,7 @@ function parseArgs(argv) {
     }
     throw new Error(`unknown arg: ${a}`);
   }
-  return { maxBatches, dryRun };
+  return { maxBatches, dryRun, full, sinceDays };
 }
 
 function sleep(ms) {
@@ -99,7 +124,9 @@ async function postRematch(url, secret, body) {
 }
 
 async function main() {
-  const { maxBatches, dryRun } = parseArgs(process.argv.slice(2));
+  const { maxBatches, dryRun, full, sinceDays } = parseArgs(
+    process.argv.slice(2),
+  );
 
   const appUrl = (process.env.APP_URL || "").trim().replace(/\/$/, "");
   const secret = (process.env.REMATCH_SECRET || "").trim();
@@ -118,8 +145,9 @@ async function main() {
   }
 
   const endpoint = `${appUrl}/api/admin/rematch`;
+  const scope = full ? "full" : `sinceDays=${sinceDays}`;
   console.log(
-    `=== rematch-runner start: url=${endpoint} batchSize=${batchSize} maxBatches=${maxBatches} dryRun=${dryRun} ===`,
+    `=== rematch-runner start: url=${endpoint} batchSize=${batchSize} maxBatches=${maxBatches} dryRun=${dryRun} scope=${scope} ===`,
   );
 
   let cursor = null;
@@ -128,6 +156,8 @@ async function main() {
 
   for (let n = 1; n <= maxBatches; n++) {
     const body = { batchSize, dryRun, useBatchRpc: false };
+    if (full) body.full = true;
+    else body.createdSinceDays = sinceDays;
     if (cursor) body.cursor = cursor;
 
     let result = null;
@@ -176,7 +206,7 @@ async function main() {
 
     if (done || !nextCursor) {
       console.log(
-        `finished: total_processed=${totalProcessed} total_matched=${totalMatched}`,
+        `finished: total_processed=${totalProcessed} total_matched=${totalMatched} scope=${scope}`,
       );
       process.exit(0);
     }
@@ -185,7 +215,7 @@ async function main() {
   }
 
   console.log(
-    `stopped after ${maxBatches} batches: total_processed=${totalProcessed} total_matched=${totalMatched}`,
+    `stopped after ${maxBatches} batches: total_processed=${totalProcessed} total_matched=${totalMatched} scope=${scope}`,
   );
   process.exit(0);
 }

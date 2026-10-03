@@ -1,5 +1,6 @@
 # Daily auto rematch for places with source null|kakao.
-# Uses production POST /api/admin/rematch via scripts/rematch-runner.mjs
+# Default (schedule + dispatch): only places created in the last 7 days.
+# Full scan: workflow_dispatch with input full=true (after loading new POI data).
 #
 # Secrets required:
 #   REMATCH_SECRET  — must match Railway REMATCH_SECRET
@@ -13,6 +14,11 @@ on:
   schedule:
     - cron: "0 19 * * *" # UTC 19:00 = KST 04:00
   workflow_dispatch:
+    inputs:
+      full:
+        description: "Scan all source null|kakao places (ignore 7-day window)"
+        type: boolean
+        default: false
 
 jobs:
   rematch:
@@ -28,4 +34,11 @@ jobs:
           REMATCH_SECRET: ${{ secrets.REMATCH_SECRET }}
           APP_URL: ${{ secrets.APP_URL }}
           BATCH_SIZE: "150"
-        run: node scripts/rematch-runner.mjs
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.full }}" = "true" ]; then
+            echo "scope=full"
+            node scripts/rematch-runner.mjs --full
+          else
+            echo "scope=sinceDays=7"
+            node scripts/rematch-runner.mjs
+          fi
