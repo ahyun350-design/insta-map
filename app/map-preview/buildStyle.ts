@@ -1,9 +1,9 @@
 /**
- * OpenFreeMap liberty → PindMap preview themes (paper / mono / dark).
+ * OpenFreeMap liberty → PindMap preview themes (paper / white / black / mono / dark).
  * Trial-only — not used by production Kakao / native maps.
  */
 
-export type MapPreviewThemeId = "paper" | "mono" | "dark";
+export type MapPreviewThemeId = "paper" | "white" | "black" | "mono" | "dark";
 
 export type MapPreviewTheme = {
   id: MapPreviewThemeId;
@@ -13,13 +13,39 @@ export type MapPreviewTheme = {
   water: string;
   park: string;
   building: string;
+  /** When false, building fill is hidden (white/black). */
+  showBuildings: boolean;
   road: string;
   roadMinor: string;
   rail: string;
   text: string;
   textHalo: string;
   boundary: string;
+  stationDot: string;
 };
+
+export const MAP_PREVIEW_THEME_ORDER: MapPreviewThemeId[] = [
+  "paper",
+  "white",
+  "black",
+  "mono",
+  "dark",
+];
+
+export function parseMapPreviewThemeId(
+  raw: string | null | undefined,
+): MapPreviewThemeId {
+  if (
+    raw === "paper" ||
+    raw === "white" ||
+    raw === "black" ||
+    raw === "mono" ||
+    raw === "dark"
+  ) {
+    return raw;
+  }
+  return "paper";
+}
 
 export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
   paper: {
@@ -30,12 +56,49 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
     water: "#C9DCE8",
     park: "#D5E6C6",
     building: "#E8E0D2",
+    showBuildings: true,
     road: "#FFFFFF",
     roadMinor: "#FFFEFA",
     rail: "#D0C8BA",
     text: "#6A5B4E",
     textHalo: "#F3EEE4",
     boundary: "#D2C8B8",
+    stationDot: "#6A5B4E",
+  },
+  white: {
+    id: "white",
+    label: "화이트",
+    background: "#FFFFFF",
+    land: "#FFFFFF",
+    water: "#E6E6E6",
+    park: "#F4F4F4",
+    building: "#FFFFFF",
+    showBuildings: false,
+    // Slightly darker lines for major roads; minor barely visible
+    road: "#D8D8D8",
+    roadMinor: "#EFEFEF",
+    rail: "#E0E0E0",
+    text: "#757575",
+    textHalo: "#FFFFFF",
+    boundary: "#E8E8E8",
+    stationDot: "#555555",
+  },
+  black: {
+    id: "black",
+    label: "블랙",
+    background: "#0B0B0B",
+    land: "#0B0B0B",
+    water: "#141414",
+    park: "#0F0F0F",
+    building: "#0B0B0B",
+    showBuildings: false,
+    road: "#3A3A3A",
+    roadMinor: "#222222",
+    rail: "#1C1C1C",
+    text: "#C8C8C8",
+    textHalo: "#0B0B0B",
+    boundary: "#222222",
+    stationDot: "#D0D0D0",
   },
   mono: {
     id: "mono",
@@ -45,12 +108,14 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
     water: "#BEBEBE",
     park: "#D5D8D2",
     building: "#DDDDDD",
+    showBuildings: true,
     road: "#FFFFFF",
     roadMinor: "#FAFAFA",
     rail: "#C8C8C8",
     text: "#555555",
     textHalo: "#E9E9E9",
     boundary: "#C5C5C5",
+    stationDot: "#555555",
   },
   dark: {
     id: "dark",
@@ -60,12 +125,14 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
     water: "#081022",
     park: "#13243F",
     building: "#182743",
+    showBuildings: true,
     road: "#2A3F5E",
     roadMinor: "#223552",
     rail: "#1C2C48",
     text: "#C9CED8",
     textHalo: "#0E1A30",
     boundary: "#2A3A55",
+    stationDot: "#C9CED8",
   },
 };
 
@@ -203,10 +270,14 @@ export async function buildPreviewStyle(themeId: MapPreviewThemeId): Promise<Sty
     }
 
     if (layer.id === "building") {
-      paintSet(layer, "fill-color", theme.building);
-      paintSet(layer, "fill-opacity", 0.9);
-      layer.minzoom = 14;
-      delete layer.maxzoom;
+      if (!theme.showBuildings) {
+        setVisibility(layer, false);
+      } else {
+        paintSet(layer, "fill-color", theme.building);
+        paintSet(layer, "fill-opacity", 0.9);
+        layer.minzoom = 14;
+        delete layer.maxzoom;
+      }
     }
 
     if (isRoadFill(layer.id) || layer.id === "road_area_pattern" || layer.id.startsWith("aeroway_")) {
@@ -332,7 +403,7 @@ export async function buildPreviewStyle(themeId: MapPreviewThemeId): Promise<Sty
         minzoom: 13,
         paint: {
           "circle-radius": 3.2,
-          "circle-color": theme.text,
+          "circle-color": theme.stationDot,
           "circle-opacity": 0.85,
           "circle-stroke-width": 1,
           "circle-stroke-color": theme.textHalo,

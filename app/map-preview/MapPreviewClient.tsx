@@ -7,8 +7,10 @@ import "./map-preview.css";
 import { DEFAULT_CATEGORY_PIN } from "@/lib/categoryAppearance";
 import type { FeedPostCategory } from "@/lib/feedPost";
 import {
+  MAP_PREVIEW_THEME_ORDER,
   MAP_PREVIEW_THEMES,
   buildPreviewStyle,
+  parseMapPreviewThemeId,
   type MapPreviewThemeId,
 } from "./buildStyle";
 import {
@@ -17,13 +19,36 @@ import {
   MAP_PREVIEW_ZOOM,
 } from "./samplePins";
 
-const THEME_ORDER: MapPreviewThemeId[] = ["paper", "mono", "dark"];
 const PIN_SOURCE = "preview-pins";
 
 function pinSvg(category: FeedPostCategory): string {
   const { color, emoji } = DEFAULT_CATEGORY_PIN[category];
   const stroke = category === "맛집" ? "#fff" : "#999";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${color}" stroke="${stroke}" stroke-width="1"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
+}
+
+function writeThemeToUrl(themeId: MapPreviewThemeId) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("theme", themeId);
+  window.history.replaceState(null, "", `${url.pathname}?theme=${themeId}`);
+}
+
+function readThemeFromUrl(): MapPreviewThemeId {
+  if (typeof window === "undefined") return "paper";
+  return parseMapPreviewThemeId(
+    new URLSearchParams(window.location.search).get("theme"),
+  );
+}
+
+function clusterPaint(themeId: MapPreviewThemeId) {
+  if (themeId === "black") {
+    return { color: "#555555", stroke: "#0B0B0B" };
+  }
+  if (themeId === "dark") {
+    return { color: "#3d5a8a", stroke: "#0E1A30" };
+  }
+  return { color: "#1a2a7a", stroke: "#ffffff" };
 }
 
 async function addPinImages(map: MlMap) {
@@ -73,7 +98,7 @@ function pinsGeoJson() {
 function addPinLayers(map: MlMap, themeId: MapPreviewThemeId) {
   if (map.getSource(PIN_SOURCE)) return;
 
-  const theme = MAP_PREVIEW_THEMES[themeId];
+  const cluster = clusterPaint(themeId);
   map.addSource(PIN_SOURCE, {
     type: "geojson",
     data: pinsGeoJson(),
@@ -88,10 +113,10 @@ function addPinLayers(map: MlMap, themeId: MapPreviewThemeId) {
     source: PIN_SOURCE,
     filter: ["has", "point_count"],
     paint: {
-      "circle-color": themeId === "dark" ? "#3d5a8a" : "#1a2a7a",
+      "circle-color": cluster.color,
       "circle-radius": ["step", ["get", "point_count"], 16, 5, 20, 12, 24],
       "circle-stroke-width": 2,
-      "circle-stroke-color": themeId === "dark" ? "#0E1A30" : "#ffffff",
+      "circle-stroke-color": cluster.stroke,
     },
   });
 
@@ -123,9 +148,6 @@ function addPinLayers(map: MlMap, themeId: MapPreviewThemeId) {
       "icon-ignore-placement": true,
     },
   });
-
-  // silence unused in types if theme only for future label paint
-  void theme;
 }
 
 export default function MapPreviewClient() {
@@ -163,9 +185,13 @@ export default function MapPreviewClient() {
     const el = containerRef.current;
     if (!el) return;
 
+    const initialTheme = readThemeFromUrl();
+    setTheme(initialTheme);
+    writeThemeToUrl(initialTheme);
+
     (async () => {
       try {
-        const style = await buildPreviewStyle("paper");
+        const style = await buildPreviewStyle(initialTheme);
         if (cancelled) return;
         const map = new maplibregl.Map({
           container: el,
@@ -183,7 +209,7 @@ export default function MapPreviewClient() {
         );
         mapRef.current = map;
         map.on("load", () => {
-          void mountPins(map, "paper").then(() => {
+          void mountPins(map, initialTheme).then(() => {
             if (!cancelled) setStatus("ready");
           });
         });
@@ -211,6 +237,7 @@ export default function MapPreviewClient() {
       const map = mapRef.current;
       if (!map || next === themeRef.current) return;
       setTheme(next);
+      writeThemeToUrl(next);
       setStatus("loading");
       try {
         const style = await buildPreviewStyle(next);
@@ -226,12 +253,15 @@ export default function MapPreviewClient() {
     [mountPins],
   );
 
+  const rootTone =
+    theme === "black" || theme === "dark" ? "is-dark" : "is-light";
+
   return (
-    <div className="map-preview-root">
+    <div className={`map-preview-root ${rootTone}`}>
       <header className="map-preview-bar">
         <div className="map-preview-title">핀맵 지도 미리보기</div>
         <div className="map-preview-themes" role="group" aria-label="지도 스타일">
-          {THEME_ORDER.map((id) => (
+          {MAP_PREVIEW_THEME_ORDER.map((id) => (
             <button
               key={id}
               type="button"
