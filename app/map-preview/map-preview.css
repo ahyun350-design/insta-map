@@ -53,6 +53,9 @@
   inset: 0;
   touch-action: none;
 }
+.map-preview-map .pindmapGlMapRoot {
+  min-height: 100%;
+}
 .map-preview-status {
   position: absolute;
   left: 50%;
