@@ -4,6 +4,10 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { FEED_POST_CATEGORIES, type FeedPostCategory } from "@/lib/feedPost";
 import { isSubCategory } from "@/lib/kakaoSubcategory";
 import { resolvePlaceViaPoi } from "@/lib/resolvePlaceViaPoi";
+import {
+  SANGGA_SOURCE,
+  subcategoryFromSanggaRaw,
+} from "@/lib/sanggaGuard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,11 +102,14 @@ export async function POST(req: Request) {
     }
 
     // Kakao coords → try poi re-resolve (same helper as extract); match → poi, else keep kakao
+    // category는 body(추출) 값 유지. sangga여도 덮지 않음.
+    let subcategoryOut = subcategory;
     if (source === "kakao" && hasCoords) {
       const poiResolved = await resolvePlaceViaPoi(admin, {
         placeName: name,
         originLat: lat,
         originLng: lng,
+        placeCategory: category,
       });
       if (poiResolved.ok) {
         address = poiResolved.address;
@@ -111,6 +118,22 @@ export async function POST(req: Request) {
         hasCoords = true;
         source = "poi";
         poiId = poiResolved.poiId;
+        if (
+          !subcategoryOut &&
+          (poiResolved.match.poi.source ?? null) === SANGGA_SOURCE
+        ) {
+          const { data: poiRow } = await admin
+            .from("poi")
+            .select("raw_category")
+            .eq("id", poiResolved.poiId)
+            .maybeSingle<{ raw_category?: string | null }>();
+          const raw =
+            typeof poiRow?.raw_category === "string" ? poiRow.raw_category : null;
+          subcategoryOut = subcategoryFromSanggaRaw(
+            category as FeedPostCategory,
+            raw,
+          );
+        }
       }
     }
 
@@ -120,7 +143,7 @@ export async function POST(req: Request) {
       name,
       address,
       category,
-      subcategory,
+      subcategory: subcategoryOut,
       lat: hasCoords ? lat : null,
       lng: hasCoords ? lng : null,
       ...(source ? { source } : {}),

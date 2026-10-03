@@ -13,6 +13,10 @@ import {
 import { resolveExtractPlaceCategory } from "@/lib/kakaoCategory";
 import { resolveKakaoSubcategory } from "@/lib/kakaoSubcategory";
 import {
+  SANGGA_SOURCE,
+  subcategoryFromSanggaRaw,
+} from "@/lib/sanggaGuard";
+import {
   classifyCaption,
   kakaoBranchTagAcceptable,
   normalizeCountryCode,
@@ -598,25 +602,38 @@ export async function POST(req: Request) {
         }
 
         // 이름은 항상 Claude 추출명 유지. 카카오 좌표는 origin 으로만 사용.
+        // category는 추출 시그널로 먼저 산출(sangga 가드·최종 category 유지용).
+        const extractCategory = resolveExtractPlaceCategory({
+          groupCode: kakaoResult.category_group_code,
+          categoryName: kakaoResult.category_name,
+          claudeCategory: item.category,
+        });
         const poiResolved = await resolvePlaceViaPoi(supabase, {
           placeName: item.name,
           originLat: kakaoResult.lat,
           originLng: kakaoResult.lng,
+          placeCategory: extractCategory,
         });
         let poiRaw: string | null = null;
+        let poiSource: string | null = null;
         if (poiResolved.ok) {
+          poiSource = poiResolved.match.poi.source ?? null;
           poiRaw = await fetchPoiRawCategory(supabase, poiResolved.poiId);
         }
+        // sangga 매칭이어도 category는 추출 결과 유지(상가 업종으로 덮지 않음).
         const category = resolveExtractPlaceCategory({
           groupCode: kakaoResult.category_group_code,
           categoryName: kakaoResult.category_name,
           claudeCategory: item.category,
-          poiRawCategory: poiRaw,
+          poiRawCategory: poiSource === SANGGA_SOURCE ? null : poiRaw,
         });
-        const subcategory = resolveKakaoSubcategory(
+        let subcategory = resolveKakaoSubcategory(
           category,
           kakaoResult.category_name,
         );
+        if (poiSource === SANGGA_SOURCE && !subcategory) {
+          subcategory = subcategoryFromSanggaRaw(category, poiRaw);
+        }
         if (poiResolved.ok) {
           console.log(formatPlaceSourceLog("poi", item.name));
           resolved.push({

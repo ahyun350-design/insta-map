@@ -27,6 +27,9 @@ scripts/localdata/.db_url
 
 # LOCALDATA C-group raw CSVs (large)
 scripts/localdata/raw_c/
+
+# 상가(상권)정보 raw (large)
+scripts/localdata/raw_d/
 .xcode-derived/
 .worktrees/
 

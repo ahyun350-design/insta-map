@@ -27,6 +27,7 @@ from poi_match import (
     detect_facility_route,
     evaluate_candidate_pair,
 )
+from sangga_common import SOURCE as SANGGA_SOURCE, sangga_guard_reject_reason
 
 OUT = Path(__file__).resolve().parent / "out"
 DB_URL_FILE = Path(__file__).resolve().parent / ".db_url"
@@ -119,6 +120,7 @@ def _fetch_candidates(
               p.name AS poi_name,
               p.name_norm AS poi_norm,
               p.source AS poi_source,
+              p.category AS poi_category,
               p.lat AS poi_lat,
               p.lng AS poi_lng,
               (
@@ -169,6 +171,7 @@ def _pick_best(
     cands: list[dict],
     *,
     routing: bool,
+    place_category: str | None = None,
 ) -> tuple[dict | None, Counter]:
     place_excl: Counter = Counter()
     picked = None
@@ -182,6 +185,18 @@ def _pick_best(
         if not scored:
             # Count coarse exclusions via legacy path? Skip — attribution uses matched set.
             continue
+        # sangga 전용 가드 (lib/sanggaGuard.rules.json)
+        if (c.get("poi_source") or "") == SANGGA_SOURCE:
+            reject = sangga_guard_reject_reason(
+                c["place_name"] or "",
+                place_category,
+                c["poi_name"] or "",
+                c.get("poi_category"),
+                float(c["dist_m"]),
+            )
+            if reject:
+                place_excl[reject] += 1
+                continue
         score, reason = scored
         dist_m = float(c["dist_m"])
         row = {
@@ -247,7 +262,11 @@ def match_batch(conn, batch: list[dict]) -> tuple[dict[str, dict], Counter]:
             pid = str(p["id"])
             if pid in best:
                 continue
-            picked, place_excl = _pick_best(by_place.get(pid, []), routing=False)
+            picked, place_excl = _pick_best(
+                by_place.get(pid, []),
+                routing=False,
+                place_category=p.get("category"),
+            )
             if picked:
                 picked["path"] = path_label
                 best[pid] = picked
@@ -256,6 +275,10 @@ def match_batch(conn, batch: list[dict]) -> tuple[dict[str, dict], Counter]:
                     excl["franchise_prefix"] += 1
                 elif place_excl["facility_keyword"] > 0:
                     excl["facility_keyword"] += 1
+                elif place_excl["sangga_partial_guard"] > 0:
+                    excl["sangga_partial_guard"] += 1
+                elif place_excl["sangga_sim_distance"] > 0:
+                    excl["sangga_sim_distance"] += 1
                 elif place_excl["reverse_contain"] > 0:
                     excl["reverse_contain"] += 1
                 elif place_excl["distance"] > 0:
@@ -280,7 +303,11 @@ def match_batch(conn, batch: list[dict]) -> tuple[dict[str, dict], Counter]:
             by_place.setdefault(str(r["place_id"]), []).append(r)
         for p in places:
             pid = str(p["id"])
-            picked, place_excl = _pick_best(by_place.get(pid, []), routing=True)
+            picked, place_excl = _pick_best(
+                by_place.get(pid, []),
+                routing=True,
+                place_category=p.get("category"),
+            )
             if picked:
                 picked["route_source"] = route_src
                 picked["path"] = "routing"

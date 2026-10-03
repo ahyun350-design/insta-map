@@ -11,18 +11,22 @@ import {
   evaluateCandidate,
   haversineM,
   normalizePoiName,
-  pickBestPoiMatch,
   roughNameSimilarity,
   type ExcludeReason,
   type PlacePoiMatch,
   type PoiRow,
 } from "@/lib/poiMatch";
+import { sanggaGuardRejectReason } from "@/lib/sanggaGuard";
 
 export type ResolveViaPoiInput = {
   placeName: string;
   originLat: number;
   originLng: number;
+  /** sangga 부분일치 가드용. 없으면 category 일치 조건 실패로 진부분일치 거절. */
+  placeCategory?: string | null;
 };
+
+type SanggaAwareExclude = ExcludeReason | "sangga_partial_guard" | "sangga_sim_distance";
 
 export type ResolveViaPoiFailReason =
   | "empty_name"
@@ -54,7 +58,7 @@ export type ResolveViaPoiResult =
       ok: false;
       reason: ResolveViaPoiFailReason;
       nearbyCount: number;
-      excluded?: Partial<Record<ExcludeReason, number>>;
+      excluded?: Partial<Record<SanggaAwareExclude, number>>;
       timing?: ResolveViaPoiTiming;
     };
 
@@ -188,6 +192,7 @@ export async function resolvePlacesViaPoiBatch(
     id: string;
     placeName: string;
     placeNorm: string;
+    placeCategory: string | null;
     originLat: number;
     originLng: number;
     routeSource: string | null;
@@ -212,6 +217,7 @@ export async function resolvePlacesViaPoiBatch(
       id: input.id,
       placeName,
       placeNorm,
+      placeCategory: input.placeCategory ?? null,
       originLat: input.originLat,
       originLng: input.originLng,
       routeSource: detectFacilityRoute(placeName),
@@ -250,6 +256,7 @@ export async function resolvePlacesViaPoiBatch(
         const result = finishMatch(
           p.placeName,
           p.placeNorm,
+          p.placeCategory,
           cands,
           true,
           rpcMs / routed.length,
@@ -297,6 +304,7 @@ export async function resolvePlacesViaPoiBatch(
           finishMatch(
             p.placeName,
             p.placeNorm,
+            p.placeCategory,
             cands,
             false,
             rpcMs / needGeneral.length,
@@ -331,16 +339,16 @@ function buildCandidates(
   return candidates;
 }
 
-function finishMatch(
+function pickBestWithSanggaGuard(
   placeName: string,
   placeNorm: string,
+  placeCategory: string | null | undefined,
   candidates: Array<PoiRow & { distM: number; simRaw: number }>,
-  routing: boolean,
-  rpcMs: number,
-  matchStarted: number,
-): ResolveViaPoiResult {
-  const excluded: Partial<Record<ExcludeReason, number>> = {};
+  opts?: { routing?: boolean },
+): { best: PlacePoiMatch | null; excluded: Partial<Record<SanggaAwareExclude, number>>; scoredN: number } {
+  const excluded: Partial<Record<SanggaAwareExclude, number>> = {};
   let scoredN = 0;
+  let best: PlacePoiMatch | null = null;
   for (const c of candidates) {
     const pick = evaluateCandidate(
       {
@@ -351,16 +359,59 @@ function finishMatch(
         simRaw: c.simRaw,
         distM: c.distM,
       },
-      { routing },
+      opts,
     );
     if (!pick) continue;
     scoredN += 1;
     if (pick.excluded) {
       excluded[pick.excluded] = (excluded[pick.excluded] || 0) + 1;
+      continue;
+    }
+    const sanggaReject = sanggaGuardRejectReason({
+      placeName,
+      placeCategory,
+      poiName: c.name,
+      poiCategory: c.category,
+      poiSource: c.source,
+      distM: pick.distM,
+      reason: pick.reason,
+    });
+    if (sanggaReject) {
+      excluded[sanggaReject] = (excluded[sanggaReject] || 0) + 1;
+      continue;
+    }
+    if (
+      !best ||
+      pick.score > best.score ||
+      (pick.score === best.score && pick.distM < best.distM)
+    ) {
+      best = {
+        poi: c,
+        score: pick.score,
+        reason: pick.reason,
+        distM: pick.distM,
+      };
     }
   }
+  return { best, excluded, scoredN };
+}
 
-  const best = pickBestPoiMatch(placeName, placeNorm, candidates, { routing });
+function finishMatch(
+  placeName: string,
+  placeNorm: string,
+  placeCategory: string | null | undefined,
+  candidates: Array<PoiRow & { distM: number; simRaw: number }>,
+  routing: boolean,
+  rpcMs: number,
+  matchStarted: number,
+): ResolveViaPoiResult {
+  const { best, excluded, scoredN } = pickBestWithSanggaGuard(
+    placeName,
+    placeNorm,
+    placeCategory,
+    candidates,
+    { routing },
+  );
   const timing = { rpcMs, matchMs: Date.now() - matchStarted };
 
   if (!best) {
@@ -433,6 +484,7 @@ export async function resolvePlaceViaPoi(
     return { ok: false, reason: "norm_too_short", nearbyCount: 0 };
   }
 
+  const placeCategory = input.placeCategory ?? null;
   const routeSource = detectFacilityRoute(placeName);
   let rpcMs = 0;
   const tMatchAll = Date.now();
@@ -460,6 +512,7 @@ export async function resolvePlaceViaPoi(
     const routed = finishMatch(
       placeName,
       placeNorm,
+      placeCategory,
       routedCands,
       true,
       rpcMs,
@@ -484,14 +537,22 @@ export async function resolvePlaceViaPoi(
     POI_MATCH_RADIUS_M,
     placeNorm,
   );
-  return finishMatch(placeName, placeNorm, candidates, false, rpcMs, tMatchAll);
+  return finishMatch(
+    placeName,
+    placeNorm,
+    placeCategory,
+    candidates,
+    false,
+    rpcMs,
+    tMatchAll,
+  );
 }
 
 /** B 경로: 카카오 성공 후 poi 재해결 실패 */
 export function formatPoiReresolveMissLog(
   placeName: string,
   reason: ResolveViaPoiFailReason,
-  excluded?: Partial<Record<ExcludeReason, number>>,
+  excluded?: Partial<Record<SanggaAwareExclude, number>>,
 ): string {
   const safe = (placeName || "").replace(/\|/g, "/").trim();
   const excl =
