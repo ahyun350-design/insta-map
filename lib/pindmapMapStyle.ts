@@ -67,36 +67,35 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
   paper: {
     id: "paper",
     label: "페이퍼",
-    background: "#F3EEE4",
-    land: "#F3EEE4",
-    water: "#C9DCE8",
-    park: "#D5E6C6",
-    building: "#E8E0D2",
+    background: "#F7F5F0",
+    land: "#F7F5F0",
+    water: "#BFDDF2",
+    park: "#DCEAD0",
+    building: "#EEEAE2",
     showBuildings: true,
     road: "#FFFFFF",
-    roadMinor: "#FFFEFA",
-    rail: "#D0C8BA",
-    text: "#6A5B4E",
-    textHalo: "#F3EEE4",
-    boundary: "#D2C8B8",
-    stationDot: "#6A5B4E",
+    roadMinor: "#FFFFFF",
+    rail: "#C5C0B8",
+    text: "#3A4155",
+    textHalo: "#FFFFFF",
+    boundary: "#D8D2C8",
+    stationDot: "#3A4155",
   },
   white: {
     id: "white",
     label: "화이트",
     background: "#FFFFFF",
     land: "#FFFFFF",
-    water: "#E6E6E6",
-    park: "#F4F4F4",
-    building: "#FFFFFF",
-    showBuildings: false,
-    // Slightly darker lines for major roads; minor barely visible
-    road: "#D8D8D8",
-    roadMinor: "#EFEFEF",
-    rail: "#E0E0E0",
-    text: "#757575",
+    water: "#DCE6EE",
+    park: "#EEF2EC",
+    building: "#F3F3F3",
+    showBuildings: true,
+    road: "#FFFFFF",
+    roadMinor: "#FAFAFA",
+    rail: "#D0D0D0",
+    text: "#3A4155",
     textHalo: "#FFFFFF",
-    boundary: "#E8E8E8",
+    boundary: "#E0E0E0",
     stationDot: "#555555",
   },
   black: {
@@ -251,8 +250,39 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   for (const raw of style.layers) {
     const layer: AnyLayer = { ...raw, layout: { ...(raw.layout || {}) }, paint: { ...(raw.paint || {}) } };
 
-    if (HIDE_LAYER_IDS.has(layer.id) || isCasing(layer.id)) {
+    if (HIDE_LAYER_IDS.has(layer.id)) {
       setVisibility(layer, false);
+      layers.push(layer);
+      continue;
+    }
+
+    const useGuideRoads = theme.id === "paper" || theme.id === "white";
+    const roadCasing = theme.id === "white" ? "#E8E8E8" : "#E6E1D6";
+    const majorFill = theme.id === "white" ? "#F0F0F0" : "#FBEBC2";
+    const majorCasing = theme.id === "white" ? "#D8D8D8" : "#EBD9A6";
+    const woodFill = theme.id === "white" ? "#F5F7F3" : "#E8F0E0";
+    const buildingOutline = theme.id === "white" ? "#E6E6E6" : "#E2DDD2";
+
+    if (isCasing(layer.id)) {
+      if (!useGuideRoads) {
+        setVisibility(layer, false);
+        layers.push(layer);
+        continue;
+      }
+      const major =
+        layer.id.includes("motorway") ||
+        layer.id.includes("trunk") ||
+        layer.id.includes("primary") ||
+        layer.id.includes("secondary");
+      if (layer.type === "line") {
+        paintSet(layer, "line-color", major ? majorCasing : roadCasing);
+        paintSet(layer, "line-opacity", 1);
+        // Keep liberty width; ensure visible from z6 for motorway casing
+        if (layer.id.includes("motorway") || layer.id.includes("trunk")) {
+          layer.minzoom = Math.min(layer.minzoom ?? 6, 6);
+        }
+      }
+      setVisibility(layer, true);
       layers.push(layer);
       continue;
     }
@@ -272,18 +302,23 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       layer.id.startsWith("landuse_")
     ) {
       if (layer.type === "fill") {
-        if (layer.id === "park" || layer.id.includes("wood") || layer.id.includes("grass")) {
+        if (layer.id.includes("wood") || layer.id.includes("forest")) {
+          paintSet(layer, "fill-color", woodFill);
+          paintSet(layer, "fill-opacity", 0.7);
+        } else if (layer.id === "park" || layer.id.includes("grass")) {
           paintSet(layer, "fill-color", theme.park);
+          paintSet(layer, "fill-opacity", 0.9);
         } else if (layer.id.includes("sand") || layer.id.includes("ice")) {
           paintSet(layer, "fill-color", theme.land);
+          paintSet(layer, "fill-opacity", 0.5);
         } else {
           paintSet(layer, "fill-color", theme.land);
+          paintSet(layer, "fill-opacity", 0.4);
         }
-        paintSet(layer, "fill-opacity", layer.id === "park" ? 0.85 : 0.55);
       }
       if (layer.id === "park_outline") {
         paintSet(layer, "line-color", theme.park);
-        paintSet(layer, "line-opacity", 0.35);
+        paintSet(layer, "line-opacity", 0.4);
       }
     }
 
@@ -292,8 +327,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         setVisibility(layer, false);
       } else {
         paintSet(layer, "fill-color", theme.building);
-        paintSet(layer, "fill-opacity", 0.9);
-        layer.minzoom = 14;
+        paintSet(layer, "fill-opacity", 0.95);
+        paintSet(layer, "fill-outline-color", buildingOutline);
+        layer.minzoom = 15;
         delete layer.maxzoom;
       }
     }
@@ -311,13 +347,22 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           layer.id.includes("trunk") ||
           layer.id.includes("primary") ||
           layer.id.includes("secondary");
-        // Major: slightly thicker warm tint; minor/일반: near-white (theme.road)
-        const majorWarm =
-          theme.id === "black" || theme.id === "dark" ? "#4a3f35" : "#E8D5BF";
-        paintSet(layer, "line-color", minor ? theme.roadMinor : major ? majorWarm : theme.road);
-        paintSet(layer, "line-opacity", major ? 0.95 : 1);
-        if (major && layer.paint && typeof layer.paint["line-width"] !== "undefined") {
-          /* keep liberty width ramp; nudge via multiplier where numeric */
+        const highway =
+          layer.id.includes("motorway") || layer.id.includes("trunk");
+        if (useGuideRoads) {
+          paintSet(
+            layer,
+            "line-color",
+            minor ? theme.roadMinor : major ? majorFill : theme.road,
+          );
+          paintSet(layer, "line-opacity", 1);
+          if (highway) {
+            // Low-zoom thin highways so national view isn't empty land
+            layer.minzoom = Math.min(layer.minzoom ?? 6, 6);
+          }
+        } else {
+          paintSet(layer, "line-color", minor ? theme.roadMinor : theme.road);
+          paintSet(layer, "line-opacity", 1);
         }
       }
       if (layer.type === "fill") {
@@ -334,7 +379,11 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
 
     if (layer.id.startsWith("boundary")) {
       paintSet(layer, "line-color", theme.boundary);
-      paintSet(layer, "line-opacity", 0.45);
+      paintSet(layer, "line-opacity", 0.55);
+      if (useGuideRoads && layer.type === "line") {
+        paintSet(layer, "line-dasharray", [2, 2]);
+        layer.minzoom = Math.min(layer.minzoom ?? 4, 4);
+      }
     }
 
     // Labels — Korean only + zoom ladder
@@ -345,18 +394,28 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       }
       paintSet(layer, "text-color", theme.text);
       paintSet(layer, "text-halo-color", theme.textHalo);
-      paintSet(layer, "text-halo-width", 1.2);
+      paintSet(layer, "text-halo-width", 1.5);
 
-      if (layer.id.startsWith("water")) {
+      if (layer.id.startsWith("water") && layer.type === "symbol") {
         layer.minzoom = 10;
+        paintSet(layer, "text-color", theme.id === "white" ? "#6A8FA8" : "#4A8BB8");
+        paintSet(layer, "text-halo-color", theme.textHalo);
+        paintSet(layer, "text-halo-width", 1.5);
+        if (layer.layout) {
+          layer.layout["text-font"] = ["Noto Sans Regular"];
+        }
       }
-      // 시 이름: z8 이하 위주 (city/town). 구 스케일에서는 숨겨 겹침 감소.
+      // 시 이름: z8 이하 위주 — 굵고 크게
       if (layer.id === "label_city" || layer.id === "label_town") {
         layer.minzoom = 5;
         layer.maxzoom = 9;
         paintSet(layer, "text-color", theme.text);
         paintSet(layer, "text-halo-color", theme.textHalo);
-        paintSet(layer, "text-halo-width", 1.4);
+        paintSet(layer, "text-halo-width", 1.5);
+        if (layer.layout) {
+          layer.layout["text-font"] = ["Noto Sans Bold"];
+          layer.layout["text-size"] = layer.id === "label_city" ? 15 : 13;
+        }
       }
       if (layer.id === "label_other") {
         // Seoul tiles: 구=borough (z14), 동=quarter (z14). suburb≠구.
@@ -372,15 +431,16 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           maxzoom: 16,
           layout: {
             "text-field": KO_TEXT,
-            "text-font": ["Noto Sans Regular"],
+            "text-font": ["Noto Sans Bold"],
             "text-size": 13,
+            "text-letter-spacing": 0.06,
             "text-max-width": 8,
             visibility: "visible",
           },
           paint: {
             "text-color": theme.text,
             "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.4,
+            "text-halo-width": 1.5,
           },
         });
         layers.push({
@@ -400,7 +460,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           paint: {
             "text-color": theme.text,
             "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.3,
+            "text-halo-width": 1.5,
           },
         });
         continue;
@@ -449,6 +509,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       // 큰 공원·산
       if (layer.id.includes("park_label") || layer.id === "label_park") {
         layer.minzoom = 11;
+        paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : "#4F7A4A");
+        paintSet(layer, "text-halo-color", theme.textHalo);
+        paintSet(layer, "text-halo-width", 1.5);
       }
       if (layer.id.includes("mountain") || layer.id.includes("peak")) {
         layer.minzoom = 11;
@@ -498,15 +561,16 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     maxzoom: 13.5,
     layout: {
       "text-field": ["get", "name"],
-      "text-font": ["Noto Sans Regular"],
+      "text-font": ["Noto Sans Bold"],
       "text-size": 13,
+      "text-letter-spacing": 0.08,
       "text-max-width": 8,
       visibility: "visible",
     },
     paint: {
       "text-color": theme.text,
       "text-halo-color": theme.textHalo,
-      "text-halo-width": 1.4,
+      "text-halo-width": 1.5,
     },
   });
 

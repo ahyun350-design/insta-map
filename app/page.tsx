@@ -10182,7 +10182,8 @@ function HomePageContent() {
     }
     const cachedView = mapViewBootstrapRef.current;
     const loc = myLocationLatLngRef.current;
-    // Match Kakao compact: after GPS, center=me + level 9. Prefer known loc so first paint isn't elsewhere.
+    // Kakao compact final state = my-location center + level 9 (pins never fitBounds).
+    // Never reuse cached level: a prior MapLibre bug saved Korea-wide zoom as L14 and looped.
     const centerLat =
       loc && Number.isFinite(loc.lat)
         ? loc.lat
@@ -10195,7 +10196,7 @@ function HomePageContent() {
         : cachedView && Number.isFinite(cachedView.lng)
           ? cachedView.lng
           : 126.978;
-    const level = loc ? 9 : cachedView && Number.isFinite(cachedView.level) ? cachedView.level : 9;
+    const level = 9;
     container.classList.add("is-maplibre-pins");
 
     void MapLibreMapAdapter.create({
@@ -10216,6 +10217,12 @@ function HomePageContent() {
         if (!mapRef.current) return;
         setCompactMapReady(true);
         setCompactMapIsMapLibre(true);
+        // Final Kakao-equivalent camera before pins (pins must not change camera).
+        mapRef.current.setLevel(9);
+        if (myLocationLatLngRef.current) {
+          const { lat, lng } = myLocationLatLngRef.current;
+          mapRef.current.setCenter({ getLat: () => lat, getLng: () => lng });
+        }
         addMyLocation(mapRef.current, "main");
         attachCompactMapResizeObserver();
         scheduleCompactMapRelayout();
@@ -10229,6 +10236,8 @@ function HomePageContent() {
       },
       onViewIdle: (view) => {
         if (!Number.isFinite(view.lat) || !Number.isFinite(view.lng)) return;
+        // Reject polluted zooms (Korea-wide / building-level) so next open stays L9-class.
+        if (view.level < 6 || view.level > 12) return;
         mapViewBootstrapRef.current = view;
         if (mapViewSaveTimerRef.current !== null) {
           window.clearTimeout(mapViewSaveTimerRef.current);

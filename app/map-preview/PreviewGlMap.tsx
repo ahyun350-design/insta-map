@@ -14,8 +14,9 @@ import {
 import {
   MAP_PIN_HEIGHT,
   MAP_PIN_ICON_SIZE,
-  MAP_PIN_PIXEL_RATIO,
   MAP_PIN_WIDTH,
+  clampMapPinDpr,
+  loadMapImageFromSvg,
   pinMarkerSvg,
 } from "@/lib/mapPinImages";
 import type { FeedPostCategory } from "@/lib/feedPost";
@@ -71,39 +72,30 @@ function pinSvg(category: string) {
 
 
 async function ensurePinImages(map: MlMap) {
+  const dpr = clampMapPinDpr(typeof window !== "undefined" ? window.devicePixelRatio : 2);
+  const cats = new Set<string>(FEED_CATS);
   await Promise.all(
-    FEED_CATS.map(
-      (cat) =>
-        new Promise<void>((resolve, reject) => {
-          const id = `pin-${cat}`;
-          if (map.hasImage(id)) {
-            resolve();
-            return;
-          }
-          const img = new Image(MAP_PIN_WIDTH, MAP_PIN_HEIGHT);
-          img.onload = () => {
-            if (!map.hasImage(id)) map.addImage(id, img, { pixelRatio: MAP_PIN_PIXEL_RATIO });
-            resolve();
-          };
-          img.onerror = () => reject(new Error(`pin_image_${cat}`));
-          img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(pinSvg(cat))}`;
-        }),
+    [...cats].map((cat) =>
+      loadMapImageFromSvg(
+        map,
+        `pin-${cat}`,
+        pinSvg(cat),
+        MAP_PIN_WIDTH,
+        MAP_PIN_HEIGHT,
+        dpr,
+      ),
     ),
   );
-  if (!map.hasImage("pin-fallback")) {
-    await new Promise<void>((resolve, reject) => {
-      const img = new Image(MAP_PIN_WIDTH, MAP_PIN_HEIGHT);
-      img.onload = () => {
-        if (!map.hasImage("pin-fallback")) {
-          map.addImage("pin-fallback", img, { pixelRatio: MAP_PIN_PIXEL_RATIO });
-        }
-        resolve();
-      };
-      img.onerror = () => reject(new Error("pin_image_fallback"));
-      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(pinSvg("기타"))}`;
-    });
-  }
+  await loadMapImageFromSvg(
+    map,
+    "pin-fallback",
+    pinSvg("기타"),
+    MAP_PIN_WIDTH,
+    MAP_PIN_HEIGHT,
+    dpr,
+  );
 }
+
 
 function toGeoJson(pins: PreviewGlPin[]) {
   return {

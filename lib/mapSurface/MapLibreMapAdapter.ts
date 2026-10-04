@@ -14,10 +14,11 @@ import {
   MAP_MYLOC_SIZE,
   MAP_PIN_HEIGHT,
   MAP_PIN_ICON_SIZE,
-  MAP_PIN_PIXEL_RATIO,
   MAP_PIN_WIDTH,
   MY_LOCATION_IMAGE_ID,
+  clampMapPinDpr,
   focusMarkerSvg,
+  loadMapImageFromSvg,
   myLocationMarkerSvg,
   pinImageKey,
   pinMarkerSvg,
@@ -47,27 +48,11 @@ const MYLOC_LAYER = "compact-myloc-symbol";
 const EDGE_PX = 24;
 const HIT_PAD_PX = 14;
 const FIRST_TILE_TIMEOUT_MS = 4000;
-
-async function ensureImage(
-  map: MlMap,
-  id: string,
-  svg: string,
-  w: number,
-  h: number,
-) {
-  if (map.hasImage(id)) return;
-  await new Promise<void>((resolve, reject) => {
-    const img = new Image(w, h);
-    img.onload = () => {
-      if (!map.hasImage(id)) {
-        map.addImage(id, img, { pixelRatio: MAP_PIN_PIXEL_RATIO });
-      }
-      resolve();
-    };
-    img.onerror = () => reject(new Error(`image_${id}`));
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  });
-}
+/** Clusters while zoom < 10; L9 → ML zoom 10 shows individual pins. */
+const CLUSTER_MAX_ZOOM = 9;
+const CLUSTER_RADIUS = 52;
+const PIN_CLUSTER_LAYER = "compact-pins-clusters";
+const PIN_CLUSTER_COUNT_LAYER = "compact-pins-cluster-count";
 
 export type CreateCompactMapLibreOptions = {
   container: HTMLElement;
@@ -93,6 +78,7 @@ export class MapLibreMapAdapter implements CompactMapSurface {
   private onMapClickEmpty: (() => void) | null = null;
   private onViewIdle: ((view: { lat: number; lng: number; level: number }) => void) | null =
     null;
+  private imageDpr = 2;
 
   static async create(
     options: CreateCompactMapLibreOptions,
@@ -111,8 +97,10 @@ export class MapLibreMapAdapter implements CompactMapSurface {
 
     const dpr =
       typeof window !== "undefined"
-        ? Math.min(window.devicePixelRatio || 1, 2)
+        ? clampMapPinDpr(window.devicePixelRatio || 1)
         : 1;
+
+    this.imageDpr = dpr;
 
     const map = new maplibregl.Map({
       container: options.container,
@@ -170,12 +158,13 @@ export class MapLibreMapAdapter implements CompactMapSurface {
         try {
           if (this.destroyed || !this.map) return;
           this.styleReady = true;
-          await ensureImage(
+          await loadMapImageFromSvg(
             this.map,
             MY_LOCATION_IMAGE_ID,
             myLocationMarkerSvg(),
             MAP_MYLOC_SIZE,
             MAP_MYLOC_SIZE,
+            this.imageDpr,
           );
           this.addLayers(this.map);
           this.bindClicks(this.map);
@@ -264,12 +253,40 @@ export class MapLibreMapAdapter implements CompactMapSurface {
     map.addSource(PIN_SOURCE, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
-      cluster: false,
+      cluster: true,
+      clusterMaxZoom: CLUSTER_MAX_ZOOM,
+      clusterRadius: CLUSTER_RADIUS,
+    });
+    map.addLayer({
+      id: PIN_CLUSTER_LAYER,
+      type: "circle",
+      source: PIN_SOURCE,
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-color": "#1a2a7a",
+        "circle-radius": ["step", ["get", "point_count"], 16, 8, 20, 25, 26],
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ffffff",
+      },
+    });
+    map.addLayer({
+      id: PIN_CLUSTER_COUNT_LAYER,
+      type: "symbol",
+      source: PIN_SOURCE,
+      filter: ["has", "point_count"],
+      layout: {
+        "text-field": ["get", "point_count_abbreviated"],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": 12,
+        "text-allow-overlap": true,
+      },
+      paint: { "text-color": "#ffffff" },
     });
     map.addLayer({
       id: PIN_LAYER,
       type: "symbol",
       source: PIN_SOURCE,
+      filter: ["!", ["has", "point_count"]],
       layout: {
         "icon-image": ["get", "icon"],
         "icon-size": MAP_PIN_ICON_SIZE,
@@ -298,11 +315,26 @@ export class MapLibreMapAdapter implements CompactMapSurface {
   }
 
   private bindClicks(map: MlMap) {
+    map.on("click", PIN_CLUSTER_LAYER, (e) => {
+      const feat = e.features?.[0];
+      if (!feat || feat.geometry.type !== "Point") return;
+      const clusterId = feat.properties?.cluster_id as number | undefined;
+      if (clusterId == null) return;
+      const src = map.getSource(PIN_SOURCE) as GeoJSONSource;
+      const coords = feat.geometry.coordinates as [number, number];
+      void src.getClusterExpansionZoom(clusterId).then((z) => {
+        map.easeTo({ center: coords, zoom: Math.min(z, 12) });
+      });
+    });
     map.on("click", (e) => {
       const bbox: [[number, number], [number, number]] = [
         [e.point.x - HIT_PAD_PX, e.point.y - HIT_PAD_PX],
         [e.point.x + HIT_PAD_PX, e.point.y + HIT_PAD_PX],
       ];
+      const clusterHits = map.queryRenderedFeatures(bbox, {
+        layers: [PIN_CLUSTER_LAYER],
+      });
+      if (clusterHits.length > 0) return; // cluster handler owns this
       const feats = map.queryRenderedFeatures(bbox, {
         layers: [PIN_LAYER, FOCUS_LAYER],
       });
@@ -405,12 +437,13 @@ export class MapLibreMapAdapter implements CompactMapSurface {
     if (!map?.getSource(PIN_SOURCE)) return;
     await Promise.all(
       pins.map((p) =>
-        ensureImage(
+        loadMapImageFromSvg(
           map,
           pinImageKey("pin", p.category, p.fillColor),
           pinMarkerSvg(p.category, p.fillColor),
           MAP_PIN_WIDTH,
           MAP_PIN_HEIGHT,
+          this.imageDpr,
         ),
       ),
     );
@@ -503,12 +536,13 @@ export class MapLibreMapAdapter implements CompactMapSurface {
     const map = this.map;
     if (!map?.getSource(FOCUS_SOURCE)) return;
     const icon = pinImageKey("focus", pin.category, pin.fillColor);
-    await ensureImage(
+    await loadMapImageFromSvg(
       map,
       icon,
       focusMarkerSvg(pin.category, pin.fillColor),
       MAP_FOCUS_PIN_WIDTH,
       MAP_FOCUS_PIN_HEIGHT,
+      this.imageDpr,
     );
     if (this.destroyed || !this.map) return;
     (this.map.getSource(FOCUS_SOURCE) as GeoJSONSource).setData({
