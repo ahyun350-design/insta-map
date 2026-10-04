@@ -242,6 +242,418 @@ function isRail(id: string) {
   return id.includes("rail");
 }
 
+/** Strip metro suffixes for compact city labels (keep plain "…시"). */
+const SHORT_CITY_KO: unknown = [
+  "let",
+  "n",
+  ["to-string", ["coalesce", ["get", "name:ko"], ["get", "name:nonlatin"], ["get", "name"], ""]],
+  [
+    "case",
+    [
+      "==",
+      ["slice", ["var", "n"], ["-", ["length", ["var", "n"]], 5]],
+      "특별자치시",
+    ],
+    ["slice", ["var", "n"], 0, ["-", ["length", ["var", "n"]], 5]],
+    [
+      "==",
+      ["slice", ["var", "n"], ["-", ["length", ["var", "n"]], 5]],
+      "특별자치도",
+    ],
+    ["slice", ["var", "n"], 0, ["-", ["length", ["var", "n"]], 5]],
+    [
+      "==",
+      ["slice", ["var", "n"], ["-", ["length", ["var", "n"]], 3]],
+      "광역시",
+    ],
+    ["slice", ["var", "n"], 0, ["-", ["length", ["var", "n"]], 3]],
+    [
+      "==",
+      ["slice", ["var", "n"], ["-", ["length", ["var", "n"]], 3]],
+      "특별시",
+    ],
+    ["slice", ["var", "n"], 0, ["-", ["length", ["var", "n"]], 3]],
+    ["var", "n"],
+  ],
+];
+
+type RoadKind =
+  | "motorway"
+  | "trunk"
+  | "primary"
+  | "secondary"
+  | "tertiary"
+  | "minor"
+  | "service"
+  | "link"
+  | "path"
+  | "other";
+
+function cloneLayer(layer: AnyLayer): AnyLayer {
+  return {
+    ...layer,
+    layout: { ...(layer.layout || {}) },
+    paint: { ...(layer.paint || {}) },
+    filter: layer.filter ? structuredClone(layer.filter) : layer.filter,
+  };
+}
+
+function andFilter(existing: unknown, extra: unknown): unknown {
+  if (!existing) return extra;
+  return ["all", existing, extra];
+}
+
+function withRoadClass(layer: AnyLayer, className: string, suffix: string): AnyLayer {
+  const next = cloneLayer(layer);
+  next.id = `${layer.id}__${suffix}`;
+  next.filter = andFilter(next.filter, ["==", ["get", "class"], className]);
+  return next;
+}
+
+function roadMinZoom(kind: RoadKind): number {
+  switch (kind) {
+    case "motorway":
+      return 6;
+    case "trunk":
+    case "primary":
+      return 9;
+    case "secondary":
+      return 11;
+    case "tertiary":
+      return 13;
+    case "link":
+      return 12;
+    case "minor":
+    case "service":
+      return 14;
+    case "path":
+      return 15;
+    default:
+      return 14;
+  }
+}
+
+function roadFillWidth(kind: RoadKind): unknown {
+  // ~30% thinner than Liberty defaults; smooth zoom interpolation.
+  switch (kind) {
+    case "motorway":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        6,
+        0.6,
+        8,
+        1.0,
+        10,
+        1.5,
+        14,
+        4.2,
+        18,
+        11,
+      ];
+    case "trunk":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        9,
+        1.0,
+        12,
+        2.0,
+        16,
+        7,
+        18,
+        10,
+      ];
+    case "primary":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        9,
+        0.8,
+        10,
+        1.2,
+        14,
+        3.0,
+        18,
+        8,
+      ];
+    case "secondary":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        11,
+        0.7,
+        14,
+        2.2,
+        18,
+        6.5,
+      ];
+    case "tertiary":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        13,
+        0.6,
+        15,
+        1.7,
+        18,
+        5,
+      ];
+    case "link":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        12,
+        0.5,
+        14,
+        1.4,
+        18,
+        5.5,
+      ];
+    case "minor":
+    case "service":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        14,
+        0.5,
+        16,
+        1.6,
+        18,
+        4.2,
+      ];
+    case "path":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        15,
+        0.4,
+        18,
+        2.5,
+      ];
+    default:
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        14,
+        0.5,
+        18,
+        4,
+      ];
+  }
+}
+
+function roadCasingWidth(kind: RoadKind): unknown {
+  switch (kind) {
+    case "motorway":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        6,
+        1.15,
+        8,
+        1.7,
+        10,
+        2.4,
+        14,
+        5.6,
+        18,
+        13,
+      ];
+    case "trunk":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        9,
+        1.6,
+        12,
+        2.9,
+        16,
+        8.5,
+        18,
+        12,
+      ];
+    case "primary":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        9,
+        1.35,
+        10,
+        1.85,
+        14,
+        4.2,
+        18,
+        10,
+      ];
+    case "secondary":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        11,
+        1.2,
+        14,
+        3.2,
+        18,
+        8,
+      ];
+    case "tertiary":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        13,
+        1.05,
+        15,
+        2.5,
+        18,
+        6.5,
+      ];
+    case "link":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        12,
+        1.0,
+        14,
+        2.2,
+        18,
+        7,
+      ];
+    case "minor":
+    case "service":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        14,
+        0.9,
+        16,
+        2.4,
+        18,
+        5.5,
+      ];
+    case "path":
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        15,
+        0.8,
+        18,
+        3.5,
+      ];
+    default:
+      return [
+        "interpolate",
+        ["exponential", 1.2],
+        ["zoom"],
+        14,
+        0.9,
+        18,
+        5,
+      ];
+  }
+}
+
+function roadFillColor(
+  theme: MapPreviewTheme,
+  kind: RoadKind,
+): string {
+  const yellow = kind === "motorway" || kind === "trunk";
+  if (theme.id === "paper") {
+    if (yellow) return "#FAF0D4";
+    return theme.road;
+  }
+  if (theme.id === "white") {
+    if (yellow) return "#EDEDED";
+    return theme.road;
+  }
+  return kind === "path" || kind === "minor" || kind === "service"
+    ? theme.roadMinor
+    : theme.road;
+}
+
+function roadCasingColor(
+  theme: MapPreviewTheme,
+  kind: RoadKind,
+): string {
+  const yellow = kind === "motorway" || kind === "trunk";
+  if (theme.id === "paper") {
+    return yellow ? "#EFE2B8" : "#E6E1D6";
+  }
+  if (theme.id === "white") {
+    return yellow ? "#E0E0E0" : "#E8E8E8";
+  }
+  return theme.boundary;
+}
+
+function applyGuideRoadStyle(
+  layer: AnyLayer,
+  theme: MapPreviewTheme,
+  kind: RoadKind,
+  casing: boolean,
+) {
+  layer.minzoom = Math.max(layer.minzoom ?? 0, roadMinZoom(kind));
+  if (layer.type === "line") {
+    paintSet(layer, "line-color", casing ? roadCasingColor(theme, kind) : roadFillColor(theme, kind));
+    paintSet(layer, "line-opacity", 1);
+    paintSet(layer, "line-width", casing ? roadCasingWidth(kind) : roadFillWidth(kind));
+  }
+  setVisibility(layer, true);
+}
+
+function expandCombinedRoadLayers(
+  layer: AnyLayer,
+  theme: MapPreviewTheme,
+  casing: boolean,
+): AnyLayer[] | null {
+  const id = layer.id;
+  if (id.includes("trunk_primary")) {
+    const trunk = withRoadClass(layer, "trunk", "trunk");
+    const primary = withRoadClass(layer, "primary", "primary");
+    applyGuideRoadStyle(trunk, theme, "trunk", casing);
+    applyGuideRoadStyle(primary, theme, "primary", casing);
+    return [trunk, primary];
+  }
+  if (id.includes("secondary_tertiary")) {
+    const secondary = withRoadClass(layer, "secondary", "secondary");
+    const tertiary = withRoadClass(layer, "tertiary", "tertiary");
+    applyGuideRoadStyle(secondary, theme, "secondary", casing);
+    applyGuideRoadStyle(tertiary, theme, "tertiary", casing);
+    return [secondary, tertiary];
+  }
+  return null;
+}
+
+function detectRoadKind(id: string): RoadKind {
+  if (id.includes("motorway") && id.includes("link")) return "link";
+  if (id.includes("motorway")) return "motorway";
+  if (id.includes("trunk")) return "trunk";
+  if (id.includes("primary")) return "primary";
+  if (id.includes("secondary")) return "secondary";
+  if (id.includes("tertiary")) return "tertiary";
+  if (id.includes("link")) return "link";
+  if (id.includes("path") || id.includes("pedestrian")) return "path";
+  if (id.includes("service") || id.includes("track")) return "service";
+  if (id.includes("minor") || id.includes("street")) return "minor";
+  return "other";
+}
+
 export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<StyleJson> {
   const theme = MAP_PREVIEW_THEMES[themeId];
   const style = await fetchLibertyStyle();
@@ -257,9 +669,6 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     }
 
     const useGuideRoads = theme.id === "paper" || theme.id === "white";
-    const roadCasing = theme.id === "white" ? "#E8E8E8" : "#E6E1D6";
-    const majorFill = theme.id === "white" ? "#F0F0F0" : "#FBEBC2";
-    const majorCasing = theme.id === "white" ? "#D8D8D8" : "#EBD9A6";
     const woodFill = theme.id === "white" ? "#F5F7F3" : "#E8F0E0";
     const buildingOutline = theme.id === "white" ? "#E6E6E6" : "#E2DDD2";
 
@@ -269,20 +678,13 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         layers.push(layer);
         continue;
       }
-      const major =
-        layer.id.includes("motorway") ||
-        layer.id.includes("trunk") ||
-        layer.id.includes("primary") ||
-        layer.id.includes("secondary");
-      if (layer.type === "line") {
-        paintSet(layer, "line-color", major ? majorCasing : roadCasing);
-        paintSet(layer, "line-opacity", 1);
-        // Keep liberty width; ensure visible from z6 for motorway casing
-        if (layer.id.includes("motorway") || layer.id.includes("trunk")) {
-          layer.minzoom = Math.min(layer.minzoom ?? 6, 6);
-        }
+      const expanded = expandCombinedRoadLayers(layer, theme, true);
+      if (expanded) {
+        layers.push(...expanded);
+        continue;
       }
-      setVisibility(layer, true);
+      const kind = detectRoadKind(layer.id);
+      applyGuideRoadStyle(layer, theme, kind, true);
       layers.push(layer);
       continue;
     }
@@ -335,6 +737,19 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     }
 
     if (isRoadFill(layer.id) || layer.id === "road_area_pattern" || layer.id.startsWith("aeroway_")) {
+      if (layer.type === "line" && useGuideRoads && (isRoadFill(layer.id) || layer.id.startsWith("aeroway_"))) {
+        if (isRoadFill(layer.id)) {
+          const expanded = expandCombinedRoadLayers(layer, theme, false);
+          if (expanded) {
+            layers.push(...expanded);
+            continue;
+          }
+          const kind = detectRoadKind(layer.id);
+          applyGuideRoadStyle(layer, theme, kind, false);
+          layers.push(layer);
+          continue;
+        }
+      }
       if (layer.type === "line") {
         const minor =
           layer.id.includes("path") ||
@@ -342,28 +757,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           layer.id.includes("service") ||
           layer.id.includes("minor") ||
           layer.id.includes("track");
-        const major =
-          layer.id.includes("motorway") ||
-          layer.id.includes("trunk") ||
-          layer.id.includes("primary") ||
-          layer.id.includes("secondary");
-        const highway =
-          layer.id.includes("motorway") || layer.id.includes("trunk");
-        if (useGuideRoads) {
-          paintSet(
-            layer,
-            "line-color",
-            minor ? theme.roadMinor : major ? majorFill : theme.road,
-          );
-          paintSet(layer, "line-opacity", 1);
-          if (highway) {
-            // Low-zoom thin highways so national view isn't empty land
-            layer.minzoom = Math.min(layer.minzoom ?? 6, 6);
-          }
-        } else {
-          paintSet(layer, "line-color", minor ? theme.roadMinor : theme.road);
-          paintSet(layer, "line-opacity", 1);
-        }
+        paintSet(layer, "line-color", minor ? theme.roadMinor : theme.road);
+        paintSet(layer, "line-opacity", 1);
       }
       if (layer.type === "fill") {
         paintSet(layer, "fill-color", theme.road);
@@ -402,19 +797,37 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-color", theme.textHalo);
         paintSet(layer, "text-halo-width", 1.5);
         if (layer.layout) {
-          layer.layout["text-font"] = ["Noto Sans Regular"];
+          layer.layout["text-font"] = ["Noto Sans Italic"];
+          if (layer.id === "water_name_point_label") {
+            layer.layout["text-size"] = [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              0,
+              9,
+              8,
+              12,
+            ];
+          } else {
+            layer.layout["text-size"] = 12;
+          }
         }
       }
-      // 시 이름: z8 이하 위주 — 굵고 크게
+      // 시 이름: 접미사 제거, 2단계 축소, Regular(medium 대체)
       if (layer.id === "label_city" || layer.id === "label_town") {
-        layer.minzoom = 5;
+        layer.minzoom = layer.id === "label_city" ? 5 : 6;
         layer.maxzoom = 9;
         paintSet(layer, "text-color", theme.text);
         paintSet(layer, "text-halo-color", theme.textHalo);
         paintSet(layer, "text-halo-width", 1.5);
         if (layer.layout) {
-          layer.layout["text-font"] = ["Noto Sans Bold"];
-          layer.layout["text-size"] = layer.id === "label_city" ? 15 : 13;
+          layer.layout["text-field"] = SHORT_CITY_KO;
+          layer.layout["text-font"] = ["Noto Sans Regular"];
+          layer.layout["text-size"] =
+            layer.id === "label_city"
+              ? ["interpolate", ["exponential", 1.2], ["zoom"], 4, 10, 7, 12, 11, 14]
+              : ["interpolate", ["exponential", 1.2], ["zoom"], 7, 10, 11, 12];
+          layer.layout["icon-size"] = 0.45;
         }
       }
       if (layer.id === "label_other") {
@@ -431,16 +844,16 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           maxzoom: 16,
           layout: {
             "text-field": KO_TEXT,
-            "text-font": ["Noto Sans Bold"],
-            "text-size": 13,
+            "text-font": ["Noto Sans Regular"],
+            "text-size": 12.5,
             "text-letter-spacing": 0.06,
             "text-max-width": 8,
             visibility: "visible",
           },
           paint: {
-            "text-color": theme.text,
+            "text-color": "#4A5166",
             "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.5,
+            "text-halo-width": 1.2,
           },
         });
         layers.push({
@@ -453,14 +866,14 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           layout: {
             "text-field": KO_TEXT,
             "text-font": ["Noto Sans Regular"],
-            "text-size": 12,
+            "text-size": 11,
             "text-max-width": 8,
             visibility: "visible",
           },
           paint: {
-            "text-color": theme.text,
+            "text-color": "#6A7185",
             "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.5,
+            "text-halo-width": 1.1,
           },
         });
         continue;
@@ -478,6 +891,12 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-color", theme.textHalo);
       }
       if (layer.id === "airport" || layer.id.startsWith("airport")) {
+        // International airports only (IATA present). Hide small airfields/heliports.
+        layer.filter = [
+          "all",
+          ["has", "iata"],
+          ["!=", ["to-string", ["coalesce", ["get", "iata"], ""]], ""],
+        ];
         setVisibility(layer, true);
         layer.minzoom = 9;
         const layout = { ...(layer.layout || {}) };
@@ -561,16 +980,16 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     maxzoom: 13.5,
     layout: {
       "text-field": ["get", "name"],
-      "text-font": ["Noto Sans Bold"],
-      "text-size": 13,
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 12.5,
       "text-letter-spacing": 0.08,
       "text-max-width": 8,
       visibility: "visible",
     },
     paint: {
-      "text-color": theme.text,
+      "text-color": "#4A5166",
       "text-halo-color": theme.textHalo,
-      "text-halo-width": 1.5,
+      "text-halo-width": 1.2,
     },
   });
 

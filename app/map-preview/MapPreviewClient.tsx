@@ -198,6 +198,7 @@ export default function MapPreviewClient() {
     category: string;
   } | null>(null);
   const [diag, setDiag] = useState<PreviewDiagnostics | null>(null);
+  const [zoomJump, setZoomJump] = useState<{ zoom: number; token: number } | null>(null);
 
   const leave = useCallback(() => {
     safeRouterBack(router, "/?tab=mypage");
@@ -323,6 +324,18 @@ export default function MapPreviewClient() {
             </button>
           ))}
         </div>
+        <div className="map-preview-zooms" role="group" aria-label="줌 바로가기">
+          {[7, 10, 12, 14, 16].map((z) => (
+            <button
+              key={z}
+              type="button"
+              className="map-preview-zoom-btn"
+              onClick={() => setZoomJump({ zoom: z, token: Date.now() })}
+            >
+              z{z}
+            </button>
+          ))}
+        </div>
       </header>
 
       <div className="map-preview-map">
@@ -335,6 +348,7 @@ export default function MapPreviewClient() {
             singleZoom={fitZoom}
             fitPadding={effectivePinCount > 0 ? 28 : 48}
             cluster={cluster}
+            zoomJump={zoomJump}
             onReady={() => setStatus("ready")}
             onError={(e) => {
               setStatus("error");

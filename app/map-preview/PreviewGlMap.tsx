@@ -56,6 +56,8 @@ type Props = {
   cluster?: boolean;
   fitPadding?: number;
   singleZoom?: number;
+  /** Imperative zoom jump for style QA (z7/10/12/14/16). */
+  zoomJump?: { zoom: number; token: number } | null;
   onReady?: () => void;
   onError?: (err: Error) => void;
   onPinClick?: (pinId: string) => void;
@@ -261,6 +263,7 @@ export default function PreviewGlMap({
   cluster = true,
   fitPadding = 40,
   singleZoom = 11,
+  zoomJump = null,
   onReady,
   onError,
   onPinClick,
@@ -289,6 +292,13 @@ export default function PreviewGlMap({
   onCompareRef.current = onCompareSample;
   const handlersBound = useRef(false);
   const bootAtRef = useRef(0);
+
+  useEffect(() => {
+    if (!zoomJump) return;
+    const map = mapRef.current;
+    if (!map) return;
+    map.jumpTo({ zoom: zoomJump.zoom });
+  }, [zoomJump]);
 
   useEffect(() => {
     let cancelled = false;
