@@ -8,6 +8,10 @@ export type CompactPinInput = {
   /** Resolved fill hex (category or list color) */
   fillColor: string;
   name?: string;
+  /** First related post image — admin MapLibre photo pin (expanded z≥14) */
+  photoUrl?: string | null;
+  /** Related curation count — badge when > 0 */
+  postCount?: number;
 };
 
 export type CompactRouteMode = "car" | "walk" | "course" | "preview";
@@ -56,6 +60,11 @@ export type CompactMapSurface = {
   clearRoute: () => void;
   setFocusMarker: (pin: CompactPinInput) => void;
   clearFocusMarker: () => void;
+  /**
+   * Highlight the open place-sheet pin (~1.3×, above others).
+   * No-op while clustered (MapLibre zoom &lt; 10).
+   */
+  setSelectedPinId: (pinId: string | null) => void;
   destroy: () => void;
 };
 

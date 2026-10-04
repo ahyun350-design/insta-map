@@ -85,6 +85,12 @@ const CLUSTER_MAX_ZOOM = 9;
 const CLUSTER_RADIUS = 52;
 const PIN_CLUSTER_LAYER = "compact-pins-clusters";
 const PIN_CLUSTER_COUNT_LAYER = "compact-pins-cluster-count";
+/** Photo DOM pins (expanded admin MapLibre only). */
+const PHOTO_PIN_MIN_ZOOM = 14;
+const PHOTO_PIN_MAX = 30;
+/** Selected emphasis only when unclustered (zoom ≥ 10). */
+const SELECTED_PIN_MIN_ZOOM = 10;
+const SELECTED_PIN_SCALE = 1.3;
 
 export type CreateCompactMapLibreOptions = {
   container: HTMLElement;
@@ -136,6 +142,11 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   /** Set before map.remove() so intentional WEBGL_lose_context is not a fallback. */
   private intentionalDestroy = false;
   private pins: CompactPinInput[] = [];
+  private selectedPinId: string | null = null;
+  private prevSelectedFeatureId: string | null = null;
+  /** DOM photo / badge overlays — expanded mode, refreshed on moveend only. */
+  private photoMarkers = new Map<string, maplibregl.Marker>();
+  private photoFailedIds = new Set<string>();
   private fallbackTimer: number | null = null;
   private firstTileSeen = false;
   private styleReady = false;
@@ -265,6 +276,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         lng: c.lng,
         level: mapLibreZoomToKakaoLevel(this.map.getZoom()),
       });
+      this.refreshPhotoPins();
+      this.syncSelectedFeatureState();
     });
 
     this.fallbackTimer = window.setTimeout(() => {
@@ -475,6 +488,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       cluster: true,
       clusterMaxZoom: CLUSTER_MAX_ZOOM,
       clusterRadius: CLUSTER_RADIUS,
+      promoteId: "id",
     });
     map.addLayer({
       id: PIN_CLUSTER_LAYER,
@@ -508,10 +522,26 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       filter: ["!", ["has", "point_count"]],
       layout: {
         "icon-image": ["get", "icon"],
-        "icon-size": MAP_PIN_ICON_SIZE,
+        "icon-size": [
+          "case",
+          [
+            "all",
+            [">=", ["zoom"], SELECTED_PIN_MIN_ZOOM],
+            ["boolean", ["feature-state", "selected"], false],
+          ],
+          MAP_PIN_ICON_SIZE * SELECTED_PIN_SCALE,
+          MAP_PIN_ICON_SIZE,
+        ],
         "icon-anchor": "bottom",
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
+        "symbol-z-order": "source",
+        "symbol-sort-key": [
+          "case",
+          ["boolean", ["feature-state", "selected"], false],
+          10,
+          0,
+        ],
       },
     });
 
@@ -753,6 +783,252 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     void this.applyPins(pins);
   }
 
+  setSelectedPinId(pinId: string | null) {
+    this.selectedPinId = pinId && pinId.trim() ? pinId.trim() : null;
+    this.syncSelectedFeatureState();
+    this.syncPhotoMarkerSelectedStyle();
+  }
+
+  private syncSelectedFeatureState() {
+    const map = this.map;
+    if (!map?.getSource(PIN_SOURCE)) return;
+    if (this.prevSelectedFeatureId) {
+      try {
+        map.removeFeatureState(
+          { source: PIN_SOURCE, id: this.prevSelectedFeatureId },
+          "selected",
+        );
+      } catch {
+        /* noop */
+      }
+      this.prevSelectedFeatureId = null;
+    }
+    if (!this.selectedPinId) return;
+    if (map.getZoom() < SELECTED_PIN_MIN_ZOOM) return;
+    try {
+      map.setFeatureState(
+        { source: PIN_SOURCE, id: this.selectedPinId },
+        { selected: true },
+      );
+      this.prevSelectedFeatureId = this.selectedPinId;
+    } catch {
+      /* feature may be clustered / missing */
+    }
+  }
+
+  private syncPhotoMarkerSelectedStyle() {
+    for (const [id, marker] of this.photoMarkers) {
+      const el = marker.getElement();
+      if (id === this.selectedPinId && (this.map?.getZoom() ?? 0) >= SELECTED_PIN_MIN_ZOOM) {
+        el.classList.add("is-selected");
+        el.style.zIndex = "3";
+      } else {
+        el.classList.remove("is-selected");
+        el.style.zIndex = "";
+      }
+    }
+  }
+
+  private clearPhotoPins() {
+    for (const marker of this.photoMarkers.values()) {
+      try {
+        marker.remove();
+      } catch {
+        /* noop */
+      }
+    }
+    this.photoMarkers.clear();
+    this.applyPhotoHideFilter([]);
+  }
+
+  private applyPhotoHideFilter(photoIds: string[]) {
+    const map = this.map;
+    if (!map?.getLayer(PIN_LAYER)) return;
+    if (photoIds.length === 0) {
+      map.setFilter(PIN_LAYER, ["!", ["has", "point_count"]]);
+      return;
+    }
+    map.setFilter(PIN_LAYER, [
+      "all",
+      ["!", ["has", "point_count"]],
+      ["!", ["in", ["get", "id"], ["literal", photoIds]]],
+    ]);
+  }
+
+  private formatPostCountBadge(count: number): string {
+    if (count > 99) return "99+";
+    return String(count);
+  }
+
+  private createPhotoMarkerEl(pin: CompactPinInput, mode: "photo" | "badge"): HTMLButtonElement {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = mode === "photo" ? "mlPhotoPin" : "mlPhotoPinBadgeOnly";
+    el.setAttribute("aria-label", pin.name?.trim() || "장소");
+    if (mode === "photo" && pin.photoUrl) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.decoding = "async";
+      img.loading = "lazy";
+      img.draggable = false;
+      img.src = pin.photoUrl;
+      img.onerror = () => {
+        this.photoFailedIds.add(pin.id);
+        const existing = this.photoMarkers.get(pin.id);
+        if (existing) {
+          try {
+            existing.remove();
+          } catch {
+            /* noop */
+          }
+          this.photoMarkers.delete(pin.id);
+        }
+        this.applyPhotoHideFilter([...this.photoMarkers.keys()].filter((id) => {
+          const p = this.pins.find((x) => x.id === id);
+          return Boolean(p?.photoUrl) && !this.photoFailedIds.has(id);
+        }));
+        // Retry as badge-only if postCount remains
+        if ((pin.postCount ?? 0) > 0) {
+          this.refreshPhotoPins();
+        }
+      };
+      el.appendChild(img);
+    }
+    if ((pin.postCount ?? 0) > 0) {
+      const badge = document.createElement("span");
+      badge.className = "mlPhotoPinBadge";
+      badge.textContent = this.formatPostCountBadge(pin.postCount!);
+      el.appendChild(badge);
+    }
+    el.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.onPinClick?.(pin.id);
+    });
+    return el;
+  }
+
+  /** Expanded admin: photo pins at z≥14 (max 30 in view); badge when postCount>0. */
+  private refreshPhotoPins() {
+    const map = this.map;
+    if (!map || this.destroyed) return;
+    if (this.mode !== "expanded") {
+      this.clearPhotoPins();
+      return;
+    }
+    const z = map.getZoom();
+    if (z < PHOTO_PIN_MIN_ZOOM) {
+      this.clearPhotoPins();
+      return;
+    }
+    const bounds = map.getBounds();
+    const center = map.getCenter();
+    const dist2 = (p: CompactPinInput) =>
+      (p.lat - center.lat) ** 2 + (p.lng - center.lng) ** 2;
+
+    const inView = this.pins.filter(
+      (p) =>
+        Number.isFinite(p.lat) &&
+        Number.isFinite(p.lng) &&
+        bounds.contains([p.lng, p.lat]),
+    );
+
+    const photoCandidates = inView
+      .filter(
+        (p) =>
+          typeof p.photoUrl === "string" &&
+          p.photoUrl.trim() &&
+          !this.photoFailedIds.has(p.id),
+      )
+      .sort((a, b) => {
+        if (a.id === this.selectedPinId) return -1;
+        if (b.id === this.selectedPinId) return 1;
+        return dist2(a) - dist2(b);
+      })
+      .slice(0, PHOTO_PIN_MAX);
+
+    const photoIds = new Set(photoCandidates.map((p) => p.id));
+
+    // Badge-only for postCount>0 pins without a photo overlay (same 30 budget leftover).
+    const badgeSlots = Math.max(0, PHOTO_PIN_MAX - photoCandidates.length);
+    const badgeCandidates =
+      badgeSlots === 0
+        ? []
+        : inView
+            .filter(
+              (p) =>
+                !photoIds.has(p.id) &&
+                typeof p.postCount === "number" &&
+                p.postCount > 0,
+            )
+            .sort((a, b) => {
+              if (a.id === this.selectedPinId) return -1;
+              if (b.id === this.selectedPinId) return 1;
+              return dist2(a) - dist2(b);
+            })
+            .slice(0, badgeSlots);
+
+    const desired = new Map<string, { pin: CompactPinInput; mode: "photo" | "badge" }>();
+    for (const p of photoCandidates) desired.set(p.id, { pin: p, mode: "photo" });
+    for (const p of badgeCandidates) desired.set(p.id, { pin: p, mode: "badge" });
+
+    for (const [id, marker] of [...this.photoMarkers.entries()]) {
+      if (!desired.has(id)) {
+        try {
+          marker.remove();
+        } catch {
+          /* noop */
+        }
+        this.photoMarkers.delete(id);
+      }
+    }
+
+    for (const [id, { pin, mode }] of desired) {
+      const existing = this.photoMarkers.get(id);
+      if (existing) {
+        existing.setLngLat([pin.lng, pin.lat]);
+        const el = existing.getElement();
+        const wantPhoto = mode === "photo";
+        const isPhoto = el.classList.contains("mlPhotoPin");
+        if (wantPhoto !== isPhoto) {
+          try {
+            existing.remove();
+          } catch {
+            /* noop */
+          }
+          this.photoMarkers.delete(id);
+        } else {
+          const badgeEl = el.querySelector(".mlPhotoPinBadge");
+          if ((pin.postCount ?? 0) > 0) {
+            if (badgeEl) {
+              badgeEl.textContent = this.formatPostCountBadge(pin.postCount!);
+            } else {
+              const badge = document.createElement("span");
+              badge.className = "mlPhotoPinBadge";
+              badge.textContent = this.formatPostCountBadge(pin.postCount!);
+              el.appendChild(badge);
+            }
+          } else if (badgeEl) {
+            badgeEl.remove();
+          }
+          continue;
+        }
+      }
+      if (this.photoMarkers.has(id)) continue;
+      const el = this.createPhotoMarkerEl(pin, mode);
+      const marker = new maplibregl.Marker({
+        element: el,
+        anchor: "bottom",
+      })
+        .setLngLat([pin.lng, pin.lat])
+        .addTo(map);
+      this.photoMarkers.set(id, marker);
+    }
+
+    this.applyPhotoHideFilter([...photoIds]);
+    this.syncPhotoMarkerSelectedStyle();
+  }
+
   private async applyPins(pins: CompactPinInput[]) {
     const map = this.map;
     if (!map?.getSource(PIN_SOURCE)) return;
@@ -787,6 +1063,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         geometry: { type: "Point", coordinates: [p.lng, p.lat] },
       })),
     });
+    this.refreshPhotoPins();
+    this.syncSelectedFeatureState();
   }
 
   setMyLocation(lat: number, lng: number) {
@@ -1095,6 +1373,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     // Mark intentional teardown BEFORE remove — MapLibre calls WEBGL_lose_context on remove.
     this.intentionalDestroy = true;
     this.destroyed = true;
+    this.clearPhotoPins();
+    this.photoFailedIds.clear();
+    this.selectedPinId = null;
+    this.prevSelectedFeatureId = null;
     if (this.fallbackTimer != null) {
       window.clearTimeout(this.fallbackTimer);
       this.fallbackTimer = null;

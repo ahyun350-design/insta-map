@@ -215,6 +215,7 @@ import {
 import { resolveListColor } from "@/lib/listColors";
 import { updatePlaceCategory } from "@/lib/placeCategory";
 import { resolveKakaoSubcategory } from "@/lib/kakaoSubcategory";
+import { derivePostImageThumbUrl } from "@/lib/postImageThumb";
 import { HomeCategoryFilterChips, type HomeCategoryFilter } from "@/components/HomeCategoryFilterChips";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
@@ -10509,20 +10510,41 @@ function HomePageContent() {
       string,
       { lat: number; lng: number; category: Category; listColor: string | null }
     >();
+    // Photo/badge meta only when admin expanded MapLibre is forced (flag off → identical pins).
+    const attachPhotoMeta =
+      userIdRef.current === ADMIN_USER_ID &&
+      readExpandedMapLibreOverride() === "force_maplibre";
 
     const publish = () => {
       if (myRunId !== placePinsRunIdRef.current.expanded) return;
-      const pins = [...byId.entries()].map(([id, entry]) => ({
-        id,
-        lat: entry.lat,
-        lng: entry.lng,
-        category: entry.category,
-        fillColor: pinFillForPlace({
+      const pins = [...byId.entries()].map(([id, entry]) => {
+        const place = places.find((p) => p.id === id);
+        const base = {
+          id,
+          lat: entry.lat,
+          lng: entry.lng,
           category: entry.category,
-          listColor: entry.listColor,
-        }),
-        name: places.find((p) => p.id === id)?.name,
-      }));
+          fillColor: pinFillForPlace({
+            category: entry.category,
+            listColor: entry.listColor,
+          }),
+          name: place?.name,
+        };
+        if (!attachPhotoMeta || !place) return base;
+        const meta = getMarkerPhotoMetaForPlace(feedPostsRef.current, place, {
+          lat: entry.lat,
+          lng: entry.lng,
+        });
+        const rawPhoto = meta.photos[0];
+        const photoUrl = rawPhoto
+          ? derivePostImageThumbUrl(rawPhoto) || rawPhoto
+          : null;
+        return {
+          ...base,
+          ...(photoUrl ? { photoUrl } : {}),
+          ...(meta.postCount > 0 ? { postCount: meta.postCount } : {}),
+        };
+      });
       void adapter.setPins(pins);
       expandedMarkersRef.current = [{ setMap: () => adapter.setPins([]) }];
     };
@@ -14065,6 +14087,25 @@ function HomePageContent() {
     user?.id === ADMIN_USER_ID &&
     (adminCompactMapLibre === "force_maplibre" ||
       adminExpandedMapLibre === "force_maplibre");
+
+  // Selected pin emphasis (MapLibre only; Kakao path untouched).
+  useEffect(() => {
+    const pinId =
+      typeof selectedPlace?._savedPlaceId === "string" && selectedPlace._savedPlaceId.trim()
+        ? selectedPlace._savedPlaceId.trim()
+        : null;
+    if (compactMapIsMapLibre) {
+      getCompactMapLibreAdapter(mapRef.current)?.setSelectedPinId(pinId);
+    }
+    if (expandedMapIsMapLibre) {
+      getExpandedMapLibreAdapter(expandedMapRef.current)?.setSelectedPinId(pinId);
+    }
+  }, [
+    selectedPlace?._savedPlaceId,
+    compactMapIsMapLibre,
+    expandedMapIsMapLibre,
+    mapExpanded,
+  ]);
 
   const renderPlaceCard = () => {
     if (!selectedPlace) return null;
