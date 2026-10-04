@@ -9111,7 +9111,10 @@ function HomePageContent() {
           category: place.category,
         };
       });
-      glCourse.setCourseStops(courseStops);
+      glCourse.setCourseStops(courseStops, {
+        selectedOrder:
+          courseNavSegmentIndex != null ? courseNavSegmentIndex + 1 : 1,
+      });
       searchMarkersRef.current = [{ setMap: () => glCourse.clearCourseStops() }];
       if (stops.length === 1) {
         glCourse.setCenter(stops[0]!.lat, stops[0]!.lng);
@@ -11008,17 +11011,16 @@ function HomePageContent() {
     if (gl) {
       if (path.length < 2) return;
       const preview = opts?.preview === true;
-      gl.setRoute(path, "walk");
-      gl.setRouteStyle({
-        color: preview ? "#c5cad3" : "#1a2a7a",
-        width: preview ? 3 : 4,
-        dasharray: preview ? [1.5, 1.2] : [1, 0],
-        opacity: preview ? 0.55 : 0.95,
-      });
+      gl.setRoute(path, preview ? "preview" : "course");
       routePolylineRef.current = { setMap: () => gl.clearRoute() };
       if (fitBounds) {
         const bottomPad = Math.max(96, courseNavBottomPadRef.current);
-        gl.fitPoints(path, { top: 48, right: 40, bottom: bottomPad, left: 40 });
+        gl.fitPoints(path, {
+          top: 108,
+          right: 28,
+          bottom: bottomPad,
+          left: 28,
+        });
       }
       return;
     }
@@ -11082,7 +11084,21 @@ function HomePageContent() {
     setCourseNavFullRouteView(false);
     setCourseNavStepIndex(segment.steps.length > 0 ? 0 : null);
     applyWebCourseRoutePath(segment.path);
-  }, [applyWebCourseRoutePath, courseNavigation]);
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (gl && courseResult?.length) {
+      gl.setCourseStops(
+        courseResult.map((place, idx) => ({
+          id: place.id || `course-${idx}`,
+          lat: place.lat,
+          lng: place.lng,
+          name: truncateCourseLabelName(place.name),
+          order: idx + 1,
+          category: place.category,
+        })),
+        { selectedOrder: index + 1 },
+      );
+    }
+  }, [applyWebCourseRoutePath, courseNavigation, courseResult]);
 
   const handleCourseNavSelectStep = useCallback((stepIndex: number) => {
     const nav = courseNavigation ?? fullscreenCourseNavigationRef.current;
@@ -11159,7 +11175,12 @@ function HomePageContent() {
         if (gl) {
           gl.setRoute(path, mode);
           routePolylineRef.current = { setMap: () => gl.clearRoute() };
-          gl.fitPoints(path);
+          gl.fitPoints(path, {
+            top: 108,
+            right: 28,
+            bottom: 280,
+            left: 28,
+          });
           return;
         }
         const linePath = path.map((p) => new window.kakao.maps.LatLng(p.lat, p.lng));

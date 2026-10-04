@@ -312,3 +312,15 @@
   border-color: rgba(255, 255, 255, 0.18);
   color: #ddd;
 }
+
+.map-preview-routes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: auto;
+}
+.map-preview-zoom-btn.is-active {
+  background: #1a2a7a;
+  border-color: #1a2a7a;
+  color: #fff;
+}

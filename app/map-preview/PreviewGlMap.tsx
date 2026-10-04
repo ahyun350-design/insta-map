@@ -29,6 +29,10 @@ import {
   horizontalSpanKmForMapLibreZoom,
   mapLibreZoomToKakaoLevel,
 } from "@/lib/mapSurface/kakaoZoom";
+import {
+  paintPreviewRouteDemo,
+  type PreviewRouteMode,
+} from "./routeDemo";
 
 export type PreviewPerfMode = "default" | "lite" | "nopins";
 
@@ -58,6 +62,8 @@ type Props = {
   singleZoom?: number;
   /** Imperative zoom jump for style QA (z7/10/12/14/16). */
   zoomJump?: { zoom: number; token: number } | null;
+  /** Route style demo: walk | car | course (Seongsu fake path). */
+  routeDemo?: PreviewRouteMode | null;
   onReady?: () => void;
   onError?: (err: Error) => void;
   onPinClick?: (pinId: string) => void;
@@ -264,6 +270,7 @@ export default function PreviewGlMap({
   fitPadding = 40,
   singleZoom = 11,
   zoomJump = null,
+  routeDemo = null,
   onReady,
   onError,
   onPinClick,
@@ -280,6 +287,8 @@ export default function PreviewGlMap({
   themeRef.current = theme;
   const clusterRef = useRef(cluster);
   clusterRef.current = cluster;
+  const routeDemoRef = useRef(routeDemo);
+  routeDemoRef.current = routeDemo;
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const onErrorRef = useRef(onError);
@@ -378,6 +387,9 @@ export default function PreviewGlMap({
                 themeRef.current,
               );
               fitToPins(map, pinsRef.current, fitPadding, singleZoom);
+              if (routeDemoRef.current) {
+                await paintPreviewRouteDemo(map, routeDemoRef.current);
+              }
 
               if (!handlersBound.current) {
                 handlersBound.current = true;

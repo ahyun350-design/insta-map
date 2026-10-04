@@ -37,13 +37,24 @@ import type {
   ExpandedMapSurface,
   MapLatLng,
   SearchPinInput,
+  SetCourseStopsOptions,
 } from "./types";
 import { trackMapGlFallback, trackMapGlReady } from "./mapGlTelemetry";
+import { MAP_BRAND_NAVY } from "./mapBrand";
+import {
+  COMPACT_ROUTE_FIT_PADDING,
+  EXPANDED_ROUTE_FIT_PADDING,
+  ROUTE_LAYOUT,
+  routePaintForMode,
+} from "./routeStyle";
 
 const PIN_SOURCE = "compact-pins";
 const PIN_LAYER = "compact-pins-symbol";
 const ROUTE_SOURCE = "compact-route";
+const ROUTE_CASING_LAYER = "compact-route-casing";
 const ROUTE_LAYER = "compact-route-line";
+const ROUTE_ORIGIN_SOURCE = "compact-route-origin";
+const ROUTE_ORIGIN_LAYER = "compact-route-origin-circle";
 const FOCUS_SOURCE = "compact-focus";
 const FOCUS_LAYER = "compact-focus-symbol";
 const MYLOC_SOURCE = "compact-myloc";
@@ -51,7 +62,8 @@ const MYLOC_LAYER = "compact-myloc-symbol";
 const SEARCH_SOURCE = "compact-search";
 const SEARCH_LAYER = "compact-search-symbol";
 const COURSE_SOURCE = "compact-course";
-const COURSE_PIN_LAYER = "compact-course-pins";
+const COURSE_CIRCLE_LAYER = "compact-course-circles";
+const COURSE_NUMBER_LAYER = "compact-course-numbers";
 const COURSE_LABEL_LAYER = "compact-course-labels";
 const SEARCH_IMAGE_ID = "pindmap-search-pin";
 
@@ -81,16 +93,7 @@ export type CreateCompactMapLibreOptions = {
 
 function searchPinSvg(): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-  <circle cx="14" cy="14" r="9" fill="#1a2a7a" stroke="#ffffff" stroke-width="3"/>
-</svg>`;
-}
-
-function courseOrderPinSvg(order: number): string {
-  const label = String(order);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40">
-  <path d="M16 1C8.3 1 2 7.3 2 15c0 10.5 14 24 14 24s14-13.5 14-24C30 7.3 23.7 1 16 1z" fill="#1a2a7a"/>
-  <circle cx="16" cy="15" r="8" fill="#ffffff"/>
-  <text x="16" y="19" text-anchor="middle" font-size="11" font-weight="700" font-family="system-ui,sans-serif" fill="#1a2a7a">${label}</text>
+  <circle cx="14" cy="14" r="9" fill="${MAP_BRAND_NAVY}" stroke="#ffffff" stroke-width="3"/>
 </svg>`;
 }
 
@@ -113,6 +116,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private mode: "compact" | "expanded" = "compact";
   private mountStartedAt = 0;
   private fallbackReported = false;
+  private courseSelectedOrder: number | null = null;
 
   static async create(
     options: CreateCompactMapLibreOptions,
@@ -295,14 +299,52 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       data: { type: "FeatureCollection", features: [] },
     });
     map.addLayer({
+      id: ROUTE_CASING_LAYER,
+      type: "line",
+      source: ROUTE_SOURCE,
+      layout: { ...ROUTE_LAYOUT },
+      paint: {
+        "line-color": "#FFFFFF",
+        "line-width": 7,
+        "line-opacity": 0.95,
+      },
+    });
+    map.addLayer({
       id: ROUTE_LAYER,
       type: "line",
       source: ROUTE_SOURCE,
-      layout: { "line-cap": "round", "line-join": "round" },
+      layout: { ...ROUTE_LAYOUT },
       paint: {
-        "line-color": "#1a2a7a",
-        "line-width": 5,
-        "line-opacity": 0.95,
+        "line-color": MAP_BRAND_NAVY,
+        "line-width": 3,
+        "line-opacity": 1,
+      },
+    });
+    map.addSource(ROUTE_ORIGIN_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: "compact-route-origin-shadow",
+      type: "circle",
+      source: ROUTE_ORIGIN_SOURCE,
+      paint: {
+        "circle-radius": 9,
+        "circle-color": "#000000",
+        "circle-opacity": 0.18,
+        "circle-blur": 0.55,
+      },
+    });
+    map.addLayer({
+      id: ROUTE_ORIGIN_LAYER,
+      type: "circle",
+      source: ROUTE_ORIGIN_SOURCE,
+      paint: {
+        "circle-radius": 7,
+        "circle-color": "#FFFFFF",
+        "circle-stroke-width": 3,
+        "circle-stroke-color": MAP_BRAND_NAVY,
+        "circle-opacity": 1,
       },
     });
 
@@ -336,7 +378,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       source: PIN_SOURCE,
       filter: ["has", "point_count"],
       paint: {
-        "circle-color": "#1a2a7a",
+        "circle-color": MAP_BRAND_NAVY,
         "circle-radius": ["step", ["get", "point_count"], 16, 8, 20, 25, 26],
         "circle-stroke-width": 2,
         "circle-stroke-color": "#ffffff",
@@ -407,16 +449,55 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       data: { type: "FeatureCollection", features: [] },
     });
     map.addLayer({
-      id: COURSE_PIN_LAYER,
+      id: "compact-course-circle-shadow",
+      type: "circle",
+      source: COURSE_SOURCE,
+      paint: {
+        "circle-radius": [
+          "case",
+          ["==", ["get", "selected"], 1],
+          18,
+          15,
+        ],
+        "circle-color": "#000000",
+        "circle-opacity": 0.16,
+        "circle-blur": 0.45,
+      },
+    });
+    map.addLayer({
+      id: COURSE_CIRCLE_LAYER,
+      type: "circle",
+      source: COURSE_SOURCE,
+      paint: {
+        "circle-radius": [
+          "case",
+          ["==", ["get", "selected"], 1],
+          16,
+          13,
+        ],
+        "circle-color": MAP_BRAND_NAVY,
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ffffff",
+        "circle-opacity": 1,
+      },
+    });
+    map.addLayer({
+      id: COURSE_NUMBER_LAYER,
       type: "symbol",
       source: COURSE_SOURCE,
       layout: {
-        "icon-image": ["get", "icon"],
-        "icon-size": 1,
-        "icon-anchor": "bottom",
-        "icon-allow-overlap": true,
-        "icon-ignore-placement": true,
+        "text-field": ["to-string", ["get", "order"]],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": [
+          "case",
+          ["==", ["get", "selected"], 1],
+          14,
+          12,
+        ],
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
       },
+      paint: { "text-color": "#ffffff" },
     });
     map.addLayer({
       id: COURSE_LABEL_LAYER,
@@ -425,15 +506,15 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       layout: {
         "text-field": ["get", "name"],
         "text-font": ["Noto Sans Regular"],
-        "text-size": 12,
-        "text-offset": [0, -2.8],
-        "text-anchor": "bottom",
-        "text-max-width": 10,
+        "text-size": 11,
+        "text-offset": [0, 1.7],
+        "text-anchor": "top",
+        "text-max-width": 9,
         "text-allow-overlap": false,
         "text-optional": true,
       },
       paint: {
-        "text-color": "#1a1a2e",
+        "text-color": "#3A4155",
         "text-halo-color": "#ffffff",
         "text-halo-width": 1.4,
       },
@@ -462,7 +543,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       });
       if (clusterHits.length > 0) return; // cluster handler owns this
       const feats = map.queryRenderedFeatures(bbox, {
-        layers: [PIN_LAYER, FOCUS_LAYER, SEARCH_LAYER, COURSE_PIN_LAYER],
+        layers: [PIN_LAYER, FOCUS_LAYER, SEARCH_LAYER, COURSE_CIRCLE_LAYER],
       });
       if (feats.length > 0) {
         let bestId: string | null = null;
@@ -484,7 +565,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         }
         if (bestId) {
           if (bestLayer === SEARCH_LAYER) this.onSearchPinClick?.(bestId);
-          else if (bestLayer === COURSE_PIN_LAYER) this.onCourseStopClick?.(bestId);
+          else if (bestLayer === COURSE_CIRCLE_LAYER) this.onCourseStopClick?.(bestId);
           else this.onPinClick?.(bestId);
           return;
         }
@@ -541,8 +622,13 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   fitPoints(
     points: MapLatLng[],
-    padding = { top: 48, right: 36, bottom: 300, left: 36 },
+    padding?: { top: number; right: number; bottom: number; left: number },
   ) {
+    const pad =
+      padding ??
+      (this.mode === "expanded"
+        ? EXPANDED_ROUTE_FIT_PADDING
+        : COMPACT_ROUTE_FIT_PADDING);
     const map = this.map;
     if (!map || points.length === 0) return;
     if (points.length === 1) {
@@ -554,7 +640,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     }
     const bounds = new maplibregl.LngLatBounds();
     for (const p of points) bounds.extend([p.lng, p.lat]);
-    map.fitBounds(bounds, { padding, maxZoom: 16, duration: 0 });
+    map.fitBounds(bounds, { padding: pad, maxZoom: 16, duration: 0 });
   }
 
   setPins(pins: CompactPinInput[]) {
@@ -621,31 +707,81 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   setRoute(path: MapLatLng[], mode: CompactRouteMode) {
     const map = this.map;
     if (!map?.getSource(ROUTE_SOURCE) || path.length < 2) return;
-    if (map.getLayer(ROUTE_LAYER)) {
-      map.setPaintProperty(
-        ROUTE_LAYER,
-        "line-color",
-        mode === "walk" ? "#16a34a" : "#1a2a7a",
-      );
-      map.setPaintProperty(ROUTE_LAYER, "line-width", mode === "walk" ? 7 : 5);
-      map.setPaintProperty(
-        ROUTE_LAYER,
-        "line-dasharray",
-        mode === "walk" ? [1.5, 1.2] : [1, 0],
-      );
-    }
+    this.applyRoutePaint(mode);
     (map.getSource(ROUTE_SOURCE) as GeoJSONSource).setData({
       type: "FeatureCollection",
       features: [
         {
           type: "Feature",
-          properties: {},
+          properties: { mode },
           geometry: {
             type: "LineString",
             coordinates: path.map((p) => [p.lng, p.lat]),
           },
         },
       ],
+    });
+    // Origin endpoint (destination = focus pin, managed separately)
+    if (mode === "preview") {
+      this.clearRouteOrigin();
+    } else {
+      const start = path[0]!;
+      this.setRouteOrigin(start.lat, start.lng);
+    }
+  }
+
+  private applyRoutePaint(mode: CompactRouteMode) {
+    const map = this.map;
+    if (!map) return;
+    const visual = routePaintForMode(mode);
+    if (map.getLayer(ROUTE_CASING_LAYER)) {
+      if (visual.casing) {
+        map.setLayoutProperty(ROUTE_CASING_LAYER, "visibility", "visible");
+        map.setPaintProperty(ROUTE_CASING_LAYER, "line-color", visual.casing.color);
+        map.setPaintProperty(ROUTE_CASING_LAYER, "line-opacity", visual.casing.opacity);
+        map.setPaintProperty(ROUTE_CASING_LAYER, "line-width", visual.casing.width);
+      } else {
+        map.setLayoutProperty(ROUTE_CASING_LAYER, "visibility", "none");
+      }
+    }
+    if (map.getLayer(ROUTE_LAYER)) {
+      map.setPaintProperty(ROUTE_LAYER, "line-color", visual.line.color);
+      map.setPaintProperty(ROUTE_LAYER, "line-opacity", visual.line.opacity);
+      map.setPaintProperty(ROUTE_LAYER, "line-width", visual.line.width);
+      if (visual.line.dasharray) {
+        map.setPaintProperty(ROUTE_LAYER, "line-dasharray", visual.line.dasharray);
+      } else {
+        // solid — remove dasharray if previously set
+        try {
+          map.setPaintProperty(ROUTE_LAYER, "line-dasharray", [1, 0]);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  private setRouteOrigin(lat: number, lng: number) {
+    const map = this.map;
+    if (!map?.getSource(ROUTE_ORIGIN_SOURCE)) return;
+    (map.getSource(ROUTE_ORIGIN_SOURCE) as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "Point", coordinates: [lng, lat] },
+        },
+      ],
+    });
+  }
+
+  private clearRouteOrigin() {
+    const map = this.map;
+    if (!map?.getSource(ROUTE_ORIGIN_SOURCE)) return;
+    (map.getSource(ROUTE_ORIGIN_SOURCE) as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: [],
     });
   }
 
@@ -656,6 +792,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       type: "FeatureCollection",
       features: [],
     });
+    this.clearRouteOrigin();
   }
 
   setFocusMarker(pin: CompactPinInput) {
@@ -740,34 +877,25 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.setSearchPins([]);
   }
 
-  setCourseStops(stops: CourseStopInput[]) {
-    void this.applyCourseStops(stops);
+  setCourseStops(stops: CourseStopInput[], opts?: SetCourseStopsOptions) {
+    this.courseSelectedOrder =
+      opts?.selectedOrder == null ? null : opts.selectedOrder;
+    this.applyCourseStops(stops);
   }
 
-  private async applyCourseStops(stops: CourseStopInput[]) {
+  private applyCourseStops(stops: CourseStopInput[]) {
     const map = this.map;
     if (!map?.getSource(COURSE_SOURCE)) return;
-    await Promise.all(
-      stops.map((s) =>
-        loadMapImageFromSvg(
-          map,
-          `course-order-${s.order}`,
-          courseOrderPinSvg(s.order),
-          32,
-          40,
-          this.imageDpr,
-        ),
-      ),
-    );
-    if (this.destroyed || !this.map) return;
-    (this.map.getSource(COURSE_SOURCE) as GeoJSONSource).setData({
+    const selected = this.courseSelectedOrder;
+    (map.getSource(COURSE_SOURCE) as GeoJSONSource).setData({
       type: "FeatureCollection",
       features: stops.map((s) => ({
         type: "Feature",
         properties: {
           id: s.id,
           name: s.name,
-          icon: `course-order-${s.order}`,
+          order: s.order,
+          selected: selected != null && s.order === selected ? 1 : 0,
         },
         geometry: { type: "Point", coordinates: [s.lng, s.lat] },
       })),
@@ -777,6 +905,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   clearCourseStops() {
     const map = this.map;
     if (!map?.getSource(COURSE_SOURCE)) return;
+    this.courseSelectedOrder = null;
     (map.getSource(COURSE_SOURCE) as GeoJSONSource).setData({
       type: "FeatureCollection",
       features: [],
@@ -791,6 +920,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   }) {
     const map = this.map;
     if (!map?.getLayer(ROUTE_LAYER)) return;
+    // Prefer setRoute(mode). This remains for rare overrides (hides casing if gray preview).
     if (opts.color) map.setPaintProperty(ROUTE_LAYER, "line-color", opts.color);
     if (opts.width != null) map.setPaintProperty(ROUTE_LAYER, "line-width", opts.width);
     if (opts.dasharray) {
@@ -798,6 +928,12 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     }
     if (opts.opacity != null) {
       map.setPaintProperty(ROUTE_LAYER, "line-opacity", opts.opacity);
+    }
+    if (opts.color && opts.color.toLowerCase() === "#b5bac6") {
+      if (map.getLayer(ROUTE_CASING_LAYER)) {
+        map.setLayoutProperty(ROUTE_CASING_LAYER, "visibility", "none");
+      }
+      this.clearRouteOrigin();
     }
   }
 

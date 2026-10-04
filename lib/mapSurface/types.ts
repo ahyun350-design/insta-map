@@ -10,7 +10,7 @@ export type CompactPinInput = {
   name?: string;
 };
 
-export type CompactRouteMode = "car" | "walk";
+export type CompactRouteMode = "car" | "walk" | "course" | "preview";
 
 export type SearchPinInput = {
   id: string;
@@ -26,6 +26,11 @@ export type CourseStopInput = {
   order: number;
   category?: string;
   fillColor?: string;
+};
+
+export type SetCourseStopsOptions = {
+  /** Highlight current nav step (32px); others 26px. */
+  selectedOrder?: number | null;
 };
 
 /**
@@ -65,8 +70,12 @@ export type ExpandedMapSurface = CompactMapSurface & {
   unproject: (x: number, y: number) => MapLatLng | null;
   setSearchPins: (pins: SearchPinInput[]) => void;
   clearSearchPins: () => void;
-  setCourseStops: (stops: CourseStopInput[]) => void;
+  setCourseStops: (
+    stops: CourseStopInput[],
+    opts?: SetCourseStopsOptions,
+  ) => void;
   clearCourseStops: () => void;
+  /** @deprecated prefer setRoute(mode) — kept for rare overrides */
   setRouteStyle: (opts: {
     color?: string;
     width?: number;

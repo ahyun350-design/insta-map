@@ -21,6 +21,10 @@ import PreviewGlMap, {
   type PreviewDiagnostics,
   type PreviewPerfMode,
 } from "./PreviewGlMap";
+import {
+  parsePreviewRouteMode,
+  type PreviewRouteMode,
+} from "./routeDemo";
 import "./map-preview.css";
 
 type PreviewQuery = {
@@ -30,6 +34,7 @@ type PreviewQuery = {
   fps: boolean;
   mode: PreviewPerfMode;
   compare: boolean;
+  route: PreviewRouteMode | null;
 };
 
 function parseMode(sp: URLSearchParams): PreviewPerfMode {
@@ -48,6 +53,7 @@ function readPreviewQuery(): PreviewQuery {
       fps: false,
       mode: "default",
       compare: false,
+      route: null,
     };
   }
   const sp = new URLSearchParams(window.location.search);
@@ -63,6 +69,7 @@ function readPreviewQuery(): PreviewQuery {
     fps: sp.get("fps") === "1",
     mode: parseMode(sp),
     compare: sp.get("compare") === "1",
+    route: parsePreviewRouteMode(sp.get("route")),
   };
 }
 
@@ -199,6 +206,7 @@ export default function MapPreviewClient() {
   } | null>(null);
   const [diag, setDiag] = useState<PreviewDiagnostics | null>(null);
   const [zoomJump, setZoomJump] = useState<{ zoom: number; token: number } | null>(null);
+  const [routeDemo, setRouteDemo] = useState<PreviewRouteMode | null>(null);
 
   const leave = useCallback(() => {
     safeRouterBack(router, "/?tab=mypage");
@@ -219,6 +227,7 @@ export default function MapPreviewClient() {
     setShowFps(q.fps);
     setMode(q.mode);
     setShowCompare(q.compare);
+    setRouteDemo(q.route);
     writeQueryPatch({ theme: q.theme });
     setHydrated(true);
   }, []);
@@ -336,19 +345,47 @@ export default function MapPreviewClient() {
             </button>
           ))}
         </div>
+        <div className="map-preview-routes" role="group" aria-label="경로 스타일">
+          {(
+            [
+              [null, "경로없음"],
+              ["walk", "보행"],
+              ["car", "자동차"],
+              ["course", "코스"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={label}
+              type="button"
+              className={
+                routeDemo === id
+                  ? "map-preview-zoom-btn is-active"
+                  : "map-preview-zoom-btn"
+              }
+              onClick={() => {
+                setRouteDemo(id);
+                writeQueryPatch({ route: id });
+                setStatus("loading");
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </header>
 
       <div className="map-preview-map">
         {hydrated ? (
           <PreviewGlMap
-            key={`gl-${mode}-${theme}-${cluster ? 1 : 0}-${effectivePinCount}`}
+            key={`gl-${mode}-${theme}-${cluster ? 1 : 0}-${effectivePinCount}-${routeDemo ?? "noroute"}`}
             theme={theme}
             mode={mode}
             pins={pins}
-            singleZoom={fitZoom}
+            singleZoom={routeDemo ? 14 : fitZoom}
             fitPadding={effectivePinCount > 0 ? 28 : 48}
             cluster={cluster}
             zoomJump={zoomJump}
+            routeDemo={routeDemo}
             onReady={() => setStatus("ready")}
             onError={(e) => {
               setStatus("error");
