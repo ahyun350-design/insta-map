@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import PindmapGlMap from "@/components/PindmapGlMap";
 import {
   EDGE_SWIPE_PRIORITY,
   useEdgeSwipeBack,
@@ -16,8 +15,12 @@ import {
 } from "./buildStyle";
 import {
   MAP_PREVIEW_PINS,
-  generateSeoulDemoPins,
+  generateKoreaDemoPins,
 } from "./samplePins";
+import PreviewGlMap, {
+  type PreviewDiagnostics,
+  type PreviewPerfMode,
+} from "./PreviewGlMap";
 import "./map-preview.css";
 
 type PreviewQuery = {
@@ -25,37 +28,70 @@ type PreviewQuery = {
   pinCount: number;
   cluster: boolean;
   fps: boolean;
+  mode: PreviewPerfMode;
 };
+
+function parseMode(sp: URLSearchParams): PreviewPerfMode {
+  const mode = sp.get("mode");
+  if (mode === "lite" || mode === "nopins" || mode === "default") return mode;
+  if (sp.get("lite") === "1") return "lite";
+  return "default";
+}
 
 function readPreviewQuery(): PreviewQuery {
   if (typeof window === "undefined") {
-    return { theme: "paper", pinCount: 0, cluster: true, fps: false };
+    return {
+      theme: "paper",
+      pinCount: 0,
+      cluster: true,
+      fps: false,
+      mode: "default",
+    };
   }
   const sp = new URLSearchParams(window.location.search);
   const pinsRaw = Number(sp.get("pins") || "0");
   const pinCount =
-    Number.isFinite(pinsRaw) && pinsRaw > 0 ? Math.min(5000, Math.floor(pinsRaw)) : 0;
+    Number.isFinite(pinsRaw) && pinsRaw > 0
+      ? Math.min(5000, Math.floor(pinsRaw))
+      : 0;
   return {
     theme: parseMapPreviewThemeId(sp.get("theme")),
     pinCount,
     cluster: sp.get("cluster") !== "0",
     fps: sp.get("fps") === "1",
+    mode: parseMode(sp),
   };
 }
 
-function writeThemeToUrl(themeId: MapPreviewThemeId) {
+function writeQueryPatch(patch: Record<string, string | null>) {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
-  url.searchParams.set("theme", themeId);
+  for (const [k, v] of Object.entries(patch)) {
+    if (v == null || v === "") url.searchParams.delete(k);
+    else url.searchParams.set(k, v);
+  }
   const q = url.searchParams.toString();
   window.history.replaceState(null, "", `${url.pathname}${q ? `?${q}` : ""}`);
 }
 
-function FpsOverlay({ enabled }: { enabled: boolean }) {
-  const [fps, setFps] = useState(0);
+type FpsStats = {
+  current: number;
+  avg5: number;
+  min5: number;
+};
+
+function DiagPanel({
+  enabled,
+  diag,
+}: {
+  enabled: boolean;
+  diag: PreviewDiagnostics | null;
+}) {
+  const [fps, setFps] = useState<FpsStats>({ current: 0, avg5: 0, min5: 0 });
   const rafRef = useRef(0);
   const lastRef = useRef(performance.now());
   const framesRef = useRef(0);
+  const samplesRef = useRef<{ t: number; fps: number }[]>([]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -64,10 +100,20 @@ function FpsOverlay({ enabled }: { enabled: boolean }) {
       if (!alive) return;
       framesRef.current += 1;
       const elapsed = now - lastRef.current;
-      if (elapsed >= 500) {
-        setFps(Math.round((framesRef.current * 1000) / elapsed));
+      if (elapsed >= 400) {
+        const cur = Math.round((framesRef.current * 1000) / elapsed);
         framesRef.current = 0;
         lastRef.current = now;
+        const samples = samplesRef.current;
+        samples.push({ t: now, fps: cur });
+        const cutoff = now - 5000;
+        while (samples.length && samples[0]!.t < cutoff) samples.shift();
+        const vals = samples.map((s) => s.fps);
+        const avg5 = vals.length
+          ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
+          : cur;
+        const min5 = vals.length ? Math.min(...vals) : cur;
+        setFps({ current: cur, avg5, min5 });
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -79,7 +125,36 @@ function FpsOverlay({ enabled }: { enabled: boolean }) {
   }, [enabled]);
 
   if (!enabled) return null;
-  return <div className="map-preview-fps">FPS {fps || "—"}</div>;
+
+  const dpr =
+    diag?.devicePixelRatio ??
+    (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1);
+
+  return (
+    <div className="map-preview-diag" role="status" aria-label="성능 진단">
+      <div className="map-preview-diag-row">
+        FPS {fps.current || "—"}
+      </div>
+      <div className="map-preview-diag-row">
+        5초 평균 {fps.avg5 || "—"} / 최저 {fps.min5 || "—"}
+      </div>
+      <div className="map-preview-diag-row">
+        레이어 {diag?.layerCount ?? "—"}
+      </div>
+      <div className="map-preview-diag-row">
+        첫 로딩 {diag?.firstLoadMs != null ? `${diag.firstLoadMs}ms` : "—"}
+      </div>
+      <div className="map-preview-diag-row">
+        타일평균{" "}
+        {diag?.tileLoadAvgMs != null
+          ? `${diag.tileLoadAvgMs}ms(${diag.tileSampleCount})`
+          : "—"}
+      </div>
+      <div className="map-preview-diag-row">
+        DPR {Number(dpr).toFixed(2)}
+      </div>
+    </div>
+  );
 }
 
 export default function MapPreviewClient() {
@@ -88,10 +163,16 @@ export default function MapPreviewClient() {
   const [pinCount, setPinCount] = useState(0);
   const [cluster, setCluster] = useState(true);
   const [showFps, setShowFps] = useState(false);
+  const [mode, setMode] = useState<PreviewPerfMode>("default");
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
-  const [selected, setSelected] = useState<{ id: string; name: string; category: string } | null>(null);
+  const [selected, setSelected] = useState<{
+    id: string;
+    name: string;
+    category: string;
+  } | null>(null);
+  const [diag, setDiag] = useState<PreviewDiagnostics | null>(null);
 
   const leave = useCallback(() => {
     safeRouterBack(router, "/?tab=mypage");
@@ -110,13 +191,15 @@ export default function MapPreviewClient() {
     setPinCount(q.pinCount);
     setCluster(q.cluster);
     setShowFps(q.fps);
-    writeThemeToUrl(q.theme);
+    setMode(q.mode);
+    writeQueryPatch({ theme: q.theme });
     setHydrated(true);
   }, []);
 
   const pins = useMemo(() => {
+    if (mode === "nopins") return [];
     const base =
-      pinCount > 0 ? generateSeoulDemoPins(pinCount) : MAP_PREVIEW_PINS;
+      pinCount > 0 ? generateKoreaDemoPins(pinCount) : MAP_PREVIEW_PINS;
     return base.map((p) => ({
       id: p.id,
       lng: p.lng,
@@ -124,7 +207,7 @@ export default function MapPreviewClient() {
       category: p.category,
       name: p.name,
     }));
-  }, [pinCount]);
+  }, [pinCount, mode]);
 
   const pinById = useMemo(() => {
     const m = new Map<string, { id: string; name: string; category: string }>();
@@ -136,15 +219,28 @@ export default function MapPreviewClient() {
 
   const switchTheme = useCallback((next: MapPreviewThemeId) => {
     setTheme(next);
-    writeThemeToUrl(next);
+    writeQueryPatch({ theme: next });
     setStatus("loading");
     setSelected(null);
+    setDiag(null);
+  }, []);
+
+  const switchMode = useCallback((next: PreviewPerfMode) => {
+    setMode(next);
+    setStatus("loading");
+    setSelected(null);
+    setDiag(null);
+    writeQueryPatch({
+      mode: next === "default" ? null : next,
+      lite: next === "lite" ? "1" : null,
+    });
   }, []);
 
   const rootTone =
     theme === "black" || theme === "dark" ? "is-dark" : "is-light";
 
-  const fitZoom = pinCount > 0 ? 11 : 14;
+  const fitZoom = pinCount > 0 ? 6.5 : 14;
+  const effectivePinCount = mode === "nopins" ? 0 : pinCount;
 
   return (
     <div className={`map-preview-root ${rootTone}`}>
@@ -159,8 +255,31 @@ export default function MapPreviewClient() {
         </button>
         <div className="map-preview-title">
           핀맵 지도 미리보기
-          {pinCount > 0 ? ` · ${pinCount}핀` : ""}
+          {effectivePinCount > 0 ? ` · ${effectivePinCount}핀` : " · 핀없음"}
+          {mode === "lite" ? " · lite" : ""}
           {!cluster ? " · cluster off" : ""}
+        </div>
+        <div className="map-preview-modes" role="group" aria-label="성능 모드">
+          {(
+            [
+              ["default", "기본"],
+              ["lite", "경량"],
+              ["nopins", "핀 없음"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={
+                mode === id
+                  ? "map-preview-mode-btn is-active"
+                  : "map-preview-mode-btn"
+              }
+              onClick={() => switchMode(id)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         <div className="map-preview-themes" role="group" aria-label="지도 스타일">
           {MAP_PREVIEW_THEME_ORDER.map((id) => (
@@ -182,12 +301,13 @@ export default function MapPreviewClient() {
 
       <div className="map-preview-map">
         {hydrated ? (
-          <PindmapGlMap
-            key={`gl-${pinCount}-${cluster ? 1 : 0}`}
+          <PreviewGlMap
+            key={`gl-${mode}-${theme}-${cluster ? 1 : 0}-${effectivePinCount}`}
             theme={theme}
+            mode={mode}
             pins={pins}
             singleZoom={fitZoom}
-            fitPadding={pinCount > 0 ? 28 : 48}
+            fitPadding={effectivePinCount > 0 ? 28 : 48}
             cluster={cluster}
             onReady={() => setStatus("ready")}
             onError={(e) => {
@@ -198,11 +318,12 @@ export default function MapPreviewClient() {
               const p = pinById.get(id) ?? null;
               setSelected(p);
             }}
+            onDiagnostics={setDiag}
           />
         ) : null}
       </div>
 
-      <FpsOverlay enabled={showFps} />
+      <DiagPanel enabled={showFps} diag={diag} />
 
       {selected ? (
         <div className="map-preview-card" role="dialog" aria-label="선택 핀">
