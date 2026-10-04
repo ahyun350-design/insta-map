@@ -243,13 +243,21 @@ import {
 import { pushInAppRoute } from "@/lib/safeRouterBack";
 import {
   createCompactMapLibreShim,
+  createExpandedMapLibreShim,
+  ExpandedMapLibreAdapter,
   getCompactMapLibreAdapter,
+  getExpandedMapLibreAdapter,
   isCompactMapLibre,
+  isExpandedMapLibre,
   MapLibreMapAdapter,
   readCompactMapLibreFlag,
+  readExpandedMapLibreFlag,
   setSessionForceKakaoCompact,
+  setSessionForceKakaoExpanded,
   shouldUseCompactMapLibre,
+  shouldUseExpandedMapLibre,
   writeCompactMapLibreFlag,
+  writeExpandedMapLibreFlag,
 } from "@/lib/mapSurface";
 import {
   isAccountOldEnoughForWhatsNew,
@@ -1545,7 +1553,11 @@ function HomePageContent() {
   useEffect(() => {
     const isAdmin = user?.id === ADMIN_USER_ID;
     setAdminCompactMapLibre(Boolean(isAdmin && readCompactMapLibreFlag()));
-    if (!isAdmin) setCompactMapIsMapLibre(false);
+    setAdminExpandedMapLibre(Boolean(isAdmin && readExpandedMapLibreFlag()));
+    if (!isAdmin) {
+      setCompactMapIsMapLibre(false);
+      setExpandedMapIsMapLibre(false);
+    }
   }, [user?.id]);
   type Notification = {
     id: string;
@@ -1712,6 +1724,12 @@ function HomePageContent() {
   const [compactMapIsMapLibre, setCompactMapIsMapLibre] = useState(false);
   const [compactMapRemountKey, setCompactMapRemountKey] = useState(0);
   const compactMapLibreFallbackToastedRef = useRef(false);
+  /** Admin-only fullscreen MapLibre (localStorage). Default off. Separate from minimap. */
+  const [adminExpandedMapLibre, setAdminExpandedMapLibre] = useState(false);
+  const [expandedMapIsMapLibre, setExpandedMapIsMapLibre] = useState(false);
+  const [expandedMapRemountKey, setExpandedMapRemountKey] = useState(0);
+  const expandedMapLibreFallbackToastedRef = useRef(false);
+  const expandedMapLibreMountGenRef = useRef(0);
 
   const fullscreenSearchListenerRegisteredRef = useRef(false);
   const fullscreenResearchListenerRegisteredRef = useRef(false);
@@ -2498,6 +2516,8 @@ function HomePageContent() {
   const hideFromMap = (id: string) => setHiddenIds(prev => new Set([...prev, id]));
   /** 확장 지도 검색 결과 핀·픽셀 매칭 후보 제거 — 검색 초기화·새 검색 시에만 호출 */
   const clearSearchResultPins = useCallback(() => {
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (gl) gl.clearSearchPins();
     mapSearchResultPinsRef.current.forEach((m) => {
       try {
         m.setMap(null);
@@ -2536,6 +2556,24 @@ function HomePageContent() {
         return;
       }
 
+      const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+      if (gl) {
+        searchPinPlaceByIdRef.current.clear();
+        const pins = places.map((place, index) => {
+          const id = `search-${index}`;
+          searchPinPlaceByIdRef.current.set(id, place);
+          return {
+            id,
+            lat: Number(place.y),
+            lng: Number(place.x),
+          };
+        }).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+        gl.setSearchPins(pins);
+        mapSearchResultPinsRef.current = [{ setMap: () => gl.clearSearchPins() }];
+        lastExpandedSearchPlacesRef.current = places.slice();
+        return;
+      }
+
       if (!expandedMapRef.current || !window.kakao?.maps) return;
       places.forEach((place) => {
         const marker = new window.kakao.maps.Marker({
@@ -2568,8 +2606,14 @@ function HomePageContent() {
   const applyExpandedMapCameraLatLng = (lat: number, lng: number, level: number = 3) => {
     try {
       const map = expandedMapRef.current;
-      if (!map || !window.kakao?.maps) return;
+      if (!map) return;
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      if (isExpandedMapLibre(map)) {
+        map.panTo({ getLat: () => lat, getLng: () => lng });
+        map.setLevel(level);
+        return;
+      }
+      if (!window.kakao?.maps) return;
       const latlng = new window.kakao.maps.LatLng(lat, lng);
       if (typeof map.panTo === "function") {
         map.panTo(latlng);
@@ -3564,6 +3608,15 @@ function HomePageContent() {
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
+    const isAdmin =
+      userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID;
+    // Admin fullscreen MapLibre: keep web portal; never presentFullscreenNativeMap.
+    if (shouldUseExpandedMapLibre(Boolean(isAdmin))) {
+      if (!mapExpanded && fullscreenAutoOpenedRef.current) {
+        fullscreenAutoOpenedRef.current = false;
+      }
+      return;
+    }
 
     if (mapExpanded) {
       if (fullscreenAutoOpenedRef.current) return;
@@ -3587,7 +3640,7 @@ function HomePageContent() {
     void clearFullscreenNativeRoute({ silent: true });
     void clearFullscreenNativeCourseNavigation({ silent: true });
     void dismissFullscreenNativeMap({ silent: true });
-  }, [mapExpanded, showCourseRoute]);
+  }, [mapExpanded, showCourseRoute, adminExpandedMapLibre, user?.id]);
 
   useEffect(() => {
     if (!isNativeMapAvailable()) return;
@@ -7560,6 +7613,20 @@ function HomePageContent() {
         };
         return;
       }
+      if (scope === "expanded" && isExpandedMapLibre(map)) {
+        const fillColor = resolveListColor(listPresetId) ?? resolvePinColor(category);
+        void map.adapter.setFocusMarker({
+          id: FOCUS_PLACE_MARKER_ID,
+          lat,
+          lng,
+          category,
+          fillColor,
+        });
+        focusPlaceMarkerRef.current.expanded = {
+          setMap: () => map.adapter.clearFocusMarker(),
+        };
+        return;
+      }
       if (!map || !window.kakao?.maps) return;
       const existing = focusPlaceMarkerRef.current[scope];
       if (existing) {
@@ -8827,7 +8894,42 @@ function HomePageContent() {
 
   const drawListMarkersOnExpandedMap = () => {
     const session = fullscreenListRef.current;
-    if (!session?.places.length || !expandedMapRef.current || !window.kakao?.maps) return;
+    if (!session?.places.length || !expandedMapRef.current) return;
+
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (gl) {
+      clearListWebMarkers();
+      const pins = session.places.flatMap((place) => {
+        const lat = place.lat;
+        const lng = place.lng;
+        if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+          return [];
+        }
+        const fillColor =
+          resolveListColor(place.listColor) ??
+          resolveListColor(session.color) ??
+          resolvePinColor(place.category);
+        return [{
+          id: place.id,
+          lat,
+          lng,
+          category: place.category,
+          fillColor,
+          name: place.name,
+        }];
+      });
+      void gl.setPins(pins);
+      listWebMarkersRef.current = [{ setMap: () => gl.setPins([]) }];
+      if (pins.length === 1) {
+        gl.setCenter(pins[0]!.lat, pins[0]!.lng);
+        gl.setLevel(4);
+      } else if (pins.length > 1) {
+        gl.fitPoints(pins.map((p) => ({ lat: p.lat, lng: p.lng })));
+      }
+      return;
+    }
+
+    if (!window.kakao?.maps) return;
 
     clearListWebMarkers();
     expandedMarkersRef.current.forEach((m) => {
@@ -8967,10 +9069,12 @@ function HomePageContent() {
   const drawCourseRoute = async () => {
     if (!courseResult) return;
     const uid = userIdRef.current;
-    if (!expandedMapRef.current || !window.kakao?.maps) {
+    const glCourse = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (!expandedMapRef.current || (!glCourse && !window.kakao?.maps)) {
       logAdminCourseMap(uid, "drawCourseRoute wait map", {
         hasMap: !!expandedMapRef.current,
         hasKakao: !!window.kakao?.maps,
+        maplibre: Boolean(glCourse),
         retry: drawCourseRouteRetryRef.current,
       });
       if (drawCourseRouteRetryRef.current < 2) {
@@ -8983,6 +9087,53 @@ function HomePageContent() {
       return;
     }
     drawCourseRouteRetryRef.current = 0;
+
+    if (glCourse) {
+      clearRoute();
+      searchMarkersRef.current = [];
+      courseLabelOverlaysRef.current = [];
+      const stops: LatLng[] = [];
+      const stopNames: string[] = [];
+      const courseStops = courseResult.map((place, idx) => {
+        stops.push({ lat: place.lat, lng: place.lng });
+        stopNames.push(place.name);
+        return {
+          id: place.id || `course-${idx}`,
+          lat: place.lat,
+          lng: place.lng,
+          name: truncateCourseLabelName(place.name),
+          order: idx + 1,
+          category: place.category,
+        };
+      });
+      glCourse.setCourseStops(courseStops);
+      searchMarkersRef.current = [{ setMap: () => glCourse.clearCourseStops() }];
+      if (stops.length === 1) {
+        glCourse.setCenter(stops[0]!.lat, stops[0]!.lng);
+        glCourse.setLevel(4);
+      } else if (stops.length > 1) {
+        glCourse.fitPoints(stops);
+      }
+      if (stops.length < 2) return;
+      setDirectionsLoading(true);
+      try {
+        const navigation = await getOrBuildCourseWalkNavigation(stops, stopNames);
+        if (!getExpandedMapLibreAdapter(expandedMapRef.current) || !courseResult) return;
+        fullscreenCourseNavigationRef.current = navigation;
+        setCourseNavigation(navigation);
+        setCourseNavSegmentIndex(navigation.segments.length > 0 ? 0 : null);
+        setCourseNavFocusMode(false);
+        setCourseNavStepIndex(navigation.segments[0]?.steps.length ? 0 : null);
+        applyWebCourseRoutePath(navigation.mergedPath, true, { preview: false });
+      } catch (err) {
+        console.error("[course] expanded maplibre route failed", err);
+        applyWebCourseRoutePath(stops, true, { preview: true });
+      } finally {
+        setDirectionsLoading(false);
+      }
+      return;
+    }
+
     // 기존 경로·마커·라벨 지우기
     clearRoute();
     searchMarkersRef.current.forEach((m) => m.setMap(null));
@@ -9846,6 +9997,16 @@ function HomePageContent() {
       };
       return;
     }
+    if (scope === "expanded" && isExpandedMapLibre(map)) {
+      // Expanded: show dot only — never auto-center (same as Kakao web expanded).
+      map.adapter.setMyLocation(latitude, longitude);
+      myLocationMarkerRef.current.expanded = {
+        setPosition: (ll: { getLat: () => number; getLng: () => number }) => {
+          map.adapter.setMyLocation(ll.getLat(), ll.getLng());
+        },
+      };
+      return;
+    }
     const latlng = new window.kakao.maps.LatLng(latitude, longitude);
     // 메인 지도만 GPS로 센터 이동. 확장 지도는 복제된 center 유지 + 검색/저장용 focusExpandedMap만 이동.
     if (moveCenter && scope === "main") {
@@ -10174,6 +10335,88 @@ function HomePageContent() {
     publish();
   };
 
+  const syncExpandedMapLibrePins = (places: Place[]) => {
+    const adapter = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (!adapter) return;
+    const myRunId = ++placePinsRunIdRef.current.expanded;
+    const byId = new Map<
+      string,
+      { lat: number; lng: number; category: Category; listColor: string | null }
+    >();
+
+    const publish = () => {
+      if (myRunId !== placePinsRunIdRef.current.expanded) return;
+      const pins = [...byId.entries()].map(([id, entry]) => ({
+        id,
+        lat: entry.lat,
+        lng: entry.lng,
+        category: entry.category,
+        fillColor: pinFillForPlace({
+          category: entry.category,
+          listColor: entry.listColor,
+        }),
+        name: places.find((p) => p.id === id)?.name,
+      }));
+      void adapter.setPins(pins);
+      expandedMarkersRef.current = [{ setMap: () => adapter.setPins([]) }];
+    };
+
+    const upsert = (place: Place, markerLat: number, markerLng: number) => {
+      if (myRunId !== placePinsRunIdRef.current.expanded) return;
+      savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
+      byId.set(place.id, {
+        lat: markerLat,
+        lng: markerLng,
+        category: place.category,
+        listColor: place.listColor ?? null,
+      });
+    };
+
+    const resolveCoords = (place: Place) => {
+      const stored = latLngFromRow(place);
+      if (stored) return stored;
+      const byPlaceId = savedPlaceCoordsRef.current[place.id];
+      if (byPlaceId && Number.isFinite(byPlaceId.lat) && Number.isFinite(byPlaceId.lng)) return byPlaceId;
+      return getGeocodeCacheSync(place.address);
+    };
+
+    const visible = places.filter((p) => !hiddenIds.has(p.id));
+    visible.forEach((place) => {
+      const coords = resolveCoords(place);
+      if (coords) {
+        upsert(place, coords.lat, coords.lng);
+        return;
+      }
+      if (!geocoderRef.current) return;
+      geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
+        try {
+          if (myRunId !== placePinsRunIdRef.current.expanded) return;
+          if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
+          const markerLat = parseFloat(result[0].y);
+          const markerLng = parseFloat(result[0].x);
+          if (!Number.isFinite(markerLat) || !Number.isFinite(markerLng)) return;
+          void setGeocodeCache(place.address, { lat: markerLat, lng: markerLng });
+          upsert(place, markerLat, markerLng);
+          publish();
+        } catch (err) {
+          console.error("[PindMap:pin] expanded maplibre geocode failed", place?.name, err);
+        }
+      });
+    });
+    publish();
+  };
+
+  const runExpandedMapLibrePinClick = (placeId: string, markerLat: number, markerLng: number) => {
+    const place = savedPlacesRef.current.find((p) => p.id === placeId);
+    if (!place) return;
+    const relatedPosts = getRelatedPostsForPlaceSheet(
+      feedPostsRef.current,
+      placeRefFromPlace(place, markerLat, markerLng),
+    );
+    placeSheetReturnRef.current = null;
+    setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
+  };
+
   const initCompactMapLibreMap = (places: Place[], _posts: FeedPost[]) => {
     const container = mapContainerRef.current;
     if (!container || mapRef.current) return;
@@ -10344,6 +10587,10 @@ function HomePageContent() {
     if (!geocoderRef.current) return;
     if (scope === "main" && isCompactMapLibre(mapRef.current)) {
       syncCompactMapLibrePins(places);
+      return;
+    }
+    if (scope === "expanded" && isExpandedMapLibre(expandedMapRef.current)) {
+      syncExpandedMapLibrePins(places);
       return;
     }
     const useNative = isNativeMapAvailable() && expandedNativeMapEnabled && scope === "expanded";
@@ -10729,6 +10976,11 @@ function HomePageContent() {
   const clearRoute = () => {
     const gl = getCompactMapLibreAdapter(mapRef.current);
     if (gl) gl.clearRoute();
+    const glExp = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (glExp) {
+      glExp.clearRoute();
+      glExp.clearCourseStops();
+    }
     if (routePolylineRef.current) { routePolylineRef.current.setMap(null); routePolylineRef.current = null; }
     courseLabelOverlaysRef.current.forEach((o) => {
       try {
@@ -10747,6 +10999,24 @@ function HomePageContent() {
     fitBounds = true,
     opts?: { preview?: boolean },
   ) => {
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (gl) {
+      if (path.length < 2) return;
+      const preview = opts?.preview === true;
+      gl.setRoute(path, "walk");
+      gl.setRouteStyle({
+        color: preview ? "#c5cad3" : "#1a2a7a",
+        width: preview ? 3 : 4,
+        dasharray: preview ? [1.5, 1.2] : [1, 0],
+        opacity: preview ? 0.55 : 0.95,
+      });
+      routePolylineRef.current = { setMap: () => gl.clearRoute() };
+      if (fitBounds) {
+        const bottomPad = Math.max(96, courseNavBottomPadRef.current);
+        gl.fitPoints(path, { top: 48, right: 40, bottom: bottomPad, left: 40 });
+      }
+      return;
+    }
     if (!expandedMapRef.current || !window.kakao?.maps || path.length < 2) return;
     const preview = opts?.preview === true;
     // 관리자 실험: 카카오 Polyline 대신 HTML 오버레이 경로 갱신
@@ -10854,7 +11124,8 @@ function HomePageContent() {
   }, [applyWebCourseRoutePath, courseNavigation]);
 
   const drawRoute = async (destLat: number, destLng: number, mode: "car" | "walk" = "car") => {
-    if (!expandedMapRef.current || !window.kakao?.maps) return;
+    if (!expandedMapRef.current) return;
+    if (!isExpandedMapLibre(expandedMapRef.current) && !window.kakao?.maps) return;
     track("course_directions");
     setDirectionsMode(mode);
     setDirectionsLoading(true);
@@ -10879,6 +11150,13 @@ function HomePageContent() {
     try {
       const paintOnExpanded = (path: { lat: number; lng: number }[]) => {
         if (!expandedMapRef.current || path.length < 2) return;
+        const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+        if (gl) {
+          gl.setRoute(path, mode);
+          routePolylineRef.current = { setMap: () => gl.clearRoute() };
+          gl.fitPoints(path);
+          return;
+        }
         const linePath = path.map((p) => new window.kakao.maps.LatLng(p.lat, p.lng));
         const strokeColor = mode === "walk" ? "#16a34a" : "#1a2a7a";
         const strokeWeight = mode === "walk" ? 7 : 5;
@@ -10941,10 +11219,18 @@ function HomePageContent() {
         if (path.length >= 2) {
           paintOnExpanded(path);
         } else if (expandedMapRef.current) {
-          const bounds = new window.kakao.maps.LatLngBounds();
-          bounds.extend(new window.kakao.maps.LatLng(origin.lat, origin.lng));
-          bounds.extend(new window.kakao.maps.LatLng(destLat, destLng));
-          expandedMapRef.current.setBounds(bounds);
+          const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+          if (gl) {
+            gl.fitPoints([
+              { lat: origin.lat, lng: origin.lng },
+              { lat: destLat, lng: destLng },
+            ]);
+          } else if (window.kakao?.maps) {
+            const bounds = new window.kakao.maps.LatLngBounds();
+            bounds.extend(new window.kakao.maps.LatLng(origin.lat, origin.lng));
+            bounds.extend(new window.kakao.maps.LatLng(destLat, destLng));
+            expandedMapRef.current.setBounds(bounds);
+          }
         }
         return;
       }
@@ -11850,19 +12136,216 @@ function HomePageContent() {
 
   useEffect(() => {
     const uid = userIdRef.current;
+    const isAdmin =
+      userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID;
+    const useExpandedMl = shouldUseExpandedMapLibre(Boolean(isAdmin));
     // 관리자 코스 웹 포털 강제 생성 비활성 — 네이티브 가능 시 웹 맵 미생성
+    // Admin expanded MapLibre: force web portal even on iOS (skip native fullscreen).
     const adminCourse = false;
-    const shouldCreateWebMap = mapExpanded && (!isNativeMapAvailable() || adminCourse);
+    const shouldCreateWebMap =
+      mapExpanded && (!isNativeMapAvailable() || adminCourse || useExpandedMl);
 
-    if (!shouldCreateWebMap || !mapExpandedRef.current || kakaoStatus !== "ready" || !isKakaoMapsApiReady()) {
+    if (!shouldCreateWebMap || !mapExpandedRef.current) {
       logAdminCourseMap(uid, "map create effect skip", {
         mapExpanded,
         showCourseRoute,
         adminCourse,
+        useExpandedMl,
         shouldCreateWebMap,
         hasContainer: !!mapExpandedRef.current,
         containerW: mapExpandedRef.current?.clientWidth ?? null,
         containerH: mapExpandedRef.current?.clientHeight ?? null,
+        kakaoStatus,
+        kakaoReady: isKakaoMapsApiReady(),
+      });
+      return undefined;
+    }
+
+    // ── Admin MapLibre fullscreen (entry branch only; Kakao body untouched below) ──
+    if (useExpandedMl) {
+      let cancelled = false;
+      const mountGen = ++expandedMapLibreMountGenRef.current;
+      const tid = window.setTimeout(() => {
+        if (cancelled || !mapExpandedRef.current) return;
+        if (expandedMapRef.current) return;
+        const mapContainerEl = mapExpandedRef.current;
+        const centerFromMain = mapRef.current?.getCenter?.();
+        const levelFromMain = mapRef.current?.getLevel?.();
+        const centerLat =
+          typeof centerFromMain?.getLat === "function"
+            ? centerFromMain.getLat()
+            : 37.5665;
+        const centerLng =
+          typeof centerFromMain?.getLng === "function"
+            ? centerFromMain.getLng()
+            : 126.978;
+        const level =
+          typeof levelFromMain === "number" && Number.isFinite(levelFromMain)
+            ? levelFromMain
+            : 9;
+
+        void ExpandedMapLibreAdapter.create({
+          container: mapContainerEl,
+          center: { lat: centerLat, lng: centerLng },
+          level,
+          onPinClick: (pinId) => {
+            const cached = savedPlaceCoordsRef.current[pinId];
+            if (cached) {
+              runExpandedMapLibrePinClick(pinId, cached.lat, cached.lng);
+              return;
+            }
+            const place = savedPlacesRef.current.find((p) => p.id === pinId);
+            if (!place) return;
+            const coords = latLngFromRow(place);
+            if (coords) runExpandedMapLibrePinClick(pinId, coords.lat, coords.lng);
+          },
+          onSearchPinClick: (pinId) => {
+            const place = searchPinPlaceByIdRef.current.get(pinId);
+            if (place) openExpandedSearchPlaceCard(place, "maplibre-search-pin");
+          },
+          onCourseStopClick: (stopId) => {
+            const hit =
+              courseResult?.find((p, idx) => p.id === stopId || stopId === `course-${idx}`) ??
+              null;
+            if (!hit) return;
+            const coursePlaceRef = placeRefFromPlace(
+              { id: hit.id, name: hit.name, address: hit.address, category: hit.category },
+              hit.lat,
+              hit.lng,
+            );
+            setSelectedPlace({
+              place_name: hit.name,
+              category_name: hit.category,
+              ...(hit.subcategory ? { subcategory: hit.subcategory } : { subcategory: null }),
+              road_address_name: hit.address,
+              phone: "",
+              place_url: "",
+              y: hit.lat,
+              x: hit.lng,
+              _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, coursePlaceRef),
+              _placeRef: coursePlaceRef,
+            });
+          },
+          onReady: () => {
+            if (cancelled || mountGen !== expandedMapLibreMountGenRef.current) return;
+            if (!expandedMapRef.current) return;
+            setExpandedMapIsMapLibre(true);
+            addMyLocation(expandedMapRef.current, "expanded");
+            setExpandedMapPinsTick((n) => n + 1);
+            if (showCourseRoute) {
+              window.setTimeout(() => void drawCourseRoute(), 200);
+            }
+            try {
+              expandedMapRef.current.relayout?.();
+            } catch {
+              /* noop */
+            }
+          },
+          onViewIdle: () => {
+            const map = expandedMapRef.current;
+            if (!map || !isExpandedMapLibre(map)) return;
+            if (!lastSearchCenterRef.current || !mapSearchKeywordRef.current.trim()) {
+              setShowMapResearchButton(false);
+              return;
+            }
+            if (mapSearchResultsRef.current.length === 0) {
+              setShowMapResearchButton(false);
+              return;
+            }
+            if (pendingSearchCenterSyncRef.current) {
+              const c = map.getCenter();
+              lastSearchCenterRef.current = { lat: c.getLat(), lng: c.getLng() };
+              pendingSearchCenterSyncRef.current = false;
+              setShowMapResearchButton(false);
+              return;
+            }
+            const center = map.getCenter();
+            const dist = distanceMeters(
+              lastSearchCenterRef.current.lat,
+              lastSearchCenterRef.current.lng,
+              center.getLat(),
+              center.getLng(),
+            );
+            const threshold = getMapResearchDistanceThresholdM(map);
+            if (dist < threshold * 0.45) setShowMapResearchButton(false);
+            else if (dist >= threshold) setShowMapResearchButton(true);
+          },
+          onFallback: (reason) => {
+            if (cancelled) return;
+            console.warn("[PindMap:maplibre] expanded fallback", reason);
+            setSessionForceKakaoExpanded(true);
+            setExpandedMapIsMapLibre(false);
+            if (!expandedMapLibreFallbackToastedRef.current) {
+              expandedMapLibreFallbackToastedRef.current = true;
+              showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
+            }
+            try {
+              getExpandedMapLibreAdapter(expandedMapRef.current)?.destroy();
+            } catch {
+              /* noop */
+            }
+            expandedMapRef.current = null;
+            if (mapContainerEl) mapContainerEl.innerHTML = "";
+            if (isNativeMapAvailable()) {
+              fullscreenAutoOpenedRef.current = true;
+              void handleOpenFullscreenNativeMapRef.current();
+            } else {
+              setExpandedMapRemountKey((k) => k + 1);
+            }
+          },
+        })
+          .then((adapter) => {
+            if (cancelled || mountGen !== expandedMapLibreMountGenRef.current) {
+              adapter.destroy();
+              return;
+            }
+            if (expandedMapRef.current) {
+              adapter.destroy();
+              return;
+            }
+            expandedMapRef.current = createExpandedMapLibreShim(adapter, mapContainerEl);
+          })
+          .catch((err) => {
+            console.warn("[PindMap:maplibre] expanded init failed", err);
+            setSessionForceKakaoExpanded(true);
+            if (!expandedMapLibreFallbackToastedRef.current) {
+              expandedMapLibreFallbackToastedRef.current = true;
+              showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
+            }
+            if (isNativeMapAvailable()) {
+              fullscreenAutoOpenedRef.current = true;
+              void handleOpenFullscreenNativeMapRef.current();
+            } else {
+              setExpandedMapRemountKey((k) => k + 1);
+            }
+          });
+      }, 100);
+
+      return () => {
+        cancelled = true;
+        window.clearTimeout(tid);
+        expandedMapInteractionCleanupRef.current?.();
+        const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+        if (gl) {
+          try {
+            gl.destroy();
+          } catch {
+            /* noop */
+          }
+        }
+        expandedMapRef.current = null;
+        setExpandedMapIsMapLibre(false);
+        lastExpandedSearchPlacesRef.current = [];
+        mapSearchResultPinsRef.current = [];
+        myLocationMarkerRef.current.expanded = null;
+        const el = mapExpandedRef.current;
+        if (el) el.innerHTML = "";
+      };
+    }
+
+    if (kakaoStatus !== "ready" || !isKakaoMapsApiReady()) {
+      logAdminCourseMap(uid, "map create effect skip (kakao not ready)", {
+        mapExpanded,
         kakaoStatus,
         kakaoReady: isKakaoMapsApiReady(),
       });
@@ -12062,7 +12545,7 @@ function HomePageContent() {
       mapSearchResultPinsRef.current = [];
       myLocationMarkerRef.current.expanded = null;
     };
-  }, [mapExpanded, showCourseRoute, kakaoStatus, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace]);
+  }, [mapExpanded, showCourseRoute, kakaoStatus, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace, adminExpandedMapLibre, expandedMapRemountKey, user?.id]);
 
   useEffect(() => {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
@@ -12503,6 +12986,53 @@ function HomePageContent() {
     enabled: !!selectedPlace && !mapExpanded,
     priority: EDGE_SWIPE_PRIORITY.PLACE_SHEET,
     onClose: closeCompactPlaceSheet,
+  });
+  useEdgeSwipeBack({
+    id: "map-expanded",
+    enabled:
+      mapExpanded &&
+      (!isNativeMapAvailable() ||
+        shouldUseExpandedMapLibre(user?.id === ADMIN_USER_ID)),
+    priority: EDGE_SWIPE_PRIORITY.MAP_EXPANDED,
+    onClose: () => {
+      if (returnToCourseSheetRef.current) {
+        returnToCourseSheetRef.current = false;
+        setMapExpanded(false);
+        clearRoute();
+        setShowCourseRoute(false);
+        setCourseDesignPath(null);
+        setCourseNavigation(null);
+        setCourseNavSegmentIndex(null);
+        setCourseNavFocusMode(false);
+        setCourseNavStepIndex(null);
+        fullscreenCourseNavigationRef.current = null;
+        setShowCourseModal(true);
+        return;
+      }
+      if (returnToListDetailRef.current) {
+        returnToListDetailRef.current = false;
+        fullscreenListRef.current = null;
+        setListMapActive(false);
+        clearListWebMarkers();
+        setMapExpanded(false);
+        setSelectedPlace(null);
+        setActiveTab("saved");
+        setShowMyListsScreen(true);
+        return;
+      }
+      fullscreenListRef.current = null;
+      setListMapActive(false);
+      clearListWebMarkers();
+      setMapExpanded(false);
+      setSelectedPlace(null);
+      setShowCourseRoute(false);
+      setCourseDesignPath(null);
+      setCourseNavigation(null);
+      setCourseNavSegmentIndex(null);
+      setCourseNavFocusMode(false);
+      setCourseNavStepIndex(null);
+      fullscreenCourseNavigationRef.current = null;
+    },
   });
   useEdgeSwipeBack({
     id: "place-sheet-home",
@@ -15550,15 +16080,19 @@ function HomePageContent() {
                 const nativeAvail = isNativeMapAvailable();
                 // 네온/다크 코스맵용 웹 포털 강제 비활성
                 const adminCourseWebPortal = false;
+                const adminExpandedMlPortal = shouldUseExpandedMapLibre(
+                  user?.id === ADMIN_USER_ID,
+                );
                 const showWebExpandedPortal =
                   mapExpanded &&
-                  (!nativeAvail || adminCourseWebPortal) &&
+                  (!nativeAvail || adminCourseWebPortal || adminExpandedMlPortal) &&
                   typeof document !== "undefined";
                 logAdminCourseMap(user?.id ?? userIdRef.current, "web expanded portal gate", {
                   mapExpanded,
                   nativeAvail,
                   showCourseRoute,
                   adminCourseWebPortal,
+                  adminExpandedMlPortal,
                   showWebExpandedPortal,
                   hasContainerRef: !!mapExpandedRef.current,
                   kakaoStatus,
@@ -15733,7 +16267,11 @@ function HomePageContent() {
                     </div>
                     )}
                     <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-                      <div ref={mapExpandedRef} className="kakaoMap" style={{ width: "100%", height: "100%", touchAction: "manipulation" }} />
+                      <div
+                        ref={mapExpandedRef}
+                        className={`kakaoMap${expandedMapIsMapLibre ? " is-maplibre-expanded" : ""}`}
+                        style={{ width: "100%", height: "100%", touchAction: "manipulation" }}
+                      />
                       {(() => {
                         // 네온/다크 CourseMapDesignOverlay 비활성 — 기본 지도 스타일만
                         const canMountAdminOverlay = false;
@@ -17659,6 +18197,30 @@ function HomePageContent() {
                   }}
                 >
                   미니맵 핀맵 지도(관리자){adminCompactMapLibre ? " · ON" : " · OFF"}
+                </button>
+              ) : null}
+              {user?.id === ADMIN_USER_ID ? (
+                <button
+                  type="button"
+                  className="settingItem"
+                  data-testid="admin-expanded-maplibre-toggle"
+                  style={{ width: "100%", padding: "16px 20px", color: "#1a2a7a" }}
+                  onClick={() => {
+                    const next = !adminExpandedMapLibre;
+                    writeExpandedMapLibreFlag(next);
+                    setSessionForceKakaoExpanded(false);
+                    expandedMapLibreFallbackToastedRef.current = false;
+                    setAdminExpandedMapLibre(next);
+                    setShowMypageSettingsSheet(false);
+                    showToast(
+                      next
+                        ? "전체화면 핀맵 지도 ON — 지도 탭에서 전체지도를 여세요"
+                        : "전체화면 핀맵 지도 OFF — 기본 지도로 복귀",
+                      "info",
+                    );
+                  }}
+                >
+                  전체화면 핀맵 지도(관리자){adminExpandedMapLibre ? " · ON" : " · OFF"}
                 </button>
               ) : null}
               {user?.id === ADMIN_USER_ID ? (

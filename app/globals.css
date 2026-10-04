@@ -7892,6 +7892,19 @@ select:focus-visible {
   border-radius: 3px;
   pointer-events: none;
 }
+.expandedMapLibreAttrib {
+  position: absolute;
+  left: max(8px, env(safe-area-inset-left, 0px));
+  bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  z-index: 3;
+  font-size: 10px;
+  line-height: 1.2;
+  color: rgba(0, 0, 0, 0.5);
+  background: rgba(255, 255, 255, 0.65);
+  padding: 2px 6px;
+  border-radius: 3px;
+  pointer-events: none;
+}
 .screenMapTab .mapCompactMap.is-maplibre-pins .maplibregl-canvas-container,
 .screenMapTab .mapCompactMap.is-maplibre-pins .maplibregl-canvas {
   z-index: 6;

@@ -1,8 +1,11 @@
 export type {
   CompactMapSurface,
+  ExpandedMapSurface,
   MapSurface,
   CompactPinInput,
   CompactRouteMode,
+  CourseStopInput,
+  SearchPinInput,
   MapLatLng,
 } from "./types";
 export {
@@ -13,6 +16,14 @@ export {
   shouldUseCompactMapLibre,
   writeCompactMapLibreFlag,
 } from "./compactMapLibreFlag";
+export {
+  EXPANDED_MAPLIBRE_STORAGE_KEY,
+  isSessionForceKakaoExpanded,
+  readExpandedMapLibreFlag,
+  setSessionForceKakaoExpanded,
+  shouldUseExpandedMapLibre,
+  writeExpandedMapLibreFlag,
+} from "./expandedMapLibreFlag";
 export {
   kakaoLevelToMapLibreZoom,
   mapLibreZoomToKakaoLevel,
@@ -29,3 +40,11 @@ export {
   MapLibreMapAdapter,
   type CompactMapLibreShim,
 } from "./compactMapLibreBridge";
+export {
+  EXPANDED_MAPLIBRE_BRAND,
+  ExpandedMapLibreAdapter,
+  createExpandedMapLibreShim,
+  getExpandedMapLibreAdapter,
+  isExpandedMapLibre,
+  type ExpandedMapLibreShim,
+} from "./expandedMapLibreBridge";

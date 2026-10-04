@@ -9,6 +9,8 @@ export const EDGE_SWIPE_PRIORITY = {
   PHOTO_VIEWER: 3,
   CURATION_DETAIL: 3,
   PLACE_SHEET: 4,
+  /** Fullscreen map portal (web MapLibre / Kakao) — place-sheet swipe is off while expanded */
+  MAP_EXPANDED: 4,
   MY_LISTS: 5,
   SAVED_SELECT: 6,
   WHATS_NEW: 7,

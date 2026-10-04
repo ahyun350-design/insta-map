@@ -12,6 +12,22 @@ export type CompactPinInput = {
 
 export type CompactRouteMode = "car" | "walk";
 
+export type SearchPinInput = {
+  id: string;
+  lat: number;
+  lng: number;
+};
+
+export type CourseStopInput = {
+  id: string;
+  lat: number;
+  lng: number;
+  name: string;
+  order: number;
+  category?: string;
+  fillColor?: string;
+};
+
 /**
  * Minimal surface used by the admin compact MapLibre path.
  * Kakao remains the production default; this is not a full dual-stack adapter yet.
@@ -36,6 +52,27 @@ export type CompactMapSurface = {
   setFocusMarker: (pin: CompactPinInput) => void;
   clearFocusMarker: () => void;
   destroy: () => void;
+};
+
+/** Fullscreen admin MapLibre surface (extends compact + search/course/camera). */
+export type ExpandedMapSurface = CompactMapSurface & {
+  panTo: (lat: number, lng: number) => void;
+  getBounds: () => {
+    getSouthWest: () => MapLatLng;
+    getNorthEast: () => MapLatLng;
+  } | null;
+  project: (lat: number, lng: number) => { x: number; y: number } | null;
+  unproject: (x: number, y: number) => MapLatLng | null;
+  setSearchPins: (pins: SearchPinInput[]) => void;
+  clearSearchPins: () => void;
+  setCourseStops: (stops: CourseStopInput[]) => void;
+  clearCourseStops: () => void;
+  setRouteStyle: (opts: {
+    color?: string;
+    width?: number;
+    dasharray?: number[];
+    opacity?: number;
+  }) => void;
 };
 
 /** Alias — compact MapLibre surface for admin minimap. */
