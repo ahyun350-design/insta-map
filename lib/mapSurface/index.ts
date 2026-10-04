@@ -1,5 +1,6 @@
 export type {
   CompactMapSurface,
+  MapSurface,
   CompactPinInput,
   CompactRouteMode,
   MapLatLng,
