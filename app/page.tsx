@@ -242,6 +242,16 @@ import {
 } from "@/lib/useEdgeSwipeBack";
 import { pushInAppRoute } from "@/lib/safeRouterBack";
 import {
+  createCompactMapLibreShim,
+  getCompactMapLibreAdapter,
+  isCompactMapLibre,
+  MapLibreMapAdapter,
+  readCompactMapLibreFlag,
+  setSessionForceKakaoCompact,
+  shouldUseCompactMapLibre,
+  writeCompactMapLibreFlag,
+} from "@/lib/mapSurface";
+import {
   isAccountOldEnoughForWhatsNew,
   nextWhatsNewPackToShow,
   type WhatsNewPack,
@@ -1532,6 +1542,11 @@ function HomePageContent() {
   userSendRef.current = user;
   const userIdRef = useRef<string>("");
   userIdRef.current = user?.id || "";
+  useEffect(() => {
+    const isAdmin = user?.id === ADMIN_USER_ID;
+    setAdminCompactMapLibre(Boolean(isAdmin && readCompactMapLibreFlag()));
+    if (!isAdmin) setCompactMapIsMapLibre(false);
+  }, [user?.id]);
   type Notification = {
     id: string;
     user_id: string;
@@ -1692,6 +1707,12 @@ function HomePageContent() {
   const [reelInputExpanded, setReelInputExpanded] = useState(false);
   /** V-7-1: 확장 지도 상단 50% Kakao Native 오버레이 (iOS만, JS API와 병행) */
   const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
+  /** Admin-only compact MapLibre minimap (localStorage). Default off. */
+  const [adminCompactMapLibre, setAdminCompactMapLibre] = useState(false);
+  const [compactMapIsMapLibre, setCompactMapIsMapLibre] = useState(false);
+  const [compactMapRemountKey, setCompactMapRemountKey] = useState(0);
+  const compactMapLibreFallbackToastedRef = useRef(false);
+
   const fullscreenSearchListenerRegisteredRef = useRef(false);
   const fullscreenResearchListenerRegisteredRef = useRef(false);
   const fullscreenPlaceDetailListenerRegisteredRef = useRef(false);
@@ -7495,6 +7516,8 @@ function HomePageContent() {
 
   const clearFocusPlaceMarker = useCallback(() => {
     focusPlaceCoordsRef.current = null;
+    const compactAdapter = getCompactMapLibreAdapter(mapRef.current);
+    if (compactAdapter) compactAdapter.clearFocusMarker();
     (["main", "expanded"] as const).forEach((scope) => {
       const marker = focusPlaceMarkerRef.current[scope];
       if (!marker) return;
@@ -7523,6 +7546,20 @@ function HomePageContent() {
       category: Category,
       listPresetId?: string | null,
     ) => {
+      if (scope === "main" && isCompactMapLibre(map)) {
+        const fillColor = resolveListColor(listPresetId) ?? resolvePinColor(category);
+        void map.adapter.setFocusMarker({
+          id: FOCUS_PLACE_MARKER_ID,
+          lat,
+          lng,
+          category,
+          fillColor,
+        });
+        focusPlaceMarkerRef.current.main = {
+          setMap: () => map.adapter.clearFocusMarker(),
+        };
+        return;
+      }
       if (!map || !window.kakao?.maps) return;
       const existing = focusPlaceMarkerRef.current[scope];
       if (existing) {
@@ -7854,6 +7891,12 @@ function HomePageContent() {
 
   /** 컴팩트 맵에 출발·도착(또는 경로)이 보이도록 맞춤 */
   const fitCompactMapToPoints = useCallback((points: { lat: number; lng: number }[]) => {
+    const gl = getCompactMapLibreAdapter(mapRef.current);
+    if (gl) {
+      if (points.length === 0) return;
+      gl.fitPoints(points);
+      return;
+    }
     if (!mapRef.current || !window.kakao?.maps || points.length === 0) return;
     if (points.length === 1) {
       mapRef.current.setCenter(new window.kakao.maps.LatLng(points[0].lat, points[0].lng));
@@ -7869,6 +7912,14 @@ function HomePageContent() {
   /** 컴팩트(mapRef) 카카오 맵에 경로 폴리라인 표시 */
   const drawRouteOnCompactMap = useCallback(
     (path: { lat: number; lng: number }[], mode: "car" | "walk") => {
+      const gl = getCompactMapLibreAdapter(mapRef.current);
+      if (gl) {
+        if (path.length < 2) return false;
+        gl.setRoute(path, mode);
+        routePolylineRef.current = { setMap: () => gl.clearRoute() };
+        fitCompactMapToPoints(path);
+        return true;
+      }
       if (!mapRef.current || !window.kakao?.maps || path.length < 2) return false;
       if (routePolylineRef.current) {
         routePolylineRef.current.setMap(null);
@@ -9782,6 +9833,19 @@ function HomePageContent() {
     moveCenter: boolean,
   ) => {
     myLocationLatLngRef.current = { lat: latitude, lng: longitude };
+    if (scope === "main" && isCompactMapLibre(map)) {
+      if (moveCenter) {
+        map.setCenter({ getLat: () => latitude, getLng: () => longitude });
+        map.setLevel(9);
+      }
+      map.adapter.setMyLocation(latitude, longitude);
+      myLocationMarkerRef.current.main = {
+        setPosition: (ll: { getLat: () => number; getLng: () => number }) => {
+          map.adapter.setMyLocation(ll.getLat(), ll.getLng());
+        },
+      };
+      return;
+    }
     const latlng = new window.kakao.maps.LatLng(latitude, longitude);
     // 메인 지도만 GPS로 센터 이동. 확장 지도는 복제된 center 유지 + 검색/저장용 focusExpandedMap만 이동.
     if (moveCenter && scope === "main") {
@@ -9929,6 +9993,10 @@ function HomePageContent() {
 
   const relayoutCompactMap = () => {
     const map = mapRef.current;
+    if (isCompactMapLibre(map)) {
+      map.relayout();
+      return;
+    }
     if (!map || !isKakaoMapsApiReady()) return;
     map.relayout?.();
     try {
@@ -9950,11 +10018,259 @@ function HomePageContent() {
     });
   };
 
+
+  const tearDownCompactMapForRemount = () => {
+    const map = mapRef.current;
+    if (isCompactMapLibre(map)) {
+      try {
+        map.adapter.destroy();
+      } catch {
+        /* noop */
+      }
+    }
+    mapRef.current = null;
+    setCompactMapIsMapLibre(false);
+    setCompactMapReady(false);
+    myLocationMarkerRef.current.main = null;
+    mainPlaceMarkersByIdRef.current.forEach((entry) => {
+      try {
+        entry.marker.setMap(null);
+      } catch {
+        /* noop */
+      }
+    });
+    mainPlaceMarkersByIdRef.current.clear();
+    markersRef.current = [];
+    initialPinTriggeredRef.current = false;
+    prevSavedPlacesKeyRef.current = "";
+    relayoutTriggeredRef.current = false;
+    orchestratorSuccessKeyRef.current = "";
+    const el = mapContainerRef.current;
+    if (el) el.innerHTML = "";
+  };
+
+  const runCompactMapLibrePinClick = (placeId: string, markerLat: number, markerLng: number) => {
+    const place = savedPlacesRef.current.find((p) => p.id === placeId);
+    if (!place) return;
+    const clickToken = Date.now();
+    selectedPlaceTokenRef.current = clickToken;
+    placeSheetReturnRef.current = null;
+    const relatedPosts = getRelatedPostsForPlaceSheet(
+      feedPostsRef.current,
+      placeRefFromPlace(place, markerLat, markerLng),
+    );
+    setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
+    if (!window.kakao?.maps?.services?.Places) return;
+    new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
+      if (selectedPlaceTokenRef.current !== clickToken) return;
+      if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
+      const nearest = data
+        .map((it) => {
+          const y = parseFloat(it.y);
+          const x = parseFloat(it.x);
+          if (!Number.isFinite(y) || !Number.isFinite(x)) return null;
+          return { place: it, meters: distanceMeters(markerLat, markerLng, y, x) };
+        })
+        .filter((v): v is { place: any; meters: number } => Boolean(v))
+        .sort((a, b) => a.meters - b.meters)[0];
+      if (!nearest || nearest.meters > 100) return;
+      const baseSelected = toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng);
+      const safeNearest =
+        nearest.place && typeof nearest.place === "object" ? (nearest.place as Record<string, unknown>) : {};
+      const mergedSafely: Record<string, unknown> = { ...baseSelected };
+      for (const key of Object.keys(safeNearest)) {
+        const v = safeNearest[key];
+        if (v !== undefined && v !== null && v !== "") mergedSafely[key] = v;
+      }
+      mergedSafely._feedPosts = relatedPosts;
+      mergedSafely._savedPlaceId = place.id;
+      setSelectedPlace(
+        mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string },
+      );
+    });
+  };
+
+  const syncCompactMapLibrePins = (places: Place[]) => {
+    const adapter = getCompactMapLibreAdapter(mapRef.current);
+    if (!adapter || !geocoderRef.current) return;
+    const myRunId = ++placePinsRunIdRef.current.main;
+    const byId = mainPlaceMarkersByIdRef.current;
+    const desiredIds = new Set(places.map((p) => p.id));
+
+    for (const [id, entry] of [...byId.entries()]) {
+      if (desiredIds.has(id)) continue;
+      byId.delete(id);
+    }
+
+    const publish = () => {
+      const pins = [...byId.entries()].map(([id, entry]) => ({
+        id,
+        lat: entry.lat,
+        lng: entry.lng,
+        category: entry.category,
+        fillColor: pinFillForPlace({
+          category: entry.category,
+          listColor: entry.listColor,
+        }),
+      }));
+      void adapter.setPins(pins);
+      markersRef.current.length = 0;
+      byId.forEach((entry) => markersRef.current.push(entry.marker));
+    };
+
+    const upsert = (place: Place, markerLat: number, markerLng: number) => {
+      if (myRunId !== placePinsRunIdRef.current.main) return;
+      const existing = byId.get(place.id);
+      const sameCoords =
+        existing &&
+        Math.abs(existing.lat - markerLat) < 1e-7 &&
+        Math.abs(existing.lng - markerLng) < 1e-7;
+      const sameCategory = existing && existing.category === place.category;
+      const sameListColor =
+        existing && (existing.listColor ?? null) === (place.listColor ?? null);
+      if (existing && sameCoords && sameCategory && sameListColor) return;
+      savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
+      byId.set(place.id, {
+        marker: { setMap: () => {} },
+        category: place.category,
+        listColor: place.listColor ?? null,
+        lat: markerLat,
+        lng: markerLng,
+        address: place.address,
+      });
+    };
+
+    const resolveCoords = (place: Place) => {
+      const stored = latLngFromRow(place);
+      if (stored) return stored;
+      const byPlaceId = savedPlaceCoordsRef.current[place.id];
+      if (byPlaceId && Number.isFinite(byPlaceId.lat) && Number.isFinite(byPlaceId.lng)) return byPlaceId;
+      return getGeocodeCacheSync(place.address);
+    };
+
+    places.forEach((place) => {
+      const coords = resolveCoords(place);
+      if (coords) {
+        savedPlaceCoordsRef.current[place.id] = coords;
+        upsert(place, coords.lat, coords.lng);
+        return;
+      }
+      geocoderRef.current.addressSearch(place.address, (result: any[], sv: string) => {
+        try {
+          if (myRunId !== placePinsRunIdRef.current.main) return;
+          if (sv !== window.kakao.maps.services.Status.OK || !result[0]) return;
+          const markerLat = parseFloat(result[0].y);
+          const markerLng = parseFloat(result[0].x);
+          if (!Number.isFinite(markerLat) || !Number.isFinite(markerLng)) return;
+          savedPlaceCoordsRef.current[place.id] = { lat: markerLat, lng: markerLng };
+          void setGeocodeCache(place.address, { lat: markerLat, lng: markerLng });
+          upsert(place, markerLat, markerLng);
+          publish();
+        } catch (err) {
+          console.error("[PindMap:pin] maplibre geocode failed", place?.name, err);
+        }
+      });
+    });
+    publish();
+  };
+
+  const initCompactMapLibreMap = (places: Place[], _posts: FeedPost[]) => {
+    const container = mapContainerRef.current;
+    if (!container || mapRef.current) return;
+    if (!geocoderRef.current && window.kakao?.maps?.services?.Geocoder) {
+      geocoderRef.current = new window.kakao.maps.services.Geocoder();
+    }
+    const cachedView = mapViewBootstrapRef.current;
+    const centerLat = cachedView && Number.isFinite(cachedView.lat) ? cachedView.lat : 37.5665;
+    const centerLng = cachedView && Number.isFinite(cachedView.lng) ? cachedView.lng : 126.978;
+    const level = cachedView && Number.isFinite(cachedView.level) ? cachedView.level : 9;
+    container.classList.add("is-maplibre-pins");
+
+    void MapLibreMapAdapter.create({
+      container,
+      center: { lat: centerLat, lng: centerLng },
+      level,
+      onPinClick: (pinId) => {
+        const entry = mainPlaceMarkersByIdRef.current.get(pinId);
+        const lat = entry?.lat ?? savedPlaceCoordsRef.current[pinId]?.lat;
+        const lng = entry?.lng ?? savedPlaceCoordsRef.current[pinId]?.lng;
+        if (lat == null || lng == null) return;
+        runCompactMapLibrePinClick(pinId, lat, lng);
+      },
+      onMapClickEmpty: () => {
+        openMapFullscreen();
+      },
+      onReady: () => {
+        if (!mapRef.current) return;
+        setCompactMapReady(true);
+        setCompactMapIsMapLibre(true);
+        addMyLocation(mapRef.current, "main");
+        attachCompactMapResizeObserver();
+        scheduleCompactMapRelayout();
+        scheduleCompactMapRectPoll();
+        syncCompactMapLibrePins(savedPlacesRef.current);
+        try {
+          mark("map_first_paint");
+        } catch {
+          /* ignore */
+        }
+      },
+      onViewIdle: (view) => {
+        if (!Number.isFinite(view.lat) || !Number.isFinite(view.lng)) return;
+        mapViewBootstrapRef.current = view;
+        if (mapViewSaveTimerRef.current !== null) {
+          window.clearTimeout(mapViewSaveTimerRef.current);
+        }
+        mapViewSaveTimerRef.current = window.setTimeout(() => {
+          mapViewSaveTimerRef.current = null;
+          void writeCachedMapView(view);
+        }, 400);
+      },
+      onFallback: (reason) => {
+        console.warn("[PindMap:maplibre] compact fallback → kakao", reason);
+        setSessionForceKakaoCompact(true);
+        setCompactMapIsMapLibre(false);
+        if (!compactMapLibreFallbackToastedRef.current) {
+          compactMapLibreFallbackToastedRef.current = true;
+          showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
+        }
+        tearDownCompactMapForRemount();
+        setCompactMapRemountKey((k) => k + 1);
+      },
+    })
+      .then((adapter) => {
+        if (mapRef.current) {
+          adapter.destroy();
+          return;
+        }
+        mapRef.current = createCompactMapLibreShim(adapter);
+        mapInstanceIdRef.current += 1;
+      })
+      .catch((err) => {
+        console.warn("[PindMap:maplibre] compact init failed", err);
+        setSessionForceKakaoCompact(true);
+        if (!compactMapLibreFallbackToastedRef.current) {
+          compactMapLibreFallbackToastedRef.current = true;
+          showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
+        }
+        tearDownCompactMapForRemount();
+        setCompactMapRemountKey((k) => k + 1);
+      });
+  };
+
   // 카카오맵 실제 초기화 함수 (DOM이 준비된 후 호출)
   const initMap = (places: Place[], posts: FeedPost[]) => {
     if (!mapContainerRef.current || mapRef.current) {
       return;
     }
+    const isAdmin =
+      userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID;
+    if (shouldUseCompactMapLibre(Boolean(isAdmin))) {
+      initCompactMapLibreMap(places, posts);
+      return;
+    }
+    mapContainerRef.current?.classList.remove("is-maplibre-pins");
+    setCompactMapIsMapLibre(false);
     const mapTypeId = window.kakao.maps.MapTypeId?.NORMAL;
     const cachedView = mapViewBootstrapRef.current;
     const centerLat = cachedView && Number.isFinite(cachedView.lat) ? cachedView.lat : 37.5665;
@@ -10005,6 +10321,10 @@ function HomePageContent() {
 
   const addPlacePins = (map: any, arr: any[], posts: FeedPost[], places: Place[], scope: "main" | "expanded" = "main") => {
     if (!geocoderRef.current) return;
+    if (scope === "main" && isCompactMapLibre(mapRef.current)) {
+      syncCompactMapLibrePins(places);
+      return;
+    }
     const useNative = isNativeMapAvailable() && expandedNativeMapEnabled && scope === "expanded";
     const myRunId = ++placePinsRunIdRef.current[scope];
 
@@ -10386,6 +10706,8 @@ function HomePageContent() {
   };
 
   const clearRoute = () => {
+    const gl = getCompactMapLibreAdapter(mapRef.current);
+    if (gl) gl.clearRoute();
     if (routePolylineRef.current) { routePolylineRef.current.setMap(null); routePolylineRef.current = null; }
     courseLabelOverlaysRef.current.forEach((o) => {
       try {
@@ -10927,6 +11249,16 @@ function HomePageContent() {
     }
     detachCompactMapResizeObserver();
     clearCompactMapRelayoutTimers();
+    if (isCompactMapLibre(mapRef.current)) {
+      try {
+        mapRef.current.adapter.destroy();
+      } catch {
+        /* noop */
+      }
+      setCompactMapIsMapLibre(false);
+      const el = mapContainerRef.current;
+      if (el) el.innerHTML = "";
+    }
     mapRef.current = null;
     mapInstanceIdRef.current += 1;
     myLocationMarkerRef.current.main = null;
@@ -10992,7 +11324,7 @@ function HomePageContent() {
       cancelled = true;
       timeouts.forEach((tid) => window.clearTimeout(tid));
     };
-  }, [kakaoStatus, activeTab, savedPlaces, feedPosts, mapExpanded]);
+  }, [kakaoStatus, activeTab, savedPlaces, feedPosts, mapExpanded, compactMapRemountKey]);
 
   // 탭 전환·미니맵 생성 시 지도 relayout
   useEffect(() => {
@@ -15160,11 +15492,11 @@ function HomePageContent() {
                   )}
                   <div
                     ref={mapContainerRef}
-                    className="kakaoMap mapCompactMap"
+                    className={`kakaoMap mapCompactMap${compactMapIsMapLibre ? " is-maplibre-pins" : ""}`}
                   />
                   <button
                     type="button"
-                    className="mapCompactTapLayer"
+                    className={`mapCompactTapLayer${compactMapIsMapLibre ? " is-maplibre-passthrough" : ""}`}
                     aria-label="지도를 열어 검색 및 길찾기"
                     onClick={openMapFullscreen}
                   />
@@ -17282,6 +17614,32 @@ function HomePageContent() {
               >
                 로그아웃
               </button>
+              {user?.id === ADMIN_USER_ID ? (
+                <button
+                  type="button"
+                  className="settingItem"
+                  data-testid="admin-compact-maplibre-toggle"
+                  style={{ width: "100%", padding: "16px 20px", color: "#1a2a7a" }}
+                  onClick={() => {
+                    const next = !adminCompactMapLibre;
+                    writeCompactMapLibreFlag(next);
+                    setSessionForceKakaoCompact(false);
+                    compactMapLibreFallbackToastedRef.current = false;
+                    setAdminCompactMapLibre(next);
+                    setShowMypageSettingsSheet(false);
+                    tearDownCompactMapForRemount();
+                    setCompactMapRemountKey((k) => k + 1);
+                    showToast(
+                      next
+                        ? "미니맵 핀맵 지도 ON — 지도 탭에서 확인하세요"
+                        : "미니맵 핀맵 지도 OFF — 기본 지도로 복귀",
+                      "info",
+                    );
+                  }}
+                >
+                  미니맵 핀맵 지도(관리자){adminCompactMapLibre ? " · ON" : " · OFF"}
+                </button>
+              ) : null}
               {user?.id === ADMIN_USER_ID ? (
                 <button
                   type="button"
