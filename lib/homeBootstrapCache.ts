@@ -14,6 +14,10 @@ export type CachedPlace = {
   memo?: string | null;
   /** Representative list color preset id (null = category pin) */
   listColor?: string | null;
+  /** places.source — for admin MapLibre sheet (not phone) */
+  source?: "kakao" | "user" | "poi" | null;
+  /** places.poi_id — join key for public.poi.phone */
+  poi_id?: number | null;
 };
 
 export type CachedPlacesPayload = {
@@ -107,6 +111,18 @@ function parsePlace(raw: unknown): CachedPlace | null {
   } else if (o.listColor === null) {
     place.listColor = null;
   }
+  if (o.source === "kakao" || o.source === "user" || o.source === "poi") {
+    place.source = o.source;
+  } else if (o.source === null) {
+    place.source = null;
+  }
+  if (typeof o.poi_id === "number" && Number.isFinite(o.poi_id)) {
+    place.poi_id = o.poi_id;
+  } else if (typeof o.poi_id === "string" && /^\d+$/.test(o.poi_id.trim())) {
+    place.poi_id = Number(o.poi_id.trim());
+  } else if (o.poi_id === null) {
+    place.poi_id = null;
+  }
   return place;
 }
 
@@ -149,6 +165,16 @@ export async function writeCachedPlaces(userId: string, places: CachedPlace[]): 
         : p.listColor === null
           ? { listColor: null }
           : {}),
+      ...(p.source === "kakao" || p.source === "user" || p.source === "poi"
+        ? { source: p.source }
+        : p.source === null
+          ? { source: null }
+          : {}),
+      ...(typeof p.poi_id === "number" && Number.isFinite(p.poi_id)
+        ? { poi_id: p.poi_id }
+        : p.poi_id === null
+          ? { poi_id: null }
+          : {}),
     })),
   };
   await prefsSet(CACHE_PLACES_KEY, JSON.stringify(payload));
@@ -183,7 +209,7 @@ export function placesCacheFingerprint(places: ReadonlyArray<CachedPlace>): stri
   return places
     .map(
       (p) =>
-        `${p.id}\t${p.name}\t${p.address}\t${p.category}\t${p.lat ?? ""}\t${p.lng ?? ""}\t${p.created_at ?? ""}\t${p.memo ?? ""}\t${p.listColor ?? ""}`,
+        `${p.id}\t${p.name}\t${p.address}\t${p.category}\t${p.lat ?? ""}\t${p.lng ?? ""}\t${p.created_at ?? ""}\t${p.memo ?? ""}\t${p.listColor ?? ""}\t${p.source ?? ""}\t${p.poi_id ?? ""}`,
     )
     .sort()
     .join("\n");

@@ -439,6 +439,8 @@ type Place = {
   memo?: string | null;
   /** 좌표 출처: kakao | user | poi */
   source?: "kakao" | "user" | "poi" | null;
+  /** public.poi id when source=poi — phone is read from poi, never copied here */
+  poi_id?: number | null;
   /** 대표 목록 색 프리셋 id — 없으면 카테고리 핀 */
   listColor?: string | null;
 };
@@ -610,6 +612,8 @@ function mapPlaceRow(p: {
   created_at?: unknown;
   memo?: unknown;
   listColor?: unknown;
+  source?: unknown;
+  poi_id?: unknown;
 }): Place {
   const coords = latLngFromRow(p);
   const createdAt = typeof p.created_at === "string" && p.created_at.trim() ? p.created_at.trim() : undefined;
@@ -625,6 +629,20 @@ function mapPlaceRow(p: {
     typeof p.subcategory === "string" ? p.subcategory.trim() : p.subcategory === null ? null : undefined;
   const subcategory =
     subcategoryRaw === undefined ? undefined : subcategoryRaw ? subcategoryRaw : null;
+  const source =
+    p.source === "kakao" || p.source === "user" || p.source === "poi"
+      ? p.source
+      : p.source === null
+        ? null
+        : undefined;
+  const poiId =
+    typeof p.poi_id === "number" && Number.isFinite(p.poi_id)
+      ? p.poi_id
+      : typeof p.poi_id === "string" && /^\d+$/.test(p.poi_id.trim())
+        ? Number(p.poi_id.trim())
+        : p.poi_id === null
+          ? null
+          : undefined;
   return {
     id: p.id,
     name: p.name,
@@ -635,6 +653,8 @@ function mapPlaceRow(p: {
     ...(createdAt ? { created_at: createdAt } : {}),
     ...(memo !== undefined ? { memo } : {}),
     ...(listColor !== undefined ? { listColor } : {}),
+    ...(source !== undefined ? { source } : {}),
+    ...(poiId !== undefined ? { poi_id: poiId } : {}),
   };
 }
 
@@ -2139,6 +2159,8 @@ function HomePageContent() {
     listPresetId?: string | null;
   } | null>(null);
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
+  /** public.poi.phone by poi id — never written to places */
+  const poiPhoneByIdRef = useRef<Record<number, string | null>>({});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
   const loadDataInFlightRef = useRef(false);
@@ -3727,6 +3749,68 @@ function HomePageContent() {
     if (mapRef.current) addPlacePins(mapRef.current, markersRef.current, feedPostsRef.current, savedPlaces, "main");
     if (mapExpanded && expandedMapRef.current) addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPostsRef.current, savedPlaces, "expanded");
   };
+  const hydratePoiPhonesFromPlaces = useCallback(async (places: Place[]) => {
+    const ids = [
+      ...new Set(
+        places
+          .filter((p) => p.source === "poi" && typeof p.poi_id === "number")
+          .map((p) => p.poi_id as number),
+      ),
+    ].filter((id) => poiPhoneByIdRef.current[id] === undefined);
+    if (ids.length === 0) return;
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      try {
+        const { data, error } = await supabase.from("poi").select("id, phone").in("id", chunk);
+        if (error || !data) {
+          for (const id of chunk) {
+            if (poiPhoneByIdRef.current[id] === undefined) poiPhoneByIdRef.current[id] = null;
+          }
+          continue;
+        }
+        for (const row of data as Array<{ id?: unknown; phone?: unknown }>) {
+          const id =
+            typeof row.id === "number"
+              ? row.id
+              : typeof row.id === "string" && /^\d+$/.test(row.id.trim())
+                ? Number(row.id.trim())
+                : NaN;
+          if (!Number.isFinite(id)) continue;
+          const phone = typeof row.phone === "string" && row.phone.trim() ? row.phone.trim() : null;
+          poiPhoneByIdRef.current[id] = phone;
+        }
+        for (const id of chunk) {
+          if (poiPhoneByIdRef.current[id] === undefined) poiPhoneByIdRef.current[id] = null;
+        }
+      } catch {
+        for (const id of chunk) {
+          if (poiPhoneByIdRef.current[id] === undefined) poiPhoneByIdRef.current[id] = null;
+        }
+      }
+    }
+  }, []);
+
+  const ensurePoiPhoneOnSelectedPlace = useCallback(async (place: Place) => {
+    if (place.source !== "poi" || typeof place.poi_id !== "number") return;
+    const poiId = place.poi_id;
+    let phone = poiPhoneByIdRef.current[poiId];
+    if (phone === undefined) {
+      try {
+        const { data } = await supabase.from("poi").select("phone").eq("id", poiId).maybeSingle();
+        phone = typeof data?.phone === "string" && data.phone.trim() ? data.phone.trim() : null;
+      } catch {
+        phone = null;
+      }
+      poiPhoneByIdRef.current[poiId] = phone;
+    }
+    if (!phone) return;
+    setSelectedPlace((prev: PlaceSheetData | null) => {
+      if (!prev || prev._savedPlaceId !== place.id) return prev;
+      if (prev._poiPhone === phone && prev._placeSource === "poi") return prev;
+      return { ...prev, _placeSource: "poi", _poiPhone: phone };
+    });
+  }, []);
+
   const toSelectedFromSavedPlace = useCallback((place: Place, relatedPosts: FeedPost[], lat?: number, lng?: number) => {
     const fromArgs = coerceLatLng(lat, lng);
     const fromPlace = latLngFromRow(place);
@@ -3735,6 +3819,10 @@ function HomePageContent() {
     if (coords) {
       savedPlaceCoordsRef.current[place.id] = coords;
     }
+    const poiPhone =
+      place.source === "poi" && typeof place.poi_id === "number"
+        ? poiPhoneByIdRef.current[place.poi_id] ?? null
+        : null;
     return {
       place_name: place.name,
       category_name: place.category,
@@ -3748,6 +3836,8 @@ function HomePageContent() {
       _feedPosts: relatedPosts,
       _savedPlaceId: place.id,
       _placeRef: placeRefFromPlace(place, coords?.lat, coords?.lng),
+      _placeSource: place.source ?? null,
+      ...(poiPhone ? { _poiPhone: poiPhone } : {}),
     };
   }, []);
 
@@ -4648,6 +4738,7 @@ function HomePageContent() {
         if (!placesAreEqual(mappedPlaces, savedPlacesRef.current)) {
           setSavedPlaces(mappedPlaces);
         }
+        void hydratePoiPhonesFromPlaces(mappedPlaces);
         if (uid) {
           void writeCachedPlaces(uid, mappedPlaces);
         }
@@ -4881,6 +4972,8 @@ function HomePageContent() {
                 created_at: p.created_at,
                 memo: p.memo,
                 listColor: p.listColor,
+                source: p.source,
+                poi_id: p.poi_id,
               }),
             );
             asPlaces.forEach((place) => {
@@ -4888,6 +4981,7 @@ function HomePageContent() {
               if (coords) savedPlaceCoordsRef.current[place.id] = coords;
             });
             setSavedPlaces(asPlaces);
+            void hydratePoiPhonesFromPlaces(asPlaces);
             bootstrapCacheHitRef.current = true;
             setBootstrapCacheHit(true);
             setLoading(false);
@@ -6130,37 +6224,41 @@ function HomePageContent() {
     setFeedPosts((prev) => [post, ...prev]);
     return { error: null };
   };
+  /** 외부 지도/브라우저 — WebView 내부 네비게이션 금지 (transit과 동일). */
+  const openExternalMapUrl = useCallback((webUrl: string) => {
+    console.log("[PindMap:externalMap] open web", webUrl);
+    let opened: Window | null = null;
+    try {
+      opened = window.open(webUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      console.warn("[PindMap:externalMap] window.open threw", err);
+    }
+    if (opened) {
+      console.log("[PindMap:externalMap] window.open ok");
+      return;
+    }
+    try {
+      const a = document.createElement("a");
+      a.href = webUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      console.log("[PindMap:externalMap] anchor click dispatched");
+    } catch (err) {
+      console.warn("[PindMap:externalMap] anchor failed, location.href fallback", err);
+      window.location.href = webUrl;
+    }
+  }, []);
+
   /** 대중교통: 웹을 즉시 연다 (GPS 대기 금지). 앱 스킴은 보조 시도. */
   const openTransitInKakaoMap = (destName: string, destLat: number, destLng: number) => {
     console.log("[PindMap:transit] click", { destName, destLat, destLng, isIOSLike });
 
     const openWebReliable = (webUrl: string) => {
-      console.log("[PindMap:transit] open web", webUrl);
-      let opened: Window | null = null;
-      try {
-        opened = window.open(webUrl, "_blank", "noopener,noreferrer");
-      } catch (err) {
-        console.warn("[PindMap:transit] window.open threw", err);
-      }
-      if (opened) {
-        console.log("[PindMap:transit] window.open ok");
-        return;
-      }
-      // Capacitor WKWebView: window.open 이 막히면 <a target=_blank> 클릭 시도
-      try {
-        const a = document.createElement("a");
-        a.href = webUrl;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        a.style.display = "none";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        console.log("[PindMap:transit] anchor click dispatched");
-      } catch (err) {
-        console.warn("[PindMap:transit] anchor failed, location.href fallback", err);
-        window.location.href = webUrl;
-      }
+      openExternalMapUrl(webUrl);
     };
 
     const tryAppScheme = (appUrl: string) => {
@@ -7800,6 +7898,7 @@ function HomePageContent() {
         showFocusPlaceMarker(stored.lat, stored.lng, place.category, listColor);
       }
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
+      void ensurePoiPhoneOnSelectedPlace(place);
       return;
     }
     if (stored) {
@@ -7807,11 +7906,13 @@ function HomePageContent() {
         showFocusPlaceMarker(stored.lat, stored.lng, place.category, listColor);
       }
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, stored.lat, stored.lng));
+      void ensurePoiPhoneOnSelectedPlace(place);
       return;
     }
 
     // 좌표 없음 → 시트 먼저 띄우고 DB/지오코딩 폴백
     setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts));
+    void ensurePoiPhoneOnSelectedPlace(place);
     void (async () => {
       const coords = await resolveSavedPlaceCoords(place);
       if (!coords) {
@@ -7826,6 +7927,7 @@ function HomePageContent() {
         showFocusPlaceMarker(coords.lat, coords.lng, place.category, listColor);
       }
       setSelectedPlace(toSelectedFromSavedPlace({ ...place, ...coords }, relatedPosts, coords.lat, coords.lng));
+      void ensurePoiPhoneOnSelectedPlace(place);
     })();
   };
 
@@ -10278,6 +10380,7 @@ function HomePageContent() {
       placeRefFromPlace(place, markerLat, markerLng),
     );
     setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
+    void ensurePoiPhoneOnSelectedPlace(place);
     if (!window.kakao?.maps?.services?.Places) return;
     new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
       if (selectedPlaceTokenRef.current !== clickToken) return;
@@ -10302,9 +10405,15 @@ function HomePageContent() {
       }
       mergedSafely._feedPosts = relatedPosts;
       mergedSafely._savedPlaceId = place.id;
+      mergedSafely._placeSource = place.source ?? null;
+      if (place.source === "poi" && typeof place.poi_id === "number") {
+        const cachedPhone = poiPhoneByIdRef.current[place.poi_id];
+        if (cachedPhone) mergedSafely._poiPhone = cachedPhone;
+      }
       setSelectedPlace(
         mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string },
       );
+      void ensurePoiPhoneOnSelectedPlace(place);
     });
   };
 
@@ -10472,6 +10581,7 @@ function HomePageContent() {
     );
     placeSheetReturnRef.current = null;
     setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
+    void ensurePoiPhoneOnSelectedPlace(place);
   };
 
   const initCompactMapLibreMap = (places: Place[], _posts: FeedPost[]) => {
@@ -10701,6 +10811,7 @@ function HomePageContent() {
         placeRefFromPlace(place, markerLat, markerLng),
       );
       setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
+      void ensurePoiPhoneOnSelectedPlace(place);
       new window.kakao.maps.services.Places().keywordSearch(place.name, (data: any[], st: string) => {
         if (selectedPlaceTokenRef.current !== clickToken) return;
         if (st !== window.kakao.maps.services.Status.OK || !Array.isArray(data) || data.length === 0) return;
@@ -10726,7 +10837,13 @@ function HomePageContent() {
         }
         mergedSafely._feedPosts = relatedPosts;
         mergedSafely._savedPlaceId = place.id;
+        mergedSafely._placeSource = place.source ?? null;
+        if (place.source === "poi" && typeof place.poi_id === "number") {
+          const cachedPhone = poiPhoneByIdRef.current[place.poi_id];
+          if (cachedPhone) mergedSafely._poiPhone = cachedPhone;
+        }
         setSelectedPlace(mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string });
+        void ensurePoiPhoneOnSelectedPlace(place);
       });
     };
 
@@ -13917,24 +14034,37 @@ function HomePageContent() {
       const matchedSaved = savedPlaces.find(
         (p) => p.name.trim() === sheetName && p.address.trim() === sheetAddress,
       );
-      setHomePlaceSheet(
-        feedPostToPlaceSheet(
-          {
-            id: post.id,
-            placeName: sheetName,
-            address: sheetAddress,
-            category: post.category,
-            lat: ref.lat ?? post.lat,
-            lng: ref.lng ?? post.lng,
-          },
-          relatedPosts,
-          matchedSaved?.id,
-          ref,
-        ),
+      const base = feedPostToPlaceSheet(
+        {
+          id: post.id,
+          placeName: sheetName,
+          address: sheetAddress,
+          category: post.category,
+          lat: ref.lat ?? post.lat,
+          lng: ref.lng ?? post.lng,
+        },
+        relatedPosts,
+        matchedSaved?.id,
+        ref,
       );
+      const poiPhone =
+        matchedSaved?.source === "poi" && typeof matchedSaved.poi_id === "number"
+          ? poiPhoneByIdRef.current[matchedSaved.poi_id] ?? null
+          : null;
+      setHomePlaceSheet({
+        ...base,
+        _placeSource: matchedSaved?.source ?? null,
+        ...(poiPhone ? { _poiPhone: poiPhone } : {}),
+      });
     },
     [feedPosts, savedPlaces],
   );
+
+  /** Admin MapLibre override on either surface — gates phone + external map links. */
+  const showAdminMapExtras =
+    user?.id === ADMIN_USER_ID &&
+    (adminCompactMapLibre === "force_maplibre" ||
+      adminExpandedMapLibre === "force_maplibre");
 
   const renderPlaceCard = () => {
     if (!selectedPlace) return null;
@@ -13954,6 +14084,8 @@ function HomePageContent() {
         directionsLoading={directionsLoading}
         directionsInfo={directionsInfo}
         memo={savedMemo}
+        showAdminMapExtras={showAdminMapExtras}
+        onOpenExternalMapUrl={openExternalMapUrl}
         onClose={() => {
           setSelectedPlace(null);
           setSelectedMapPlace(null);
@@ -18081,6 +18213,8 @@ function HomePageContent() {
                 const m = resolveSavedMatch(selectedPlace)?.memo;
                 return typeof m === "string" && m.trim() ? m.trim() : null;
               })()}
+              showAdminMapExtras={showAdminMapExtras}
+              onOpenExternalMapUrl={openExternalMapUrl}
               onClose={() => {
                 closeCompactPlaceSheet();
               }}
@@ -18144,6 +18278,8 @@ function HomePageContent() {
                   const m = resolveSavedMatch(homePlaceSheet)?.memo;
                   return typeof m === "string" && m.trim() ? m.trim() : null;
                 })()}
+                showAdminMapExtras={showAdminMapExtras}
+                onOpenExternalMapUrl={openExternalMapUrl}
                 onClose={() => setHomePlaceSheet(null)}
                 onToggleSave={() => { void togglePlaceSheetSave(homePlaceSheet); }}
                 onAddToList={() => openAddToListFromPlaceSheet(homePlaceSheet)}

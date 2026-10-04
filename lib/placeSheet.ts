@@ -34,7 +34,45 @@ export type PlaceSheetData = {
   _feedPosts?: PlaceSheetFeedPost[];
   _savedPlaceId?: string;
   _placeRef?: PlaceRefForPhotoTagMatch;
+  /** places.source — admin MapLibre sheet phone gate */
+  _placeSource?: "kakao" | "user" | "poi" | null;
+  /** public.poi.phone (never copied onto places) */
+  _poiPhone?: string | null;
 };
+
+/** Displayable phone: keep original formatting, hide if fewer than 7 digits. */
+export function displayablePhone(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 7) return null;
+  return trimmed;
+}
+
+/** 주소에서 구/군 + 동/읍/면/가 추출 (네이버 검색 보조 쿼리). */
+export function extractGuDongFromAddress(address: string | null | undefined): string {
+  if (typeof address !== "string") return "";
+  const text = address.trim();
+  if (!text) return "";
+  const gu = text.match(/[가-힣]+(?:구|군)/)?.[0] ?? "";
+  const dong = text.match(/[가-힣]+(?:동|읍|면|가)/)?.[0] ?? "";
+  return [gu, dong].filter(Boolean).join(" ");
+}
+
+export function buildKakaoMapViewUrl(placeName: string, lat: number, lng: number): string {
+  return `https://map.kakao.com/link/map/${encodeURIComponent(placeName)},${lat},${lng}`;
+}
+
+export function buildKakaoTransitUrl(placeName: string, lat: number, lng: number): string {
+  return `https://map.kakao.com/link/to/${encodeURIComponent(placeName)},${lat},${lng}`;
+}
+
+export function buildNaverMapSearchUrl(placeName: string, address?: string | null): string {
+  const guDong = extractGuDongFromAddress(address);
+  const q = guDong ? `${placeName} ${guDong}` : placeName;
+  return `https://map.naver.com/p/search/${encodeURIComponent(q)}`;
+}
 
 export function feedPostToPlaceSheet(
   post: {

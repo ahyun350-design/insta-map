@@ -6,7 +6,15 @@ import {
   getFirstMatchingPhotoIndex,
   getRelatedPostImageEntriesForPlace,
 } from "@/lib/photoPlaceTag";
-import { placeRefFromPlaceSheet, type PlaceSheetData, type PlaceSheetFeedPost } from "@/lib/placeSheet";
+import {
+  buildKakaoMapViewUrl,
+  buildKakaoTransitUrl,
+  buildNaverMapSearchUrl,
+  displayablePhone,
+  placeRefFromPlaceSheet,
+  type PlaceSheetData,
+  type PlaceSheetFeedPost,
+} from "@/lib/placeSheet";
 import {
   FEED_POST_CATEGORIES,
   type FeedPostCategory,
@@ -56,6 +64,13 @@ type Props = {
   onDirectionsModeChange?: (mode: DirectionsMode) => void;
   onOpenTransit?: () => void;
   onClearRoute?: () => void;
+  /**
+   * Admin MapLibre flag (compact or expanded force_maplibre).
+   * When false, sheet UI must match the pre-feature render exactly.
+   */
+  showAdminMapExtras?: boolean;
+  /** Open Kakao/Naver URLs outside the WebView (same path as transit). */
+  onOpenExternalMapUrl?: (url: string) => void;
 };
 
 const LIGHT_PIN_CATEGORIES = new Set(["카페", "쇼핑", "숙소", "놀거리", "여행지"]);
@@ -144,6 +159,8 @@ export function PlaceDetailSheet({
   onDirectionsModeChange,
   onOpenTransit,
   onClearRoute,
+  showAdminMapExtras = false,
+  onOpenExternalMapUrl,
 }: Props) {
   const relatedPosts: PlaceSheetFeedPost[] = place._feedPosts ?? [];
   const placeRef = placeRefFromPlaceSheet(place);
@@ -153,6 +170,10 @@ export function PlaceDetailSheet({
   const lat = parseFloat(String(place.y ?? ""));
   const lng = parseFloat(String(place.x ?? ""));
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
+  const adminPoiPhone =
+    showAdminMapExtras && place._placeSource === "poi"
+      ? displayablePhone(place._poiPhone)
+      : null;
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [photoViewer, setPhotoViewer] = useState<{
     postId: string;
@@ -312,19 +333,64 @@ export function PlaceDetailSheet({
             <span className="placeDetailSheetValue">{place.road_address_name}</span>
           </div>
         )}
-        {place.phone && (
-          <div className="placeDetailSheetRow placeDetailSheetRowCenter">
-            <span className="placeDetailSheetLabel">전화</span>
-            <a className="placeDetailSheetLink" href={`tel:${place.phone}`}>
-              {place.phone}
-            </a>
-          </div>
-        )}
+        {showAdminMapExtras
+          ? adminPoiPhone && (
+              <div className="placeDetailSheetRow placeDetailSheetRowCenter">
+                <span className="placeDetailSheetLabel">전화번호</span>
+                <a className="placeDetailSheetLink" href={`tel:${adminPoiPhone}`}>
+                  {adminPoiPhone}
+                </a>
+              </div>
+            )
+          : place.phone && (
+              <div className="placeDetailSheetRow placeDetailSheetRowCenter">
+                <span className="placeDetailSheetLabel">전화</span>
+                <a className="placeDetailSheetLink" href={`tel:${place.phone}`}>
+                  {place.phone}
+                </a>
+              </div>
+            )}
         {place.place_url && (
           <a className="placeDetailSheetKakaoBtn" href={place.place_url} target="_blank" rel="noreferrer">
             카카오맵에서 영업시간 보기
           </a>
         )}
+        {showAdminMapExtras && hasCoordinates && onOpenExternalMapUrl ? (
+          <div className="placeDetailSheetExternalMaps">
+            <button
+              type="button"
+              className="placeDetailSheetExternalMapBtn"
+              onClick={() =>
+                onOpenExternalMapUrl(buildKakaoMapViewUrl(place.place_name, lat, lng))
+              }
+            >
+              카카오맵에서 보기
+            </button>
+            <button
+              type="button"
+              className="placeDetailSheetExternalMapBtn"
+              onClick={() =>
+                onOpenExternalMapUrl(
+                  buildNaverMapSearchUrl(
+                    place.place_name,
+                    place.road_address_name || place.address_name,
+                  ),
+                )
+              }
+            >
+              네이버 지도에서 보기
+            </button>
+            <button
+              type="button"
+              className="placeDetailSheetExternalMapBtn"
+              onClick={() =>
+                onOpenExternalMapUrl(buildKakaoTransitUrl(place.place_name, lat, lng))
+              }
+            >
+              대중교통 길찾기
+            </button>
+          </div>
+        ) : null}
 
         {onExpandMap && (
           <button
