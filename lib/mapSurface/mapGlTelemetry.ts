@@ -28,3 +28,8 @@ export function trackMapGlFallback(
   fallbackFired.add(surface);
   track("map_gl_fallback", { surface, reason });
 }
+
+/** After a successful remount following webglcontextlost. */
+export function trackMapGlRecovered(surface: MapGlSurface): void {
+  track("map_gl_recovered", { surface });
+}

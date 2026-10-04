@@ -41,6 +41,7 @@ import type {
   SetCourseStopsOptions,
 } from "./types";
 import { trackMapGlFallback, trackMapGlReady } from "./mapGlTelemetry";
+import { claimMapGlSlot, releaseMapGlSlot } from "./mapGlRecovery";
 import {
   MAP_BRAND_NAVY,
   MAP_NEON_ACCENT,
@@ -98,8 +99,27 @@ export type CreateCompactMapLibreOptions = {
   onMapClickEmpty?: () => void;
   onReady?: () => void;
   onFallback?: (reason: string) => void;
+  /**
+   * webglcontextlost — page decides remount vs fallback.
+   * `hidden` means tab/offscreen/covered; do not fallback, remount when visible.
+   */
+  onContextLost?: (info: { hidden: boolean }) => void;
+  /** False while minimap is under fullscreen or tab is display:none. */
+  isSurfaceVisible?: () => boolean;
   onViewIdle?: (view: { lat: number; lng: number; level: number }) => void;
 };
+
+function isElementVisiblyMapped(el: HTMLElement | null | undefined): boolean {
+  if (!el || !el.isConnected) return false;
+  let node: HTMLElement | null = el;
+  while (node) {
+    const style = window.getComputedStyle(node);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    node = node.parentElement;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
 
 function searchPinSvg(): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
@@ -112,11 +132,17 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   readonly provider = "maplibre" as const;
   private map: MlMap | null = null;
   private destroyed = false;
+  /** Set before map.remove() so intentional WEBGL_lose_context is not a fallback. */
+  private intentionalDestroy = false;
   private pins: CompactPinInput[] = [];
   private fallbackTimer: number | null = null;
   private firstTileSeen = false;
   private styleReady = false;
   private touchCleanups: Array<() => void> = [];
+  private contextLostHandler: ((ev: Event) => void) | null = null;
+  private containerEl: HTMLElement | null = null;
+  private isSurfaceVisibleFn: (() => boolean) | null = null;
+  private onContextLostCb: ((info: { hidden: boolean }) => void) | null = null;
   private onPinClick: ((id: string) => void) | null = null;
   private onSearchPinClick: ((id: string) => void) | null = null;
   private onCourseStopClick: ((id: string) => void) | null = null;
@@ -128,6 +154,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private mountStartedAt = 0;
   private fallbackReported = false;
   private courseSelectedOrder: number | null = null;
+  /** Context lost while hidden — page should remount when surface is shown again. */
+  pendingHiddenContextLost = false;
 
   static async create(
     options: CreateCompactMapLibreOptions,
@@ -154,10 +182,24 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     options.onFallback?.(reason);
   }
 
+  private surfaceIsVisible(): boolean {
+    if (this.isSurfaceVisibleFn) {
+      try {
+        return this.isSurfaceVisibleFn();
+      } catch {
+        return false;
+      }
+    }
+    return isElementVisiblyMapped(this.containerEl);
+  }
+
   private async mount(options: CreateCompactMapLibreOptions) {
     this.mountStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    this.containerEl = options.container;
+    this.isSurfaceVisibleFn = options.isSurfaceVisible ?? null;
+    this.onContextLostCb = options.onContextLost ?? null;
     const style = await buildPindmapStyle(this.theme);
-    if (this.destroyed) return;
+    if (this.destroyed || this.intentionalDestroy) return;
 
     const dpr =
       typeof window !== "undefined"
@@ -165,6 +207,11 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         : 1;
 
     this.imageDpr = dpr;
+
+    // Drop any other live MapLibre GL before creating a second context (iOS budget).
+    claimMapGlSlot(this.mode, () => {
+      if (!this.destroyed && !this.intentionalDestroy) this.destroy();
+    });
 
     const map = new maplibregl.Map({
       container: options.container,
@@ -189,12 +236,25 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     const canvas = map.getCanvas();
     const onContextLost = (ev: Event) => {
       ev.preventDefault();
+      if (this.intentionalDestroy || this.destroyed) return;
+      const hidden = !this.surfaceIsVisible();
+      if (hidden) {
+        this.pendingHiddenContextLost = true;
+        this.onContextLostCb?.({ hidden: true });
+        return;
+      }
+      if (this.onContextLostCb) {
+        this.onContextLostCb({ hidden: false });
+        return;
+      }
       this.reportFallback(options, "webglcontextlost");
     };
+    this.contextLostHandler = onContextLost;
     canvas.addEventListener("webglcontextlost", onContextLost, false);
-    this.touchCleanups.push(() =>
-      canvas.removeEventListener("webglcontextlost", onContextLost, false),
-    );
+    this.touchCleanups.push(() => {
+      canvas.removeEventListener("webglcontextlost", onContextLost, false);
+      if (this.contextLostHandler === onContextLost) this.contextLostHandler = null;
+    });
     map.on("moveend", () => {
       if (this.destroyed || !this.map) return;
       const c = this.map.getCenter();
@@ -1025,18 +1085,32 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   }
 
   destroy() {
+    // Mark intentional teardown BEFORE remove — MapLibre calls WEBGL_lose_context on remove.
+    this.intentionalDestroy = true;
     this.destroyed = true;
     if (this.fallbackTimer != null) {
       window.clearTimeout(this.fallbackTimer);
       this.fallbackTimer = null;
     }
+    // Detach contextlost listener before map.remove() so intentional loss is ignored.
+    const canvas = this.map?.getCanvas?.();
+    if (canvas && this.contextLostHandler) {
+      try {
+        canvas.removeEventListener("webglcontextlost", this.contextLostHandler, false);
+      } catch {
+        /* noop */
+      }
+      this.contextLostHandler = null;
+    }
     for (const off of this.touchCleanups) off();
     this.touchCleanups = [];
+    releaseMapGlSlot(this.mode);
     try {
       this.map?.remove();
     } catch {
       /* noop */
     }
     this.map = null;
+    this.containerEl = null;
   }
 }

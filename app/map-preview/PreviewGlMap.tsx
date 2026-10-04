@@ -30,6 +30,10 @@ import {
   mapLibreZoomToKakaoLevel,
 } from "@/lib/mapSurface/kakaoZoom";
 import {
+  claimMapGlSlot,
+  releaseMapGlSlot,
+} from "@/lib/mapSurface/mapGlRecovery";
+import {
   paintPreviewRouteDemo,
   type PreviewRouteMode,
 } from "./routeDemo";
@@ -342,6 +346,14 @@ export default function PreviewGlMap({
             ? Math.min(window.devicePixelRatio || 1, modeRef.current === "lite" ? 2 : 3)
             : 1;
 
+        claimMapGlSlot("preview", () => {
+          try {
+            mapRef.current?.remove();
+          } catch {
+            /* noop */
+          }
+          mapRef.current = null;
+        });
         const map = new maplibregl.Map({
           container: canvas,
           style: style as StyleSpecification,
@@ -464,6 +476,7 @@ export default function PreviewGlMap({
     return () => {
       cancelled = true;
       handlersBound.current = false;
+      releaseMapGlSlot("preview");
       mapRef.current?.remove();
       mapRef.current = null;
     };

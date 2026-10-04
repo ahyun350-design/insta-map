@@ -264,6 +264,10 @@ import {
   writeAdminMapLibreTheme,
   resolveMapLibreThemeId,
   adminMapThemeLabel,
+  canAttemptMapGlRemount,
+  consumeMapGlRemountAttempt,
+  trackMapGlFallback,
+  trackMapGlRecovered,
   type AdminMapLibreThemeId,
   type AdminMapGlOverride,
 } from "@/lib/mapSurface";
@@ -1735,6 +1739,10 @@ function HomePageContent() {
   const [compactMapIsMapLibre, setCompactMapIsMapLibre] = useState(false);
   const [compactMapRemountKey, setCompactMapRemountKey] = useState(0);
   const compactMapLibreFallbackToastedRef = useRef(false);
+  /** Expect map_gl_recovered after a contextlost remount. */
+  const compactMapGlRecoveringRef = useRef(false);
+  /** Contextlost while compact was hidden (fullscreen/tab) — remount when shown. */
+  const compactPendingVisibleRemountRef = useRef(false);
   /** Admin expanded MapLibre override (separate from minimap). */
   const [adminMapLibreTheme, setAdminMapLibreTheme] =
     useState<AdminMapLibreThemeId>("paper");
@@ -1744,6 +1752,12 @@ function HomePageContent() {
   const [expandedMapRemountKey, setExpandedMapRemountKey] = useState(0);
   const expandedMapLibreFallbackToastedRef = useRef(false);
   const expandedMapLibreMountGenRef = useRef(0);
+  const expandedMapGlRecoveringRef = useRef(false);
+  /**
+   * Final expanded fallback decided while fullscreen is open — apply force-Kakao
+   * only after close so we don't swap engines mid-session (or present native).
+   */
+  const deferredExpandedForceKakaoRef = useRef(false);
 
   const fullscreenSearchListenerRegisteredRef = useRef(false);
   const fullscreenResearchListenerRegisteredRef = useRef(false);
@@ -8227,6 +8241,20 @@ function HomePageContent() {
 
   const openMapFullscreen = useCallback(() => {
     track("map_fullscreen_open");
+    // Free WebGL before expanded MapLibre mounts (compact kept alive → dual context → contextlost).
+    const map = mapRef.current;
+    if (isCompactMapLibre(map)) {
+      try {
+        map.adapter.destroy();
+      } catch {
+        /* noop */
+      }
+      mapRef.current = null;
+      setCompactMapIsMapLibre(false);
+      setCompactMapReady(false);
+      const el = mapContainerRef.current;
+      if (el) el.innerHTML = "";
+    }
     setMapExpanded(true);
   }, []);
 
@@ -10490,6 +10518,10 @@ function HomePageContent() {
         if (!mapRef.current) return;
         setCompactMapReady(true);
         setCompactMapIsMapLibre(true);
+        if (compactMapGlRecoveringRef.current) {
+          compactMapGlRecoveringRef.current = false;
+          trackMapGlRecovered("compact");
+        }
         // Final Kakao-equivalent camera before pins (pins must not change camera).
         mapRef.current.setLevel(9);
         if (myLocationLatLngRef.current) {
@@ -10520,8 +10552,42 @@ function HomePageContent() {
           void writeCachedMapView(view);
         }, 400);
       },
+      isSurfaceVisible: () =>
+        !mapExpandedLiveRef.current &&
+        activeTabRef.current === "map" &&
+        !!mapContainerRef.current &&
+        mapContainerRef.current.offsetParent !== null,
+      onContextLost: ({ hidden }) => {
+        if (hidden || mapExpandedLiveRef.current) {
+          // Don't fallback while covered by fullscreen / display:none — remount when shown.
+          compactPendingVisibleRemountRef.current = true;
+          console.warn("[PindMap:maplibre] compact contextlost while hidden — defer remount");
+          return;
+        }
+        if (canAttemptMapGlRemount("compact")) {
+          consumeMapGlRemountAttempt("compact");
+          compactMapGlRecoveringRef.current = true;
+          console.warn("[PindMap:maplibre] compact contextlost → remount attempt");
+          tearDownCompactMapForRemount();
+          setCompactMapRemountKey((k) => k + 1);
+          return;
+        }
+        console.warn("[PindMap:maplibre] compact contextlost → kakao (remount exhausted)");
+        trackMapGlFallback("compact", "webglcontextlost");
+        setSessionForceKakaoCompact(true);
+        setCompactMapIsMapLibre(false);
+        if (!compactMapLibreFallbackToastedRef.current) {
+          compactMapLibreFallbackToastedRef.current = true;
+          showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
+        }
+        tearDownCompactMapForRemount();
+        setCompactMapRemountKey((k) => k + 1);
+      },
       onFallback: (reason) => {
+        // Hard failures (timeout/error). webglcontextlost uses onContextLost.
+        if (reason === "webglcontextlost") return;
         console.warn("[PindMap:maplibre] compact fallback → kakao", reason);
+        compactMapGlRecoveringRef.current = false;
         setSessionForceKakaoCompact(true);
         setCompactMapIsMapLibre(false);
         if (!compactMapLibreFallbackToastedRef.current) {
@@ -10533,7 +10599,7 @@ function HomePageContent() {
       },
     })
       .then((adapter) => {
-        if (mapRef.current) {
+        if (mapRef.current || mapExpandedLiveRef.current) {
           adapter.destroy();
           return;
         }
@@ -11631,9 +11697,35 @@ function HomePageContent() {
     };
   }, [mapKey]);
 
-  // 확장 지도 닫히면 메인 지도 참조 무효화 → 아래 초기화 effect가 initMap 재호출
+  // Expand: free compact MapLibre WebGL (single context). Collapse: remount compact + apply deferred expanded fallback.
   useEffect(() => {
-    if (mapExpanded) return;
+    if (mapExpanded) {
+      if (isCompactMapLibre(mapRef.current)) {
+        try {
+          mapRef.current.adapter.destroy();
+        } catch {
+          /* noop */
+        }
+        mapRef.current = null;
+        setCompactMapIsMapLibre(false);
+        setCompactMapReady(false);
+        const el = mapContainerRef.current;
+        if (el) el.innerHTML = "";
+      }
+      return;
+    }
+
+    // Left fullscreen — apply engine fallback decided while it was open.
+    if (deferredExpandedForceKakaoRef.current) {
+      deferredExpandedForceKakaoRef.current = false;
+      setSessionForceKakaoExpanded(true);
+    }
+
+    if (compactPendingVisibleRemountRef.current) {
+      compactPendingVisibleRemountRef.current = false;
+      setCompactMapRemountKey((k) => k + 1);
+    }
+
     if (!mapRef.current) {
       return;
     }
@@ -11669,9 +11761,20 @@ function HomePageContent() {
     orchestratorSuccessKeyRef.current = "";
   }, [mapExpanded]);
 
+  // Hidden compact contextlost: remount when map tab is visible again (not under fullscreen).
+  useEffect(() => {
+    if (activeTab !== "map" || mapExpanded) return;
+    if (!compactPendingVisibleRemountRef.current) return;
+    compactPendingVisibleRemountRef.current = false;
+    tearDownCompactMapForRemount();
+    setCompactMapRemountKey((k) => k + 1);
+  }, [activeTab, mapExpanded]);
+
   // SDK 준비 + 지도 탭일 때: 컨테이너 높이 0 등으로 initMap 스킵되던 문제를 재시도로 해소
   useEffect(() => {
     if (kakaoStatus !== "ready" || activeTab !== "map") return;
+    // Never recreate compact MapLibre under fullscreen (dual WebGL).
+    if (mapExpanded) return;
     if (mapRef.current) {
       return;
     }
@@ -12248,12 +12351,14 @@ function HomePageContent() {
     }
 
     // ── Admin MapLibre fullscreen (entry branch only; Kakao body untouched below) ──
-    if (useExpandedMl) {
+    // Skip if a deferred fallback already decided Kakao for the next open.
+    if (useExpandedMl && !deferredExpandedForceKakaoRef.current) {
       let cancelled = false;
       const mountGen = ++expandedMapLibreMountGenRef.current;
       const tid = window.setTimeout(() => {
         if (cancelled || !mapExpandedRef.current) return;
         if (expandedMapRef.current) return;
+        if (deferredExpandedForceKakaoRef.current) return;
         const mapContainerEl = mapExpandedRef.current;
         const centerFromMain = mapRef.current?.getCenter?.();
         const levelFromMain = mapRef.current?.getLevel?.();
@@ -12317,6 +12422,10 @@ function HomePageContent() {
             if (cancelled || mountGen !== expandedMapLibreMountGenRef.current) return;
             if (!expandedMapRef.current) return;
             setExpandedMapIsMapLibre(true);
+            if (expandedMapGlRecoveringRef.current) {
+              expandedMapGlRecoveringRef.current = false;
+              trackMapGlRecovered("expanded");
+            }
             addMyLocation(expandedMapRef.current, "expanded");
             setExpandedMapPinsTick((n) => n + 1);
             if (showCourseRoute) {
@@ -12327,6 +12436,53 @@ function HomePageContent() {
             } catch {
               /* noop */
             }
+          },
+          isSurfaceVisible: () =>
+            mapExpandedLiveRef.current &&
+            !!mapExpandedRef.current &&
+            mapExpandedRef.current.offsetParent !== null,
+          onContextLost: ({ hidden }) => {
+            if (cancelled) return;
+            if (hidden) {
+              console.warn(
+                "[PindMap:maplibre] expanded contextlost while hidden — ignore until visible",
+              );
+              return;
+            }
+            if (canAttemptMapGlRemount("expanded")) {
+              consumeMapGlRemountAttempt("expanded");
+              expandedMapGlRecoveringRef.current = true;
+              console.warn("[PindMap:maplibre] expanded contextlost → remount attempt");
+              try {
+                getExpandedMapLibreAdapter(expandedMapRef.current)?.destroy();
+              } catch {
+                /* noop */
+              }
+              expandedMapRef.current = null;
+              setExpandedMapIsMapLibre(false);
+              if (mapContainerEl) mapContainerEl.innerHTML = "";
+              setExpandedMapRemountKey((k) => k + 1);
+              return;
+            }
+            // Remount exhausted: defer engine switch until fullscreen closes (no sudden native).
+            console.warn(
+              "[PindMap:maplibre] expanded contextlost → defer Kakao until next open",
+            );
+            trackMapGlFallback("expanded", "webglcontextlost");
+            deferredExpandedForceKakaoRef.current = true;
+            if (!expandedMapLibreFallbackToastedRef.current) {
+              expandedMapLibreFallbackToastedRef.current = true;
+              showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
+            }
+            try {
+              getExpandedMapLibreAdapter(expandedMapRef.current)?.destroy();
+            } catch {
+              /* noop */
+            }
+            expandedMapRef.current = null;
+            setExpandedMapIsMapLibre(false);
+            if (mapContainerEl) mapContainerEl.innerHTML = "";
+            // Stay on web portal until user closes — do not presentNative / remount Kakao mid-session.
           },
           onViewIdle: () => {
             const map = expandedMapRef.current;
@@ -12359,7 +12515,10 @@ function HomePageContent() {
           },
           onFallback: (reason) => {
             if (cancelled) return;
+            // webglcontextlost handled by onContextLost (remount / defer).
+            if (reason === "webglcontextlost") return;
             console.warn("[PindMap:maplibre] expanded fallback", reason);
+            expandedMapGlRecoveringRef.current = false;
             try {
               getExpandedMapLibreAdapter(expandedMapRef.current)?.destroy();
             } catch {
@@ -12373,13 +12532,17 @@ function HomePageContent() {
               (userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID) &&
               readExpandedMapLibreOverride() === "force_maplibre";
 
-            // Admin MapLibre test: never hand the session to iOS native fullscreen.
-            // Transient WebGL loss (keyboard/search) → remount MapLibre; hard failures → web Kakao in portal.
-            if (adminForcedMl) {
-              if (reason === "webglcontextlost") {
-                setExpandedMapRemountKey((k) => k + 1);
-                return;
+            // Never swap engines mid-fullscreen — defer Kakao/native to next open.
+            if (mapExpandedLiveRef.current) {
+              deferredExpandedForceKakaoRef.current = true;
+              if (!expandedMapLibreFallbackToastedRef.current) {
+                expandedMapLibreFallbackToastedRef.current = true;
+                showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
               }
+              return;
+            }
+
+            if (adminForcedMl) {
               setSessionForceKakaoExpanded(true);
               if (!expandedMapLibreFallbackToastedRef.current) {
                 expandedMapLibreFallbackToastedRef.current = true;
@@ -12418,12 +12581,19 @@ function HomePageContent() {
             const adminForcedMl =
               (userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID) &&
               readExpandedMapLibreOverride() === "force_maplibre";
+            if (mapExpandedLiveRef.current) {
+              deferredExpandedForceKakaoRef.current = true;
+              if (!expandedMapLibreFallbackToastedRef.current) {
+                expandedMapLibreFallbackToastedRef.current = true;
+                showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
+              }
+              return;
+            }
             setSessionForceKakaoExpanded(true);
             if (!expandedMapLibreFallbackToastedRef.current) {
               expandedMapLibreFallbackToastedRef.current = true;
               showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
             }
-            // Admin MapLibre: keep web portal (Kakao web remount), never present native.
             if (adminForcedMl || !isNativeMapAvailable()) {
               setExpandedMapRemountKey((k) => k + 1);
             } else {

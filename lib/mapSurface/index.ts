@@ -42,9 +42,19 @@ export {
 export {
   trackMapGlFallback,
   trackMapGlReady,
+  trackMapGlRecovered,
   type MapGlFallbackReason,
   type MapGlSurface,
 } from "./mapGlTelemetry";
+export {
+  MAP_GL_REMOUNT_MAX,
+  activeMapGlSlot,
+  canAttemptMapGlRemount,
+  claimMapGlSlot,
+  consumeMapGlRemountAttempt,
+  mapGlRemountAttemptsUsed,
+  releaseMapGlSlot,
+} from "./mapGlRecovery";
 export {
   kakaoLevelToMapLibreZoom,
   mapLibreZoomToKakaoLevel,
