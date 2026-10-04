@@ -8050,6 +8050,53 @@ select:focus-visible {
   border-radius: 3px;
   pointer-events: none;
 }
+
+/* Admin MapLibre fullscreen — my location (bottom-right; attrib stays bottom-left) */
+.expandedMapLibreLocateBtn {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right, 0px));
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  z-index: 22;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  color: #1a2a7a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: bottom 0.2s ease, color 0.15s ease, background 0.15s ease;
+}
+.expandedMapLibreLocateBtn:active {
+  transform: scale(0.97);
+}
+.expandedMapLibreLocateBtn.is-following {
+  color: #1a2a7a;
+  background: #ffffff;
+}
+.expandedMapLibreLocateBtn:not(.is-following) {
+  color: #5b6470;
+}
+.expandedMapLibreLocateBtn.is-sheet-open {
+  /* Sit above embedded place sheet / search sheet (max-height 60vh) */
+  bottom: max(
+    16px,
+    calc(env(safe-area-inset-bottom, 0px) + min(60vh, 420px) + 12px)
+  );
+}
+.expandedMapLibreLocateBtn.is-neon {
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  color: #1a2a7a;
+}
+.expandedMapLibreLocateBtn.is-neon:not(.is-following) {
+  color: #3a4155;
+}
 .screenMapTab .mapCompactMap.is-maplibre-pins .maplibregl-canvas-container,
 .screenMapTab .mapCompactMap.is-maplibre-pins .maplibregl-canvas {
   z-index: 6;

@@ -65,6 +65,8 @@ export type CompactMapSurface = {
    * No-op while clustered (MapLibre zoom &lt; 10).
    */
   setSelectedPinId: (pinId: string | null) => void;
+  /** Smooth camera to lat/lng at Kakao-equivalent level (expanded locate button). */
+  easeToView: (lat: number, lng: number, kakaoLevel: number) => void;
   destroy: () => void;
 };
 

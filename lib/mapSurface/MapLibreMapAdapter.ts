@@ -1263,6 +1263,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.map?.easeTo({ center: [lng, lat], duration: 450 });
   }
 
+  easeToView(lat: number, lng: number, kakaoLevel: number) {
+    this.map?.easeTo({
+      center: [lng, lat],
+      zoom: kakaoLevelToMapLibreZoom(kakaoLevel),
+      duration: 520,
+    });
+  }
+
   getBounds() {
     if (!this.map) return null;
     const b = this.map.getBounds();

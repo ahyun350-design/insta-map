@@ -2148,6 +2148,10 @@ function HomePageContent() {
   const routePolylineRef = useRef<any>(null); const mapKey = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
   const placePinsRunIdRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
   const locationRenderTokenRef = useRef<{ main: number; expanded: number }>({ main: 0, expanded: 0 });
+  /** Admin MapLibre expanded locate button — debounce overlapping GPS requests. */
+  const expandedMlLocateInFlightRef = useRef(false);
+  const expandedMlFollowMyLocationRef = useRef(false);
+  const [expandedMlFollowMyLocation, setExpandedMlFollowMyLocation] = useState(false);
   /** 확장 지도 직접 검색 시 Location bias — addMyLocation 성공 시 저장, 없으면 지도 center */
   const myLocationLatLngRef = useRef<{ lat: number; lng: number } | null>(null);
   const myLocationMarkerRef = useRef<{ main: any | null; expanded: any | null }>({ main: null, expanded: null });
@@ -3750,7 +3754,17 @@ function HomePageContent() {
     if (mapRef.current) addPlacePins(mapRef.current, markersRef.current, feedPostsRef.current, savedPlaces, "main");
     if (mapExpanded && expandedMapRef.current) addPlacePins(expandedMapRef.current, expandedMarkersRef.current, feedPostsRef.current, savedPlaces, "expanded");
   };
+  /** Admin + force_maplibre only — regular users must not hit public.poi for phone. */
+  const shouldFetchPoiPhones = useCallback(() => {
+    return (
+      userIdRef.current === ADMIN_USER_ID &&
+      (readCompactMapLibreOverride() === "force_maplibre" ||
+        readExpandedMapLibreOverride() === "force_maplibre")
+    );
+  }, []);
+
   const hydratePoiPhonesFromPlaces = useCallback(async (places: Place[]) => {
+    if (!shouldFetchPoiPhones()) return;
     const ids = [
       ...new Set(
         places
@@ -3789,9 +3803,10 @@ function HomePageContent() {
         }
       }
     }
-  }, []);
+  }, [shouldFetchPoiPhones]);
 
   const ensurePoiPhoneOnSelectedPlace = useCallback(async (place: Place) => {
+    if (!shouldFetchPoiPhones()) return;
     if (place.source !== "poi" || typeof place.poi_id !== "number") return;
     const poiId = place.poi_id;
     let phone = poiPhoneByIdRef.current[poiId];
@@ -3810,7 +3825,7 @@ function HomePageContent() {
       if (prev._poiPhone === phone && prev._placeSource === "poi") return prev;
       return { ...prev, _placeSource: "poi", _poiPhone: phone };
     });
-  }, []);
+  }, [shouldFetchPoiPhones]);
 
   const toSelectedFromSavedPlace = useCallback((place: Place, relatedPosts: FeedPost[], lat?: number, lng?: number) => {
     const fromArgs = coerceLatLng(lat, lng);
@@ -10142,6 +10157,7 @@ function HomePageContent() {
     latitude: number,
     longitude: number,
     moveCenter: boolean,
+    opts?: { neighborhoodZoom?: boolean },
   ) => {
     myLocationLatLngRef.current = { lat: latitude, lng: longitude };
     if (scope === "main" && isCompactMapLibre(map)) {
@@ -10158,13 +10174,19 @@ function HomePageContent() {
       return;
     }
     if (scope === "expanded" && isExpandedMapLibre(map)) {
-      // Expanded: show dot only — never auto-center (same as Kakao web expanded).
+      // Auto GPS: show dot only. Locate button passes neighborhoodZoom to ease camera.
       map.adapter.setMyLocation(latitude, longitude);
       myLocationMarkerRef.current.expanded = {
         setPosition: (ll: { getLat: () => number; getLng: () => number }) => {
           map.adapter.setMyLocation(ll.getLat(), ll.getLng());
         },
       };
+      if (moveCenter && opts?.neighborhoodZoom) {
+        const adapter = getExpandedMapLibreAdapter(map);
+        if (adapter?.easeToView) {
+          adapter.easeToView(latitude, longitude, 5);
+        }
+      }
       return;
     }
     const latlng = new window.kakao.maps.LatLng(latitude, longitude);
@@ -10228,6 +10250,68 @@ function HomePageContent() {
       }
     })();
   };
+
+  /** Admin MapLibre fullscreen locate — reuses GPS stages + applyMyLocationOnMap; centers at Kakao L5. */
+  const goToMyLocationExpandedMapLibre = useCallback(() => {
+    if (expandedMlLocateInFlightRef.current) return;
+    const map = expandedMapRef.current;
+    if (!map || !isExpandedMapLibre(map)) return;
+    expandedMlLocateInFlightRef.current = true;
+    const token = ++locationRenderTokenRef.current.expanded;
+    void (async () => {
+      let stage1Ok = false;
+      try {
+        try {
+          const { latitude, longitude } = await getCurrentPositionForMapStage1();
+          if (expandedMapRef.current !== map || token !== locationRenderTokenRef.current.expanded) {
+            return;
+          }
+          applyMyLocationOnMap(map, "expanded", latitude, longitude, true, {
+            neighborhoodZoom: true,
+          });
+          stage1Ok = true;
+          expandedMlFollowMyLocationRef.current = true;
+          setExpandedMlFollowMyLocation(true);
+        } catch (err) {
+          if (isGeolocationPermissionDenied(err)) {
+            showToast("위치 권한이 필요해요. 설정에서 위치를 허용해 주세요.", "info");
+            return;
+          }
+        }
+
+        try {
+          const { latitude, longitude } = await getCurrentPositionForMapStage2();
+          if (expandedMapRef.current !== map || token !== locationRenderTokenRef.current.expanded) {
+            return;
+          }
+          applyMyLocationOnMap(
+            map,
+            "expanded",
+            latitude,
+            longitude,
+            !stage1Ok,
+            stage1Ok ? undefined : { neighborhoodZoom: true },
+          );
+          if (!stage1Ok) {
+            expandedMlFollowMyLocationRef.current = true;
+            setExpandedMlFollowMyLocation(true);
+          }
+        } catch (err) {
+          if (!stage1Ok) {
+            const denied = isGeolocationPermissionDenied(err);
+            showToast(
+              denied
+                ? "위치 권한이 필요해요. 설정에서 위치를 허용해 주세요."
+                : "현재 위치를 가져오지 못했어요.",
+              "info",
+            );
+          }
+        }
+      } finally {
+        expandedMlLocateInFlightRef.current = false;
+      }
+    })();
+  }, []);
 
   const detachCompactMapResizeObserver = () => {
     compactMapResizeObserverRef.current?.disconnect();
@@ -12626,6 +12710,22 @@ function HomePageContent() {
           onViewIdle: () => {
             const map = expandedMapRef.current;
             if (!map || !isExpandedMapLibre(map)) return;
+            if (expandedMlFollowMyLocationRef.current) {
+              const stored = myLocationLatLngRef.current;
+              if (stored) {
+                const center = map.getCenter();
+                const dist = distanceMeters(
+                  stored.lat,
+                  stored.lng,
+                  center.getLat(),
+                  center.getLng(),
+                );
+                if (dist > 120) {
+                  expandedMlFollowMyLocationRef.current = false;
+                  setExpandedMlFollowMyLocation(false);
+                }
+              }
+            }
             if (!lastSearchCenterRef.current || !mapSearchKeywordRef.current.trim()) {
               setShowMapResearchButton(false);
               return;
@@ -16956,6 +17056,47 @@ function HomePageContent() {
                         </>
                       )}
                       <MapResearchAreaButton visible={showMapResearchButton} onResearch={handleResearchThisArea} />
+                      {adminExpandedMlPortal && (
+                        <button
+                          type="button"
+                          className={[
+                            "expandedMapLibreLocateBtn",
+                            expandedMlFollowMyLocation ? "is-following" : "",
+                            selectedPlace || isMapSearchSheetOpen ? "is-sheet-open" : "",
+                            adminMapLibreTheme === "neon" ? "is-neon" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          aria-label="현재 위치로 이동"
+                          aria-pressed={expandedMlFollowMyLocation}
+                          onClick={goToMyLocationExpandedMapLibre}
+                        >
+                          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+                            <circle
+                              cx="12"
+                              cy="12"
+                              r="3.25"
+                              fill={expandedMlFollowMyLocation ? "currentColor" : "none"}
+                              stroke="currentColor"
+                              strokeWidth="1.75"
+                            />
+                            <circle
+                              cx="12"
+                              cy="12"
+                              r="7.25"
+                              stroke="currentColor"
+                              strokeWidth="1.75"
+                              fill="none"
+                            />
+                            <path
+                              d="M12 2.5V5.2M12 18.8V21.5M2.5 12H5.2M18.8 12H21.5"
+                              stroke="currentColor"
+                              strokeWidth="1.75"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        </button>
+                      )}
                       {showCourseRoute && directionsLoading && !courseNavigation && (
                         <div
                           role="status"
