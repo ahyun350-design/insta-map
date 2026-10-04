@@ -1656,6 +1656,7 @@ function HomePageContent() {
   const profileEditAvatarBlobRef = useRef<string | null>(null);
   const profileAvatarFileInputRef = useRef<HTMLInputElement | null>(null);
   const [showMypageSettingsSheet, setShowMypageSettingsSheet] = useState(false);
+  const [showDataAttributionModal, setShowDataAttributionModal] = useState(false);
   const [mypageFollowerCount, setMypageFollowerCount] = useState(0);
   const [mypageFollowingCount, setMypageFollowingCount] = useState(0);
   const [adminStatus, setAdminStatus] = useState<AdminStatusPayload | null>(null);
@@ -13005,6 +13006,12 @@ function HomePageContent() {
     onClose: () => setShowDeleteAccountFinalModal(false),
   });
   useEdgeSwipeBack({
+    id: "data-attribution",
+    enabled: showDataAttributionModal,
+    priority: EDGE_SWIPE_PRIORITY.CONFIRM_MODAL,
+    onClose: () => setShowDataAttributionModal(false),
+  });
+  useEdgeSwipeBack({
     id: "curation-detail",
     enabled: !!detailPostId,
     priority: EDGE_SWIPE_PRIORITY.CURATION_DETAIL,
@@ -18168,7 +18175,7 @@ function HomePageContent() {
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "8px 0 40px", boxSizing: "border-box" }}
+              style={{ background: "#fff", width: "100%", borderRadius: "20px 20px 0 0", padding: "8px 0 0", boxSizing: "border-box" }}
             >
               <div style={{ padding: "12px 20px 8px", borderBottom: "0.5px solid #efefef" }}>
                 <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>설정</span>
@@ -18195,29 +18202,6 @@ function HomePageContent() {
               >
                 계정 삭제
               </button>
-              <div
-                className="settingItem"
-                data-testid="map-data-attribution"
-                style={{
-                  width: "100%",
-                  padding: "16px 20px",
-                  color: "#5b6470",
-                  fontSize: 13,
-                  lineHeight: 1.45,
-                  cursor: "default",
-                }}
-              >
-                <div style={{ fontWeight: 700, color: "#3a4155", marginBottom: 6 }}>
-                  데이터 출처
-                </div>
-                <div>
-                  지도: © OpenStreetMap contributors (OpenFreeMap)
-                </div>
-                <div style={{ marginTop: 4 }}>
-                  장소 정보: 행정안전부 지방행정 인허가 데이터, 소상공인시장진흥공단
-                  상가(상권)정보, 전국 표준데이터(공원·박물관·시장·도서관·관광지)
-                </div>
-              </div>
               <button
                 type="button"
                 className="settingItem"
@@ -18289,6 +18273,112 @@ function HomePageContent() {
                   지도 시험(관리자)
                 </button>
               ) : null}
+              <div
+                style={{
+                  padding: "18px 20px calc(16px + env(safe-area-inset-bottom, 0px))",
+                  textAlign: "center",
+                }}
+              >
+                <button
+                  type="button"
+                  data-testid="map-data-attribution"
+                  onClick={() => setShowDataAttributionModal(true)}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    margin: 0,
+                    fontSize: 12,
+                    lineHeight: 1.4,
+                    color: "#a0a6b0",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    textAlign: "center",
+                  }}
+                >
+                  데이터 출처
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showDataAttributionModal && (
+          <div
+            onClick={() => setShowDataAttributionModal(false)}
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 100000,
+              background: "rgba(0,0,0,0.4)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 20,
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              role="dialog"
+              aria-label="데이터 출처"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "#fff",
+                width: "100%",
+                maxWidth: 360,
+                borderRadius: 16,
+                padding: "22px 20px 18px",
+                boxSizing: "border-box",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontFamily: "'Playfair Display', serif",
+                  fontSize: 18,
+                  color: "#1a1a2e",
+                }}
+              >
+                데이터 출처
+              </p>
+              <div
+                style={{
+                  fontSize: 13,
+                  lineHeight: 1.65,
+                  color: "#555",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div>지도: © OpenStreetMap contributors (OpenFreeMap)</div>
+                <div>장소 정보: 행정안전부 지방행정 인허가 데이터</div>
+                <div>장소 정보: 소상공인시장진흥공단 상가(상권)정보</div>
+                <div>장소 정보: 전국 표준데이터 (공원·박물관·시장·도서관·관광지)</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDataAttributionModal(false)}
+                style={{
+                  marginTop: 4,
+                  width: "100%",
+                  padding: 12,
+                  borderRadius: 10,
+                  border: "1px solid #ddd",
+                  background: "#f5f5f5",
+                  color: "#666",
+                  fontSize: 14,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                닫기
+              </button>
             </div>
           </div>
         )}
