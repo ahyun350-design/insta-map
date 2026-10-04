@@ -73,6 +73,12 @@ function readPreviewQuery(): PreviewQuery {
   };
 }
 
+const PREVIEW_PLACES = [
+  { id: "hongdae", label: "홍대", center: [126.9236, 37.5563] as [number, number] },
+  { id: "gangnam", label: "강남", center: [127.0276, 37.4979] as [number, number] },
+  { id: "seomyeon", label: "서면", center: [129.0595, 35.1576] as [number, number] },
+] as const;
+
 function writeQueryPatch(patch: Record<string, string | null>) {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
@@ -205,7 +211,11 @@ export default function MapPreviewClient() {
     category: string;
   } | null>(null);
   const [diag, setDiag] = useState<PreviewDiagnostics | null>(null);
-  const [zoomJump, setZoomJump] = useState<{ zoom: number; token: number } | null>(null);
+  const [zoomJump, setZoomJump] = useState<{
+    zoom?: number;
+    center?: [number, number];
+    token: number;
+  } | null>(null);
   const [routeDemo, setRouteDemo] = useState<PreviewRouteMode | null>(null);
 
   const leave = useCallback(() => {
@@ -334,7 +344,7 @@ export default function MapPreviewClient() {
           ))}
         </div>
         <div className="map-preview-zooms" role="group" aria-label="줌 바로가기">
-          {[7, 10, 12, 14, 16].map((z) => (
+          {[12, 14, 16].map((z) => (
             <button
               key={z}
               type="button"
@@ -342,6 +352,24 @@ export default function MapPreviewClient() {
               onClick={() => setZoomJump({ zoom: z, token: Date.now() })}
             >
               z{z}
+            </button>
+          ))}
+        </div>
+        <div className="map-preview-zooms" role="group" aria-label="지역 바로가기">
+          {PREVIEW_PLACES.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className="map-preview-zoom-btn"
+              onClick={() =>
+                setZoomJump({
+                  center: p.center,
+                  zoom: 14,
+                  token: Date.now(),
+                })
+              }
+            >
+              {p.label}
             </button>
           ))}
         </div>

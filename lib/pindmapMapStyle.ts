@@ -202,6 +202,186 @@ const KO_TEXT: unknown = [
   ["get", "name"],
 ];
 
+/**
+ * Guide landmarks from OpenMapTiles `poi` (commercial shop/cafe/restaurant stay hidden).
+ * Color groups: culture | medical | transit (2–3 calm tones).
+ */
+const LANDMARK_FILTER: unknown = [
+  "any",
+  // 대학교
+  [
+    "all",
+    ["==", ["get", "class"], "college"],
+    ["==", ["get", "subclass"], "university"],
+  ],
+  // 종합병원 (clinic/의원 제외)
+  [
+    "all",
+    ["==", ["get", "class"], "hospital"],
+    ["==", ["get", "subclass"], "hospital"],
+  ],
+  // 백화점·대형몰
+  [
+    "all",
+    ["==", ["get", "class"], "shop"],
+    ["==", ["get", "subclass"], "mall"],
+  ],
+  [
+    "all",
+    ["==", ["get", "class"], "grocery"],
+    ["==", ["get", "subclass"], "department_store"],
+  ],
+  // 시청·구청 (주민센터/경로당 community_centre 제외)
+  [
+    "all",
+    ["==", ["get", "class"], "town_hall"],
+    ["==", ["get", "subclass"], "townhall"],
+  ],
+  // 박물관·미술관
+  ["all", ["==", ["get", "class"], "museum"], ["==", ["get", "subclass"], "museum"]],
+  [
+    "all",
+    ["==", ["get", "class"], "art_gallery"],
+    ["match", ["get", "subclass"], ["gallery", "arts_centre"], true, false],
+  ],
+  // 경기장·궁·관광명소
+  ["==", ["get", "class"], "stadium"],
+  ["==", ["get", "class"], "castle"],
+  ["==", ["get", "class"], "attraction"],
+  // 기차역·버스터미널 (지하철역은 subway_* 레이어)
+  [
+    "all",
+    ["==", ["get", "class"], "railway"],
+    ["==", ["get", "subclass"], "station"],
+  ],
+  [
+    "all",
+    ["==", ["get", "class"], "bus"],
+    ["==", ["get", "subclass"], "bus_station"],
+  ],
+];
+
+/** OpenMapTiles rank is ascending importance within a grid cell (1 = top). */
+function landmarkRankMaxExpr(z12Max: number, z14Max: number, z16Max: number): unknown {
+  return [
+    "step",
+    ["zoom"],
+    z12Max,
+    14,
+    z14Max,
+    15.5,
+    z16Max,
+  ];
+}
+
+function landmarkGroupColor(theme: MapPreviewTheme): unknown {
+  const culture =
+    theme.id === "neon" ? "#A8B0E0" : theme.id === "white" ? "#5A6A88" : "#5A6B8C";
+  const medical =
+    theme.id === "neon" ? "#D4A0A8" : theme.id === "white" ? "#9A6A6A" : "#A66B6B";
+  const transit =
+    theme.id === "neon" ? "#7AB8A0" : theme.id === "white" ? "#4A7A68" : "#3A6B5A";
+  return [
+    "case",
+    [
+      "any",
+      ["all", ["==", ["get", "class"], "hospital"], ["==", ["get", "subclass"], "hospital"]],
+    ],
+    medical,
+    [
+      "any",
+      ["all", ["==", ["get", "class"], "railway"], ["==", ["get", "subclass"], "station"]],
+      ["all", ["==", ["get", "class"], "bus"], ["==", ["get", "subclass"], "bus_station"]],
+    ],
+    transit,
+    culture,
+  ];
+}
+
+function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
+  const color = landmarkGroupColor(theme);
+  const rankMax = landmarkRankMaxExpr(2, 6, 14);
+  const filter: unknown = [
+    "all",
+    LANDMARK_FILTER,
+    ["has", "name"],
+    ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], rankMax],
+  ];
+  // Higher sort-key wins placement → invert OMT rank
+  const sortKey: unknown = ["-", 1000, ["to-number", ["coalesce", ["get", "rank"], 999]]];
+
+  layers.push({
+    id: "landmark_dot",
+    type: "circle",
+    source: "openmaptiles",
+    "source-layer": "poi",
+    minzoom: 12,
+    filter,
+    layout: {
+      visibility: "visible",
+    },
+    paint: {
+      "circle-radius": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        12,
+        2.2,
+        14,
+        2.8,
+        16,
+        3.2,
+      ],
+      "circle-color": color,
+      "circle-opacity": theme.id === "neon" ? 0.92 : 0.88,
+      "circle-stroke-width": 1,
+      "circle-stroke-color": theme.textHalo,
+      "circle-sort-key": sortKey,
+    },
+  });
+
+  layers.push({
+    id: "landmark_label",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "poi",
+    minzoom: 12,
+    filter,
+    layout: {
+      visibility: "visible",
+      "text-field": KO_TEXT,
+      "text-font": ["Noto Sans Regular"],
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        12,
+        10.5,
+        14,
+        11.5,
+        16,
+        12.5,
+      ],
+      "text-anchor": "left",
+      "text-offset": [0.7, 0],
+      "text-max-width": 8,
+      "text-padding": 2,
+      "text-optional": true,
+      "icon-optional": true,
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
+      "symbol-sort-key": sortKey,
+      "symbol-z-order": "source",
+    },
+    paint: {
+      "text-color": color,
+      "text-halo-color": theme.textHalo,
+      "text-halo-width": theme.id === "neon" ? 1.6 : 1.4,
+      "text-halo-blur": 0.2,
+    },
+  });
+}
+
 type AnyLayer = {
   id: string;
   type: string;
@@ -949,20 +1129,54 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-width", 1.3);
       }
       if (layer.id === "poi_transit") {
+        // OpenFreeMap POI: subway/train stops are class=railway (subclass subway|station).
+        // Liberty style historically used class=rail — keep both.
         layer.filter = [
-          "any",
-          ["==", ["get", "class"], "rail"],
-          ["==", ["get", "class"], "railway"],
+          "all",
+          [
+            "any",
+            ["==", ["get", "class"], "rail"],
+            ["==", ["get", "class"], "railway"],
+          ],
+          [
+            "match",
+            ["get", "subclass"],
+            ["subway", "station", "halt", "tram_stop"],
+            true,
+            false,
+          ],
+          ["has", "name"],
         ];
         layer.minzoom = 12;
         const layout = { ...(layer.layout || {}) };
         delete layout["icon-image"];
         delete layout["icon-size"];
         layout["text-anchor"] = "top";
-        layout["text-offset"] = [0, 0.55];
-        layout["text-size"] = 11;
+        layout["text-offset"] = [0, 0.65];
+        layout["text-size"] = [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          12,
+          11,
+          14,
+          12,
+          16,
+          13,
+        ];
         layout["text-field"] = KO_TEXT;
+        layout["text-font"] = ["Noto Sans Bold"];
+        layout["text-optional"] = true;
+        layout["text-allow-overlap"] = false;
+        layout["symbol-sort-key"] = [
+          "-",
+          1000,
+          ["to-number", ["coalesce", ["get", "rank"], 999]],
+        ];
         layer.layout = layout;
+        paintSet(layer, "text-color", theme.stationDot);
+        paintSet(layer, "text-halo-color", theme.textHalo);
+        paintSet(layer, "text-halo-width", theme.id === "neon" ? 1.6 : 1.5);
       }
       // 큰 공원·산
       if (layer.id.includes("park_label") || layer.id === "label_park") {
@@ -987,16 +1201,36 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         source: "openmaptiles",
         "source-layer": "poi",
         filter: [
-          "any",
-          ["==", ["get", "class"], "rail"],
-          ["==", ["get", "class"], "railway"],
+          "all",
+          [
+            "any",
+            ["==", ["get", "class"], "rail"],
+            ["==", ["get", "class"], "railway"],
+          ],
+          [
+            "match",
+            ["get", "subclass"],
+            ["subway", "station", "halt", "tram_stop"],
+            true,
+            false,
+          ],
         ],
         minzoom: 12,
         paint: {
-          "circle-radius": 2.6,
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            12,
+            3.2,
+            14,
+            4,
+            16,
+            4.6,
+          ],
           "circle-color": theme.stationDot,
-          "circle-opacity": 0.9,
-          "circle-stroke-width": 1,
+          "circle-opacity": 0.95,
+          "circle-stroke-width": theme.id === "neon" ? 1.4 : 1.2,
           "circle-stroke-color": theme.textHalo,
         },
       });
@@ -1054,6 +1288,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       "text-halo-width": 1.2,
     },
   });
+
+  // Guide landmarks (below adapter pins — pins are added after style load)
+  appendLandmarkLayers(layers, theme);
 
   style.layers = layers;
   style.name = `pindmap-${theme.id}`;

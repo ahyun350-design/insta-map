@@ -64,8 +64,12 @@ type Props = {
   cluster?: boolean;
   fitPadding?: number;
   singleZoom?: number;
-  /** Imperative zoom jump for style QA (z7/10/12/14/16). */
-  zoomJump?: { zoom: number; token: number } | null;
+  /** Imperative camera jump for style QA (zoom and/or center). */
+  zoomJump?: {
+    zoom?: number;
+    center?: [number, number];
+    token: number;
+  } | null;
   /** Route style demo: walk | car | course (Seongsu fake path). */
   routeDemo?: PreviewRouteMode | null;
   onReady?: () => void;
@@ -320,7 +324,10 @@ export default function PreviewGlMap({
     if (!zoomJump) return;
     const map = mapRef.current;
     if (!map) return;
-    map.jumpTo({ zoom: zoomJump.zoom });
+    const next: { zoom?: number; center?: [number, number] } = {};
+    if (typeof zoomJump.zoom === "number") next.zoom = zoomJump.zoom;
+    if (zoomJump.center) next.center = zoomJump.center;
+    if (next.zoom != null || next.center) map.jumpTo(next);
   }, [zoomJump]);
 
   useEffect(() => {
