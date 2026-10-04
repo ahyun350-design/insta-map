@@ -9,21 +9,42 @@ export type {
   MapLatLng,
 } from "./types";
 export {
+  MAP_GL_ROLLOUT_PERCENT,
+  adminMapGlOverrideLabel,
+  cycleAdminMapGlOverride,
+  isInMapGlRollout,
+  isMapLibreWebGlSupported,
+  shouldUseMapLibre,
+  userIdRolloutBucket,
+  type AdminMapGlOverride,
+  type MapGlDecisionInput,
+} from "./rollout";
+export {
   COMPACT_MAPLIBRE_STORAGE_KEY,
   isSessionForceKakaoCompact,
   readCompactMapLibreFlag,
+  readCompactMapLibreOverride,
   setSessionForceKakaoCompact,
   shouldUseCompactMapLibre,
   writeCompactMapLibreFlag,
+  writeCompactMapLibreOverride,
 } from "./compactMapLibreFlag";
 export {
   EXPANDED_MAPLIBRE_STORAGE_KEY,
   isSessionForceKakaoExpanded,
   readExpandedMapLibreFlag,
+  readExpandedMapLibreOverride,
   setSessionForceKakaoExpanded,
   shouldUseExpandedMapLibre,
   writeExpandedMapLibreFlag,
+  writeExpandedMapLibreOverride,
 } from "./expandedMapLibreFlag";
+export {
+  trackMapGlFallback,
+  trackMapGlReady,
+  type MapGlFallbackReason,
+  type MapGlSurface,
+} from "./mapGlTelemetry";
 export {
   kakaoLevelToMapLibreZoom,
   mapLibreZoomToKakaoLevel,

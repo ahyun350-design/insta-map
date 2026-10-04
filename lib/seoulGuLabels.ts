@@ -1,6 +1,6 @@
 /**
- * Seoul 자치구 label anchors — OpenMapTiles only includes `place.class=borough`
- * (강서구 등) from z14 tiles. For city-scale (z9–13) we overlay these points.
+ * Seoul 자치구 label anchors (canonical 25).
+ * Nationwide overlay: lib/koreaGuLabels.ts (generated; preserves these coords).
  */
 export type SeoulGuLabel = { name: string; lng: number; lat: number };
 

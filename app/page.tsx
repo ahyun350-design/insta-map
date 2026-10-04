@@ -242,22 +242,25 @@ import {
 } from "@/lib/useEdgeSwipeBack";
 import { pushInAppRoute } from "@/lib/safeRouterBack";
 import {
+  adminMapGlOverrideLabel,
   createCompactMapLibreShim,
   createExpandedMapLibreShim,
+  cycleAdminMapGlOverride,
   ExpandedMapLibreAdapter,
   getCompactMapLibreAdapter,
   getExpandedMapLibreAdapter,
   isCompactMapLibre,
   isExpandedMapLibre,
   MapLibreMapAdapter,
-  readCompactMapLibreFlag,
-  readExpandedMapLibreFlag,
+  readCompactMapLibreOverride,
+  readExpandedMapLibreOverride,
   setSessionForceKakaoCompact,
   setSessionForceKakaoExpanded,
   shouldUseCompactMapLibre,
   shouldUseExpandedMapLibre,
-  writeCompactMapLibreFlag,
-  writeExpandedMapLibreFlag,
+  writeCompactMapLibreOverride,
+  writeExpandedMapLibreOverride,
+  type AdminMapGlOverride,
 } from "@/lib/mapSurface";
 import {
   isAccountOldEnoughForWhatsNew,
@@ -1552,8 +1555,8 @@ function HomePageContent() {
   userIdRef.current = user?.id || "";
   useEffect(() => {
     const isAdmin = user?.id === ADMIN_USER_ID;
-    setAdminCompactMapLibre(Boolean(isAdmin && readCompactMapLibreFlag()));
-    setAdminExpandedMapLibre(Boolean(isAdmin && readExpandedMapLibreFlag()));
+    setAdminCompactMapLibre(isAdmin ? readCompactMapLibreOverride() : "auto");
+    setAdminExpandedMapLibre(isAdmin ? readExpandedMapLibreOverride() : "auto");
     if (!isAdmin) {
       setCompactMapIsMapLibre(false);
       setExpandedMapIsMapLibre(false);
@@ -1719,13 +1722,15 @@ function HomePageContent() {
   const [reelInputExpanded, setReelInputExpanded] = useState(false);
   /** V-7-1: 확장 지도 상단 50% Kakao Native 오버레이 (iOS만, JS API와 병행) */
   const [expandedNativeMapEnabled, setExpandedNativeMapEnabled] = useState(false);
-  /** Admin-only compact MapLibre minimap (localStorage). Default off. */
-  const [adminCompactMapLibre, setAdminCompactMapLibre] = useState(false);
+  /** Admin compact MapLibre override: auto | force_maplibre | force_kakao */
+  const [adminCompactMapLibre, setAdminCompactMapLibre] =
+    useState<AdminMapGlOverride>("auto");
   const [compactMapIsMapLibre, setCompactMapIsMapLibre] = useState(false);
   const [compactMapRemountKey, setCompactMapRemountKey] = useState(0);
   const compactMapLibreFallbackToastedRef = useRef(false);
-  /** Admin-only fullscreen MapLibre (localStorage). Default off. Separate from minimap. */
-  const [adminExpandedMapLibre, setAdminExpandedMapLibre] = useState(false);
+  /** Admin expanded MapLibre override (separate from minimap). */
+  const [adminExpandedMapLibre, setAdminExpandedMapLibre] =
+    useState<AdminMapGlOverride>("auto");
   const [expandedMapIsMapLibre, setExpandedMapIsMapLibre] = useState(false);
   const [expandedMapRemountKey, setExpandedMapRemountKey] = useState(0);
   const expandedMapLibreFallbackToastedRef = useRef(false);
@@ -3611,7 +3616,7 @@ function HomePageContent() {
     const isAdmin =
       userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID;
     // Admin fullscreen MapLibre: keep web portal; never presentFullscreenNativeMap.
-    if (shouldUseExpandedMapLibre(Boolean(isAdmin))) {
+    if (shouldUseExpandedMapLibre(Boolean(isAdmin), userIdRef.current || user?.id)) {
       if (!mapExpanded && fullscreenAutoOpenedRef.current) {
         fullscreenAutoOpenedRef.current = false;
       }
@@ -10529,7 +10534,7 @@ function HomePageContent() {
     }
     const isAdmin =
       userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID;
-    if (shouldUseCompactMapLibre(Boolean(isAdmin))) {
+    if (shouldUseCompactMapLibre(Boolean(isAdmin), userIdRef.current || user?.id)) {
       initCompactMapLibreMap(places, posts);
       return;
     }
@@ -12138,7 +12143,10 @@ function HomePageContent() {
     const uid = userIdRef.current;
     const isAdmin =
       userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID;
-    const useExpandedMl = shouldUseExpandedMapLibre(Boolean(isAdmin));
+    const useExpandedMl = shouldUseExpandedMapLibre(
+      Boolean(isAdmin),
+      userIdRef.current || user?.id,
+    );
     // 관리자 코스 웹 포털 강제 생성 비활성 — 네이티브 가능 시 웹 맵 미생성
     // Admin expanded MapLibre: force web portal even on iOS (skip native fullscreen).
     const adminCourse = false;
@@ -12992,7 +13000,10 @@ function HomePageContent() {
     enabled:
       mapExpanded &&
       (!isNativeMapAvailable() ||
-        shouldUseExpandedMapLibre(user?.id === ADMIN_USER_ID)),
+        shouldUseExpandedMapLibre(
+          user?.id === ADMIN_USER_ID,
+          user?.id,
+        )),
     priority: EDGE_SWIPE_PRIORITY.MAP_EXPANDED,
     onClose: () => {
       if (returnToCourseSheetRef.current) {
@@ -16082,6 +16093,7 @@ function HomePageContent() {
                 const adminCourseWebPortal = false;
                 const adminExpandedMlPortal = shouldUseExpandedMapLibre(
                   user?.id === ADMIN_USER_ID,
+                  user?.id,
                 );
                 const showWebExpandedPortal =
                   mapExpanded &&
@@ -18162,6 +18174,29 @@ function HomePageContent() {
               >
                 계정 삭제
               </button>
+              <div
+                className="settingItem"
+                data-testid="map-data-attribution"
+                style={{
+                  width: "100%",
+                  padding: "16px 20px",
+                  color: "#5b6470",
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                  cursor: "default",
+                }}
+              >
+                <div style={{ fontWeight: 700, color: "#3a4155", marginBottom: 6 }}>
+                  데이터 출처
+                </div>
+                <div>
+                  지도: © OpenStreetMap contributors (OpenFreeMap)
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  장소 정보: 행정안전부 지방행정 인허가 데이터, 소상공인시장진흥공단
+                  상가(상권)정보, 전국 표준데이터(공원·박물관·시장·도서관·관광지)
+                </div>
+              </div>
               <button
                 type="button"
                 className="settingItem"
@@ -18180,8 +18215,8 @@ function HomePageContent() {
                   data-testid="admin-compact-maplibre-toggle"
                   style={{ width: "100%", padding: "16px 20px", color: "#1a2a7a" }}
                   onClick={() => {
-                    const next = !adminCompactMapLibre;
-                    writeCompactMapLibreFlag(next);
+                    const next = cycleAdminMapGlOverride(adminCompactMapLibre);
+                    writeCompactMapLibreOverride(next);
                     setSessionForceKakaoCompact(false);
                     compactMapLibreFallbackToastedRef.current = false;
                     setAdminCompactMapLibre(next);
@@ -18189,14 +18224,12 @@ function HomePageContent() {
                     tearDownCompactMapForRemount();
                     setCompactMapRemountKey((k) => k + 1);
                     showToast(
-                      next
-                        ? "미니맵 핀맵 지도 ON — 지도 탭에서 확인하세요"
-                        : "미니맵 핀맵 지도 OFF — 기본 지도로 복귀",
+                      `미니맵 핀맵 지도 · ${adminMapGlOverrideLabel(next)}`,
                       "info",
                     );
                   }}
                 >
-                  미니맵 핀맵 지도(관리자){adminCompactMapLibre ? " · ON" : " · OFF"}
+                  미니맵 핀맵 지도(관리자) · {adminMapGlOverrideLabel(adminCompactMapLibre)}
                 </button>
               ) : null}
               {user?.id === ADMIN_USER_ID ? (
@@ -18206,21 +18239,19 @@ function HomePageContent() {
                   data-testid="admin-expanded-maplibre-toggle"
                   style={{ width: "100%", padding: "16px 20px", color: "#1a2a7a" }}
                   onClick={() => {
-                    const next = !adminExpandedMapLibre;
-                    writeExpandedMapLibreFlag(next);
+                    const next = cycleAdminMapGlOverride(adminExpandedMapLibre);
+                    writeExpandedMapLibreOverride(next);
                     setSessionForceKakaoExpanded(false);
                     expandedMapLibreFallbackToastedRef.current = false;
                     setAdminExpandedMapLibre(next);
                     setShowMypageSettingsSheet(false);
                     showToast(
-                      next
-                        ? "전체화면 핀맵 지도 ON — 지도 탭에서 전체지도를 여세요"
-                        : "전체화면 핀맵 지도 OFF — 기본 지도로 복귀",
+                      `전체화면 핀맵 지도 · ${adminMapGlOverrideLabel(next)}`,
                       "info",
                     );
                   }}
                 >
-                  전체화면 핀맵 지도(관리자){adminExpandedMapLibre ? " · ON" : " · OFF"}
+                  전체화면 핀맵 지도(관리자) · {adminMapGlOverrideLabel(adminExpandedMapLibre)}
                 </button>
               ) : null}
               {user?.id === ADMIN_USER_ID ? (

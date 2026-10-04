@@ -4,7 +4,7 @@
  * Preview-only extras: black, mono, dark (used by /map-preview).
  */
 
-import { seoulGuLabelsGeoJson } from "@/lib/seoulGuLabels";
+import { koreaGuLabelsGeoJson } from "@/lib/koreaGuLabels";
 
 /** Production-adopted themes */
 export type PindmapMapThemeId = "paper" | "white";
@@ -964,18 +964,18 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     }
   }
 
-  // 구 이름 z9–13: tiles lack borough until z14 → static Seoul overlay
+  // 구·군 이름 z9–13: tiles lack borough until z14 → static Korea overlay
   style.sources = {
     ...style.sources,
-    seoul_gu_labels: {
+    korea_gu_labels: {
       type: "geojson",
-      data: seoulGuLabelsGeoJson(),
+      data: koreaGuLabelsGeoJson(),
     },
   };
   layers.push({
-    id: "label_seoul_gu_overlay",
+    id: "label_korea_gu_overlay",
     type: "symbol",
-    source: "seoul_gu_labels",
+    source: "korea_gu_labels",
     minzoom: 9,
     maxzoom: 13.5,
     layout: {

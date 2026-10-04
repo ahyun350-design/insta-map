@@ -38,6 +38,7 @@ import type {
   MapLatLng,
   SearchPinInput,
 } from "./types";
+import { trackMapGlFallback, trackMapGlReady } from "./mapGlTelemetry";
 
 const PIN_SOURCE = "compact-pins";
 const PIN_LAYER = "compact-pins-symbol";
@@ -110,6 +111,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     null;
   private imageDpr = 2;
   private mode: "compact" | "expanded" = "compact";
+  private mountStartedAt = 0;
+  private fallbackReported = false;
 
   static async create(
     options: CreateCompactMapLibreOptions,
@@ -125,7 +128,18 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     return adapter;
   }
 
+  private reportFallback(
+    options: CreateCompactMapLibreOptions,
+    reason: "style_timeout" | "tile_timeout" | "webgl_unsupported" | "error" | "webglcontextlost",
+  ) {
+    if (this.fallbackReported || this.destroyed) return;
+    this.fallbackReported = true;
+    trackMapGlFallback(this.mode, reason);
+    options.onFallback?.(reason);
+  }
+
   private async mount(options: CreateCompactMapLibreOptions) {
+    this.mountStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     const style = await buildPindmapStyle("paper");
     if (this.destroyed) return;
 
@@ -156,6 +170,15 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     map.touchZoomRotate.disableRotation();
     this.installEdgeGestureGuard(map);
     this.installAttribution(options.container);
+    const canvas = map.getCanvas();
+    const onContextLost = (ev: Event) => {
+      ev.preventDefault();
+      this.reportFallback(options, "webglcontextlost");
+    };
+    canvas.addEventListener("webglcontextlost", onContextLost, false);
+    this.touchCleanups.push(() =>
+      canvas.removeEventListener("webglcontextlost", onContextLost, false),
+    );
     map.on("moveend", () => {
       if (this.destroyed || !this.map) return;
       const c = this.map.getCenter();
@@ -169,7 +192,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.fallbackTimer = window.setTimeout(() => {
       if (this.destroyed) return;
       if (!this.styleReady || !this.firstTileSeen) {
-        options.onFallback?.(
+        this.reportFallback(
+          options,
           !this.styleReady ? "style_timeout" : "tile_timeout",
         );
       }
@@ -181,7 +205,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         e.dataType === "source" &&
         e.isSourceLoaded &&
         e.sourceId !== PIN_SOURCE &&
-        e.sourceId !== "seoul_gu_labels"
+        e.sourceId !== "korea_gu_labels"
       ) {
         this.firstTileSeen = true;
       }
@@ -213,9 +237,13 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
           window.setTimeout(() => {
             if (!this.firstTileSeen) this.firstTileSeen = true;
           }, 800);
+          const ms =
+            (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+            this.mountStartedAt;
+          trackMapGlReady(this.mode, ms);
           options.onReady?.();
         } catch {
-          options.onFallback?.("load_error");
+          this.reportFallback(options, "error");
         }
       })();
     });
