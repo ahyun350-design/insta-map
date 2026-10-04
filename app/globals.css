@@ -7892,6 +7892,101 @@ select:focus-visible {
   border-radius: 3px;
   pointer-events: none;
 }
+/* MapLibre fullscreen floating chrome (native production parity) */
+.expandedMapLibreTopChrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  pointer-events: none;
+}
+.expandedMapLibreTopChrome > * {
+  pointer-events: auto;
+}
+.expandedMapLibreRoundBtn {
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.expandedMapLibreRoundBtn:active {
+  transform: scale(0.97);
+}
+.expandedMapLibreSearchPill {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 14px;
+  box-sizing: border-box;
+}
+.expandedMapLibreSearchIcon {
+  flex-shrink: 0;
+  display: flex;
+  color: #8b92a1;
+}
+.expandedMapLibreSearchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1.2;
+  font-family: inherit;
+  color: #1a1a2e;
+  padding: 0;
+  -webkit-appearance: none;
+}
+.expandedMapLibreSearchInput::placeholder {
+  color: #9aa0a6;
+}
+.expandedMapLibreSearchClear {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: #999;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Research / loading toast sit below floating search row */
+.expandedMapLibreStage .mapResearchAreaBtn {
+  top: calc(12px + env(safe-area-inset-top, 0px) + 44px + 10px);
+}
+.expandedMapLibreStage .expandedMapLibreRouteLoading {
+  top: calc(12px + env(safe-area-inset-top, 0px) + 44px + 10px) !important;
+}
+
 .expandedMapLibreAttrib {
   position: absolute;
   left: max(8px, env(safe-area-inset-left, 0px));

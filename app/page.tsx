@@ -2541,7 +2541,14 @@ function HomePageContent() {
 
   const addSearchResultPins = useCallback(
     (places: any[], onMarkerClick: (place: any) => void) => {
-      if (isNativeMapAvailable() && expandedNativeMapEnabled) {
+      if (
+        isNativeMapAvailable() &&
+        expandedNativeMapEnabled &&
+        !shouldUseExpandedMapLibre(
+          userIdRef.current === ADMIN_USER_ID,
+          userIdRef.current,
+        )
+      ) {
         const nativeMarkers = places.map((place, index) => ({
           id: `search-${index}`,
           lat: Number(place.y),
@@ -12659,7 +12666,16 @@ function HomePageContent() {
   useEffect(() => {
     const EXTENDED_NATIVE_MAP_SLOT_ID = "extended-map-slot";
 
-    if (!mapExpanded || !expandedNativeMapEnabled || !isNativeMapAvailable()) {
+    const mapLibreExpandedActive = shouldUseExpandedMapLibre(
+      userIdRef.current === ADMIN_USER_ID,
+      userIdRef.current,
+    );
+    if (
+      !mapExpanded ||
+      !expandedNativeMapEnabled ||
+      !isNativeMapAvailable() ||
+      mapLibreExpandedActive
+    ) {
       const staleId = expandedNativeMapIdRef.current;
       if (staleId) {
         void destroyNativeMap(staleId);
@@ -12723,7 +12739,11 @@ function HomePageContent() {
       !expandedNativeMapId ||
       expandedNativeMapId === "unavailable" ||
       !expandedMapRef.current ||
-      !window.kakao?.maps
+      !window.kakao?.maps ||
+      shouldUseExpandedMapLibre(
+        userIdRef.current === ADMIN_USER_ID,
+        userIdRef.current,
+      )
     ) {
       return undefined;
     }
@@ -16151,12 +16171,17 @@ function HomePageContent() {
                       display: "flex",
                       flexDirection: "column",
                       boxSizing: "border-box",
-                      paddingTop: "env(safe-area-inset-top, 0px)",
-                      paddingBottom: "env(safe-area-inset-bottom, 0px)",
-                      paddingLeft: "env(safe-area-inset-left, 0px)",
-                      paddingRight: "env(safe-area-inset-right, 0px)",
+                      ...(adminExpandedMlPortal
+                        ? {}
+                        : {
+                            paddingTop: "env(safe-area-inset-top, 0px)",
+                            paddingBottom: "env(safe-area-inset-bottom, 0px)",
+                            paddingLeft: "env(safe-area-inset-left, 0px)",
+                            paddingRight: "env(safe-area-inset-right, 0px)",
+                          }),
                     }}
                   >
+                    {!adminExpandedMlPortal && (
                     <div
                       className="fullscreenMapHeaderRow"
                       style={{
@@ -16235,7 +16260,8 @@ function HomePageContent() {
                       </button>
                       <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
                     </div>
-                    {!showCourseRoute && (
+                    )}
+                    {!adminExpandedMlPortal && !showCourseRoute && (
                     <div
                       style={{
                         padding: "12px 20px",
@@ -16306,7 +16332,97 @@ function HomePageContent() {
                       )}
                     </div>
                     )}
-                    <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+                    <div
+                      className={adminExpandedMlPortal ? "expandedMapLibreStage" : undefined}
+                      style={{ flex: 1, minHeight: 0, position: "relative" }}
+                    >
+                      {adminExpandedMlPortal && (
+                        <div className="expandedMapLibreTopChrome">
+                          <button
+                            type="button"
+                            className="expandedMapLibreRoundBtn"
+                            aria-label="전체 지도 닫기"
+                            onClick={() => {
+                          if (returnToCourseSheetRef.current) {
+                            returnToCourseSheetRef.current = false;
+                            setMapExpanded(false);
+                            clearRoute();
+                            setShowCourseRoute(false);
+                            setCourseDesignPath(null);
+                            setCourseNavigation(null);
+                            setCourseNavSegmentIndex(null);
+                            setCourseNavFocusMode(false);
+                            setCourseNavStepIndex(null);
+                            fullscreenCourseNavigationRef.current = null;
+                            setShowCourseModal(true);
+                            return;
+                          }
+                          if (returnToListDetailRef.current) {
+                            returnToListDetailRef.current = false;
+                            fullscreenListRef.current = null;
+                            setListMapActive(false);
+                            clearListWebMarkers();
+                            setMapExpanded(false);
+                            setSelectedPlace(null);
+                            setActiveTab("saved");
+                            setShowMyListsScreen(true);
+                            return;
+                          }
+                          fullscreenListRef.current = null;
+                          setListMapActive(false);
+                          clearListWebMarkers();
+                          setMapExpanded(false);
+                          setSelectedPlace(null);
+                          setShowCourseRoute(false);
+                          setCourseDesignPath(null);
+                          setCourseNavigation(null);
+                          setCourseNavSegmentIndex(null);
+                          setCourseNavFocusMode(false);
+                          setCourseNavStepIndex(null);
+                          fullscreenCourseNavigationRef.current = null;
+                            }}
+                          >
+                            <svg width="22" height="22" viewBox="0 0 20 20" fill="none" aria-hidden>
+                              <path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                          {!showCourseRoute && (
+                            <div className="expandedMapLibreSearchPill">
+                              <span className="expandedMapLibreSearchIcon" aria-hidden>
+                                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                                  <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+                                  <path d="M12.2 12.2L15.5 15.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                </svg>
+                              </span>
+                              <input
+                                ref={expandedMapSearchInputRef}
+                                className="expandedMapLibreSearchInput"
+                                placeholder="장소명으로 검색"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    handleSearch();
+                                  }
+                                }}
+                                enterKeyHint="search"
+                                inputMode="search"
+                              />
+                              {(searchQuery.trim() || mapSearchResults.length > 0) && (
+                                <button
+                                  type="button"
+                                  className="expandedMapLibreSearchClear"
+                                  aria-label="검색 지우기"
+                                  onClick={handleClearMapSearch}
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div
                         ref={mapExpandedRef}
                         className={`kakaoMap${expandedMapIsMapLibre ? " is-maplibre-expanded" : ""}`}
@@ -16403,7 +16519,7 @@ function HomePageContent() {
                           />
                         );
                       })()}
-                      {expandedNativeMapEnabled && isNativeMapAvailable() && (
+                      {expandedNativeMapEnabled && isNativeMapAvailable() && !adminExpandedMlPortal && (
                         <>
                           <div id="extended-map-slot" className="extendedNativeMapSlot" aria-hidden />
                           <div className="extendedNativeMapDivider" aria-hidden />
@@ -16415,6 +16531,7 @@ function HomePageContent() {
                         <div
                           role="status"
                           aria-live="polite"
+                          className={adminExpandedMlPortal ? "expandedMapLibreRouteLoading" : undefined}
                           style={{
                             position: "absolute",
                             top: "max(12px, env(safe-area-inset-top))",
