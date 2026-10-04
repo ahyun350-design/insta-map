@@ -24,6 +24,7 @@ import {
   pinMarkerSvg,
 } from "@/lib/mapPinImages";
 import { buildPindmapStyle } from "@/lib/pindmapMapStyle";
+import type { AdminMapLibreThemeId } from "./adminMapTheme";
 import {
   horizontalSpanKmForMapLibreZoom,
   kakaoLevelToMapLibreZoom,
@@ -40,7 +41,12 @@ import type {
   SetCourseStopsOptions,
 } from "./types";
 import { trackMapGlFallback, trackMapGlReady } from "./mapGlTelemetry";
-import { MAP_BRAND_NAVY } from "./mapBrand";
+import {
+  MAP_BRAND_NAVY,
+  MAP_NEON_ACCENT,
+  MAP_NEON_CLUSTER_FILL,
+  MAP_NEON_CORE,
+} from "./mapBrand";
 import {
   COMPACT_ROUTE_FIT_PADDING,
   EXPANDED_ROUTE_FIT_PADDING,
@@ -51,6 +57,8 @@ import {
 const PIN_SOURCE = "compact-pins";
 const PIN_LAYER = "compact-pins-symbol";
 const ROUTE_SOURCE = "compact-route";
+const ROUTE_GLOW_OUTER_LAYER = "compact-route-glow-outer";
+const ROUTE_GLOW_MID_LAYER = "compact-route-glow-mid";
 const ROUTE_CASING_LAYER = "compact-route-casing";
 const ROUTE_LAYER = "compact-route-line";
 const ROUTE_ORIGIN_SOURCE = "compact-route-origin";
@@ -80,6 +88,8 @@ export type CreateCompactMapLibreOptions = {
   container: HTMLElement;
   center: MapLatLng;
   level: number;
+  /** Basemap + route chrome theme (admin neon | paper). */
+  theme?: AdminMapLibreThemeId;
   /** compact = minimap; expanded = fullscreen admin map */
   mode?: "compact" | "expanded";
   onPinClick?: (pinId: string) => void;
@@ -98,6 +108,7 @@ function searchPinSvg(): string {
 }
 
 export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface {
+  private theme: AdminMapLibreThemeId = "paper";
   readonly provider = "maplibre" as const;
   private map: MlMap | null = null;
   private destroyed = false;
@@ -123,6 +134,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   ): Promise<MapLibreMapAdapter> {
     const adapter = new MapLibreMapAdapter();
     adapter.mode = options.mode ?? "compact";
+    adapter.theme = options.theme === "neon" ? "neon" : "paper";
     adapter.onPinClick = options.onPinClick ?? null;
     adapter.onSearchPinClick = options.onSearchPinClick ?? null;
     adapter.onCourseStopClick = options.onCourseStopClick ?? null;
@@ -144,7 +156,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   private async mount(options: CreateCompactMapLibreOptions) {
     this.mountStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const style = await buildPindmapStyle("paper");
+    const style = await buildPindmapStyle(this.theme);
     if (this.destroyed) return;
 
     const dpr =
@@ -255,10 +267,11 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   private installAttribution(container: HTMLElement) {
     const el = document.createElement("div");
-    el.className =
+    const base =
       this.mode === "expanded"
         ? "expandedMapLibreAttrib"
         : "compactMapLibreAttrib";
+    el.className = this.theme === "neon" ? `${base} is-neon` : base;
     el.textContent = "© OpenStreetMap contributors";
     container.appendChild(el);
     this.touchCleanups.push(() => el.remove());
@@ -299,6 +312,30 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       data: { type: "FeatureCollection", features: [] },
     });
     map.addLayer({
+      id: ROUTE_GLOW_OUTER_LAYER,
+      type: "line",
+      source: ROUTE_SOURCE,
+      layout: { ...ROUTE_LAYOUT, visibility: "none" },
+      paint: {
+        "line-color": MAP_NEON_ACCENT,
+        "line-width": 17,
+        "line-opacity": 0.35,
+        "line-blur": 12,
+      },
+    });
+    map.addLayer({
+      id: ROUTE_GLOW_MID_LAYER,
+      type: "line",
+      source: ROUTE_SOURCE,
+      layout: { ...ROUTE_LAYOUT, visibility: "none" },
+      paint: {
+        "line-color": MAP_NEON_ACCENT,
+        "line-width": 9,
+        "line-opacity": 0.6,
+        "line-blur": 4,
+      },
+    });
+    map.addLayer({
       id: ROUTE_CASING_LAYER,
       type: "line",
       source: ROUTE_SOURCE,
@@ -329,10 +366,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       type: "circle",
       source: ROUTE_ORIGIN_SOURCE,
       paint: {
-        "circle-radius": 9,
-        "circle-color": "#000000",
-        "circle-opacity": 0.18,
-        "circle-blur": 0.55,
+        "circle-radius": this.theme === "neon" ? 12 : 9,
+        "circle-color": this.theme === "neon" ? MAP_NEON_ACCENT : "#000000",
+        "circle-opacity": this.theme === "neon" ? 0.45 : 0.18,
+        "circle-blur": this.theme === "neon" ? 0.85 : 0.55,
       },
     });
     map.addLayer({
@@ -341,9 +378,9 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       source: ROUTE_ORIGIN_SOURCE,
       paint: {
         "circle-radius": 7,
-        "circle-color": "#FFFFFF",
-        "circle-stroke-width": 3,
-        "circle-stroke-color": MAP_BRAND_NAVY,
+        "circle-color": this.theme === "neon" ? MAP_NEON_CLUSTER_FILL : "#FFFFFF",
+        "circle-stroke-width": this.theme === "neon" ? 3.5 : 3,
+        "circle-stroke-color": this.theme === "neon" ? MAP_NEON_ACCENT : MAP_BRAND_NAVY,
         "circle-opacity": 1,
       },
     });
@@ -378,10 +415,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       source: PIN_SOURCE,
       filter: ["has", "point_count"],
       paint: {
-        "circle-color": MAP_BRAND_NAVY,
+        "circle-color": this.theme === "neon" ? MAP_NEON_CLUSTER_FILL : MAP_BRAND_NAVY,
         "circle-radius": ["step", ["get", "point_count"], 16, 8, 20, 25, 26],
-        "circle-stroke-width": 2,
-        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": this.theme === "neon" ? 2.5 : 2,
+        "circle-stroke-color": this.theme === "neon" ? MAP_NEON_ACCENT : "#ffffff",
       },
     });
     map.addLayer({
@@ -448,6 +485,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
     });
+    const neon = this.theme === "neon";
     map.addLayer({
       id: "compact-course-circle-shadow",
       type: "circle",
@@ -456,12 +494,12 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         "circle-radius": [
           "case",
           ["==", ["get", "selected"], 1],
-          18,
-          15,
+          neon ? 22 : 18,
+          neon ? 17 : 15,
         ],
-        "circle-color": "#000000",
-        "circle-opacity": 0.16,
-        "circle-blur": 0.45,
+        "circle-color": neon ? MAP_NEON_ACCENT : "#000000",
+        "circle-opacity": neon ? 0.4 : 0.16,
+        "circle-blur": neon ? 0.75 : 0.45,
       },
     });
     map.addLayer({
@@ -475,9 +513,9 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
           16,
           13,
         ],
-        "circle-color": MAP_BRAND_NAVY,
-        "circle-stroke-width": 2,
-        "circle-stroke-color": "#ffffff",
+        "circle-color": neon ? MAP_NEON_CLUSTER_FILL : MAP_BRAND_NAVY,
+        "circle-stroke-width": neon ? 2.5 : 2,
+        "circle-stroke-color": neon ? MAP_NEON_ACCENT : "#ffffff",
         "circle-opacity": 1,
       },
     });
@@ -497,7 +535,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         "text-allow-overlap": true,
         "text-ignore-placement": true,
       },
-      paint: { "text-color": "#ffffff" },
+      paint: { "text-color": neon ? MAP_NEON_CORE : "#ffffff" },
     });
     map.addLayer({
       id: COURSE_LABEL_LAYER,
@@ -514,8 +552,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         "text-optional": true,
       },
       paint: {
-        "text-color": "#3A4155",
-        "text-halo-color": "#ffffff",
+        "text-color": neon ? "#C9CEF5" : "#3A4155",
+        "text-halo-color": neon ? "#0E1230" : "#ffffff",
         "text-halo-width": 1.4,
       },
     });
@@ -651,12 +689,16 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private async applyPins(pins: CompactPinInput[]) {
     const map = this.map;
     if (!map?.getSource(PIN_SOURCE)) return;
+    const pinOpts =
+      this.theme === "neon"
+        ? { stroke: "#ffffff", strokeWidth: 1.5, glow: true }
+        : undefined;
     await Promise.all(
       pins.map((p) =>
         loadMapImageFromSvg(
           map,
-          pinImageKey("pin", p.category, p.fillColor),
-          pinMarkerSvg(p.category, p.fillColor),
+          pinImageKey("pin", p.category, p.fillColor) + (this.theme === "neon" ? ":neon" : ""),
+          pinMarkerSvg(p.category, p.fillColor, pinOpts),
           MAP_PIN_WIDTH,
           MAP_PIN_HEIGHT,
           this.imageDpr,
@@ -672,7 +714,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         id: p.id,
         properties: {
           id: p.id,
-          icon: pinImageKey("pin", p.category, p.fillColor),
+          icon: pinImageKey("pin", p.category, p.fillColor) + (this.theme === "neon" ? ":neon" : ""),
           name: p.name ?? "",
         },
         geometry: { type: "Point", coordinates: [p.lng, p.lat] },
@@ -733,7 +775,38 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private applyRoutePaint(mode: CompactRouteMode) {
     const map = this.map;
     if (!map) return;
-    const visual = routePaintForMode(mode);
+    const visual = routePaintForMode(mode, this.theme);
+
+    const applyGlow = (
+      layerId: string,
+      paint: {
+        color: string;
+        opacity: number;
+        width: unknown;
+        dasharray: number[] | null;
+        blur?: number;
+      } | null,
+    ) => {
+      if (!map.getLayer(layerId)) return;
+      if (!paint) {
+        map.setLayoutProperty(layerId, "visibility", "none");
+        return;
+      }
+      map.setLayoutProperty(layerId, "visibility", "visible");
+      map.setPaintProperty(layerId, "line-color", paint.color);
+      map.setPaintProperty(layerId, "line-opacity", paint.opacity);
+      map.setPaintProperty(layerId, "line-width", paint.width);
+      map.setPaintProperty(layerId, "line-blur", paint.blur ?? 0);
+      try {
+        map.setPaintProperty(layerId, "line-dasharray", paint.dasharray ?? [1, 0]);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    applyGlow(ROUTE_GLOW_OUTER_LAYER, visual.glowOuter);
+    applyGlow(ROUTE_GLOW_MID_LAYER, visual.glowMid);
+
     if (map.getLayer(ROUTE_CASING_LAYER)) {
       if (visual.casing) {
         map.setLayoutProperty(ROUTE_CASING_LAYER, "visibility", "visible");
@@ -748,10 +821,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       map.setPaintProperty(ROUTE_LAYER, "line-color", visual.line.color);
       map.setPaintProperty(ROUTE_LAYER, "line-opacity", visual.line.opacity);
       map.setPaintProperty(ROUTE_LAYER, "line-width", visual.line.width);
+      try {
+        map.setPaintProperty(ROUTE_LAYER, "line-blur", visual.line.blur ?? 0);
+      } catch {
+        /* ignore */
+      }
       if (visual.line.dasharray) {
         map.setPaintProperty(ROUTE_LAYER, "line-dasharray", visual.line.dasharray);
       } else {
-        // solid — remove dasharray if previously set
         try {
           map.setPaintProperty(ROUTE_LAYER, "line-dasharray", [1, 0]);
         } catch {
@@ -802,11 +879,15 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private async applyFocusMarker(pin: CompactPinInput) {
     const map = this.map;
     if (!map?.getSource(FOCUS_SOURCE)) return;
-    const icon = pinImageKey("focus", pin.category, pin.fillColor);
+    const icon = pinImageKey("focus", pin.category, pin.fillColor) + (this.theme === "neon" ? ":neon" : "");
     await loadMapImageFromSvg(
       map,
       icon,
-      focusMarkerSvg(pin.category, pin.fillColor),
+      focusMarkerSvg(
+        pin.category,
+        pin.fillColor,
+        this.theme === "neon" ? { stroke: "#ffffff", glow: true } : undefined,
+      ),
       MAP_FOCUS_PIN_WIDTH,
       MAP_FOCUS_PIN_HEIGHT,
       this.imageDpr,
@@ -932,6 +1013,12 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     if (opts.color && opts.color.toLowerCase() === "#b5bac6") {
       if (map.getLayer(ROUTE_CASING_LAYER)) {
         map.setLayoutProperty(ROUTE_CASING_LAYER, "visibility", "none");
+      }
+      if (map.getLayer(ROUTE_GLOW_OUTER_LAYER)) {
+        map.setLayoutProperty(ROUTE_GLOW_OUTER_LAYER, "visibility", "none");
+      }
+      if (map.getLayer(ROUTE_GLOW_MID_LAYER)) {
+        map.setLayoutProperty(ROUTE_GLOW_MID_LAYER, "visibility", "none");
       }
       this.clearRouteOrigin();
     }

@@ -8032,3 +8032,9 @@ select:focus-visible {
 .screenMapTab .mapCompactTapLayer.is-maplibre-passthrough {
   pointer-events: none;
 }
+
+.compactMapLibreAttrib.is-neon,
+.expandedMapLibreAttrib.is-neon {
+  color: rgba(201, 206, 245, 0.72);
+  background: rgba(14, 18, 48, 0.55);
+}

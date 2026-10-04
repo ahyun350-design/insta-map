@@ -18,21 +18,37 @@ export function clampMapPinDpr(dpr?: number): number {
   return Math.max(1, Math.min(3, Math.round(n || 1)));
 }
 
-export function pinMarkerSvg(category: string, fillColor: string): string {
+export function pinMarkerSvg(
+  category: string,
+  fillColor: string,
+  opts?: { stroke?: string; strokeWidth?: number; glow?: boolean },
+): string {
   const emoji =
     category in DEFAULT_CATEGORY_PIN
       ? DEFAULT_CATEGORY_PIN[category as FeedPostCategory].emoji
       : "📍";
-  const stroke = category === "맛집" ? "#fff" : "#999";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><defs><filter id="s" x="-30%" y="-20%" width="160%" height="160%"><feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-color="#000000" flood-opacity="0.28"/></filter></defs><path filter="url(#s)" d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${fillColor}" stroke="${stroke}" stroke-width="1"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
+  const stroke = opts?.stroke ?? (category === "맛집" ? "#fff" : "#999");
+  const strokeWidth = opts?.strokeWidth ?? 1;
+  const shadow = opts?.glow
+    ? `<feDropShadow dx="0" dy="0" stdDeviation="1.6" flood-color="#ffffff" flood-opacity="0.45"/><feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-color="#000000" flood-opacity="0.35"/>`
+    : `<feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-color="#000000" flood-opacity="0.28"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><defs><filter id="s" x="-40%" y="-30%" width="180%" height="180%">${shadow}</filter></defs><path filter="url(#s)" d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${fillColor}" stroke="${stroke}" stroke-width="${strokeWidth}"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
 }
 
-export function focusMarkerSvg(category: string, fillColor: string): string {
+export function focusMarkerSvg(
+  category: string,
+  fillColor: string,
+  opts?: { stroke?: string; glow?: boolean },
+): string {
   const emoji =
     category in DEFAULT_CATEGORY_PIN
       ? DEFAULT_CATEGORY_PIN[category as FeedPostCategory].emoji
       : "📍";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58"><defs><filter id="s" x="-30%" y="-20%" width="160%" height="160%"><feDropShadow dx="0" dy="1.4" stdDeviation="1.2" flood-color="#000000" flood-opacity="0.3"/></filter></defs><path filter="url(#s)" d="M24 1C11.3 1 1 11.3 1 24c0 17.5 23 33 23 33s23-15.5 23-33C47 11.3 36.7 1 24 1z" fill="${fillColor}" stroke="#1a2a7a" stroke-width="2.5"/><circle cx="24" cy="24" r="15" fill="white" opacity="0.95"/><text x="24" y="30" text-anchor="middle" font-size="16">${emoji}</text></svg>`;
+  const stroke = opts?.stroke ?? "#1a2a7a";
+  const shadow = opts?.glow
+    ? `<feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#ffffff" flood-opacity="0.4"/><feDropShadow dx="0" dy="1.4" stdDeviation="1.2" flood-color="#000000" flood-opacity="0.35"/>`
+    : `<feDropShadow dx="0" dy="1.4" stdDeviation="1.2" flood-color="#000000" flood-opacity="0.3"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58"><defs><filter id="s" x="-40%" y="-30%" width="180%" height="180%">${shadow}</filter></defs><path filter="url(#s)" d="M24 1C11.3 1 1 11.3 1 24c0 17.5 23 33 23 33s23-15.5 23-33C47 11.3 36.7 1 24 1z" fill="${fillColor}" stroke="${stroke}" stroke-width="2.5"/><circle cx="24" cy="24" r="15" fill="white" opacity="0.95"/><text x="24" y="30" text-anchor="middle" font-size="16">${emoji}</text></svg>`;
 }
 
 /** Same asset as Kakao compact `makeMyLocationImage` (24×24 ring). */

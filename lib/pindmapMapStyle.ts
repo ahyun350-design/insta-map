@@ -1,6 +1,7 @@
 /**
  * PindMap MapLibre basemap styles (OpenFreeMap / OpenMapTiles).
  * Production themes: paper, white.
+ * Admin MapLibre + preview: neon.
  * Preview-only extras: black, mono, dark (used by /map-preview).
  */
 
@@ -10,7 +11,7 @@ import { koreaGuLabelsGeoJson } from "@/lib/koreaGuLabels";
 export type PindmapMapThemeId = "paper" | "white";
 
 /** Includes preview-only themes */
-export type MapPreviewThemeId = PindmapMapThemeId | "black" | "mono" | "dark";
+export type MapPreviewThemeId = PindmapMapThemeId | "neon" | "black" | "mono" | "dark";
 
 export type MapPreviewTheme = {
   id: MapPreviewThemeId;
@@ -36,6 +37,7 @@ export const PIND_MAP_PRODUCTION_THEMES: PindmapMapThemeId[] = ["paper", "white"
 export const MAP_PREVIEW_THEME_ORDER: MapPreviewThemeId[] = [
   "paper",
   "white",
+  "neon",
   "black",
   "mono",
   "dark",
@@ -47,6 +49,7 @@ export function parseMapPreviewThemeId(
   if (
     raw === "paper" ||
     raw === "white" ||
+    raw === "neon" ||
     raw === "black" ||
     raw === "mono" ||
     raw === "dark"
@@ -97,6 +100,24 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
     textHalo: "#FFFFFF",
     boundary: "#E0E0E0",
     stationDot: "#555555",
+  },
+  neon: {
+    id: "neon",
+    label: "네온",
+    // Accent point color from CourseMapDesignOverlay pin: #F0E4C3
+    background: "#0E1230",
+    land: "#0E1230",
+    water: "#0A142C",
+    park: "#0D2A2A",
+    building: "#1A2250",
+    showBuildings: true,
+    road: "#3A45A0",
+    roadMinor: "#262D66",
+    rail: "#1E2858",
+    text: "#C9CEF5",
+    textHalo: "#0E1230",
+    boundary: "#2A3366",
+    stationDot: "#C9CEF5",
   },
   black: {
     id: "black",
@@ -583,6 +604,11 @@ function roadFillColor(
     if (yellow) return "#EDEDED";
     return theme.road;
   }
+  if (theme.id === "neon") {
+    // 간선(motorway/trunk/primary) → road; 일반·소로 → roadMinor
+    if (yellow || kind === "primary") return theme.road;
+    return theme.roadMinor;
+  }
   return kind === "path" || kind === "minor" || kind === "service"
     ? theme.roadMinor
     : theme.road;
@@ -598,6 +624,9 @@ function roadCasingColor(
   }
   if (theme.id === "white") {
     return yellow ? "#E0E0E0" : "#E8E8E8";
+  }
+  if (theme.id === "neon") {
+    return yellow ? "#2E3878" : "#1A2250";
   }
   return theme.boundary;
 }
@@ -668,9 +697,19 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       continue;
     }
 
-    const useGuideRoads = theme.id === "paper" || theme.id === "white";
-    const woodFill = theme.id === "white" ? "#F5F7F3" : "#E8F0E0";
-    const buildingOutline = theme.id === "white" ? "#E6E6E6" : "#E2DDD2";
+    const useGuideRoads = theme.id === "paper" || theme.id === "white" || theme.id === "neon";
+    const woodFill =
+      theme.id === "white"
+        ? "#F5F7F3"
+        : theme.id === "neon"
+          ? "#0A2424"
+          : "#E8F0E0";
+    const buildingOutline =
+      theme.id === "white"
+        ? "#E6E6E6"
+        : theme.id === "neon"
+          ? "#242C5C"
+          : "#E2DDD2";
 
     if (isCasing(layer.id)) {
       if (!useGuideRoads) {
@@ -793,7 +832,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
 
       if (layer.id.startsWith("water") && layer.type === "symbol") {
         layer.minzoom = 10;
-        paintSet(layer, "text-color", theme.id === "white" ? "#6A8FA8" : "#4A8BB8");
+        paintSet(layer, "text-color", theme.id === "white" ? "#6A8FA8" : theme.id === "neon" ? "#8AA0D8" : "#4A8BB8");
         paintSet(layer, "text-halo-color", theme.textHalo);
         paintSet(layer, "text-halo-width", 1.5);
         if (layer.layout) {
@@ -851,7 +890,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             visibility: "visible",
           },
           paint: {
-            "text-color": "#4A5166",
+            "text-color": theme.id === "neon" ? "#A8B0E0" : "#4A5166",
             "text-halo-color": theme.textHalo,
             "text-halo-width": 1.2,
           },
@@ -871,7 +910,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             visibility: "visible",
           },
           paint: {
-            "text-color": "#6A7185",
+            "text-color": theme.id === "neon" ? "#8E96C8" : "#6A7185",
             "text-halo-color": theme.textHalo,
             "text-halo-width": 1.1,
           },
@@ -928,7 +967,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       // 큰 공원·산
       if (layer.id.includes("park_label") || layer.id === "label_park") {
         layer.minzoom = 11;
-        paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : "#4F7A4A");
+        paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : theme.id === "neon" ? "#7AB8A0" : "#4F7A4A");
         paintSet(layer, "text-halo-color", theme.textHalo);
         paintSet(layer, "text-halo-width", 1.5);
       }
@@ -987,7 +1026,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       visibility: "visible",
     },
     paint: {
-      "text-color": "#4A5166",
+      "text-color": theme.id === "neon" ? "#A8B0E0" : "#4A5166",
       "text-halo-color": theme.textHalo,
       "text-halo-width": 1.2,
     },

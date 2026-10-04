@@ -273,7 +273,7 @@ export default function MapPreviewClient() {
   }, []);
 
   const rootTone =
-    theme === "black" || theme === "dark" ? "is-dark" : "is-light";
+    theme === "black" || theme === "dark" || theme === "neon" ? "is-dark" : "is-light";
 
   const fitZoom = pinCount > 0 ? 6.5 : 14;
   const effectivePinCount = mode === "nopins" ? 0 : pinCount;

@@ -57,7 +57,19 @@ export {
   MAP_BRAND_NAVY,
   MAP_ROUTE_CASING_WHITE,
   MAP_ROUTE_PREVIEW_GRAY,
+  MAP_NEON_ACCENT,
+  MAP_NEON_CORE,
+  MAP_NEON_PREVIEW,
+  MAP_NEON_CLUSTER_FILL,
 } from "./mapBrand";
+export {
+  ADMIN_MAP_THEME_STORAGE_KEY,
+  adminMapThemeLabel,
+  readAdminMapLibreTheme,
+  resolveMapLibreThemeId,
+  writeAdminMapLibreTheme,
+  type AdminMapLibreThemeId,
+} from "./adminMapTheme";
 export {
   COMPACT_ROUTE_FIT_PADDING,
   EXPANDED_ROUTE_FIT_PADDING,

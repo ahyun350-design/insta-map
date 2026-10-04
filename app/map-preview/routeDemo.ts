@@ -8,6 +8,8 @@ import {
   routePaintForMode,
   type RouteVisualMode,
 } from "@/lib/mapSurface/routeStyle";
+import type { AdminMapLibreThemeId } from "@/lib/mapSurface/adminMapTheme";
+import { MAP_NEON_ACCENT, MAP_NEON_CLUSTER_FILL, MAP_NEON_CORE } from "@/lib/mapSurface/mapBrand";
 import { resolvePinColor } from "@/lib/categoryAppearance";
 import {
   MAP_FOCUS_PIN_HEIGHT,
@@ -86,6 +88,30 @@ function ensureRouteLayers(map: MlMap) {
       "line-color": "#FFFFFF",
       "line-width": 7,
       "line-opacity": 0.95,
+    },
+  });
+  map.addLayer({
+    id: "preview-route-glow-outer",
+    type: "line",
+    source: ROUTE_SOURCE,
+    layout: { ...ROUTE_LAYOUT, visibility: "none" },
+    paint: {
+      "line-color": MAP_NEON_ACCENT,
+      "line-width": 17,
+      "line-opacity": 0.35,
+      "line-blur": 12,
+    },
+  });
+  map.addLayer({
+    id: "preview-route-glow-mid",
+    type: "line",
+    source: ROUTE_SOURCE,
+    layout: { ...ROUTE_LAYOUT, visibility: "none" },
+    paint: {
+      "line-color": MAP_NEON_ACCENT,
+      "line-width": 9,
+      "line-opacity": 0.6,
+      "line-blur": 4,
     },
   });
   map.addLayer({
@@ -201,8 +227,45 @@ function ensureRouteLayers(map: MlMap) {
   });
 }
 
-function applyPaint(map: MlMap, mode: RouteVisualMode) {
-  const visual = routePaintForMode(mode);
+const GLOW_OUTER = "preview-route-glow-outer";
+const GLOW_MID = "preview-route-glow-mid";
+
+function applyGlowLayer(
+  map: MlMap,
+  layerId: string,
+  paint: {
+    color: string;
+    opacity: number;
+    width: unknown;
+    dasharray: number[] | null;
+    blur?: number;
+  } | null,
+) {
+  if (!map.getLayer(layerId)) return;
+  if (!paint) {
+    map.setLayoutProperty(layerId, "visibility", "none");
+    return;
+  }
+  map.setLayoutProperty(layerId, "visibility", "visible");
+  map.setPaintProperty(layerId, "line-color", paint.color);
+  map.setPaintProperty(layerId, "line-opacity", paint.opacity);
+  map.setPaintProperty(layerId, "line-width", paint.width);
+  map.setPaintProperty(layerId, "line-blur", paint.blur ?? 0);
+  try {
+    map.setPaintProperty(layerId, "line-dasharray", paint.dasharray ?? [1, 0]);
+  } catch {
+    /* ignore */
+  }
+}
+
+function applyPaint(
+  map: MlMap,
+  mode: RouteVisualMode,
+  theme: AdminMapLibreThemeId,
+) {
+  const visual = routePaintForMode(mode, theme);
+  const neon = theme === "neon";
+
   if (visual.casing) {
     map.setLayoutProperty(ROUTE_CASING, "visibility", "visible");
     map.setPaintProperty(ROUTE_CASING, "line-color", visual.casing.color);
@@ -211,24 +274,105 @@ function applyPaint(map: MlMap, mode: RouteVisualMode) {
   } else {
     map.setLayoutProperty(ROUTE_CASING, "visibility", "none");
   }
+
+  applyGlowLayer(map, GLOW_OUTER, visual.glowOuter);
+  applyGlowLayer(map, GLOW_MID, visual.glowMid);
+
   map.setPaintProperty(ROUTE_LINE, "line-color", visual.line.color);
   map.setPaintProperty(ROUTE_LINE, "line-opacity", visual.line.opacity);
   map.setPaintProperty(ROUTE_LINE, "line-width", visual.line.width);
+  try {
+    map.setPaintProperty(ROUTE_LINE, "line-blur", visual.line.blur ?? 0);
+  } catch {
+    /* ignore */
+  }
   map.setPaintProperty(
     ROUTE_LINE,
     "line-dasharray",
     visual.line.dasharray ?? [1, 0],
   );
+
+  if (map.getLayer(ORIGIN_SHADOW)) {
+    map.setPaintProperty(ORIGIN_SHADOW, "circle-radius", neon ? 12 : 9);
+    map.setPaintProperty(
+      ORIGIN_SHADOW,
+      "circle-color",
+      neon ? MAP_NEON_ACCENT : "#000000",
+    );
+    map.setPaintProperty(ORIGIN_SHADOW, "circle-opacity", neon ? 0.45 : 0.18);
+    map.setPaintProperty(ORIGIN_SHADOW, "circle-blur", neon ? 0.85 : 0.55);
+  }
+  if (map.getLayer(ORIGIN_CIRCLE)) {
+    map.setPaintProperty(
+      ORIGIN_CIRCLE,
+      "circle-color",
+      neon ? MAP_NEON_CLUSTER_FILL : "#FFFFFF",
+    );
+    map.setPaintProperty(ORIGIN_CIRCLE, "circle-stroke-width", neon ? 3.5 : 3);
+    map.setPaintProperty(
+      ORIGIN_CIRCLE,
+      "circle-stroke-color",
+      neon ? MAP_NEON_ACCENT : MAP_BRAND_NAVY,
+    );
+  }
+  if (map.getLayer(COURSE_SHADOW)) {
+    map.setPaintProperty(COURSE_SHADOW, "circle-radius", [
+      "case",
+      ["==", ["get", "selected"], 1],
+      neon ? 22 : 18,
+      neon ? 17 : 15,
+    ]);
+    map.setPaintProperty(
+      COURSE_SHADOW,
+      "circle-color",
+      neon ? MAP_NEON_ACCENT : "#000000",
+    );
+    map.setPaintProperty(COURSE_SHADOW, "circle-opacity", neon ? 0.4 : 0.16);
+    map.setPaintProperty(COURSE_SHADOW, "circle-blur", neon ? 0.75 : 0.45);
+  }
+  if (map.getLayer(COURSE_CIRCLE)) {
+    map.setPaintProperty(
+      COURSE_CIRCLE,
+      "circle-color",
+      neon ? MAP_NEON_CLUSTER_FILL : MAP_BRAND_NAVY,
+    );
+    map.setPaintProperty(COURSE_CIRCLE, "circle-stroke-width", neon ? 2.5 : 2);
+    map.setPaintProperty(
+      COURSE_CIRCLE,
+      "circle-stroke-color",
+      neon ? MAP_NEON_ACCENT : "#ffffff",
+    );
+  }
+  if (map.getLayer(COURSE_NUM)) {
+    map.setPaintProperty(
+      COURSE_NUM,
+      "text-color",
+      neon ? MAP_NEON_CORE : "#ffffff",
+    );
+  }
+  if (map.getLayer(COURSE_LABEL)) {
+    map.setPaintProperty(
+      COURSE_LABEL,
+      "text-color",
+      neon ? "#C9CEF5" : "#3A4155",
+    );
+    map.setPaintProperty(
+      COURSE_LABEL,
+      "text-halo-color",
+      neon ? "#0E1230" : "#ffffff",
+    );
+  }
 }
 
 export async function paintPreviewRouteDemo(
   map: MlMap,
   mode: PreviewRouteMode,
+  theme: AdminMapLibreThemeId = "paper",
 ) {
   ensureRouteLayers(map);
   const path = SEONGSU_DEMO_PATH;
   const routeMode: RouteVisualMode = mode === "course" ? "course" : mode;
-  applyPaint(map, routeMode);
+  applyPaint(map, routeMode, theme);
 
   (map.getSource(ROUTE_SOURCE) as GeoJSONSource).setData({
     type: "FeatureCollection",
@@ -280,14 +424,20 @@ export async function paintPreviewRouteDemo(
 
   const category = "카페";
   const fill = resolvePinColor(category);
-  const icon = pinImageKey("focus", category, fill);
+  const neon = theme === "neon";
+  const icon =
+    pinImageKey("focus", category, fill) + (neon ? ":neon" : "");
   const dpr = clampMapPinDpr(
     typeof window !== "undefined" ? window.devicePixelRatio : 2,
   );
   await loadMapImageFromSvg(
     map,
     icon,
-    focusMarkerSvg(category, fill),
+    focusMarkerSvg(
+      category,
+      fill,
+      neon ? { stroke: "#ffffff", glow: true } : undefined,
+    ),
     MAP_FOCUS_PIN_WIDTH,
     MAP_FOCUS_PIN_HEIGHT,
     dpr,

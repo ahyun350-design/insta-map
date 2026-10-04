@@ -74,20 +74,24 @@ type Props = {
 const PIN_SOURCE = "preview-pins";
 const FEED_CATS = Object.keys(DEFAULT_CATEGORY_PIN) as FeedPostCategory[];
 
-function pinSvg(category: string) {
-  return pinMarkerSvg(category, resolvePinColor(category));
+function pinSvg(category: string, neon = false) {
+  return pinMarkerSvg(
+    category,
+    resolvePinColor(category),
+    neon ? { stroke: "#ffffff", strokeWidth: 1.5, glow: true } : undefined,
+  );
 }
 
-
-async function ensurePinImages(map: MlMap) {
+async function ensurePinImages(map: MlMap, neon = false) {
   const dpr = clampMapPinDpr(typeof window !== "undefined" ? window.devicePixelRatio : 2);
   const cats = new Set<string>(FEED_CATS);
+  const suffix = neon ? "-neon" : "";
   await Promise.all(
     [...cats].map((cat) =>
       loadMapImageFromSvg(
         map,
-        `pin-${cat}`,
-        pinSvg(cat),
+        `pin-${cat}${suffix}`,
+        pinSvg(cat, neon),
         MAP_PIN_WIDTH,
         MAP_PIN_HEIGHT,
         dpr,
@@ -96,8 +100,8 @@ async function ensurePinImages(map: MlMap) {
   );
   await loadMapImageFromSvg(
     map,
-    "pin-fallback",
-    pinSvg("기타"),
+    `pin-fallback${suffix}`,
+    pinSvg("기타", neon),
     MAP_PIN_WIDTH,
     MAP_PIN_HEIGHT,
     dpr,
@@ -183,6 +187,7 @@ function addPinLayers(
   });
 
   const dark = themeId === "dark" || themeId === "black";
+  const neon = themeId === "neon";
 
   map.addLayer({
     id: "preview-clusters",
@@ -190,10 +195,14 @@ function addPinLayers(
     source: PIN_SOURCE,
     filter: ["has", "point_count"],
     paint: {
-      "circle-color": dark ? "#555555" : "#1a2a7a",
+      "circle-color": neon ? "#12183A" : dark ? "#555555" : "#1a2a7a",
       "circle-radius": ["step", ["get", "point_count"], 16, 5, 20, 12, 24],
-      "circle-stroke-width": 2,
-      "circle-stroke-color": dark ? "#0B0B0B" : "#ffffff",
+      "circle-stroke-width": neon ? 2.5 : 2,
+      "circle-stroke-color": neon
+        ? "#F0E4C3"
+        : dark
+          ? "#0B0B0B"
+          : "#ffffff",
     },
   });
 
@@ -227,6 +236,7 @@ function addPinLayers(
     paint: { "text-color": "#ffffff" },
   });
 
+  const pinSuffix = neon ? "-neon" : "";
   map.addLayer({
     id: "preview-unclustered",
     type: "symbol",
@@ -236,8 +246,8 @@ function addPinLayers(
       "icon-image": [
         "case",
         ["==", ["get", "category"], "fallback"],
-        "pin-fallback",
-        ["concat", "pin-", ["get", "category"]],
+        `pin-fallback${pinSuffix}`,
+        ["concat", "pin-", ["get", "category"], pinSuffix],
       ],
       "icon-size": MAP_PIN_ICON_SIZE,
       "icon-anchor": "bottom",
@@ -376,7 +386,7 @@ export default function PreviewGlMap({
           void (async () => {
             try {
               if (modeRef.current === "default") {
-                await ensurePinImages(map);
+                await ensurePinImages(map, themeRef.current === "neon");
               }
               if (cancelled) return;
               addPinLayers(
@@ -388,7 +398,11 @@ export default function PreviewGlMap({
               );
               fitToPins(map, pinsRef.current, fitPadding, singleZoom);
               if (routeDemoRef.current) {
-                await paintPreviewRouteDemo(map, routeDemoRef.current);
+                await paintPreviewRouteDemo(
+                  map,
+                  routeDemoRef.current,
+                  themeRef.current === "neon" ? "neon" : "paper",
+                );
               }
 
               if (!handlersBound.current) {

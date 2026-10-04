@@ -260,6 +260,11 @@ import {
   shouldUseExpandedMapLibre,
   writeCompactMapLibreOverride,
   writeExpandedMapLibreOverride,
+  readAdminMapLibreTheme,
+  writeAdminMapLibreTheme,
+  resolveMapLibreThemeId,
+  adminMapThemeLabel,
+  type AdminMapLibreThemeId,
   type AdminMapGlOverride,
 } from "@/lib/mapSurface";
 import {
@@ -1557,6 +1562,7 @@ function HomePageContent() {
     const isAdmin = user?.id === ADMIN_USER_ID;
     setAdminCompactMapLibre(isAdmin ? readCompactMapLibreOverride() : "auto");
     setAdminExpandedMapLibre(isAdmin ? readExpandedMapLibreOverride() : "auto");
+    setAdminMapLibreTheme(isAdmin ? readAdminMapLibreTheme() : "paper");
     if (!isAdmin) {
       setCompactMapIsMapLibre(false);
       setExpandedMapIsMapLibre(false);
@@ -1730,6 +1736,8 @@ function HomePageContent() {
   const [compactMapRemountKey, setCompactMapRemountKey] = useState(0);
   const compactMapLibreFallbackToastedRef = useRef(false);
   /** Admin expanded MapLibre override (separate from minimap). */
+  const [adminMapLibreTheme, setAdminMapLibreTheme] =
+    useState<AdminMapLibreThemeId>("paper");
   const [adminExpandedMapLibre, setAdminExpandedMapLibre] =
     useState<AdminMapGlOverride>("auto");
   const [expandedMapIsMapLibre, setExpandedMapIsMapLibre] = useState(false);
@@ -10467,6 +10475,7 @@ function HomePageContent() {
       container,
       center: { lat: centerLat, lng: centerLng },
       level,
+      theme: resolveMapLibreThemeId(userIdRef.current === ADMIN_USER_ID),
       onPinClick: (pinId) => {
         const entry = mainPlaceMarkersByIdRef.current.get(pinId);
         const lat = entry?.lat ?? savedPlaceCoordsRef.current[pinId]?.lat;
@@ -12263,6 +12272,7 @@ function HomePageContent() {
 
         void ExpandedMapLibreAdapter.create({
           container: mapContainerEl,
+          theme: resolveMapLibreThemeId(userIdRef.current === ADMIN_USER_ID),
           center: { lat: centerLat, lng: centerLng },
           level,
           onPinClick: (pinId) => {
@@ -18465,6 +18475,65 @@ function HomePageContent() {
                 >
                   지도 시험(관리자)
                 </button>
+              ) : null}
+              {user?.id === ADMIN_USER_ID ? (
+                <div
+                  data-testid="admin-map-theme"
+                  style={{
+                    width: "100%",
+                    padding: "16px 20px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                    alignItems: "stretch",
+                    cursor: "default",
+                  }}
+                >
+                  <span style={{ color: "#1a2a7a", fontSize: 14, fontWeight: 600 }}>
+                    지도 테마(관리자) · {adminMapThemeLabel(adminMapLibreTheme)}
+                  </span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {([
+                      ["paper", "페이퍼"],
+                      ["neon", "네온"],
+                    ] as const).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        data-testid={`admin-map-theme-${id}`}
+                        onClick={() => {
+                          writeAdminMapLibreTheme(id);
+                          setAdminMapLibreTheme(id);
+                          setShowMypageSettingsSheet(false);
+                          setCompactMapRemountKey((k) => k + 1);
+                          setExpandedMapRemountKey((k) => k + 1);
+                          showToast(
+                            `지도 테마 · ${adminMapThemeLabel(id)}`,
+                            "info",
+                          );
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          border:
+                            adminMapLibreTheme === id
+                              ? "1.5px solid #1a2a7a"
+                              : "1px solid #ddd",
+                          background:
+                            adminMapLibreTheme === id ? "#1a2a7a" : "#fff",
+                          color: adminMapLibreTheme === id ? "#fff" : "#444",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ) : null}
               <div
                 style={{
