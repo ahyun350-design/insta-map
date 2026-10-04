@@ -10181,9 +10181,21 @@ function HomePageContent() {
       geocoderRef.current = new window.kakao.maps.services.Geocoder();
     }
     const cachedView = mapViewBootstrapRef.current;
-    const centerLat = cachedView && Number.isFinite(cachedView.lat) ? cachedView.lat : 37.5665;
-    const centerLng = cachedView && Number.isFinite(cachedView.lng) ? cachedView.lng : 126.978;
-    const level = cachedView && Number.isFinite(cachedView.level) ? cachedView.level : 9;
+    const loc = myLocationLatLngRef.current;
+    // Match Kakao compact: after GPS, center=me + level 9. Prefer known loc so first paint isn't elsewhere.
+    const centerLat =
+      loc && Number.isFinite(loc.lat)
+        ? loc.lat
+        : cachedView && Number.isFinite(cachedView.lat)
+          ? cachedView.lat
+          : 37.5665;
+    const centerLng =
+      loc && Number.isFinite(loc.lng)
+        ? loc.lng
+        : cachedView && Number.isFinite(cachedView.lng)
+          ? cachedView.lng
+          : 126.978;
+    const level = loc ? 9 : cachedView && Number.isFinite(cachedView.level) ? cachedView.level : 9;
     container.classList.add("is-maplibre-pins");
 
     void MapLibreMapAdapter.create({

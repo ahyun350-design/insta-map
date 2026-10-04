@@ -29,6 +29,7 @@ type PreviewQuery = {
   cluster: boolean;
   fps: boolean;
   mode: PreviewPerfMode;
+  compare: boolean;
 };
 
 function parseMode(sp: URLSearchParams): PreviewPerfMode {
@@ -46,6 +47,7 @@ function readPreviewQuery(): PreviewQuery {
       cluster: true,
       fps: false,
       mode: "default",
+      compare: false,
     };
   }
   const sp = new URLSearchParams(window.location.search);
@@ -60,6 +62,7 @@ function readPreviewQuery(): PreviewQuery {
     cluster: sp.get("cluster") !== "0",
     fps: sp.get("fps") === "1",
     mode: parseMode(sp),
+    compare: sp.get("compare") === "1",
   };
 }
 
@@ -79,6 +82,26 @@ type FpsStats = {
   avg5: number;
   min5: number;
 };
+
+
+function CompareHud({
+  enabled,
+  info,
+}: {
+  enabled: boolean;
+  info: { zoom: number; km: number; level: number } | null;
+}) {
+  if (!enabled) return null;
+  return (
+    <div className="map-preview-compare" role="status" aria-label="줌 비교">
+      <div>
+        ML zoom {info ? info.zoom.toFixed(2) : "—"} · Kakao L
+        {info ? info.level : "—"}
+      </div>
+      <div>가로 {info ? `${info.km.toFixed(2)} km` : "—"}</div>
+    </div>
+  );
+}
 
 function DiagPanel({
   enabled,
@@ -163,6 +186,8 @@ export default function MapPreviewClient() {
   const [pinCount, setPinCount] = useState(0);
   const [cluster, setCluster] = useState(true);
   const [showFps, setShowFps] = useState(false);
+  const [showCompare, setShowCompare] = useState(false);
+  const [compareInfo, setCompareInfo] = useState<{ zoom: number; km: number; level: number } | null>(null);
   const [mode, setMode] = useState<PreviewPerfMode>("default");
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -192,6 +217,7 @@ export default function MapPreviewClient() {
     setCluster(q.cluster);
     setShowFps(q.fps);
     setMode(q.mode);
+    setShowCompare(q.compare);
     writeQueryPatch({ theme: q.theme });
     setHydrated(true);
   }, []);
@@ -319,10 +345,21 @@ export default function MapPreviewClient() {
               setSelected(p);
             }}
             onDiagnostics={setDiag}
+            onCompareSample={
+              showCompare
+                ? (s) =>
+                    setCompareInfo({
+                      zoom: s.zoom,
+                      km: s.widthKm,
+                      level: s.level,
+                    })
+                : undefined
+            }
           />
         ) : null}
       </div>
 
+      <CompareHud enabled={showCompare} info={compareInfo} />
       <DiagPanel enabled={showFps} diag={diag} />
 
       {selected ? (

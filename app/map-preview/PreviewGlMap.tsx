@@ -11,12 +11,23 @@ import {
   DEFAULT_CATEGORY_PIN,
   resolvePinColor,
 } from "@/lib/categoryAppearance";
+import {
+  MAP_PIN_HEIGHT,
+  MAP_PIN_ICON_SIZE,
+  MAP_PIN_PIXEL_RATIO,
+  MAP_PIN_WIDTH,
+  pinMarkerSvg,
+} from "@/lib/mapPinImages";
 import type { FeedPostCategory } from "@/lib/feedPost";
 import {
   buildLitePreviewStyle,
   buildPindmapStyle,
   type MapPreviewThemeId,
 } from "./buildStyle";
+import {
+  horizontalSpanKmForMapLibreZoom,
+  mapLibreZoomToKakaoLevel,
+} from "@/lib/mapSurface/kakaoZoom";
 
 export type PreviewPerfMode = "default" | "lite" | "nopins";
 
@@ -48,20 +59,16 @@ type Props = {
   onError?: (err: Error) => void;
   onPinClick?: (pinId: string) => void;
   onDiagnostics?: (d: PreviewDiagnostics) => void;
+  onCompareSample?: (s: { zoom: number; widthKm: number; level: number }) => void;
 };
 
 const PIN_SOURCE = "preview-pins";
 const FEED_CATS = Object.keys(DEFAULT_CATEGORY_PIN) as FeedPostCategory[];
 
 function pinSvg(category: string) {
-  const fill = resolvePinColor(category);
-  const stroke = category === "카페" || category === "쇼핑" || category === "여행지" ? "#666" : "#999";
-  const emoji =
-    FEED_CATS.includes(category as FeedPostCategory)
-      ? DEFAULT_CATEGORY_PIN[category as FeedPostCategory].emoji
-      : "📍";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${fill}" stroke="${stroke}" stroke-width="1"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
+  return pinMarkerSvg(category, resolvePinColor(category));
 }
+
 
 async function ensurePinImages(map: MlMap) {
   await Promise.all(
@@ -73,9 +80,9 @@ async function ensurePinImages(map: MlMap) {
             resolve();
             return;
           }
-          const img = new Image(36, 44);
+          const img = new Image(MAP_PIN_WIDTH, MAP_PIN_HEIGHT);
           img.onload = () => {
-            if (!map.hasImage(id)) map.addImage(id, img, { pixelRatio: 2 });
+            if (!map.hasImage(id)) map.addImage(id, img, { pixelRatio: MAP_PIN_PIXEL_RATIO });
             resolve();
           };
           img.onerror = () => reject(new Error(`pin_image_${cat}`));
@@ -85,10 +92,10 @@ async function ensurePinImages(map: MlMap) {
   );
   if (!map.hasImage("pin-fallback")) {
     await new Promise<void>((resolve, reject) => {
-      const img = new Image(36, 44);
+      const img = new Image(MAP_PIN_WIDTH, MAP_PIN_HEIGHT);
       img.onload = () => {
         if (!map.hasImage("pin-fallback")) {
-          map.addImage("pin-fallback", img, { pixelRatio: 2 });
+          map.addImage("pin-fallback", img, { pixelRatio: MAP_PIN_PIXEL_RATIO });
         }
         resolve();
       };
@@ -232,7 +239,7 @@ function addPinLayers(
         "pin-fallback",
         ["concat", "pin-", ["get", "category"]],
       ],
-      "icon-size": 0.55,
+      "icon-size": MAP_PIN_ICON_SIZE,
       "icon-anchor": "bottom",
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
@@ -266,6 +273,7 @@ export default function PreviewGlMap({
   onError,
   onPinClick,
   onDiagnostics,
+  onCompareSample,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -285,6 +293,8 @@ export default function PreviewGlMap({
   onPinClickRef.current = onPinClick;
   const onDiagRef = useRef(onDiagnostics);
   onDiagRef.current = onDiagnostics;
+  const onCompareRef = useRef(onCompareSample);
+  onCompareRef.current = onCompareSample;
   const handlersBound = useRef(false);
   const bootAtRef = useRef(0);
 
@@ -330,6 +340,21 @@ export default function PreviewGlMap({
         });
         mapRef.current = map;
         map.touchZoomRotate.disableRotation();
+        const sampleCompare = () => {
+          if (!onCompareRef.current) return;
+          const c = map.getCanvas();
+          const w = c.clientWidth || c.width || 0;
+          if (!w) return;
+          const zoom = map.getZoom();
+          const lat = map.getCenter().lat;
+          onCompareRef.current({
+            zoom,
+            widthKm: horizontalSpanKmForMapLibreZoom(zoom, lat, w),
+            level: mapLibreZoomToKakaoLevel(zoom),
+          });
+        };
+        map.on("moveend", sampleCompare);
+        map.on("zoomend", sampleCompare);
 
         map.on("error", (ev) => {
           const msg = String(ev.error?.message ?? "");
@@ -390,6 +415,7 @@ export default function PreviewGlMap({
                 });
               }, 1200);
 
+              sampleCompare();
               onReadyRef.current?.();
             } catch (e) {
               onErrorRef.current?.(

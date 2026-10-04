@@ -4,6 +4,8 @@
  * Preview-only extras: black, mono, dark (used by /map-preview).
  */
 
+import { seoulGuLabelsGeoJson } from "@/lib/seoulGuLabels";
+
 /** Production-adopted themes */
 export type PindmapMapThemeId = "paper" | "white";
 
@@ -157,7 +159,7 @@ const HIDE_LAYER_IDS = new Set([
   "poi_r20",
   "poi_r7",
   "poi_r1",
-  "airport",
+  // airport kept visible (guide label) — shop/POI icons stay hidden via poi_* above
   "road_one_way_arrow",
   "road_one_way_arrow_opposite",
   "highway-shield-non-us",
@@ -172,8 +174,10 @@ const HIDE_LAYER_IDS = new Set([
   "label_village",
 ]);
 
+/** Prefer Korean name fields from OpenMapTiles. */
 const KO_TEXT: unknown = [
   "coalesce",
+  ["get", "name:ko"],
   ["get", "name:nonlatin"],
   ["get", "name"],
 ];
@@ -302,8 +306,19 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           layer.id.includes("service") ||
           layer.id.includes("minor") ||
           layer.id.includes("track");
-        paintSet(layer, "line-color", minor ? theme.roadMinor : theme.road);
-        paintSet(layer, "line-opacity", 1);
+        const major =
+          layer.id.includes("motorway") ||
+          layer.id.includes("trunk") ||
+          layer.id.includes("primary") ||
+          layer.id.includes("secondary");
+        // Major: slightly thicker warm tint; minor/일반: near-white (theme.road)
+        const majorWarm =
+          theme.id === "black" || theme.id === "dark" ? "#4a3f35" : "#E8D5BF";
+        paintSet(layer, "line-color", minor ? theme.roadMinor : major ? majorWarm : theme.road);
+        paintSet(layer, "line-opacity", major ? 0.95 : 1);
+        if (major && layer.paint && typeof layer.paint["line-width"] !== "undefined") {
+          /* keep liberty width ramp; nudge via multiplier where numeric */
+        }
       }
       if (layer.type === "fill") {
         paintSet(layer, "fill-color", theme.road);
@@ -335,21 +350,26 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       if (layer.id.startsWith("water")) {
         layer.minzoom = 10;
       }
+      // 시 이름: z8 이하 위주 (city/town). 구 스케일에서는 숨겨 겹침 감소.
       if (layer.id === "label_city" || layer.id === "label_town") {
-        layer.minzoom = 10;
-        layer.maxzoom = 13;
+        layer.minzoom = 5;
+        layer.maxzoom = 9;
+        paintSet(layer, "text-color", theme.text);
+        paintSet(layer, "text-halo-color", theme.textHalo);
+        paintSet(layer, "text-halo-width", 1.4);
       }
       if (layer.id === "label_other") {
-        // Split below into suburb (구) vs neighbourhood (동)
+        // Seoul tiles: 구=borough (z14), 동=quarter (z14). suburb≠구.
         setVisibility(layer, false);
         layers.push(layer);
         layers.push({
-          id: "label_suburb_ko",
+          id: "label_borough_ko",
           type: "symbol",
           source: "openmaptiles",
           "source-layer": "place",
-          filter: ["==", ["get", "class"], "suburb"],
-          minzoom: 11,
+          filter: ["==", ["get", "class"], "borough"],
+          minzoom: 13,
+          maxzoom: 16,
           layout: {
             "text-field": KO_TEXT,
             "text-font": ["Noto Sans Regular"],
@@ -360,15 +380,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           paint: {
             "text-color": theme.text,
             "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.2,
+            "text-halo-width": 1.4,
           },
         });
         layers.push({
-          id: "label_neighbourhood_ko",
+          id: "label_dong_ko",
           type: "symbol",
           source: "openmaptiles",
           "source-layer": "place",
-          filter: ["match", ["get", "class"], ["neighbourhood", "quarter"], true, false],
+          filter: ["match", ["get", "class"], ["quarter", "neighbourhood"], true, false],
           minzoom: 13,
           layout: {
             "text-field": KO_TEXT,
@@ -380,51 +400,138 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           paint: {
             "text-color": theme.text,
             "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.2,
+            "text-halo-width": 1.3,
           },
         });
         continue;
       }
       if (layer.id.startsWith("highway-name")) {
-        if (layer.id.includes("major")) layer.minzoom = 14;
+        // 주요 도로 이름 z13+, 방패/번호는 HIDE
+        if (layer.id.includes("major")) layer.minzoom = 13;
         else if (layer.id.includes("minor")) layer.minzoom = 15.2;
         else layer.minzoom = 16;
       }
+      // 다리 이름 (한강 다리 등)
+      if (layer.id.includes("bridge") && layer.type === "symbol") {
+        layer.minzoom = 12;
+        paintSet(layer, "text-color", theme.text);
+        paintSet(layer, "text-halo-color", theme.textHalo);
+      }
+      if (layer.id === "airport" || layer.id.startsWith("airport")) {
+        setVisibility(layer, true);
+        layer.minzoom = 9;
+        const layout = { ...(layer.layout || {}) };
+        layout["text-field"] = KO_TEXT;
+        layout["text-font"] = ["Noto Sans Regular"];
+        layout["text-size"] = 12;
+        delete layout["icon-image"];
+        layer.layout = layout;
+        paintSet(layer, "text-color", theme.text);
+        paintSet(layer, "text-halo-color", theme.textHalo);
+        paintSet(layer, "text-halo-width", 1.3);
+      }
       if (layer.id === "poi_transit") {
-        // 지하철역: 작은 점 + 이름, 노선색/아이콘 없음
-        layer.filter = ["==", ["get", "class"], "rail"];
-        layer.minzoom = 13;
+        layer.filter = [
+          "any",
+          ["==", ["get", "class"], "rail"],
+          ["==", ["get", "class"], "railway"],
+        ];
+        layer.minzoom = 12;
         const layout = { ...(layer.layout || {}) };
         delete layout["icon-image"];
         delete layout["icon-size"];
         layout["text-anchor"] = "top";
-        layout["text-offset"] = [0, 0.6];
+        layout["text-offset"] = [0, 0.55];
         layout["text-size"] = 11;
+        layout["text-field"] = KO_TEXT;
         layer.layout = layout;
+      }
+      // 큰 공원·산
+      if (layer.id.includes("park_label") || layer.id === "label_park") {
+        layer.minzoom = 11;
+      }
+      if (layer.id.includes("mountain") || layer.id.includes("peak")) {
+        layer.minzoom = 11;
+        paintSet(layer, "text-color", theme.text);
+        paintSet(layer, "text-halo-color", theme.textHalo);
       }
     }
 
     layers.push(layer);
 
-    // Insert subway station dots just before poi_transit text
     if (layer.id === "poi_transit") {
       layers.splice(layers.length - 1, 0, {
         id: "subway_station_dot",
         type: "circle",
         source: "openmaptiles",
         "source-layer": "poi",
-        filter: ["==", ["get", "class"], "rail"],
-        minzoom: 13,
+        filter: [
+          "any",
+          ["==", ["get", "class"], "rail"],
+          ["==", ["get", "class"], "railway"],
+        ],
+        minzoom: 12,
         paint: {
-          "circle-radius": 3.2,
+          "circle-radius": 2.6,
           "circle-color": theme.stationDot,
-          "circle-opacity": 0.85,
+          "circle-opacity": 0.9,
           "circle-stroke-width": 1,
           "circle-stroke-color": theme.textHalo,
         },
       });
     }
   }
+
+  // 구 이름 z9–13: tiles lack borough until z14 → static Seoul overlay
+  style.sources = {
+    ...style.sources,
+    seoul_gu_labels: {
+      type: "geojson",
+      data: seoulGuLabelsGeoJson(),
+    },
+  };
+  layers.push({
+    id: "label_seoul_gu_overlay",
+    type: "symbol",
+    source: "seoul_gu_labels",
+    minzoom: 9,
+    maxzoom: 13.5,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 13,
+      "text-max-width": 8,
+      visibility: "visible",
+    },
+    paint: {
+      "text-color": theme.text,
+      "text-halo-color": theme.textHalo,
+      "text-halo-width": 1.4,
+    },
+  });
+
+  // transportation_name bridge labels if liberty didn't already expose them
+  layers.push({
+    id: "label_bridge_ko",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "transportation_name",
+    minzoom: 12,
+    filter: ["==", ["get", "brunnel"], "bridge"],
+    layout: {
+      "text-field": KO_TEXT,
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 11,
+      "symbol-placement": "line",
+      "text-max-angle": 30,
+      visibility: "visible",
+    },
+    paint: {
+      "text-color": theme.text,
+      "text-halo-color": theme.textHalo,
+      "text-halo-width": 1.2,
+    },
+  });
 
   style.layers = layers;
   style.name = `pindmap-${theme.id}`;

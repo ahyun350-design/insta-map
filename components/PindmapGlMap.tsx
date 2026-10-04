@@ -9,6 +9,13 @@ import maplibregl, {
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./PindmapGlMap.css";
 import { DEFAULT_CATEGORY_PIN, resolvePinColor } from "@/lib/categoryAppearance";
+import {
+  MAP_PIN_HEIGHT,
+  MAP_PIN_ICON_SIZE,
+  MAP_PIN_PIXEL_RATIO,
+  MAP_PIN_WIDTH,
+  pinMarkerSvg,
+} from "@/lib/mapPinImages";
 import type { FeedPostCategory } from "@/lib/feedPost";
 import {
   buildPindmapStyle,
@@ -44,15 +51,9 @@ const PIN_SOURCE = "pindmap-pins";
 const FEED_CATS = Object.keys(DEFAULT_CATEGORY_PIN) as FeedPostCategory[];
 
 function pinSvg(category: string): string {
-  const fill = resolvePinColor(category);
-  const isFood = category === "맛집";
-  const stroke = isFood ? "#fff" : "#999";
-  const emoji =
-    (FEED_CATS.includes(category as FeedPostCategory)
-      ? DEFAULT_CATEGORY_PIN[category as FeedPostCategory].emoji
-      : "📍");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${fill}" stroke="${stroke}" stroke-width="1"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
+  return pinMarkerSvg(category, resolvePinColor(category));
 }
+
 
 async function ensurePinImages(map: MlMap) {
   const cats = new Set<string>(FEED_CATS);
@@ -65,10 +66,10 @@ async function ensurePinImages(map: MlMap) {
             resolve();
             return;
           }
-          const img = new Image(36, 44);
+          const img = new Image(MAP_PIN_WIDTH, MAP_PIN_HEIGHT);
           img.onload = () => {
             if (!map.hasImage(id)) {
-              map.addImage(id, img, { pixelRatio: 2 });
+              map.addImage(id, img, { pixelRatio: MAP_PIN_PIXEL_RATIO });
             }
             resolve();
           };
@@ -81,10 +82,10 @@ async function ensurePinImages(map: MlMap) {
   const fallbackId = "pin-fallback";
   if (!map.hasImage(fallbackId)) {
     await new Promise<void>((resolve, reject) => {
-      const img = new Image(36, 44);
+      const img = new Image(MAP_PIN_WIDTH, MAP_PIN_HEIGHT);
       img.onload = () => {
         if (!map.hasImage(fallbackId)) {
-          map.addImage(fallbackId, img, { pixelRatio: 2 });
+          map.addImage(fallbackId, img, { pixelRatio: MAP_PIN_PIXEL_RATIO });
         }
         resolve();
       };
@@ -192,7 +193,7 @@ function addPinLayers(
         "pin-fallback",
         ["concat", "pin-", ["get", "category"]],
       ],
-      "icon-size": 0.55,
+      "icon-size": MAP_PIN_ICON_SIZE,
       "icon-anchor": "bottom",
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,

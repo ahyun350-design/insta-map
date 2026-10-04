@@ -266,3 +266,21 @@
   flex-wrap: wrap;
   row-gap: 8px;
 }
+
+.map-preview-compare {
+  position: absolute;
+  top: calc(56px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 22;
+  min-width: 220px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(10, 14, 28, 0.82);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+}

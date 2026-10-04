@@ -16,6 +16,10 @@ export {
 export {
   kakaoLevelToMapLibreZoom,
   mapLibreZoomToKakaoLevel,
+  kakaoLevelWidthKm,
+  mapLibreZoomWidthKm,
+  horizontalSpanKmForMapLibreZoom,
+  metersPerPixelAtLatZoom256,
 } from "./kakaoZoom";
 export {
   COMPACT_MAPLIBRE_BRAND,

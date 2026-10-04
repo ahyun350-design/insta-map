@@ -6,10 +6,25 @@ import maplibregl, {
   type StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { DEFAULT_CATEGORY_PIN } from "@/lib/categoryAppearance";
-import type { FeedPostCategory } from "@/lib/feedPost";
+import {
+  MAP_FOCUS_PIN_HEIGHT,
+  MAP_FOCUS_PIN_ICON_SIZE,
+  MAP_FOCUS_PIN_WIDTH,
+  MAP_MYLOC_ICON_SIZE,
+  MAP_MYLOC_SIZE,
+  MAP_PIN_HEIGHT,
+  MAP_PIN_ICON_SIZE,
+  MAP_PIN_PIXEL_RATIO,
+  MAP_PIN_WIDTH,
+  MY_LOCATION_IMAGE_ID,
+  focusMarkerSvg,
+  myLocationMarkerSvg,
+  pinImageKey,
+  pinMarkerSvg,
+} from "@/lib/mapPinImages";
 import { buildPindmapStyle } from "@/lib/pindmapMapStyle";
 import {
+  horizontalSpanKmForMapLibreZoom,
   kakaoLevelToMapLibreZoom,
   mapLibreZoomToKakaoLevel,
 } from "./kakaoZoom";
@@ -27,31 +42,11 @@ const ROUTE_LAYER = "compact-route-line";
 const FOCUS_SOURCE = "compact-focus";
 const FOCUS_LAYER = "compact-focus-symbol";
 const MYLOC_SOURCE = "compact-myloc";
-const MYLOC_LAYER = "compact-myloc-circle";
+const MYLOC_LAYER = "compact-myloc-symbol";
 
 const EDGE_PX = 24;
+const HIT_PAD_PX = 14;
 const FIRST_TILE_TIMEOUT_MS = 4000;
-
-function pinSvg(category: string, fillColor: string) {
-  const emoji =
-    category in DEFAULT_CATEGORY_PIN
-      ? DEFAULT_CATEGORY_PIN[category as FeedPostCategory].emoji
-      : "📍";
-  const stroke = category === "맛집" ? "#fff" : "#999";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${fillColor}" stroke="${stroke}" stroke-width="1"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
-}
-
-function focusPinSvg(category: string, fillColor: string) {
-  const emoji =
-    category in DEFAULT_CATEGORY_PIN
-      ? DEFAULT_CATEGORY_PIN[category as FeedPostCategory].emoji
-      : "📍";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58"><path d="M24 1C11.3 1 1 11.3 1 24c0 17.5 23 33 23 33s23-15.5 23-33C47 11.3 36.7 1 24 1z" fill="${fillColor}" stroke="#1a2a7a" stroke-width="2.5"/><circle cx="24" cy="24" r="15" fill="white" opacity="0.95"/><text x="24" y="30" text-anchor="middle" font-size="16">${emoji}</text></svg>`;
-}
-
-function imageKey(kind: "pin" | "focus", category: string, fillColor: string) {
-  return `${kind}:${category}:${fillColor.toLowerCase()}`;
-}
 
 async function ensureImage(
   map: MlMap,
@@ -64,7 +59,9 @@ async function ensureImage(
   await new Promise<void>((resolve, reject) => {
     const img = new Image(w, h);
     img.onload = () => {
-      if (!map.hasImage(id)) map.addImage(id, img, { pixelRatio: 2 });
+      if (!map.hasImage(id)) {
+        map.addImage(id, img, { pixelRatio: MAP_PIN_PIXEL_RATIO });
+      }
       resolve();
     };
     img.onerror = () => reject(new Error(`image_${id}`));
@@ -94,7 +91,8 @@ export class MapLibreMapAdapter implements CompactMapSurface {
   private touchCleanups: Array<() => void> = [];
   private onPinClick: ((id: string) => void) | null = null;
   private onMapClickEmpty: (() => void) | null = null;
-  private onViewIdle: ((view: { lat: number; lng: number; level: number }) => void) | null = null;
+  private onViewIdle: ((view: { lat: number; lng: number; level: number }) => void) | null =
+    null;
 
   static async create(
     options: CreateCompactMapLibreOptions,
@@ -155,12 +153,14 @@ export class MapLibreMapAdapter implements CompactMapSurface {
       }
     }, FIRST_TILE_TIMEOUT_MS);
 
-    map.on("error", () => {
-      /* tile noise ignored; timeout handles hard failure */
-    });
-
+    map.on("error", () => {});
     map.on("sourcedata", (e) => {
-      if (e.dataType === "source" && e.isSourceLoaded && e.sourceId !== PIN_SOURCE) {
+      if (
+        e.dataType === "source" &&
+        e.isSourceLoaded &&
+        e.sourceId !== PIN_SOURCE &&
+        e.sourceId !== "seoul_gu_labels"
+      ) {
         this.firstTileSeen = true;
       }
     });
@@ -170,9 +170,15 @@ export class MapLibreMapAdapter implements CompactMapSurface {
         try {
           if (this.destroyed || !this.map) return;
           this.styleReady = true;
+          await ensureImage(
+            this.map,
+            MY_LOCATION_IMAGE_ID,
+            myLocationMarkerSvg(),
+            MAP_MYLOC_SIZE,
+            MAP_MYLOC_SIZE,
+          );
           this.addLayers(this.map);
           this.bindClicks(this.map);
-          // Empty-ish load still counts as first paint if no tiles requested yet
           window.setTimeout(() => {
             if (!this.firstTileSeen) this.firstTileSeen = true;
           }, 800);
@@ -222,24 +228,6 @@ export class MapLibreMapAdapter implements CompactMapSurface {
   }
 
   private addLayers(map: MlMap) {
-    map.addSource(PIN_SOURCE, {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: [] },
-      cluster: false,
-    });
-    map.addLayer({
-      id: PIN_LAYER,
-      type: "symbol",
-      source: PIN_SOURCE,
-      layout: {
-        "icon-image": ["get", "icon"],
-        "icon-size": 0.55,
-        "icon-anchor": "bottom",
-        "icon-allow-overlap": true,
-        "icon-ignore-placement": true,
-      },
-    });
-
     map.addSource(ROUTE_SOURCE, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
@@ -256,6 +244,41 @@ export class MapLibreMapAdapter implements CompactMapSurface {
       },
     });
 
+    // My-location below pins — non-interactive (no click handler)
+    map.addSource(MYLOC_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: MYLOC_LAYER,
+      type: "symbol",
+      source: MYLOC_SOURCE,
+      layout: {
+        "icon-image": MY_LOCATION_IMAGE_ID,
+        "icon-size": MAP_MYLOC_ICON_SIZE,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
+    });
+
+    map.addSource(PIN_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+      cluster: false,
+    });
+    map.addLayer({
+      id: PIN_LAYER,
+      type: "symbol",
+      source: PIN_SOURCE,
+      layout: {
+        "icon-image": ["get", "icon"],
+        "icon-size": MAP_PIN_ICON_SIZE,
+        "icon-anchor": "bottom",
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
+    });
+
     map.addSource(FOCUS_SOURCE, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
@@ -266,42 +289,44 @@ export class MapLibreMapAdapter implements CompactMapSurface {
       source: FOCUS_SOURCE,
       layout: {
         "icon-image": ["get", "icon"],
-        "icon-size": 0.7,
+        "icon-size": MAP_FOCUS_PIN_ICON_SIZE,
         "icon-anchor": "bottom",
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
       },
     });
-
-    map.addSource(MYLOC_SOURCE, {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: [] },
-    });
-    map.addLayer({
-      id: MYLOC_LAYER,
-      type: "circle",
-      source: MYLOC_SOURCE,
-      paint: {
-        "circle-radius": 8,
-        "circle-color": "#1a2a7a",
-        "circle-stroke-width": 2.5,
-        "circle-stroke-color": "#ffffff",
-      },
-      // Not registered for click — non-interactive my-location
-    });
   }
 
   private bindClicks(map: MlMap) {
-    map.on("click", PIN_LAYER, (e) => {
-      const id = e.features?.[0]?.properties?.id;
-      if (typeof id === "string") {
-        e.originalEvent?.stopPropagation?.();
-        this.onPinClick?.(id);
-      }
-    });
     map.on("click", (e) => {
-      const hits = map.queryRenderedFeatures(e.point, { layers: [PIN_LAYER, FOCUS_LAYER] });
-      if (hits.length > 0) return;
+      const bbox: [[number, number], [number, number]] = [
+        [e.point.x - HIT_PAD_PX, e.point.y - HIT_PAD_PX],
+        [e.point.x + HIT_PAD_PX, e.point.y + HIT_PAD_PX],
+      ];
+      const feats = map.queryRenderedFeatures(bbox, {
+        layers: [PIN_LAYER, FOCUS_LAYER],
+      });
+      if (feats.length > 0) {
+        let bestId: string | null = null;
+        let bestD = Infinity;
+        for (const f of feats) {
+          const id = f.properties?.id;
+          if (typeof id !== "string") continue;
+          if (f.geometry.type !== "Point") continue;
+          const coords = f.geometry.coordinates as [number, number];
+          const projected = map.project(coords);
+          const d =
+            (projected.x - e.point.x) ** 2 + (projected.y - e.point.y) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            bestId = id;
+          }
+        }
+        if (bestId) {
+          this.onPinClick?.(bestId);
+          return;
+        }
+      }
       this.onMapClickEmpty?.();
     });
     map.on("mouseenter", PIN_LAYER, () => {
@@ -310,6 +335,23 @@ export class MapLibreMapAdapter implements CompactMapSurface {
     map.on("mouseleave", PIN_LAYER, () => {
       map.getCanvas().style.cursor = "";
     });
+  }
+
+  /** Current horizontal ground span (km) for diagnostics. */
+  getHorizontalSpanKm(): number | null {
+    if (!this.map) return null;
+    const canvas = this.map.getCanvas();
+    const w = canvas.clientWidth || canvas.width;
+    if (!w) return null;
+    return horizontalSpanKmForMapLibreZoom(
+      this.map.getZoom(),
+      this.map.getCenter().lat,
+      w,
+    );
+  }
+
+  getZoom(): number {
+    return this.map?.getZoom() ?? 0;
   }
 
   resize() {
@@ -365,10 +407,10 @@ export class MapLibreMapAdapter implements CompactMapSurface {
       pins.map((p) =>
         ensureImage(
           map,
-          imageKey("pin", p.category, p.fillColor),
-          pinSvg(p.category, p.fillColor),
-          36,
-          44,
+          pinImageKey("pin", p.category, p.fillColor),
+          pinMarkerSvg(p.category, p.fillColor),
+          MAP_PIN_WIDTH,
+          MAP_PIN_HEIGHT,
         ),
       ),
     );
@@ -381,7 +423,7 @@ export class MapLibreMapAdapter implements CompactMapSurface {
         id: p.id,
         properties: {
           id: p.id,
-          icon: imageKey("pin", p.category, p.fillColor),
+          icon: pinImageKey("pin", p.category, p.fillColor),
           name: p.name ?? "",
         },
         geometry: { type: "Point", coordinates: [p.lng, p.lat] },
@@ -460,13 +502,13 @@ export class MapLibreMapAdapter implements CompactMapSurface {
   private async applyFocusMarker(pin: CompactPinInput) {
     const map = this.map;
     if (!map?.getSource(FOCUS_SOURCE)) return;
-    const icon = imageKey("focus", pin.category, pin.fillColor);
+    const icon = pinImageKey("focus", pin.category, pin.fillColor);
     await ensureImage(
       map,
       icon,
-      focusPinSvg(pin.category, pin.fillColor),
-      48,
-      58,
+      focusMarkerSvg(pin.category, pin.fillColor),
+      MAP_FOCUS_PIN_WIDTH,
+      MAP_FOCUS_PIN_HEIGHT,
     );
     if (this.destroyed || !this.map) return;
     (this.map.getSource(FOCUS_SOURCE) as GeoJSONSource).setData({
