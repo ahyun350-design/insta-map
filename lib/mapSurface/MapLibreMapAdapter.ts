@@ -42,6 +42,7 @@ import type {
 } from "./types";
 import { trackMapGlFallback, trackMapGlReady } from "./mapGlTelemetry";
 import { claimMapGlSlot, releaseMapGlSlot } from "./mapGlRecovery";
+import { attachSubwayOverlay, prefetchSubwayOverlay } from "./subwayOverlay";
 import {
   MAP_BRAND_NAVY,
   MAP_NEON_ACCENT,
@@ -198,6 +199,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.containerEl = options.container;
     this.isSurfaceVisibleFn = options.isSurfaceVisible ?? null;
     this.onContextLostCb = options.onContextLost ?? null;
+    prefetchSubwayOverlay();
     const style = await buildPindmapStyle(this.theme);
     if (this.destroyed || this.intentionalDestroy) return;
 
@@ -281,7 +283,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         e.dataType === "source" &&
         e.isSourceLoaded &&
         e.sourceId !== PIN_SOURCE &&
-        e.sourceId !== "korea_gu_labels"
+        e.sourceId !== "korea_gu_labels" &&
+        e.sourceId !== "pindmap_subway"
       ) {
         this.firstTileSeen = true;
       }
@@ -318,6 +321,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
             this.mountStartedAt;
           trackMapGlReady(this.mode, ms);
           options.onReady?.();
+          // Subway overlay: after first paint; failure must not affect the map.
+          const theme = this.theme;
+          const mapRef = this.map;
+          void attachSubwayOverlay(mapRef, theme).catch(() => {});
         } catch {
           this.reportFallback(options, "error");
         }

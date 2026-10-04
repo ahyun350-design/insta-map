@@ -89,6 +89,11 @@ export {
   routePaintForMode,
 } from "./routeStyle";
 export {
+  attachSubwayOverlay,
+  prefetchSubwayOverlay,
+} from "./subwayOverlay";
+export { softenSubwayColour } from "./subwayColour";
+export {
   COMPACT_MAPLIBRE_BRAND,
   createCompactMapLibreShim,
   getCompactMapLibreAdapter,

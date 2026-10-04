@@ -34,6 +34,10 @@ import {
   releaseMapGlSlot,
 } from "@/lib/mapSurface/mapGlRecovery";
 import {
+  attachSubwayOverlay,
+  prefetchSubwayOverlay,
+} from "@/lib/mapSurface/subwayOverlay";
+import {
   paintPreviewRouteDemo,
   type PreviewRouteMode,
 } from "./routeDemo";
@@ -339,6 +343,7 @@ export default function PreviewGlMap({
 
     bootAtRef.current = performance.now();
     const perfOrigin = performance.now();
+    prefetchSubwayOverlay();
 
     (async () => {
       try {
@@ -464,6 +469,7 @@ export default function PreviewGlMap({
 
               sampleCompare();
               onReadyRef.current?.();
+              void attachSubwayOverlay(map, themeRef.current).catch(() => {});
             } catch (e) {
               onErrorRef.current?.(
                 e instanceof Error ? e : new Error(String(e)),
