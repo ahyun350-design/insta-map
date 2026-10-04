@@ -3623,8 +3623,13 @@ function HomePageContent() {
     if (!isNativeMapAvailable()) return;
     const isAdmin =
       userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID;
-    // Admin fullscreen MapLibre: keep web portal; never presentFullscreenNativeMap.
-    if (shouldUseExpandedMapLibre(Boolean(isAdmin), userIdRef.current || user?.id)) {
+    // Admin fullscreen MapLibre (incl. after session web fallback): never presentFullscreenNativeMap.
+    const adminForcedExpandedMl =
+      Boolean(isAdmin) && readExpandedMapLibreOverride() === "force_maplibre";
+    if (
+      shouldUseExpandedMapLibre(Boolean(isAdmin), userIdRef.current || user?.id) ||
+      adminForcedExpandedMl
+    ) {
       if (!mapExpanded && fullscreenAutoOpenedRef.current) {
         fullscreenAutoOpenedRef.current = false;
       }
@@ -11398,6 +11403,26 @@ function HomePageContent() {
             distanceMeters(searchCenterLat, searchCenterLng, parseFloat(b.y), parseFloat(b.x)),
         );
         const fitPlaces = sorted.slice(0, 3);
+        const gl = getExpandedMapLibreAdapter(mapNow);
+        if (gl) {
+          // Blur search field first — iOS WKWebView + WebGL can lose context on keyboard+camera.
+          try {
+            expandedMapSearchInputRef.current?.blur();
+          } catch {
+            /* noop */
+          }
+          const pts = fitPlaces.map((p) => ({
+            lat: parseFloat(p.y),
+            lng: parseFloat(p.x),
+          }));
+          if (pts.length === 1) {
+            gl.setCenter(pts[0]!.lat, pts[0]!.lng);
+            gl.setLevel(3);
+          } else {
+            gl.fitPoints(pts, { top: 108, right: 28, bottom: 280, left: 28 });
+          }
+          return;
+        }
         if (fitPlaces.length === 1) {
           const p = fitPlaces[0];
           mapNow.setCenter(new window.kakao.maps.LatLng(parseFloat(p.y), parseFloat(p.x)));
@@ -11426,7 +11451,9 @@ function HomePageContent() {
       };
 
       const runKeywordSearchAtMapCenter = () => {
-        const bias = getExpandedMapSearchCenter();
+        const center = getExpandedMapSearchCenter();
+        // Kakao Places requires a real LatLng instance (MapLibre shim center is duck-typed only).
+        const bias = new window.kakao.maps.LatLng(center.getLat(), center.getLng());
         const SortBy = window.kakao.maps.services.SortBy;
         const keywordOpts: Record<string, unknown> = { location: bias };
         if (SortBy?.DISTANCE != null) {
@@ -11459,8 +11486,21 @@ function HomePageContent() {
           setMapSearchResults([placeObj]);
           setMapSearchLabel(trimmed);
           setIsMapSearchSheetOpen(true);
-          expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(addr.y, addr.x));
-          expandedMapRef.current.setLevel(3);
+          {
+            const glAddr = getExpandedMapLibreAdapter(expandedMapRef.current);
+            if (glAddr && Number.isFinite(addrLat) && Number.isFinite(addrLng)) {
+              try {
+                expandedMapSearchInputRef.current?.blur();
+              } catch {
+                /* noop */
+              }
+              glAddr.setCenter(addrLat, addrLng);
+              glAddr.setLevel(3);
+            } else {
+              expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(addr.y, addr.x));
+              expandedMapRef.current.setLevel(3);
+            }
+          }
           pendingSearchCenterSyncRef.current = true;
           setSearchQuery("");
         } else {
@@ -12310,19 +12350,40 @@ function HomePageContent() {
           onFallback: (reason) => {
             if (cancelled) return;
             console.warn("[PindMap:maplibre] expanded fallback", reason);
-            setSessionForceKakaoExpanded(true);
-            setExpandedMapIsMapLibre(false);
-            if (!expandedMapLibreFallbackToastedRef.current) {
-              expandedMapLibreFallbackToastedRef.current = true;
-              showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
-            }
             try {
               getExpandedMapLibreAdapter(expandedMapRef.current)?.destroy();
             } catch {
               /* noop */
             }
             expandedMapRef.current = null;
+            setExpandedMapIsMapLibre(false);
             if (mapContainerEl) mapContainerEl.innerHTML = "";
+
+            const adminForcedMl =
+              (userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID) &&
+              readExpandedMapLibreOverride() === "force_maplibre";
+
+            // Admin MapLibre test: never hand the session to iOS native fullscreen.
+            // Transient WebGL loss (keyboard/search) → remount MapLibre; hard failures → web Kakao in portal.
+            if (adminForcedMl) {
+              if (reason === "webglcontextlost") {
+                setExpandedMapRemountKey((k) => k + 1);
+                return;
+              }
+              setSessionForceKakaoExpanded(true);
+              if (!expandedMapLibreFallbackToastedRef.current) {
+                expandedMapLibreFallbackToastedRef.current = true;
+                showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
+              }
+              setExpandedMapRemountKey((k) => k + 1);
+              return;
+            }
+
+            setSessionForceKakaoExpanded(true);
+            if (!expandedMapLibreFallbackToastedRef.current) {
+              expandedMapLibreFallbackToastedRef.current = true;
+              showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
+            }
             if (isNativeMapAvailable()) {
               fullscreenAutoOpenedRef.current = true;
               void handleOpenFullscreenNativeMapRef.current();
@@ -12344,16 +12405,20 @@ function HomePageContent() {
           })
           .catch((err) => {
             console.warn("[PindMap:maplibre] expanded init failed", err);
+            const adminForcedMl =
+              (userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID) &&
+              readExpandedMapLibreOverride() === "force_maplibre";
             setSessionForceKakaoExpanded(true);
             if (!expandedMapLibreFallbackToastedRef.current) {
               expandedMapLibreFallbackToastedRef.current = true;
               showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
             }
-            if (isNativeMapAvailable()) {
+            // Admin MapLibre: keep web portal (Kakao web remount), never present native.
+            if (adminForcedMl || !isNativeMapAvailable()) {
+              setExpandedMapRemountKey((k) => k + 1);
+            } else {
               fullscreenAutoOpenedRef.current = true;
               void handleOpenFullscreenNativeMapRef.current();
-            } else {
-              setExpandedMapRemountKey((k) => k + 1);
             }
           });
       }, 100);
@@ -16143,9 +16208,17 @@ function HomePageContent() {
                   user?.id === ADMIN_USER_ID,
                   user?.id,
                 );
+                // Keep web portal for admin MapLibre testing even after sessionForceKakao
+                // (otherwise iOS would presentFullscreenNativeMap and look like "jumped to Kakao").
+                const adminForcedExpandedMlUi =
+                  user?.id === ADMIN_USER_ID &&
+                  readExpandedMapLibreOverride() === "force_maplibre";
                 const showWebExpandedPortal =
                   mapExpanded &&
-                  (!nativeAvail || adminCourseWebPortal || adminExpandedMlPortal) &&
+                  (!nativeAvail ||
+                    adminCourseWebPortal ||
+                    adminExpandedMlPortal ||
+                    adminForcedExpandedMlUi) &&
                   typeof document !== "undefined";
                 logAdminCourseMap(user?.id ?? userIdRef.current, "web expanded portal gate", {
                   mapExpanded,
@@ -16332,12 +16405,8 @@ function HomePageContent() {
                       )}
                     </div>
                     )}
-                    <div
-                      className={adminExpandedMlPortal ? "expandedMapLibreStage" : undefined}
-                      style={{ flex: 1, minHeight: 0, position: "relative" }}
-                    >
                       {adminExpandedMlPortal && (
-                        <div className="expandedMapLibreTopChrome">
+                        <div className="expandedMapLibreTopChrome expandedMapLibreTopChromeFlow">
                           <button
                             type="button"
                             className="expandedMapLibreRoundBtn"
@@ -16388,12 +16457,17 @@ function HomePageContent() {
                           </button>
                           {!showCourseRoute && (
                             <div className="expandedMapLibreSearchPill">
-                              <span className="expandedMapLibreSearchIcon" aria-hidden>
-                                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                              <button
+                                type="button"
+                                className="expandedMapLibreSearchIcon"
+                                aria-label="검색"
+                                onClick={() => handleSearch()}
+                              >
+                                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
                                   <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
                                   <path d="M12.2 12.2L15.5 15.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                                 </svg>
-                              </span>
+                              </button>
                               <input
                                 ref={expandedMapSearchInputRef}
                                 className="expandedMapLibreSearchInput"
@@ -16406,8 +16480,6 @@ function HomePageContent() {
                                     handleSearch();
                                   }
                                 }}
-                                enterKeyHint="search"
-                                inputMode="search"
                               />
                               {(searchQuery.trim() || mapSearchResults.length > 0) && (
                                 <button
@@ -16423,6 +16495,10 @@ function HomePageContent() {
                           )}
                         </div>
                       )}
+                    <div
+                      className={adminExpandedMlPortal ? "expandedMapLibreStage" : undefined}
+                      style={{ flex: 1, minHeight: 0, position: "relative" }}
+                    >
                       <div
                         ref={mapExpandedRef}
                         className={`kakaoMap${expandedMapIsMapLibre ? " is-maplibre-expanded" : ""}`}

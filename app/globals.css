@@ -7979,12 +7979,37 @@ select:focus-visible {
   align-items: center;
   justify-content: center;
 }
-/* Research / loading toast sit below floating search row */
+
+/* Layout chrome above the WebGL canvas (not composited over it) — avoids iOS context loss on keyboard */
+.expandedMapLibreTopChromeFlow {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  flex-shrink: 0;
+  z-index: 5;
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  padding-bottom: 8px;
+  background: transparent;
+}
+.expandedMapLibreSearchIcon {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8b92a1;
+  -webkit-tap-highlight-color: transparent;
+}
+/* Research button: near top of map stage (chrome is outside) */
 .expandedMapLibreStage .mapResearchAreaBtn {
-  top: calc(12px + env(safe-area-inset-top, 0px) + 44px + 10px);
+  top: 12px;
 }
 .expandedMapLibreStage .expandedMapLibreRouteLoading {
-  top: calc(12px + env(safe-area-inset-top, 0px) + 44px + 10px) !important;
+  top: 12px !important;
 }
 
 .expandedMapLibreAttrib {
