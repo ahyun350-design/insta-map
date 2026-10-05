@@ -208,7 +208,13 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   private reportFallback(
     options: CreateCompactMapLibreOptions,
-    reason: "style_timeout" | "tile_timeout" | "webgl_unsupported" | "error" | "webglcontextlost",
+    reason:
+      | "style_timeout"
+      | "style_error"
+      | "tile_timeout"
+      | "webgl_unsupported"
+      | "error"
+      | "webglcontextlost",
   ) {
     if (this.fallbackReported || this.destroyed) return;
     this.fallbackReported = true;
@@ -313,12 +319,16 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     }, FIRST_TILE_TIMEOUT_MS);
 
     map.on("error", (ev) => {
+      if (this.styleReady || this.destroyed || this.fallbackReported) return;
       const msg = String(
         (ev as { error?: { message?: string } })?.error?.message ?? "",
       );
-      if (/layers\[|unknown property/i.test(msg)) {
+      // Style validation / parse failures never fire `load` — record style_error (no message/URL in meta).
+      if (
+        /layers\[|unknown property|source|style|Failed to load/i.test(msg)
+      ) {
         invalidateLibertyStyleCache();
-        this.reportFallback(options, "error");
+        this.reportFallback(options, "style_error");
       }
     });
     map.on("sourcedata", (e) => {

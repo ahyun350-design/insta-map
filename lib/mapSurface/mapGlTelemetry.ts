@@ -3,6 +3,7 @@ import { track } from "@/lib/track";
 export type MapGlSurface = "compact" | "expanded";
 export type MapGlFallbackReason =
   | "style_timeout"
+  | "style_error"
   | "tile_timeout"
   | "webgl_unsupported"
   | "error"

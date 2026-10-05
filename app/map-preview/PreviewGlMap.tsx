@@ -88,6 +88,44 @@ type Props = {
 const PIN_SOURCE = "preview-pins";
 const FEED_CATS = Object.keys(DEFAULT_CATEGORY_PIN) as FeedPostCategory[];
 
+/** /map-preview e2e only — never set on app home surfaces. */
+export type PindmapPreviewMapDiag = {
+  loadMs: number | null;
+  styleLoadMs: number | null;
+  /** Short codes only (no message text / URLs). */
+  errorCodes: string[];
+  layerIds: string[];
+  hasSubwaySource: boolean;
+  hasAttrib: boolean;
+};
+
+declare global {
+  interface Window {
+    __PINDMAP_PREVIEW_MAP__?: MlMap | null;
+    __PINDMAP_PREVIEW_DIAG__?: PindmapPreviewMapDiag;
+  }
+}
+
+function previewStyleErrorCode(msg: string): string {
+  if (/unknown property/i.test(msg)) return "unknown_property";
+  if (/layers\[/i.test(msg)) return "layer_spec";
+  if (/Failed to load|style/i.test(msg)) return "style_load";
+  return "map_error";
+}
+
+function publishPreviewDiag(partial: Partial<PindmapPreviewMapDiag>) {
+  if (typeof window === "undefined") return;
+  const prev = window.__PINDMAP_PREVIEW_DIAG__ ?? {
+    loadMs: null,
+    styleLoadMs: null,
+    errorCodes: [],
+    layerIds: [],
+    hasSubwaySource: false,
+    hasAttrib: false,
+  };
+  window.__PINDMAP_PREVIEW_DIAG__ = { ...prev, ...partial };
+}
+
 function pinSvg(category: string, neon = false) {
   return pinMarkerSvg(
     category,
@@ -386,6 +424,24 @@ export default function PreviewGlMap({
           pixelRatio: dpr,
         });
         mapRef.current = map;
+        // E2E / QA hook — map-preview route only
+        window.__PINDMAP_PREVIEW_MAP__ = map;
+        publishPreviewDiag({
+          loadMs: null,
+          styleLoadMs: null,
+          errorCodes: [],
+          layerIds: [],
+          hasSubwaySource: false,
+          hasAttrib: !!el.querySelector(
+            "[data-testid='maplibre-corner-attribution']",
+          ),
+        });
+        const mapCreatedAt = performance.now();
+        map.on("style.load", () => {
+          publishPreviewDiag({
+            styleLoadMs: Math.round(performance.now() - mapCreatedAt),
+          });
+        });
         map.touchZoomRotate.disableRotation();
         const sampleCompare = () => {
           if (!onCompareRef.current) return;
@@ -406,6 +462,9 @@ export default function PreviewGlMap({
         map.on("error", (ev) => {
           const msg = String(ev.error?.message ?? "");
           if (/ajax|tile|Failed to fetch/i.test(msg)) return;
+          const code = previewStyleErrorCode(msg);
+          const prev = window.__PINDMAP_PREVIEW_DIAG__?.errorCodes ?? [];
+          publishPreviewDiag({ errorCodes: [...prev, code] });
           // Style validation failures never fire `load` — surface and drop liberty cache.
           if (/layers\[|unknown property|source|style/i.test(msg)) {
             invalidateLibertyStyleCache();
@@ -458,6 +517,9 @@ export default function PreviewGlMap({
               }
 
               const firstLoadMs = Math.round(performance.now() - bootAtRef.current);
+              publishPreviewDiag({
+                loadMs: Math.round(performance.now() - mapCreatedAt),
+              });
               // Give tiles a short window then sample
               window.setTimeout(() => {
                 if (cancelled) return;
@@ -476,7 +538,28 @@ export default function PreviewGlMap({
 
               sampleCompare();
               onReadyRef.current?.();
-              void attachSubwayOverlay(map, themeRef.current).catch(() => {});
+              void attachSubwayOverlay(map, themeRef.current)
+                .then((ok) => {
+                  if (cancelled || !mapRef.current) return;
+                  const layerIds =
+                    map.getStyle()?.layers?.map((l) => l.id) ?? [];
+                  publishPreviewDiag({
+                    layerIds,
+                    hasSubwaySource: ok && !!map.getSource("pindmap_subway"),
+                    hasAttrib: !!el.querySelector(
+                      "[data-testid='maplibre-corner-attribution']",
+                    ),
+                  });
+                  console.info("[PindMap:preview] post-load layers", {
+                    landmark: layerIds.includes("landmark_label"),
+                    subwayLine: layerIds.includes("subway_overlay_line"),
+                    subwayExit: layerIds.includes("subway_overlay_exit"),
+                    attrib: !!el.querySelector(
+                      "[data-testid='maplibre-corner-attribution']",
+                    ),
+                  });
+                })
+                .catch(() => {});
             } catch (e) {
               onErrorRef.current?.(
                 e instanceof Error ? e : new Error(String(e)),
@@ -497,6 +580,9 @@ export default function PreviewGlMap({
       cancelled = true;
       handlersBound.current = false;
       releaseMapGlSlot("preview");
+      if (window.__PINDMAP_PREVIEW_MAP__ === mapRef.current) {
+        window.__PINDMAP_PREVIEW_MAP__ = null;
+      }
       mapRef.current?.remove();
       mapRef.current = null;
     };

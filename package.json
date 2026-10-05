@@ -7,11 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "e2e": "playwright test",
+    "validate:map-style": "npx tsx scripts/validate-map-style.ts",
+    "e2e": "npm run validate:map-style && playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:install": "playwright install chromium",
-    "measure:detail": "tsx e2e/measure-detail-first-pixel.ts",
-    "generate:subway-overlay": "tsx scripts/generate-subway-overlay.ts"
+    "measure:detail": "npx tsx e2e/measure-detail-first-pixel.ts",
+    "generate:subway-overlay": "npx tsx scripts/generate-subway-overlay.ts"
   },
   "dependencies": {
     "@capacitor-firebase/messaging": "^8.2.0",
