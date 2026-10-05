@@ -121,6 +121,7 @@ def _buffer_row(spec: dict, row: dict, *, for_open_filters: bool) -> dict | None
         return None
 
     closed_date = (row.get("폐업일자") or "").strip()
+    permit_date = (row.get("인허가일자") or "").strip()
     data_updated = (row.get("데이터갱신시점") or "").strip()
 
     return {
@@ -128,6 +129,7 @@ def _buffer_row(spec: dict, row: dict, *, for_open_filters: bool) -> dict | None
         "_org": org,
         "_status": status,
         "_closed_date": closed_date,
+        "_permit_date": permit_date,
         "source": source,
         "name": name,
         "name_norm": norm,

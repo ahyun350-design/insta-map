@@ -7,6 +7,8 @@
 원본은 scripts/localdata/raw_closed_check/ 재사용 (재다운로드 없음).
 detect_closed.py 의 키/버퍼 로직을 재사용.
 
+승계 판정은 모든 인허가 파일을 합쳐 비교(업종 전환 포함).
+
   scripts/localdata/.venv/bin/python scripts/localdata/apply_closed.py
   scripts/localdata/.venv/bin/python scripts/localdata/apply_closed.py --apply
   scripts/localdata/.venv/bin/python scripts/localdata/apply_closed.py --rollback out/closed_apply_backup_....json
@@ -35,10 +37,13 @@ from detect_closed import (
     month_bucket,
     remap_download_specs,
 )
+from poi_match import contains_norm, rough_name_similarity
 from prepare import OUT_DIR, assign_localdata_keys, db_url, open_csv
 
 BATCH = 200
 SUCCESSOR_DIST_M = 30.0
+HIGH_NAME_SIM = 90.0  # poiMatch simGe90OrExact
+PERMIT_WINDOW_DAYS = 90
 
 # 도로명(+로/길/거리) + 건물번호 (apply_sangga_rematch 와 동일 패턴)
 _ROAD_BN = re.compile(
@@ -90,29 +95,81 @@ def parse_lat_lng(lat_s: str, lng_s: str) -> tuple[float, float] | None:
         return None
 
 
-def parse_closed_date(closed_date: str, data_updated: str) -> str | None:
-    """YYYY-MM-DD 문자열. 폐업일자 없으면 데이터갱신시점 날짜."""
-    s = (closed_date or "").strip()
-    if s:
-        digits = "".join(ch for ch in s if ch.isdigit())
-        if len(digits) >= 8:
-            return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
-        if len(s) >= 10 and s[4] == "-" and s[7] == "-":
-            return s[:10]
-    u = (data_updated or "").strip()
-    if u:
-        digits = "".join(ch for ch in u if ch.isdigit())
-        if len(digits) >= 8:
-            return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
-        if len(u) >= 10 and u[4] == "-" and u[7] == "-":
-            return u[:10]
+def parse_ymd(raw: str) -> date | None:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if len(digits) >= 8:
+        try:
+            return date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+        except ValueError:
+            return None
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        try:
+            return date(int(s[:4]), int(s[5:7]), int(s[8:10]))
+        except ValueError:
+            return None
     return None
 
 
-def build_enriched_index(spec: dict) -> tuple[dict[str, dict], dict[str, list[dict]], dict]:
-    """source_key → row meta; open_by_norm → open candidates (for successor)."""
+def parse_closed_date(closed_date: str, data_updated: str) -> str | None:
+    """YYYY-MM-DD 문자열. 폐업일자 없으면 데이터갱신시점 날짜."""
+    d = parse_ymd(closed_date) or parse_ymd(data_updated)
+    return d.isoformat() if d else None
+
+
+def within_permit_window(closed_date: str, permit_date: str, days: int = PERMIT_WINDOW_DAYS) -> bool:
+    """폐업일·인허가일 모두 파싱 가능하고 |delta| <= days 이면 True.
+    날짜 파싱 실패 시 False (90일 필터 적용 시 승계 불인정).
+    """
+    c = parse_ymd(closed_date)
+    p = parse_ymd(permit_date)
+    if c is None or p is None:
+        return False
+    return abs((p - c).days) <= days
+
+
+def name_related(closed_norm: str, open_norm: str, closed_name: str, open_name: str) -> tuple[bool, str]:
+    """주소 동일 경로용 이름 관련성. 애매하면 False(폐업 쪽)."""
+    a = (closed_norm or "").strip()
+    b = (open_norm or "").strip()
+    if a and b and a == b:
+        return True, "name_eq"
+    if a and b and len(a) >= 2 and len(b) >= 2 and contains_norm(a, b):
+        return True, "name_contain"
+    sim = rough_name_similarity(a, b)
+    if sim >= HIGH_NAME_SIM:
+        return True, "name_sim90"
+    # display soft path also via rough on raw names if norms weak
+    if closed_name and open_name:
+        sim2 = rough_name_similarity(
+            re.sub(r"\s+", "", closed_name.lower()),
+            re.sub(r"\s+", "", open_name.lower()),
+        )
+        if sim2 >= HIGH_NAME_SIM:
+            return True, "name_sim90"
+    return False, ""
+
+
+def open_row_from_item(item: dict, key: str, source: str) -> dict:
+    return {
+        "key": key,
+        "source": source,
+        "road_address": item.get("road_address") or "",
+        "lat": item.get("lat") or "",
+        "lng": item.get("lng") or "",
+        "name": item.get("name") or "",
+        "name_norm": item.get("name_norm") or "",
+        "permit_date": item.get("_permit_date") or "",
+    }
+
+
+def build_enriched_index(spec: dict) -> tuple[dict[str, dict], list[dict], dict]:
+    """source_key → row meta; open_rows list for global successor index."""
     path: Path = spec["path"]
     group = spec["group"]
+    source = spec["source"]
     open_buf: list[dict] = []
     closed_buf: list[dict] = []
     status_all: Counter = Counter()
@@ -147,7 +204,7 @@ def build_enriched_index(spec: dict) -> tuple[dict[str, dict], dict[str, list[di
         keyed_items = [(r, r["_mgmt"]) for r in (open_buf + closed_buf)]
 
     by_key: dict[str, dict] = {}
-    open_by_norm: dict[str, list[dict]] = defaultdict(list)
+    open_rows: list[dict] = []
 
     for item, key in keyed_items:
         if not key:
@@ -156,6 +213,7 @@ def build_enriched_index(spec: dict) -> tuple[dict[str, dict], dict[str, list[di
         entry = {
             "status": st,
             "closed_date": item.get("_closed_date") or "",
+            "permit_date": item.get("_permit_date") or "",
             "name": item["name"],
             "name_norm": item["name_norm"],
             "road_address": item.get("road_address") or "",
@@ -163,17 +221,10 @@ def build_enriched_index(spec: dict) -> tuple[dict[str, dict], dict[str, list[di
             "lng": item.get("lng") or "",
             "data_updated": item.get("data_updated") or "",
             "key": key,
+            "source": source,
         }
         if st == "영업/정상":
-            open_by_norm[item["name_norm"]].append(
-                {
-                    "key": key,
-                    "road_address": entry["road_address"],
-                    "lat": entry["lat"],
-                    "lng": entry["lng"],
-                    "name": entry["name"],
-                }
-            )
+            open_rows.append(open_row_from_item(item, key, source))
         prev = by_key.get(key)
         if prev is None or (prev["status"] == "영업/정상" and st != "영업/정상"):
             by_key[key] = entry
@@ -186,40 +237,65 @@ def build_enriched_index(spec: dict) -> tuple[dict[str, dict], dict[str, list[di
         "status_all_raw": dict(status_all),
         "max_data_updated": max_upd,
     }
-    return by_key, open_by_norm, meta
+    return by_key, open_rows, meta
+
+
+def build_global_open_indexes(
+    open_rows: list[dict],
+) -> tuple[dict[tuple[str, str], list[dict]], dict[str, list[dict]]]:
+    by_addr: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    by_norm: dict[str, list[dict]] = defaultdict(list)
+    for r in open_rows:
+        rk = road_building_key(r.get("road_address"))
+        if rk:
+            by_addr[rk].append(r)
+        nn = (r.get("name_norm") or "").strip()
+        if nn:
+            by_norm[nn].append(r)
+    return by_addr, by_norm
 
 
 def find_successor(
-    closed: dict, open_by_norm: dict[str, list[dict]]
+    closed: dict,
+    open_by_addr: dict[tuple[str, str], list[dict]],
+    open_by_norm: dict[str, list[dict]],
 ) -> tuple[dict | None, str | None]:
-    """Returns (successor_open_row, rule) where rule is 'address' | 'dist_30m'."""
-    nn = closed.get("name_norm") or ""
-    if not nn:
-        return None, None
-    candidates = open_by_norm.get(nn) or []
+    """Cross-source successor.
+
+    Rules (오탐 방지 우선):
+      A) 도로명+건물번호 동일 AND (name_eq | name_contain | name_sim>=90)
+      B) name_norm 동일 AND 30m 이내
+    """
+    closed_source = closed.get("source") or ""
     closed_key = closed.get("key") or ""
     ck = road_building_key(closed.get("road_address"))
     cll = parse_lat_lng(closed.get("lat") or "", closed.get("lng") or "")
+    cnn = (closed.get("name_norm") or "").strip()
+    cname = closed.get("name") or ""
 
-    addr_hit: dict | None = None
-    dist_hit: dict | None = None
+    def same_row(c: dict) -> bool:
+        return c.get("source") == closed_source and c.get("key") == closed_key
 
-    for c in candidates:
-        if c["key"] == closed_key:
-            continue
-        ok = road_building_key(c.get("road_address"))
-        if ck and ok and ck == ok:
-            addr_hit = c
-            break
-        if cll and not dist_hit:
+    # A) address + name related
+    if ck:
+        for c in open_by_addr.get(ck, []):
+            if same_row(c):
+                continue
+            ok, how = name_related(cnn, c.get("name_norm") or "", cname, c.get("name") or "")
+            if ok:
+                return c, f"addr_{how}"
+
+    # B) same name_norm + 30m
+    if cnn and cll:
+        for c in open_by_norm.get(cnn, []):
+            if same_row(c):
+                continue
             oll = parse_lat_lng(c.get("lat") or "", c.get("lng") or "")
-            if oll and haversine_m(cll[0], cll[1], oll[0], oll[1]) <= SUCCESSOR_DIST_M:
-                dist_hit = c
+            if not oll:
+                continue
+            if haversine_m(cll[0], cll[1], oll[0], oll[1]) <= SUCCESSOR_DIST_M:
+                return c, "dist_30m_name_eq"
 
-    if addr_hit is not None:
-        return addr_hit, "address"
-    if dist_hit is not None:
-        return dist_hit, "dist_30m"
     return None, None
 
 
@@ -270,6 +346,101 @@ def load_places_for_poi_ids(conn, poi_ids: list[int]) -> list[dict]:
             (poi_ids,),
         )
         return [dict(r) for r in cur.fetchall()]
+
+
+def inspect_poi_column_impact(conn) -> dict:
+    """SELECT-only catalog check for adding poi.closed_at."""
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT
+              p.proname AS name,
+              pg_get_function_result(p.oid) AS result_type,
+              CASE
+                WHEN pg_get_function_result(p.oid) ILIKE 'SETOF%poi%'
+                  OR pg_get_function_result(p.oid) ILIKE 'poi'
+                  THEN 'setof_or_poi'
+                WHEN pg_get_function_result(p.oid) ILIKE 'TABLE%'
+                  THEN 'returns_table'
+                ELSE 'other'
+              END AS result_kind,
+              (
+                pg_get_functiondef(p.oid) ~* 'select[[:space:]]+\\*'
+                OR pg_get_functiondef(p.oid) ~* 'poi\\.\\*'
+              ) AS has_select_star_or_poi_star
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public'
+              AND p.prokind = 'f'
+              AND pg_get_functiondef(p.oid) ~* '\\mpoi\\M'
+            ORDER BY p.proname
+            """
+        )
+        functions = [dict(r) for r in cur.fetchall()]
+
+        cur.execute(
+            """
+            SELECT c.relname AS name, c.relkind
+            FROM pg_rewrite r
+            JOIN pg_class c ON c.oid = r.ev_class
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_depend d ON d.objid = r.oid
+            JOIN pg_class t ON t.oid = d.refobjid
+            JOIN pg_namespace tn ON tn.oid = t.relnamespace
+            WHERE n.nspname = 'public'
+              AND tn.nspname = 'public'
+              AND t.relname = 'poi'
+              AND c.relkind IN ('v', 'm')
+            GROUP BY c.relname, c.relkind
+            ORDER BY c.relname
+            """
+        )
+        views = [dict(r) for r in cur.fetchall()]
+
+        cur.execute(
+            """
+            SELECT tgname AS name, tgrelid::regclass::text AS on_table
+            FROM pg_trigger
+            WHERE NOT tgisinternal
+              AND (
+                tgrelid = 'public.poi'::regclass
+                OR pg_get_triggerdef(oid) ~* '\\mpoi\\M'
+              )
+            ORDER BY tgname
+            """
+        )
+        triggers = [dict(r) for r in cur.fetchall()]
+
+    risky = [
+        f["name"]
+        for f in functions
+        if f.get("has_select_star_or_poi_star")
+        and f.get("result_kind") in ("setof_or_poi", "returns_table")
+    ]
+    nearby = [f for f in functions if f["name"] in ("nearby_poi", "nearby_poi_batch")]
+
+    return {
+        "functions": [
+            {
+                "name": f["name"],
+                "result_kind": f["result_kind"],
+                "result_type": f["result_type"],
+                "has_select_star_or_poi_star": bool(f["has_select_star_or_poi_star"]),
+            }
+            for f in functions
+        ],
+        "views": [v["name"] for v in views],
+        "triggers": [{"name": t["name"], "on_table": t["on_table"]} for t in triggers],
+        "risky_star_functions": risky,
+        "nearby_poi": [
+            {
+                "name": f["name"],
+                "result_kind": f["result_kind"],
+                "has_select_star_or_poi_star": bool(f["has_select_star_or_poi_star"]),
+            }
+            for f in nearby
+        ],
+    }
 
 
 def backup_path() -> Path:
@@ -418,18 +589,49 @@ def classify_all(conn, *, with_closed_at: bool) -> dict:
                 f"raw_closed_check 원본 없음 (재다운로드 금지): {spec['path']}"
             )
 
-    by_source_counts: dict[str, dict] = {}
-    not_open_rows: list[dict] = []  # all found & status != 영업/정상
-    confirmed: list[dict] = []
-    successor_excluded: list[dict] = []
-    other_excluded: list[dict] = []
-    clear_candidates: list[dict] = []
-    succ_rule_counts = Counter()
+    print(
+        "  successor_scope=ALL_LOCALDATA_FILES (cross-source; was same-source-only)",
+        flush=True,
+    )
+
+    by_key_by_source: dict[str, dict[str, dict]] = {}
+    all_open_rows: list[dict] = []
+    meta_by_source: dict[str, dict] = {}
 
     for spec in specs:
         source = spec["source"]
         print(f"  indexing {source} …", flush=True)
-        by_key, open_by_norm, meta = build_enriched_index(spec)
+        by_key, open_rows, meta = build_enriched_index(spec)
+        by_key_by_source[source] = by_key
+        all_open_rows.extend(open_rows)
+        meta_by_source[source] = meta
+        print(
+            f"    keys={len(by_key):,} open_rows={len(open_rows):,}",
+            flush=True,
+        )
+
+    open_by_addr, open_by_norm = build_global_open_indexes(all_open_rows)
+    print(
+        f"  global open index: by_addr={len(open_by_addr):,} "
+        f"by_norm={len(open_by_norm):,} open_total={len(all_open_rows):,}",
+        flush=True,
+    )
+
+    by_source_counts: dict[str, dict] = {}
+    not_open_rows: list[dict] = []
+    confirmed: list[dict] = []
+    successor_excluded: list[dict] = []
+    other_excluded: list[dict] = []
+    clear_candidates: list[dict] = []
+    succ_rule_counts: Counter = Counter()
+    succ_cross_source_n = 0
+    succ_with_90d = 0
+    succ_without_90d = 0
+    succ_90d_unknown_date = 0
+
+    for spec in specs:
+        source = spec["source"]
+        by_key = by_key_by_source[source]
         pois = load_pois(conn, source, with_closed_at=with_closed_at)
 
         c_confirmed = c_succ = c_other = 0
@@ -454,7 +656,6 @@ def classify_all(conn, *, with_closed_at: bool) -> dict:
             if st == "영업/정상":
                 continue
 
-            # found & not open → part of the ~10,394 set
             status_of_not_open[st] += 1
             base = {
                 "poi_id": int(p["id"]),
@@ -494,8 +695,23 @@ def classify_all(conn, *, with_closed_at: bool) -> dict:
                 c_other += 1
                 continue
 
-            succ, rule = find_successor(base, open_by_norm)
+            succ, rule = find_successor(base, open_by_addr, open_by_norm)
             if succ is not None and rule is not None:
+                succ_without_90d += 1
+                in_window = within_permit_window(
+                    base["closed_date"], succ.get("permit_date") or ""
+                )
+                if in_window:
+                    succ_with_90d += 1
+                else:
+                    # date missing or outside window
+                    if parse_ymd(base["closed_date"]) is None or parse_ymd(
+                        succ.get("permit_date") or ""
+                    ) is None:
+                        succ_90d_unknown_date += 1
+
+                if (succ.get("source") or "") != source:
+                    succ_cross_source_n += 1
                 succ_rule_counts[rule] += 1
                 successor_excluded.append(
                     {
@@ -507,6 +723,9 @@ def classify_all(conn, *, with_closed_at: bool) -> dict:
                         "class": "successor_exclude",
                         "successor_rule": rule,
                         "successor_source_key": succ["key"],
+                        "successor_source": succ.get("source") or "",
+                        "successor_permit_date": succ.get("permit_date") or "",
+                        "within_90d": in_window,
                     }
                 )
                 c_succ += 1
@@ -533,10 +752,10 @@ def classify_all(conn, *, with_closed_at: bool) -> dict:
             "successor_exclude_n": c_succ,
             "other_exclude_n": c_other,
             "status_of_not_open": dict(status_of_not_open),
-            "raw_max_data_updated": meta.get("max_data_updated"),
+            "raw_max_data_updated": meta_by_source[source].get("max_data_updated"),
         }
         print(
-            f"    not_open={c_confirmed + c_succ + c_other:,} "
+            f"    classify {source}: not_open={c_confirmed + c_succ + c_other:,} "
             f"confirmed={c_confirmed:,} successor={c_succ:,} other={c_other:,}",
             flush=True,
         )
@@ -549,7 +768,22 @@ def classify_all(conn, *, with_closed_at: bool) -> dict:
         "other_excluded": other_excluded,
         "clear_candidates": clear_candidates,
         "succ_rule_counts": dict(succ_rule_counts),
+        "succ_cross_source_n": succ_cross_source_n,
+        "succ_without_90d_n": succ_without_90d,
+        "succ_with_90d_n": succ_with_90d,
+        "succ_90d_unknown_date_n": succ_90d_unknown_date,
+        "successor_scope": "all_localdata_files",
     }
+
+
+def load_prev_dryrun() -> dict | None:
+    files = sorted(OUT_DIR.glob("closed_apply_dryrun_*.json"))
+    if not files:
+        return None
+    try:
+        return json.loads(files[-1].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def main() -> int:
@@ -580,14 +814,40 @@ def main() -> int:
         print(f"raw_closed_check 없음: {RAW_CHECK}", flush=True)
         return 1
 
-    print("=== apply_closed dry-run (no download) ===", flush=True)
+    print("=== apply_closed dry-run (no download, cross-source successor) ===", flush=True)
+    prev_report = load_prev_dryrun()
+    prev_succ_pois = set()
+    prev_conf_pois = set()
+    if prev_report:
+        prev_succ_pois = {int(r["poi_id"]) for r in prev_report.get("successor_excluded", [])}
+        prev_conf_pois = {int(r["poi_id"]) for r in prev_report.get("confirmed", [])}
+        print(
+            f"  prev dryrun: confirmed={prev_report.get('confirmed_n')} "
+            f"successor={prev_report.get('successor_exclude_n')} "
+            f"other={prev_report.get('other_exclude_n')}",
+            flush=True,
+        )
+
     conn = psycopg2.connect(db_url(), connect_timeout=60)
-    # dry-run always readonly; --apply reconnects writable later
     conn.set_session(readonly=True, autocommit=True)
 
     try:
         has_closed_at = column_exists(conn, "poi", "closed_at")
         print(f"  poi.closed_at column={'yes' if has_closed_at else 'no'}", flush=True)
+
+        print("\n=== catalog impact (closed_at ADD COLUMN) ===", flush=True)
+        impact = inspect_poi_column_impact(conn)
+        print(f"  functions_ref_poi={len(impact['functions'])}", flush=True)
+        for f in impact["functions"]:
+            print(
+                f"    fn {f['name']} kind={f['result_kind']} "
+                f"star={f['has_select_star_or_poi_star']}",
+                flush=True,
+            )
+        print(f"  views={impact['views']}", flush=True)
+        print(f"  triggers={impact['triggers']}", flush=True)
+        print(f"  nearby={impact['nearby_poi']}", flush=True)
+        print(f"  risky_star_fns={impact['risky_star_functions']}", flush=True)
 
         result = classify_all(conn, with_closed_at=has_closed_at)
 
@@ -596,7 +856,6 @@ def main() -> int:
         other_excluded = result["other_excluded"]
         not_open_n = len(result["not_open_rows"])
 
-        # places linked to previous not-open set
         not_open_ids = [r["poi_id"] for r in result["not_open_rows"]]
         places = load_places_for_poi_ids(conn, not_open_ids)
         class_by_poi = {}
@@ -610,6 +869,7 @@ def main() -> int:
         place_confirmed = []
         place_successor = []
         place_other = []
+        newly_successor_places = []
         for pl in places:
             pid = int(pl["poi_id"])
             cls, meta = class_by_poi.get(pid, ("other_exclude", {}))
@@ -624,11 +884,14 @@ def main() -> int:
                 if cls == "confirmed"
                 else "",
                 "successor_rule": meta.get("successor_rule") or "",
+                "successor_source": meta.get("successor_source") or "",
             }
             if cls == "confirmed":
                 place_confirmed.append(row)
             elif cls == "successor_exclude":
                 place_successor.append(row)
+                if pid in prev_conf_pois and pid not in prev_succ_pois:
+                    newly_successor_places.append(row)
             else:
                 place_other.append(row)
 
@@ -636,28 +899,73 @@ def main() -> int:
             r["user_id"] for r in place_confirmed if r.get("user_id") is not None
         }
 
+        # dedupe confirmed places by name for report
+        confirmed_by_name: dict[str, dict] = {}
+        for r in place_confirmed:
+            nm = r["name"] or "(empty)"
+            if nm not in confirmed_by_name:
+                confirmed_by_name[nm] = {
+                    "name": r["name"],
+                    "si_gu": r["si_gu"],
+                    "closed_month": r["closed_month"],
+                    "n": 1,
+                }
+            else:
+                confirmed_by_name[nm]["n"] += 1
+
         elapsed = round(time.time() - t0, 1)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         out_path = OUT_DIR / f"closed_apply_dryrun_{stamp}.json"
 
-        # JSON: ids/keys/status/dates/successor only — no address/coords/phone
+        # If 90d filter were applied: successors outside window become confirmed
+        succ_keep_90 = [r for r in successor_excluded if r.get("within_90d")]
+        succ_drop_90 = [r for r in successor_excluded if not r.get("within_90d")]
+        confirmed_if_90d = len(confirmed) + len(succ_drop_90)
+        successor_if_90d = len(succ_keep_90)
+
         report = {
             "generated_at": stamp,
             "elapsed_s": elapsed,
             "has_closed_at_column": has_closed_at,
+            "successor_scope": "all_localdata_files",
             "not_open_n": not_open_n,
             "confirmed_n": len(confirmed),
             "successor_exclude_n": len(successor_excluded),
             "other_exclude_n": len(other_excluded),
             "by_source": result["by_source"],
             "successor_rule_counts": result["succ_rule_counts"],
+            "succ_cross_source_n": result["succ_cross_source_n"],
+            "permit_window_days": PERMIT_WINDOW_DAYS,
+            "successor_n_without_90d_filter": result["succ_without_90d_n"],
+            "successor_n_with_90d_filter": result["succ_with_90d_n"],
+            "successor_90d_unknown_date_n": result["succ_90d_unknown_date_n"],
+            "confirmed_n_if_90d_filter": confirmed_if_90d,
+            "successor_n_if_90d_filter": successor_if_90d,
             "places_linked_n": len(places),
             "places_confirmed_n": len(place_confirmed),
             "places_successor_n": len(place_successor),
             "places_other_n": len(place_other),
             "users_with_confirmed_closed_place_n": len(users_confirmed),
+            "newly_successor_places": [
+                {"name": r["name"], "si_gu": r["si_gu"], "poi_id": r["poi_id"]}
+                for r in newly_successor_places
+            ],
             "clear_candidates_n": len(result["clear_candidates"]),
+            "catalog_impact": {
+                "functions": [
+                    {
+                        "name": f["name"],
+                        "result_kind": f["result_kind"],
+                        "has_select_star_or_poi_star": f["has_select_star_or_poi_star"],
+                    }
+                    for f in impact["functions"]
+                ],
+                "views": impact["views"],
+                "triggers": [t["name"] for t in impact["triggers"]],
+                "risky_star_functions": impact["risky_star_functions"],
+                "nearby_poi": impact["nearby_poi"],
+            },
             "confirmed": [
                 {
                     "poi_id": r["poi_id"],
@@ -678,6 +986,8 @@ def main() -> int:
                     "closed_date": r["closed_date"],
                     "successor_rule": r["successor_rule"],
                     "successor_source_key": r["successor_source_key"],
+                    "successor_source": r["successor_source"],
+                    "within_90d": r["within_90d"],
                 }
                 for r in successor_excluded
             ],
@@ -697,60 +1007,79 @@ def main() -> int:
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-        # --- console report (시·구 only for place samples) ---
         print("\n========== CLOSED APPLY DRY-RUN ==========", flush=True)
-        print(f"(a) not_open total={not_open_n:,}", flush=True)
+        print(
+            "1a. previous successor scope: same source file only; "
+            "now: all localdata files combined",
+            flush=True,
+        )
+        print(
+            f"\n(a) TOTAL confirmed={len(confirmed):,} "
+            f"successor={len(successor_excluded):,} "
+            f"other={len(other_excluded):,} "
+            f"(prev 9631 / 751 / 12)",
+            flush=True,
+        )
         for src in LOCALDATA_SOURCES:
             m = result["by_source"].get(src) or {}
             print(
                 f"  {src}: confirmed={m.get('confirmed_n', 0):,} "
                 f"successor={m.get('successor_exclude_n', 0):,} "
-                f"other={m.get('other_exclude_n', 0):,} "
-                f"(not_open={m.get('not_open_n', 0):,}) "
-                f"status={m.get('status_of_not_open')}",
+                f"other={m.get('other_exclude_n', 0):,}",
                 flush=True,
             )
         print(
-            f"  TOTAL confirmed={len(confirmed):,} "
-            f"successor={len(successor_excluded):,} "
-            f"other={len(other_excluded):,}",
+            f"  cross_source_successor={result['succ_cross_source_n']:,}",
             flush=True,
         )
+        print(f"  rules={dict(result['succ_rule_counts'])}", flush=True)
 
         print(
             f"\n(b) places linked={len(places):,} "
             f"confirmed={len(place_confirmed):,} "
             f"successor={len(place_successor):,} "
             f"other={len(place_other):,} "
-            f"users_confirmed={len(users_confirmed):,}",
+            f"users_confirmed={len(users_confirmed):,} "
+            f"(prev places 53 / 4 / 0)",
             flush=True,
         )
 
-        print("\n(c) confirmed place samples (max 15):", flush=True)
-        for r in place_confirmed[:15]:
-            print(
-                f"  {r['name']} | {r['si_gu']} | {r['closed_month']}",
-                flush=True,
-            )
-
-        print("\n(d) successor-excluded place samples (max 10):", flush=True)
-        if not place_successor:
+        print("\n(c) newly successor-excluded saved places:", flush=True)
+        if not newly_successor_places:
             print("  (none)", flush=True)
-        for r in place_successor[:10]:
+        for r in newly_successor_places:
+            print(f"  {r['name']} | {r['si_gu']}", flush=True)
+
+        print("\n(d) confirmed saved places (deduped by name):", flush=True)
+        for item in confirmed_by_name.values():
+            extra = f" x{item['n']}" if item["n"] > 1 else ""
             print(
-                f"  {r['name']} | {r['si_gu']} | rule={r['successor_rule']}",
+                f"  {item['name']} | {item['si_gu']} | {item['closed_month']}{extra}",
                 flush=True,
             )
 
-        addr_n = result["succ_rule_counts"].get("address", 0)
-        dist_n = result["succ_rule_counts"].get("dist_30m", 0)
         print(
-            f"\n(e) successor rules: address={addr_n:,} dist_30m_only={dist_n:,}",
+            f"\n(e) 90d filter: without={result['succ_without_90d_n']:,} "
+            f"with={result['succ_with_90d_n']:,} "
+            f"unknown_date={result['succ_90d_unknown_date_n']:,} "
+            f"| if applied: confirmed={confirmed_if_90d:,} "
+            f"successor={successor_if_90d:,}",
             flush=True,
         )
         print(f"\n(f) elapsed={elapsed}s", flush=True)
         print(f"wrote {out_path}", flush=True)
-        print(f"clear_candidates (would NULL closed_at)={len(result['clear_candidates']):,}", flush=True)
+
+        # Safety conclusion for ALTER (no ALTER executed)
+        star_risk = impact["risky_star_functions"]
+        nearby_star = any(
+            f.get("has_select_star_or_poi_star") for f in impact["nearby_poi"]
+        )
+        safe = (not star_risk) and (not nearby_star)
+        print(
+            f"\n=== ALTER closed_at safety: {'YES' if safe else 'NO'} "
+            f"(risky_star={star_risk}, nearby_star={nearby_star}) ===",
+            flush=True,
+        )
 
         if args.apply:
             if not has_closed_at:
@@ -761,12 +1090,6 @@ def main() -> int:
                 for r in confirmed
                 if r.get("closed_at")
             ]
-            missing_date = len(confirmed) - len(set_rows)
-            if missing_date:
-                print(
-                    f"  warn: confirmed without parseable date skipped={missing_date}",
-                    flush=True,
-                )
             clear_ids = [r["poi_id"] for r in result["clear_candidates"]]
             conn.close()
             conn = psycopg2.connect(db_url(), connect_timeout=60)
