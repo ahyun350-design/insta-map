@@ -282,10 +282,15 @@ test("map-preview dense pins: 20 all render at z11/z13/z15", async ({
       .__PINDMAP_PREVIEW_MAP__;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const m = map as any;
+    // querySourceFeatures can duplicate across tiles — dedupe by pin id
     const feats = m.querySourceFeatures?.("preview-pins") ?? [];
-    const ids = feats.map((f: { properties?: { id?: string } }) =>
-      String(f.properties?.id ?? ""),
-    );
+    const ids = [
+      ...new Set(
+        feats.map((f: { properties?: { id?: string } }) =>
+          String(f.properties?.id ?? ""),
+        ),
+      ),
+    ].filter(Boolean);
     return {
       allowOverlap: m.getLayoutProperty?.(
         "preview-unclustered",
@@ -295,7 +300,7 @@ test("map-preview dense pins: 20 all render at z11/z13/z15", async ({
         "preview-unclustered",
         "icon-ignore-placement",
       ),
-      sourceCount: feats.length,
+      sourceCount: ids.length,
       denseIds: ids.filter((id: string) => id.startsWith("dense-")).length,
     };
   });
@@ -323,7 +328,16 @@ test("map-preview dense pins: 20 all render at z11/z13/z15", async ({
         "preview-unclustered-circle",
       ].filter((id) => !!map.getLayer(id));
       if (!layers.length) return 0;
-      return map.queryRenderedFeatures({ layers }).length;
+      const feats = map.queryRenderedFeatures({ layers });
+      const ids = new Set(
+        feats.map((f) =>
+          String(
+            (f as { properties?: { id?: string } }).properties?.id ?? "",
+          ),
+        ),
+      );
+      ids.delete("");
+      return ids.size;
     }, zoom);
     expect(counted, `dense pins at z${zoom}`).toBe(N);
   }
