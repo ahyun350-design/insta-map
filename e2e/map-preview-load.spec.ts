@@ -282,6 +282,10 @@ test("map-preview dense pins: 20 all render at z11/z13/z15", async ({
       .__PINDMAP_PREVIEW_MAP__;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const m = map as any;
+    const feats = m.querySourceFeatures?.("preview-pins") ?? [];
+    const ids = feats.map((f: { properties?: { id?: string } }) =>
+      String(f.properties?.id ?? ""),
+    );
     return {
       allowOverlap: m.getLayoutProperty?.(
         "preview-unclustered",
@@ -291,32 +295,36 @@ test("map-preview dense pins: 20 all render at z11/z13/z15", async ({
         "preview-unclustered",
         "icon-ignore-placement",
       ),
+      sourceCount: feats.length,
+      denseIds: ids.filter((id: string) => id.startsWith("dense-")).length,
     };
   });
   expect(layout.allowOverlap).toBe(true);
   expect(layout.ignorePlacement).toBe(true);
+  expect(layout.sourceCount, "dense source feature count").toBe(N);
+  expect(layout.denseIds, "dense-* pin ids").toBe(N);
 
   for (const zoom of [11, 13, 15]) {
-    await page.evaluate(async (z) => {
+    const counted = await page.evaluate(async (z) => {
       const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
         .__PINDMAP_PREVIEW_MAP__;
-      map.jumpTo({ zoom: z, center: [126.9236, 37.5563] });
+      map.jumpTo({ zoom: z, center: [126.9235, 37.556] });
       await new Promise<void>((resolve) => {
         map.once("idle", () => resolve());
-        window.setTimeout(() => resolve(), 3000);
+        window.setTimeout(() => resolve(), 4000);
       });
-    }, zoom);
-    const counted = await page.evaluate(() => {
-      const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
-        .__PINDMAP_PREVIEW_MAP__;
+      // Second idle pass — icons may resolve after first paint
+      await new Promise<void>((resolve) => {
+        map.once("idle", () => resolve());
+        window.setTimeout(() => resolve(), 1500);
+      });
       const layers = [
         "preview-unclustered",
         "preview-unclustered-circle",
       ].filter((id) => !!map.getLayer(id));
-      return layers.length
-        ? map.queryRenderedFeatures({ layers }).length
-        : 0;
-    });
+      if (!layers.length) return 0;
+      return map.queryRenderedFeatures({ layers }).length;
+    }, zoom);
     expect(counted, `dense pins at z${zoom}`).toBe(N);
   }
 });

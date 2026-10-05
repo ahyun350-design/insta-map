@@ -6,6 +6,8 @@ export const MAP_GL_REMOUNT_MAX = 2;
 const remountAttempts: Record<MapGlSurface, number> = {
   compact: 0,
   expanded: 0,
+  // public_list uses one-shot Kakao fallback, not WebGL remount.
+  public_list: 0,
 };
 
 export function mapGlRemountAttemptsUsed(surface: MapGlSurface): number {
