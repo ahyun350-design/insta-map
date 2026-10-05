@@ -163,31 +163,30 @@ export function applyDirectionsBasemap(
       continue;
     }
 
-    // Dark (neon-based)
-    if (id === "background" || layer.type === "background") {
+    // Dark (neon-based) — only mutate by layer type to avoid map error events.
+    if (layer.type === "background") {
       captureAndPaint(map, snap, id, "background-color", DARK.background);
       continue;
     }
+    if (layer.type === "fill") {
+      if (id.includes("water")) {
+        captureAndPaint(map, snap, id, "fill-color", DARK.water);
+      } else if (id.includes("building")) {
+        captureAndPaint(map, snap, id, "fill-color", DARK.building);
+        captureAndPaint(map, snap, id, "fill-opacity", 0.55);
+      } else if (
+        id.includes("landcover") ||
+        id.includes("landuse") ||
+        id.includes("park")
+      ) {
+        captureAndPaint(map, snap, id, "fill-color", DARK.park);
+      }
+      // Skip other fills (patterns / unknown) to avoid map error events.
+      continue;
+    }
     if (
-      id.includes("landcover") ||
-      id.includes("landuse") ||
-      id.includes("park")
-    ) {
-      captureAndPaint(map, snap, id, "fill-color", DARK.park);
-      continue;
-    }
-    if (id.includes("water") && layer.type === "fill") {
-      captureAndPaint(map, snap, id, "fill-color", DARK.water);
-      continue;
-    }
-    if (id.includes("building") && layer.type === "fill") {
-      captureAndPaint(map, snap, id, "fill-color", DARK.building);
-      captureAndPaint(map, snap, id, "fill-opacity", 0.55);
-      continue;
-    }
-    if (
-      (id.includes("road") || id.includes("bridge") || id.includes("tunnel")) &&
       layer.type === "line" &&
+      (id.includes("road") || id.includes("bridge") || id.includes("tunnel")) &&
       !id.includes("rail")
     ) {
       const minor =

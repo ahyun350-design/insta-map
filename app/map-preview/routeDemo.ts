@@ -380,53 +380,39 @@ export async function paintPreviewRouteDemo(
     const { directionsRoutePaint } = await import("@/lib/mapSurface/routeStyle");
     applyDirectionsBasemap(map, routeTheme);
     const visual = directionsRoutePaint(routeMode, routeTheme);
-    // Reuse applyPaint structure via temporary theme mapping for endpoints
-    applyPaint(map, routeMode, routeTheme === "dark" ? "neon" : "paper");
-    // Override line paints with directions chrome (solid lime/navy)
-    if (visual.glowOuter) {
-      map.setLayoutProperty("preview-route-glow-outer", "visibility", "visible");
-      map.setPaintProperty(
-        "preview-route-glow-outer",
-        "line-color",
-        visual.glowOuter.color,
-      );
-      map.setPaintProperty(
-        "preview-route-glow-outer",
-        "line-width",
-        visual.glowOuter.width,
-      );
-      map.setPaintProperty(
-        "preview-route-glow-outer",
-        "line-opacity",
-        visual.glowOuter.opacity,
-      );
-      map.setPaintProperty(
-        "preview-route-glow-outer",
-        "line-blur",
-        visual.glowOuter.blur ?? 0,
-      );
-    } else {
-      map.setLayoutProperty("preview-route-glow-outer", "visibility", "none");
-    }
-    map.setLayoutProperty("preview-route-glow-mid", "visibility", "none");
+    // Directions chrome only — avoid neon applyPaint (fires spurious map errors).
+    applyGlowLayer(map, GLOW_OUTER, visual.glowOuter);
+    applyGlowLayer(map, GLOW_MID, visual.glowMid);
     if (visual.casing) {
-      map.setLayoutProperty("preview-route-casing", "visibility", "visible");
-      map.setPaintProperty(
-        "preview-route-casing",
-        "line-color",
-        visual.casing.color,
-      );
-      map.setPaintProperty(
-        "preview-route-casing",
-        "line-width",
-        visual.casing.width,
-      );
+      map.setLayoutProperty(ROUTE_CASING, "visibility", "visible");
+      map.setPaintProperty(ROUTE_CASING, "line-color", visual.casing.color);
+      map.setPaintProperty(ROUTE_CASING, "line-opacity", visual.casing.opacity);
+      map.setPaintProperty(ROUTE_CASING, "line-width", visual.casing.width);
     } else {
-      map.setLayoutProperty("preview-route-casing", "visibility", "none");
+      map.setLayoutProperty(ROUTE_CASING, "visibility", "none");
     }
-    map.setPaintProperty("preview-route-line", "line-color", visual.line.color);
-    map.setPaintProperty("preview-route-line", "line-width", visual.line.width);
-    map.setPaintProperty("preview-route-line", "line-dasharray", [1, 0]);
+    map.setPaintProperty(ROUTE_LINE, "line-color", visual.line.color);
+    map.setPaintProperty(ROUTE_LINE, "line-opacity", visual.line.opacity);
+    map.setPaintProperty(ROUTE_LINE, "line-width", visual.line.width);
+    try {
+      map.setPaintProperty(ROUTE_LINE, "line-dasharray", [1, 0]);
+    } catch {
+      /* ignore */
+    }
+    // Endpoint colors for directions chrome
+    const core =
+      routeTheme === "dark" ? "#D9F45B" : MAP_BRAND_NAVY;
+    const fill = routeTheme === "dark" ? "#0E1230" : "#FFFFFF";
+    if (map.getLayer(ORIGIN_SHADOW)) {
+      map.setPaintProperty(ORIGIN_SHADOW, "circle-radius", 10);
+      map.setPaintProperty(ORIGIN_SHADOW, "circle-color", core);
+      map.setPaintProperty(ORIGIN_SHADOW, "circle-opacity", 0.35);
+    }
+    if (map.getLayer(ORIGIN_CIRCLE)) {
+      map.setPaintProperty(ORIGIN_CIRCLE, "circle-radius", 6);
+      map.setPaintProperty(ORIGIN_CIRCLE, "circle-color", fill);
+      map.setPaintProperty(ORIGIN_CIRCLE, "circle-stroke-color", core);
+    }
   } else {
     applyPaint(map, routeMode, theme);
   }
