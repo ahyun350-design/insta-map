@@ -11,6 +11,7 @@ import {
   EXTRACT_INTERNAL_HEADER,
   getExtractInternalSecret,
 } from "@/app/api/extract/_internalAuth";
+import { classifyExtractEntry } from "@/app/api/extract/_entry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -114,6 +115,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "서버 환경변수 미설정: EXTRACT_INTERNAL_SECRET" }, { status: 500 });
     }
 
+    // Entry for timing only — never log/store User-Agent string
+    const entry = classifyExtractEntry(req.headers.get("user-agent"));
+
     const triggerProcess = async () => {
       const res = await fetch(processUrl, {
         method: "POST",
@@ -121,7 +125,7 @@ export async function POST(req: Request) {
           "Content-Type": "application/json",
           [EXTRACT_INTERNAL_HEADER]: internalSecret,
         },
-        body: JSON.stringify({ jobId, bypassCache: forceRetry }),
+        body: JSON.stringify({ jobId, bypassCache: forceRetry, entry }),
       });
       if (!res.ok) {
         const text = await res.text();
