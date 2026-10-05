@@ -270,6 +270,83 @@ test("map-preview discover-style dots render when added", async ({ page }) => {
   expect(n).toBeGreaterThan(0);
 });
 
+test("map-preview dense pins: 20 all render at z11/z13/z15", async ({
+  page,
+}) => {
+  const N = 20;
+  await openPreview(page, `/map-preview?pins=${N}&dense=1&cluster=0`);
+
+  // Confirm overlap layout matches intended a/b (never hide pins; don't steal labels)
+  const layout = await page.evaluate(() => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const m = map as any;
+    return {
+      allowOverlap: m.getLayoutProperty?.(
+        "preview-unclustered",
+        "icon-allow-overlap",
+      ),
+      ignorePlacement: m.getLayoutProperty?.(
+        "preview-unclustered",
+        "icon-ignore-placement",
+      ),
+    };
+  });
+  expect(layout.allowOverlap).toBe(true);
+  expect(layout.ignorePlacement).toBe(true);
+
+  for (const zoom of [11, 13, 15]) {
+    await page.evaluate(async (z) => {
+      const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+        .__PINDMAP_PREVIEW_MAP__;
+      map.jumpTo({ zoom: z, center: [126.9236, 37.5563] });
+      await new Promise<void>((resolve) => {
+        map.once("idle", () => resolve());
+        window.setTimeout(() => resolve(), 3000);
+      });
+    }, zoom);
+    const counted = await page.evaluate(() => {
+      const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+        .__PINDMAP_PREVIEW_MAP__;
+      const layers = [
+        "preview-unclustered",
+        "preview-unclustered-circle",
+      ].filter((id) => !!map.getLayer(id));
+      return layers.length
+        ? map.queryRenderedFeatures({ layers }).length
+        : 0;
+    });
+    expect(counted, `dense pins at z${zoom}`).toBe(N);
+  }
+});
+
+test("map-preview public-list probe: style fail → Kakao engine", async ({
+  page,
+}) => {
+  await page.route("**/tiles.openfreemap.org/styles/liberty**", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "text/plain",
+      body: "e2e_style_fail",
+    });
+  });
+
+  await page.goto("/map-preview?probe=public-list", {
+    waitUntil: "domcontentloaded",
+  });
+
+  const probe = page.getByTestId("public-list-gl-probe");
+  await expect(probe).toBeVisible({ timeout: 15_000 });
+  await expect(probe).toHaveAttribute("data-map-engine", "kakao", {
+    timeout: 12_000,
+  });
+  // Kakao host mounts (SDK may still be loading; engine switch is the contract)
+  await expect(page.getByTestId("public-list-share-map")).toBeVisible({
+    timeout: 10_000,
+  });
+});
+
 test.skip(
   "public list MapLibre load — no durable fixture list id",
   async () => {

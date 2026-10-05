@@ -1,9 +1,10 @@
 import { track } from "@/lib/track";
 
-export type MapGlSurface = "compact" | "expanded";
+export type MapGlSurface = "compact" | "expanded" | "public_list";
 export type MapGlFallbackReason =
   | "style_timeout"
   | "style_error"
+  | "load_timeout"
   | "tile_timeout"
   | "webgl_unsupported"
   | "error"

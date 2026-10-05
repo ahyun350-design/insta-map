@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type PublicPlaceListDetail,
   type PublicPlaceListPlace,
@@ -9,8 +9,12 @@ import { formatCategoryWithSubcategory } from "@/lib/kakaoSubcategory";
 import { LIST_COLOR_PRESETS } from "@/lib/listColors";
 import { getAppStoreUrl, getTrackDomain } from "@/lib/pindmapLinks";
 import { parsePindmapMapThemeId } from "@/lib/pindmapMapStyle";
+import { trackMapGlFallback } from "@/lib/mapSurface/mapGlTelemetry";
 import { trackPublicListEvent } from "@/lib/track";
 import PindmapGlMap from "@/components/PindmapGlMap";
+
+/** MapLibre public-list load budget before Kakao fallback (?map=kakao path). */
+const PUBLIC_LIST_GL_LOAD_TIMEOUT_MS = 8000;
 
 type Props = {
   list: PublicPlaceListDetail;
@@ -92,6 +96,8 @@ export function PublicListShareView({ list, places, isIOS }: Props) {
   const [engine, setEngine] = useState<"gl" | "kakao">("gl");
   const [theme, setTheme] = useState<"paper" | "white">("paper");
   const [queryReady, setQueryReady] = useState(false);
+  /** One-shot MapLibre → Kakao fallback (style_error | load_timeout). */
+  const glFallbackOnceRef = useRef(false);
   const appStoreUrl = getAppStoreUrl();
   const showAppStoreCta = isIOS && !!appStoreUrl;
 
@@ -115,6 +121,18 @@ export function PublicListShareView({ list, places, isIOS }: Props) {
     [places],
   );
 
+  const fallbackGlToKakao = useCallback(
+    (reason: "style_error" | "load_timeout") => {
+      if (glFallbackOnceRef.current) return;
+      glFallbackOnceRef.current = true;
+      trackMapGlFallback("public_list", reason);
+      setMapError(false);
+      setMapStatus("loading");
+      setEngine("kakao");
+    },
+    [],
+  );
+
   useEffect(() => {
     setEngine(readMapEngine());
     setTheme(readTheme());
@@ -127,6 +145,23 @@ export function PublicListShareView({ list, places, isIOS }: Props) {
       domain: getTrackDomain(),
     });
   }, [list.id]);
+
+  // MapLibre load budget — if `load` never arrives, switch to Kakao once.
+  useEffect(() => {
+    if (!queryReady || engine !== "gl" || pins.length === 0) return;
+    if (mapStatus === "ready" || mapError) return;
+    const t = window.setTimeout(() => {
+      fallbackGlToKakao("load_timeout");
+    }, PUBLIC_LIST_GL_LOAD_TIMEOUT_MS);
+    return () => window.clearTimeout(t);
+  }, [
+    queryReady,
+    engine,
+    pins.length,
+    mapStatus,
+    mapError,
+    fallbackGlToKakao,
+  ]);
 
   // Kakao rollback path (?map=kakao) — keep previous implementation
   useEffect(() => {
@@ -284,8 +319,7 @@ export function PublicListShareView({ list, places, isIOS }: Props) {
                 setMapStatus("ready");
               }}
               onError={() => {
-                setMapError(true);
-                setMapStatus("error");
+                fallbackGlToKakao("style_error");
               }}
             />
           </div>

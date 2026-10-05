@@ -94,5 +94,32 @@ export function generateKoreaDemoPins(count: number): MapPreviewPin[] {
   return out;
 }
 
+/**
+ * Dense synthetic pins in one neighborhood (Hongdae box) for overlap e2e.
+ * Not user / DB data.
+ */
+export function generateDenseNeighborhoodPins(count: number): MapPreviewPin[] {
+  const n = Math.max(0, Math.min(200, Math.floor(count)));
+  const rnd = mulberry32(20261005);
+  const cats = FEED_POST_CATEGORIES;
+  // ~400m box around Hongdae
+  const lng0 = 126.9215;
+  const lat0 = 37.5545;
+  const lngSpan = 0.004;
+  const latSpan = 0.003;
+  const out: MapPreviewPin[] = [];
+  for (let i = 0; i < n; i++) {
+    const category = cats[Math.floor(rnd() * cats.length)]!;
+    out.push({
+      id: `dense-${i}`,
+      name: `밀집 데모 ${i + 1}`,
+      lng: Math.round((lng0 + rnd() * lngSpan) * 1e6) / 1e6,
+      lat: Math.round((lat0 + rnd() * latSpan) * 1e6) / 1e6,
+      category,
+    });
+  }
+  return out;
+}
+
 /** @deprecated alias — use generateKoreaDemoPins */
 export const generateSeoulDemoPins = generateKoreaDemoPins;

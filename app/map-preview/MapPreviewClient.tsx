@@ -15,12 +15,14 @@ import {
 } from "./buildStyle";
 import {
   MAP_PREVIEW_PINS,
+  generateDenseNeighborhoodPins,
   generateKoreaDemoPins,
 } from "./samplePins";
 import PreviewGlMap, {
   type PreviewDiagnostics,
   type PreviewPerfMode,
 } from "./PreviewGlMap";
+import PublicListGlProbe from "./PublicListGlProbe";
 import {
   parsePreviewRouteMode,
   type PreviewRouteMode,
@@ -31,6 +33,8 @@ type PreviewQuery = {
   theme: MapPreviewThemeId;
   pinCount: number;
   cluster: boolean;
+  dense: boolean;
+  probe: "public-list" | null;
   fps: boolean;
   mode: PreviewPerfMode;
   compare: boolean;
@@ -50,6 +54,8 @@ function readPreviewQuery(): PreviewQuery {
       theme: "paper",
       pinCount: 0,
       cluster: true,
+      dense: false,
+      probe: null,
       fps: false,
       mode: "default",
       compare: false,
@@ -62,10 +68,13 @@ function readPreviewQuery(): PreviewQuery {
     Number.isFinite(pinsRaw) && pinsRaw > 0
       ? Math.min(5000, Math.floor(pinsRaw))
       : 0;
+  const probeRaw = sp.get("probe");
   return {
     theme: parseMapPreviewThemeId(sp.get("theme")),
     pinCount,
     cluster: sp.get("cluster") !== "0",
+    dense: sp.get("dense") === "1",
+    probe: probeRaw === "public-list" ? "public-list" : null,
     fps: sp.get("fps") === "1",
     mode: parseMode(sp),
     compare: sp.get("compare") === "1",
@@ -198,6 +207,8 @@ export default function MapPreviewClient() {
   const [theme, setTheme] = useState<MapPreviewThemeId>("paper");
   const [pinCount, setPinCount] = useState(0);
   const [cluster, setCluster] = useState(true);
+  const [dense, setDense] = useState(false);
+  const [probe, setProbe] = useState<"public-list" | null>(null);
   const [showFps, setShowFps] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [compareInfo, setCompareInfo] = useState<{ zoom: number; km: number; level: number } | null>(null);
@@ -234,6 +245,8 @@ export default function MapPreviewClient() {
     setTheme(q.theme);
     setPinCount(q.pinCount);
     setCluster(q.cluster);
+    setDense(q.dense);
+    setProbe(q.probe);
     setShowFps(q.fps);
     setMode(q.mode);
     setShowCompare(q.compare);
@@ -245,7 +258,11 @@ export default function MapPreviewClient() {
   const pins = useMemo(() => {
     if (mode === "nopins") return [];
     const base =
-      pinCount > 0 ? generateKoreaDemoPins(pinCount) : MAP_PREVIEW_PINS;
+      pinCount > 0
+        ? dense
+          ? generateDenseNeighborhoodPins(pinCount)
+          : generateKoreaDemoPins(pinCount)
+        : MAP_PREVIEW_PINS;
     return base.map((p) => ({
       id: p.id,
       lng: p.lng,
@@ -253,7 +270,7 @@ export default function MapPreviewClient() {
       category: p.category,
       name: p.name,
     }));
-  }, [pinCount, mode]);
+  }, [pinCount, mode, dense]);
 
   const pinById = useMemo(() => {
     const m = new Map<string, { id: string; name: string; category: string }>();
@@ -285,8 +302,12 @@ export default function MapPreviewClient() {
   const rootTone =
     theme === "black" || theme === "dark" || theme === "neon" ? "is-dark" : "is-light";
 
-  const fitZoom = pinCount > 0 ? 6.5 : 14;
+  const fitZoom = pinCount > 0 ? (dense ? 14 : 6.5) : 14;
   const effectivePinCount = mode === "nopins" ? 0 : pinCount;
+
+  if (hydrated && probe === "public-list") {
+    return <PublicListGlProbe />;
+  }
 
   return (
     <div className={`map-preview-root ${rootTone}`}>

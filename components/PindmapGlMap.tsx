@@ -245,19 +245,32 @@ export default function PindmapGlMap({
           touchPitch: false,
         });
         mapRef.current = map;
+        let loadFired = false;
+        let errorReported = false;
+        const reportError = (e: unknown) => {
+          if (cancelled || errorReported || loadFired) return;
+          errorReported = true;
+          onErrorRef.current?.(e instanceof Error ? e : new Error(String(e)));
+        };
 
+        // Style/source failures before `load` never reach onReady — surface to parent.
         map.on("error", (ev) => {
-          const err =
-            ev.error instanceof Error
-              ? ev.error
-              : new Error(String(ev.error?.message ?? "map_error"));
-          // Ignore benign tile 404 noise; style fetch failures already throw
-          if (/ajax|tile|Failed to fetch/i.test(err.message)) {
-            /* keep map if some tiles fail */
+          const msg = String(ev.error?.message ?? "map_error");
+          // Benign tile noise after style is up — ignore.
+          if (loadFired && /ajax|tile|Failed to fetch/i.test(msg)) return;
+          if (
+            /layers\[|unknown property|source|style|Failed to load|JSON|parse|sprite|glyphs/i.test(
+              msg,
+            )
+          ) {
+            reportError(new Error(msg));
+          } else if (!loadFired) {
+            reportError(new Error(msg));
           }
         });
 
         map.on("load", () => {
+          loadFired = true;
           void (async () => {
             try {
               await ensurePinImages(map);
@@ -289,9 +302,7 @@ export default function PindmapGlMap({
 
               onReadyRef.current?.();
             } catch (e) {
-              onErrorRef.current?.(
-                e instanceof Error ? e : new Error(String(e)),
-              );
+              reportError(e);
             }
           })();
         });
@@ -307,7 +318,11 @@ export default function PindmapGlMap({
     return () => {
       cancelled = true;
       handlersBound.current = false;
-      mapRef.current?.remove();
+      try {
+        mapRef.current?.remove();
+      } catch {
+        /* WebGL already lost */
+      }
       mapRef.current = null;
     };
     // Mount once; theme/pins updates handled below

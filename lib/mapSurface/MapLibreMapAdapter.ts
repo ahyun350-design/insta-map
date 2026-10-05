@@ -645,9 +645,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
           MAP_PIN_ICON_SIZE,
         ],
         "icon-anchor": "bottom",
+        // a: pins never vanish from collisions (labels/landmarks/other pins)
         "icon-allow-overlap": true,
-        // Let major city labels compete for placement (서울 etc.)
-        "icon-ignore-placement": false,
+        // b: pins do not own collision slots — city labels (서울 etc.) can still place
+        "icon-ignore-placement": true,
         "symbol-z-order": "source",
         "symbol-sort-key": [
           "case",
