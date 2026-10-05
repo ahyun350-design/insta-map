@@ -25,6 +25,7 @@ import {
   buildPindmapStyle,
   type MapPreviewThemeId,
 } from "./buildStyle";
+import { invalidateLibertyStyleCache } from "@/lib/pindmapMapStyle";
 import {
   horizontalSpanKmForMapLibreZoom,
   mapLibreZoomToKakaoLevel,
@@ -405,6 +406,11 @@ export default function PreviewGlMap({
         map.on("error", (ev) => {
           const msg = String(ev.error?.message ?? "");
           if (/ajax|tile|Failed to fetch/i.test(msg)) return;
+          // Style validation failures never fire `load` — surface and drop liberty cache.
+          if (/layers\[|unknown property|source|style/i.test(msg)) {
+            invalidateLibertyStyleCache();
+            onErrorRef.current?.(new Error(msg));
+          }
         });
 
         map.on("load", () => {

@@ -336,7 +336,7 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
       "circle-opacity": theme.id === "neon" ? 0.92 : 0.88,
       "circle-stroke-width": 1,
       "circle-stroke-color": theme.textHalo,
-      "circle-sort-key": sortKey,
+      // MapLibre 4.x has no circle-sort-key (symbol-sort-key only). Invalid paint aborts style load.
     },
   });
 
@@ -403,6 +403,11 @@ type StyleJson = {
 };
 
 let cachedLiberty: StyleJson | null = null;
+
+/** Drop in-memory liberty cache after a style/load failure so the next attempt refetches. */
+export function invalidateLibertyStyleCache(): void {
+  cachedLiberty = null;
+}
 
 export async function fetchLibertyStyle(): Promise<StyleJson> {
   if (cachedLiberty) {

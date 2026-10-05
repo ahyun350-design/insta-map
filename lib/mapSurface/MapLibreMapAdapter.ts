@@ -23,7 +23,10 @@ import {
   pinImageKey,
   pinMarkerSvg,
 } from "@/lib/mapPinImages";
-import { buildPindmapStyle } from "@/lib/pindmapMapStyle";
+import {
+  buildPindmapStyle,
+  invalidateLibertyStyleCache,
+} from "@/lib/pindmapMapStyle";
 import type { AdminMapLibreThemeId } from "./adminMapTheme";
 import {
   horizontalSpanKmForMapLibreZoom,
@@ -309,7 +312,15 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       }
     }, FIRST_TILE_TIMEOUT_MS);
 
-    map.on("error", () => {});
+    map.on("error", (ev) => {
+      const msg = String(
+        (ev as { error?: { message?: string } })?.error?.message ?? "",
+      );
+      if (/layers\[|unknown property/i.test(msg)) {
+        invalidateLibertyStyleCache();
+        this.reportFallback(options, "error");
+      }
+    });
     map.on("sourcedata", (e) => {
       if (
         e.dataType === "source" &&
