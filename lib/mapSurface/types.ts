@@ -24,6 +24,16 @@ export type SearchPinInput = {
   lng: number;
 };
 
+/** Admin MapLibre "발견" layer (place_popularity). */
+export type DiscoverPinInput = {
+  poiId: number;
+  lat: number;
+  lng: number;
+  name: string;
+  userCount: number;
+  category?: string | null;
+};
+
 export type CourseStopInput = {
   id: string;
   lat: number;
@@ -83,6 +93,9 @@ export type ExpandedMapSurface = CompactMapSurface & {
   unproject: (x: number, y: number) => MapLatLng | null;
   setSearchPins: (pins: SearchPinInput[]) => void;
   clearSearchPins: () => void;
+  /** Admin discover layer (WebGL). Empty / missing data → clear. */
+  setDiscoverPins: (pins: DiscoverPinInput[]) => void;
+  clearDiscoverPins: () => void;
   setCourseStops: (
     stops: CourseStopInput[],
     opts?: SetCourseStopsOptions,

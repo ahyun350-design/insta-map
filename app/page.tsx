@@ -1838,6 +1838,22 @@ function HomePageContent() {
   mapSearchResultsRef.current = mapSearchResults;
   const [mapSearchLabel, setMapSearchLabel] = useState("");
   const [isMapSearchSheetOpen, setIsMapSearchSheetOpen] = useState(false);
+  /** Admin MapLibre discover layer — session-only, default off. */
+  const [discoverLayerOn, setDiscoverLayerOn] = useState(false);
+  const discoverRowsRef = useRef<
+    Array<{
+      poi_id: number;
+      user_count: number;
+      display_name: string;
+      category: string | null;
+      lat: number;
+      lng: number;
+    }>
+  >([]);
+  const discoverFetchedRef = useRef(false);
+  const discoverFetchInFlightRef = useRef<Promise<void> | null>(null);
+  const discoverStatsRef = useRef({ fetched: 0, excluded: 0 });
+  const openDiscoverPlaceSheetRef = useRef<(poiId: string) => void>(() => {});
   const [showMapResearchButton, setShowMapResearchButton] = useState(false);
   const lastSearchCenterRef = useRef<{ lat: number; lng: number } | null>(null);
   const mapSearchKeywordRef = useRef("");
@@ -12698,6 +12714,9 @@ function HomePageContent() {
             const place = searchPinPlaceByIdRef.current.get(pinId);
             if (place) openExpandedSearchPlaceCard(place, "maplibre-search-pin");
           },
+          onDiscoverPinClick: (poiId) => {
+            void openDiscoverPlaceSheetRef.current(poiId);
+          },
           onCourseStopClick: (stopId) => {
             const hit =
               courseResult?.find((p, idx) => p.id === stopId || stopId === `course-${idx}`) ??
@@ -14272,6 +14291,220 @@ function HomePageContent() {
     user?.id === ADMIN_USER_ID &&
     (adminCompactMapLibre === "force_maplibre" ||
       adminExpandedMapLibre === "force_maplibre");
+
+  const publishDiscoverPins = useCallback(() => {
+    const adapter = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (!adapter) return;
+    if (
+      !discoverLayerOn ||
+      userIdRef.current !== ADMIN_USER_ID ||
+      readExpandedMapLibreOverride() !== "force_maplibre"
+    ) {
+      adapter.clearDiscoverPins();
+      return;
+    }
+    const savedPoiIds = new Set(
+      savedPlacesRef.current
+        .filter((p) => p.source === "poi" && typeof p.poi_id === "number")
+        .map((p) => p.poi_id as number),
+    );
+    const pins = [];
+    let excluded = 0;
+    for (const row of discoverRowsRef.current) {
+      if (savedPoiIds.has(row.poi_id)) {
+        excluded += 1;
+        continue;
+      }
+      if (!Number.isFinite(row.lat) || !Number.isFinite(row.lng)) continue;
+      pins.push({
+        poiId: row.poi_id,
+        lat: row.lat,
+        lng: row.lng,
+        name: row.display_name,
+        userCount: row.user_count,
+        category: row.category,
+      });
+    }
+    discoverStatsRef.current = {
+      fetched: discoverRowsRef.current.length,
+      excluded,
+    };
+    adapter.setDiscoverPins(pins);
+  }, [discoverLayerOn]);
+
+  const ensureDiscoverRowsLoaded = useCallback(async () => {
+    if (discoverFetchedRef.current) return;
+    if (discoverFetchInFlightRef.current) {
+      await discoverFetchInFlightRef.current;
+      return;
+    }
+    const run = (async () => {
+      try {
+        const pageSize = 1000;
+        let from = 0;
+        const all: typeof discoverRowsRef.current = [];
+        while (true) {
+          const { data, error } = await supabase
+            .from("place_popularity")
+            .select("poi_id, user_count, display_name, category, lat, lng")
+            .order("poi_id", { ascending: true })
+            .range(from, from + pageSize - 1);
+          if (error || !data) break;
+          for (const row of data as Array<Record<string, unknown>>) {
+            const poiId =
+              typeof row.poi_id === "number"
+                ? row.poi_id
+                : typeof row.poi_id === "string" && /^\d+$/.test(row.poi_id)
+                  ? Number(row.poi_id)
+                  : NaN;
+            const userCount =
+              typeof row.user_count === "number"
+                ? row.user_count
+                : typeof row.user_count === "string"
+                  ? Number(row.user_count)
+                  : NaN;
+            const lat =
+              typeof row.lat === "number"
+                ? row.lat
+                : typeof row.lat === "string"
+                  ? Number(row.lat)
+                  : NaN;
+            const lng =
+              typeof row.lng === "number"
+                ? row.lng
+                : typeof row.lng === "string"
+                  ? Number(row.lng)
+                  : NaN;
+            const displayName =
+              typeof row.display_name === "string" ? row.display_name.trim() : "";
+            if (!Number.isFinite(poiId) || !Number.isFinite(userCount) || userCount < 3) continue;
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+            if (!displayName) continue;
+            all.push({
+              poi_id: poiId,
+              user_count: userCount,
+              display_name: displayName,
+              category: typeof row.category === "string" ? row.category : null,
+              lat,
+              lng,
+            });
+          }
+          if (data.length < pageSize) break;
+          from += pageSize;
+          if (from > 20000) break;
+        }
+        discoverRowsRef.current = all;
+      } catch {
+        discoverRowsRef.current = [];
+      } finally {
+        discoverFetchedRef.current = true;
+        discoverFetchInFlightRef.current = null;
+      }
+    })();
+    discoverFetchInFlightRef.current = run;
+    await run;
+  }, []);
+
+  const openDiscoverPlaceSheet = useCallback(async (poiIdRaw: string) => {
+    if (
+      userIdRef.current !== ADMIN_USER_ID ||
+      readExpandedMapLibreOverride() !== "force_maplibre"
+    ) {
+      return;
+    }
+    const poiId = Number(poiIdRaw);
+    if (!Number.isFinite(poiId)) return;
+    const row = discoverRowsRef.current.find((r) => r.poi_id === poiId);
+    if (!row) return;
+    let address = "";
+    let phone: string | null = null;
+    let closedAt: string | null = null;
+    let category = row.category || "맛집";
+    let lat = row.lat;
+    let lng = row.lng;
+    try {
+      const { data } = await supabase
+        .from("poi")
+        .select("name, road_address, jibun_address, phone, closed_at, category, lat, lng")
+        .eq("id", poiId)
+        .maybeSingle();
+      if (data) {
+        address =
+          (typeof data.road_address === "string" && data.road_address.trim()) ||
+          (typeof data.jibun_address === "string" && data.jibun_address.trim()) ||
+          "";
+        phone =
+          typeof data.phone === "string" && data.phone.trim() ? data.phone.trim() : null;
+        closedAt =
+          typeof data.closed_at === "string" && data.closed_at.trim()
+            ? data.closed_at.trim().slice(0, 10)
+            : null;
+        if (typeof data.category === "string" && data.category.trim()) {
+          category = data.category.trim();
+        }
+        if (typeof data.lat === "number" && Number.isFinite(data.lat)) lat = data.lat;
+        if (typeof data.lng === "number" && Number.isFinite(data.lng)) lng = data.lng;
+        poiPhoneByIdRef.current[poiId] = phone;
+        poiClosedAtByIdRef.current[poiId] = closedAt;
+      }
+    } catch {
+      /* sheet still opens with popularity row */
+    }
+    placeSheetReturnRef.current = null;
+    setSelectedPlace({
+      place_name: row.display_name,
+      category_name: category,
+      subcategory: null,
+      road_address_name: address,
+      address_name: address,
+      phone: "",
+      place_url: "",
+      y: String(lat),
+      x: String(lng),
+      _feedPosts: [],
+      _placeSource: "poi",
+      ...(phone ? { _poiPhone: phone } : {}),
+      ...(closedAt ? { _poiClosedAt: closedAt } : {}),
+      _discoverSaveCount: row.user_count,
+      _discoverPoiId: poiId,
+    } as PlaceSheetData);
+  }, []);
+  openDiscoverPlaceSheetRef.current = (poiId: string) => {
+    void openDiscoverPlaceSheet(poiId);
+  };
+
+  useEffect(() => {
+    if (!discoverLayerOn) {
+      getExpandedMapLibreAdapter(expandedMapRef.current)?.clearDiscoverPins();
+      return;
+    }
+    if (
+      user?.id !== ADMIN_USER_ID ||
+      readExpandedMapLibreOverride() !== "force_maplibre"
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      await ensureDiscoverRowsLoaded();
+      if (cancelled) return;
+      publishDiscoverPins();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [discoverLayerOn, user?.id, ensureDiscoverRowsLoaded, publishDiscoverPins, expandedMapIsMapLibre]);
+
+  useEffect(() => {
+    if (!discoverLayerOn) return;
+    publishDiscoverPins();
+  }, [savedPlaces, discoverLayerOn, publishDiscoverPins]);
+
+  useEffect(() => {
+    if (showAdminMapExtras) return;
+    setDiscoverLayerOn(false);
+    getExpandedMapLibreAdapter(expandedMapRef.current)?.clearDiscoverPins();
+  }, [showAdminMapExtras]);
 
   // Selected pin emphasis (MapLibre only; Kakao path untouched).
   useEffect(() => {
@@ -16994,41 +17227,60 @@ function HomePageContent() {
                             </svg>
                           </button>
                           {!showCourseRoute && (
-                            <div className="expandedMapLibreSearchPill">
-                              <button
-                                type="button"
-                                className="expandedMapLibreSearchIcon"
-                                aria-label="검색"
-                                onClick={() => handleSearch()}
-                              >
-                                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
-                                  <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
-                                  <path d="M12.2 12.2L15.5 15.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                                </svg>
-                              </button>
-                              <input
-                                ref={expandedMapSearchInputRef}
-                                className="expandedMapLibreSearchInput"
-                                placeholder="장소명으로 검색"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    handleSearch();
-                                  }
-                                }}
-                              />
-                              {(searchQuery.trim() || mapSearchResults.length > 0) && (
+                            <div className="expandedMapLibreSearchColumn">
+                              <div className="expandedMapLibreSearchPill">
                                 <button
                                   type="button"
-                                  className="expandedMapLibreSearchClear"
-                                  aria-label="검색 지우기"
-                                  onClick={handleClearMapSearch}
+                                  className="expandedMapLibreSearchIcon"
+                                  aria-label="검색"
+                                  onClick={() => handleSearch()}
                                 >
-                                  ×
+                                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+                                    <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+                                    <path d="M12.2 12.2L15.5 15.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                  </svg>
                                 </button>
-                              )}
+                                <input
+                                  ref={expandedMapSearchInputRef}
+                                  className="expandedMapLibreSearchInput"
+                                  placeholder="장소명으로 검색"
+                                  value={searchQuery}
+                                  onChange={(e) => setSearchQuery(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      handleSearch();
+                                    }
+                                  }}
+                                />
+                                {(searchQuery.trim() || mapSearchResults.length > 0) && (
+                                  <button
+                                    type="button"
+                                    className="expandedMapLibreSearchClear"
+                                    aria-label="검색 지우기"
+                                    onClick={handleClearMapSearch}
+                                  >
+                                    ×
+                                  </button>
+                                )}
+                              </div>
+                              {showAdminMapExtras ? (
+                                <div className="expandedMapLibreDiscoverRow">
+                                  <button
+                                    type="button"
+                                    className={
+                                      discoverLayerOn
+                                        ? "expandedMapLibreDiscoverChip is-on"
+                                        : "expandedMapLibreDiscoverChip"
+                                    }
+                                    aria-pressed={discoverLayerOn}
+                                    aria-label="발견 레이어"
+                                    onClick={() => setDiscoverLayerOn((v) => !v)}
+                                  >
+                                    발견
+                                  </button>
+                                </div>
+                              ) : null}
                             </div>
                           )}
                         </div>

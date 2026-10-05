@@ -1994,6 +1994,13 @@ select:focus-visible {
   color: #999999;
 }
 
+.placeDetailSheetDiscoverNote {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.3;
+  color: #666666;
+}
+
 .placeDetailSheetCategory {
   margin: 4px 0 0;
   font-size: 12px;
@@ -8024,6 +8031,43 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.expandedMapLibreSearchColumn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+/* Admin MapLibre discover chip (below search pill) */
+.expandedMapLibreDiscoverRow {
+  display: flex;
+  align-items: center;
+  padding-left: 2px;
+  box-sizing: border-box;
+}
+.expandedMapLibreDiscoverChip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(26, 42, 122, 0.28);
+  background: rgba(255, 255, 255, 0.92);
+  color: #1a2a7a;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+.expandedMapLibreDiscoverChip.is-on {
+  background: #1a2a7a;
+  border-color: #1a2a7a;
+  color: #ffffff;
 }
 
 /* Layout chrome above the WebGL canvas (not composited over it) — avoids iOS context loss on keyboard */

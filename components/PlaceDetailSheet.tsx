@@ -179,6 +179,13 @@ export function PlaceDetailSheet({
     showAdminMapExtras && place._placeSource === "poi"
       ? formatPoiClosedAtMonthLabel(place._poiClosedAt)
       : null;
+  const discoverSaveNote = (() => {
+    if (!showAdminMapExtras) return null;
+    const n = place._discoverSaveCount;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 3) return null;
+    if (n >= 5) return `${Math.floor(n)}명이 저장`;
+    return "여러 명이 저장한 곳";
+  })();
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [photoViewer, setPhotoViewer] = useState<{
     postId: string;
@@ -247,6 +254,9 @@ export function PlaceDetailSheet({
                 공공데이터 기준이라 실제와 다를 수 있어요
               </p>
             </>
+          ) : null}
+          {discoverSaveNote ? (
+            <p className="placeDetailSheetDiscoverNote">{discoverSaveNote}</p>
           ) : null}
           {canEditCategory && currentCategory ? (
             <div className="placeDetailSheetCategoryBlock">

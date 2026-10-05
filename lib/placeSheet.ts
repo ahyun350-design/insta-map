@@ -40,6 +40,10 @@ export type PlaceSheetData = {
   _poiPhone?: string | null;
   /** public.poi.closed_at ISO date (never copied onto places / bootstrap cache) */
   _poiClosedAt?: string | null;
+  /** Admin discover layer: place_popularity.user_count (no user identities) */
+  _discoverSaveCount?: number | null;
+  /** Admin discover layer: poi id for post-save pin removal */
+  _discoverPoiId?: number | null;
 };
 
 /** "2026년 9월" from poi.closed_at — null if unparseable. */

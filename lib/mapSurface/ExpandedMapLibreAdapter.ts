@@ -18,6 +18,7 @@ export type CreateExpandedMapLibreOptions = Omit<
 > & {
   onSearchPinClick?: (pinId: string) => void;
   onCourseStopClick?: (stopId: string) => void;
+  onDiscoverPinClick?: (poiId: string) => void;
 };
 
 export class ExpandedMapLibreAdapter {

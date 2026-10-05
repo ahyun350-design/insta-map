@@ -5,6 +5,7 @@ export type {
   CompactPinInput,
   CompactRouteMode,
   CourseStopInput,
+  DiscoverPinInput,
   SearchPinInput,
   MapLatLng,
 } from "./types";

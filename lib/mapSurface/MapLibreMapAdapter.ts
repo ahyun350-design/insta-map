@@ -35,6 +35,7 @@ import type {
   CompactPinInput,
   CompactRouteMode,
   CourseStopInput,
+  DiscoverPinInput,
   ExpandedMapSurface,
   MapLatLng,
   SearchPinInput,
@@ -69,6 +70,10 @@ const FOCUS_SOURCE = "compact-focus";
 const FOCUS_LAYER = "compact-focus-symbol";
 const MYLOC_SOURCE = "compact-myloc";
 const MYLOC_LAYER = "compact-myloc-symbol";
+const DISCOVER_SOURCE = "compact-discover";
+const DISCOVER_CIRCLE_LAYER = "compact-discover-circles";
+const DISCOVER_LABEL_HOT_LAYER = "compact-discover-labels-hot";
+const DISCOVER_LABEL_REST_LAYER = "compact-discover-labels-rest";
 const SEARCH_SOURCE = "compact-search";
 const SEARCH_LAYER = "compact-search-symbol";
 const COURSE_SOURCE = "compact-course";
@@ -76,6 +81,8 @@ const COURSE_CIRCLE_LAYER = "compact-course-circles";
 const COURSE_NUMBER_LAYER = "compact-course-numbers";
 const COURSE_LABEL_LAYER = "compact-course-labels";
 const SEARCH_IMAGE_ID = "pindmap-search-pin";
+/** Discover dots only at MapLibre zoom ≥ 11. */
+const DISCOVER_MIN_ZOOM = 11;
 
 const EDGE_PX = 24;
 const HIT_PAD_PX = 14;
@@ -103,6 +110,8 @@ export type CreateCompactMapLibreOptions = {
   onPinClick?: (pinId: string) => void;
   onSearchPinClick?: (pinId: string) => void;
   onCourseStopClick?: (stopId: string) => void;
+  /** Admin discover layer — poi id as string. */
+  onDiscoverPinClick?: (poiId: string) => void;
   onMapClickEmpty?: () => void;
   onReady?: () => void;
   onFallback?: (reason: string) => void;
@@ -158,6 +167,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private onPinClick: ((id: string) => void) | null = null;
   private onSearchPinClick: ((id: string) => void) | null = null;
   private onCourseStopClick: ((id: string) => void) | null = null;
+  private onDiscoverPinClick: ((id: string) => void) | null = null;
   private onMapClickEmpty: (() => void) | null = null;
   private onViewIdle: ((view: { lat: number; lng: number; level: number }) => void) | null =
     null;
@@ -178,6 +188,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     adapter.onPinClick = options.onPinClick ?? null;
     adapter.onSearchPinClick = options.onSearchPinClick ?? null;
     adapter.onCourseStopClick = options.onCourseStopClick ?? null;
+    adapter.onDiscoverPinClick = options.onDiscoverPinClick ?? null;
     adapter.onMapClickEmpty = options.onMapClickEmpty ?? null;
     adapter.onViewIdle = options.onViewIdle ?? null;
     await adapter.mount(options);
@@ -482,6 +493,80 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       },
     });
 
+    // Discover (admin) — below saved pins; WebGL only
+    const neon = this.theme === "neon";
+    map.addSource(DISCOVER_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: DISCOVER_CIRCLE_LAYER,
+      type: "circle",
+      source: DISCOVER_SOURCE,
+      minzoom: DISCOVER_MIN_ZOOM,
+      paint: {
+        "circle-radius": [
+          "match",
+          ["get", "tier"],
+          1,
+          4,
+          2,
+          5.5,
+          3,
+          7,
+          4,
+        ],
+        "circle-color": "#ffffff",
+        "circle-stroke-width": neon ? 2.25 : 2,
+        "circle-stroke-color": neon ? MAP_NEON_ACCENT : MAP_BRAND_NAVY,
+        "circle-opacity": neon ? 0.92 : 0.95,
+      },
+    });
+    map.addLayer({
+      id: DISCOVER_LABEL_HOT_LAYER,
+      type: "symbol",
+      source: DISCOVER_SOURCE,
+      minzoom: 14,
+      filter: [">=", ["get", "user_count"], 10],
+      layout: {
+        "text-field": ["get", "name"],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 11,
+        "text-offset": [0, 1.1],
+        "text-anchor": "top",
+        "text-max-width": 8,
+        "text-allow-overlap": false,
+        "text-optional": true,
+      },
+      paint: {
+        "text-color": neon ? "#C9CEF5" : "#3A4155",
+        "text-halo-color": neon ? "#0E1230" : "#ffffff",
+        "text-halo-width": 1.35,
+      },
+    });
+    map.addLayer({
+      id: DISCOVER_LABEL_REST_LAYER,
+      type: "symbol",
+      source: DISCOVER_SOURCE,
+      minzoom: 15,
+      filter: ["<", ["get", "user_count"], 10],
+      layout: {
+        "text-field": ["get", "name"],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 10.5,
+        "text-offset": [0, 1.05],
+        "text-anchor": "top",
+        "text-max-width": 8,
+        "text-allow-overlap": false,
+        "text-optional": true,
+      },
+      paint: {
+        "text-color": neon ? "#C9CEF5" : "#3A4155",
+        "text-halo-color": neon ? "#0E1230" : "#ffffff",
+        "text-halo-width": 1.25,
+      },
+    });
+
     map.addSource(PIN_SOURCE, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
@@ -590,7 +675,6 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
     });
-    const neon = this.theme === "neon";
     map.addLayer({
       id: "compact-course-circle-shadow",
       type: "circle",
@@ -685,16 +769,30 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         layers: [PIN_CLUSTER_LAYER],
       });
       if (clusterHits.length > 0) return; // cluster handler owns this
-      const feats = map.queryRenderedFeatures(bbox, {
-        layers: [PIN_LAYER, FOCUS_LAYER, SEARCH_LAYER, COURSE_CIRCLE_LAYER],
-      });
+      const hitLayers = [
+        PIN_LAYER,
+        FOCUS_LAYER,
+        SEARCH_LAYER,
+        COURSE_CIRCLE_LAYER,
+        DISCOVER_CIRCLE_LAYER,
+      ].filter((id) => Boolean(map.getLayer(id)));
+      const feats = map.queryRenderedFeatures(bbox, { layers: hitLayers });
       if (feats.length > 0) {
+        const priority = new Set([
+          PIN_LAYER,
+          FOCUS_LAYER,
+          SEARCH_LAYER,
+          COURSE_CIRCLE_LAYER,
+        ]);
+        const preferred = feats.filter((f) => priority.has(f.layer?.id ?? ""));
+        const pool = preferred.length > 0 ? preferred : feats;
         let bestId: string | null = null;
         let bestLayer: string | null = null;
         let bestD = Infinity;
-        for (const f of feats) {
+        for (const f of pool) {
           const id = f.properties?.id;
-          if (typeof id !== "string") continue;
+          if (typeof id !== "string" && typeof id !== "number") continue;
+          const idStr = String(id);
           if (f.geometry.type !== "Point") continue;
           const coords = f.geometry.coordinates as [number, number];
           const projected = map.project(coords);
@@ -702,13 +800,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
             (projected.x - e.point.x) ** 2 + (projected.y - e.point.y) ** 2;
           if (d < bestD) {
             bestD = d;
-            bestId = id;
+            bestId = idStr;
             bestLayer = f.layer?.id ?? null;
           }
         }
         if (bestId) {
           if (bestLayer === SEARCH_LAYER) this.onSearchPinClick?.(bestId);
           else if (bestLayer === COURSE_CIRCLE_LAYER) this.onCourseStopClick?.(bestId);
+          else if (bestLayer === DISCOVER_CIRCLE_LAYER) this.onDiscoverPinClick?.(bestId);
           else this.onPinClick?.(bestId);
           return;
         }
@@ -719,6 +818,12 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       map.getCanvas().style.cursor = "pointer";
     });
     map.on("mouseleave", PIN_LAYER, () => {
+      map.getCanvas().style.cursor = "";
+    });
+    map.on("mouseenter", DISCOVER_CIRCLE_LAYER, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", DISCOVER_CIRCLE_LAYER, () => {
       map.getCanvas().style.cursor = "";
     });
   }
@@ -1303,6 +1408,45 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     if (!this.map) return null;
     const ll = this.map.unproject([x, y]);
     return { lat: ll.lat, lng: ll.lng };
+  }
+
+  setDiscoverPins(pins: DiscoverPinInput[]) {
+    const map = this.map;
+    if (!map?.getSource(DISCOVER_SOURCE)) return;
+    const features = pins
+      .filter(
+        (p) =>
+          Number.isFinite(p.lat) &&
+          Number.isFinite(p.lng) &&
+          Number.isFinite(p.poiId) &&
+          p.userCount >= 3,
+      )
+      .map((p) => {
+        const tier = p.userCount >= 10 ? 3 : p.userCount >= 5 ? 2 : 1;
+        return {
+          type: "Feature" as const,
+          id: p.poiId,
+          properties: {
+            id: String(p.poiId),
+            name: (p.name || "").trim(),
+            user_count: p.userCount,
+            tier,
+            category: p.category ?? "",
+          },
+          geometry: {
+            type: "Point" as const,
+            coordinates: [p.lng, p.lat],
+          },
+        };
+      });
+    (map.getSource(DISCOVER_SOURCE) as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features,
+    });
+  }
+
+  clearDiscoverPins() {
+    this.setDiscoverPins([]);
   }
 
   setSearchPins(pins: SearchPinInput[]) {
