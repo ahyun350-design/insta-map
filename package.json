@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "validate:map-style": "npx tsx scripts/validate-map-style.ts",
+    "test:extract-share-notify": "npx tsx --test lib/extractShareNotify.test.ts",
     "e2e": "npm run validate:map-style && playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:install": "playwright install chromium",

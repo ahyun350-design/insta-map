@@ -1,4 +1,9 @@
-export type InAppNotificationType = "message" | "like" | "comment" | "follow";
+export type InAppNotificationType =
+  | "message"
+  | "like"
+  | "comment"
+  | "follow"
+  | "extract_share_outcome";
 
 export type InAppNotificationItem = {
   id: string;
@@ -46,6 +51,9 @@ export function formatInAppNotificationFromRow(input: {
         : `${name}님이 댓글을 남겼어요`;
     case "follow":
       return `${name}님이 회원님을 팔로우하기 시작했습니다`;
+    case "extract_share_outcome":
+      // target_text holds the fixed Korean copy (no actor name)
+      return input.target_text?.trim() || "추출 결과가 있어요";
     default:
       return `${name}님의 활동이 있어요`;
   }

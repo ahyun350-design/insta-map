@@ -60,6 +60,7 @@ import {
   extractFailCode,
   recordExtractTiming,
 } from "@/app/api/extract/_timing";
+import { notifyExtractShareOutcome } from "@/app/api/extract/_shareNotify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -898,6 +899,13 @@ export async function POST(req: Request) {
         })
         .eq("id", jobId);
       if (dupDoneError) throw dupDoneError;
+      // Share quiet-result: all_saved had no extract_complete push
+      await notifyExtractShareOutcome(supabase, {
+        userId: job.user_id,
+        jobId,
+        entry: timingEntry,
+        outcome: "all_saved",
+      });
       timingSaveMs = Date.now() - dbT0;
       console.log(`[PindMap:perf] extract.process.db ${timingSaveMs}ms`);
       console.log(`[PindMap:perf] extract.process.total ${Date.now() - routeT0}ms`);
@@ -1015,6 +1023,16 @@ export async function POST(req: Request) {
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
+        // Share quiet-result: failures had no push
+        if (timingUserId) {
+          await notifyExtractShareOutcome(supabase, {
+            userId: timingUserId,
+            jobId,
+            entry: timingEntry,
+            outcome: "failed",
+            failCode: extractFailCode(message),
+          });
+        }
       } catch {
         // noop
       }

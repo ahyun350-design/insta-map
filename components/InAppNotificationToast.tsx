@@ -12,6 +12,7 @@ const TYPE_ICONS: Record<InAppNotificationType, string> = {
   like: "❤️",
   comment: "💭",
   follow: "👤",
+  extract_share_outcome: "📍",
 };
 
 type Props = {

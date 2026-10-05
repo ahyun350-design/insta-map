@@ -1612,7 +1612,7 @@ function HomePageContent() {
   type Notification = {
     id: string;
     user_id: string;
-    type: "like" | "comment" | "follow" | "message";
+    type: "like" | "comment" | "follow" | "message" | "extract_share_outcome";
     actor_id: string;
     actor_username: string;
     actorAvatarUrl?: string;
@@ -5142,7 +5142,13 @@ function HomePageContent() {
               .from("notifications")
               .select("*")
               .eq("user_id", uid)
-              .in("type", ["like", "comment", "follow", "message"])
+              .in("type", [
+                "like",
+                "comment",
+                "follow",
+                "message",
+                "extract_share_outcome",
+              ])
               .order("created_at", { ascending: false })
               .limit(50),
           ),
@@ -7229,12 +7235,13 @@ function HomePageContent() {
           },
           (payload) => {
             const newNotification = payload.new as Notification;
-            // System / push-only types — never list or in-app toast
+            // extract_complete stays push-only; extract_share_outcome is listed (no toast — self actor)
             if (
               newNotification.type !== "like" &&
               newNotification.type !== "comment" &&
               newNotification.type !== "follow" &&
-              newNotification.type !== "message"
+              newNotification.type !== "message" &&
+              newNotification.type !== "extract_share_outcome"
             ) {
               return;
             }
@@ -7243,6 +7250,7 @@ function HomePageContent() {
               const actorAvatarUrl = userAvatarCacheRef.current.getByUserId(newNotification.actor_id);
               setNotifications((prev) => [{ ...newNotification, actorAvatarUrl }, ...prev]);
 
+              if (newNotification.type === "extract_share_outcome") return;
               if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
               if (newNotification.actor_id === userIdRef.current) return;
               if (
@@ -7562,6 +7570,11 @@ function HomePageContent() {
         setActiveTab("messages");
         const room = await resolveChatRoomForId(item.targetId);
         if (room) await openChat(room);
+        return;
+      }
+      if (item.type === "extract_share_outcome") {
+        // Do not call tryRestoreExtractReview — no place-selection sheet for these
+        setActiveTab("saved");
       }
     },
     [openChat, resolveChatRoomForId, router],
@@ -12284,9 +12297,12 @@ function HomePageContent() {
     }
     if (searchParams?.get("tab") === "saved") {
       setActiveTab("saved");
+      const skipReview = searchParams.get("skipReview") === "1";
       window.history.replaceState({}, "", "/");
-      // Push extract_complete → /?tab=saved: restore server unreviewed review overlay
-      tryRestoreExtractReview();
+      // Push extract_complete → restore review; share outcome uses skipReview=1
+      if (!skipReview) {
+        tryRestoreExtractReview();
+      }
     }
     if (searchParams?.get("tab") === "home" && !searchParams?.get("postId")) {
       setActiveTab("home");
@@ -15104,7 +15120,7 @@ function HomePageContent() {
               <p style={{ margin: 0, fontSize: "13px", color: "#1a1a2e", lineHeight: 1.4 }}>
                 {getNotificationMessage(n)}
               </p>
-              {n.target_text && (
+              {n.target_text && n.type !== "extract_share_outcome" && (
                 <p style={{ margin: "4px 0 0", fontSize: "12px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {n.target_text}
                 </p>

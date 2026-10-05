@@ -89,6 +89,9 @@ export function usePushNotifications(userId: string | undefined) {
           } else if (data?.type === "extract_complete") {
             // Saved tab — places land there; extract review resumes via /api/extract/pending-review
             window.location.href = "/?tab=saved";
+          } else if (data?.type === "extract_share_outcome") {
+            // Quiet share outcomes — saved tab only; do not restore extract review
+            window.location.href = "/?tab=saved&skipReview=1";
           }
         });
       } catch (e) {
