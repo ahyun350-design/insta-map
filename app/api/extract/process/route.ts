@@ -52,14 +52,6 @@ import {
   getExtractInternalSecret,
   isValidExtractInternalSecret,
 } from "@/app/api/extract/_internalAuth";
-import {
-  parseExtractEntry,
-  type ExtractEntry,
-} from "@/app/api/extract/_entry";
-import {
-  extractFailCode,
-  recordExtractTiming,
-} from "@/app/api/extract/_timing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -313,45 +305,10 @@ async function fetchPoiRawCategory(
 export async function POST(req: Request) {
   const routeT0 = Date.now();
   let jobId = "";
-  let timingUserId = "";
-  let timingEntry: ExtractEntry = "unknown";
-  let timingWaitMs: number | null = null;
-  let timingApifyMs: number | null = null;
-  let timingClaudeMs: number | null = null;
-  let timingKakaoMs: number | null = null;
-  let timingPoiMs: number | null = null;
-  let timingSaveMs: number | null = null;
-  let timingRecorded = false;
   /** 성공/실패 최종 UPDATE에도 포함 */
   let diagClaudePlaces: RawPlace[] | PlaceCandidateJson[] | null = null;
   let diagKakaoMisses: string[] | null = null;
   let diagPendingPlaces: PendingPlaceJson[] | null = null;
-
-  const flushTiming = async (
-    supabase: ReturnType<typeof createServiceSupabase>,
-    ok: boolean,
-    failCode: string | null,
-    placeCount: number,
-  ) => {
-    if (timingRecorded || !timingUserId) return;
-    timingRecorded = true;
-    const writeMs = await recordExtractTiming(supabase, timingUserId, {
-      entry: timingEntry,
-      ok,
-      fail_code: failCode,
-      wait_ms: timingWaitMs,
-      apify_ms: timingApifyMs,
-      claude_ms: timingClaudeMs,
-      kakao_ms: timingKakaoMs,
-      poi_ms: timingPoiMs,
-      save_ms: timingSaveMs,
-      total_ms: Date.now() - routeT0,
-      place_count: placeCount,
-    });
-    if (writeMs != null) {
-      console.log(`[PindMap:perf] extract.timing_write ${writeMs}ms`);
-    }
-  };
 
   try {
     const expectedSecret = getExtractInternalSecret();
@@ -363,13 +320,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
     }
 
-    const body = (await req.json()) as {
-      jobId?: string;
-      bypassCache?: boolean;
-      entry?: unknown;
-    };
+    const body = (await req.json()) as { jobId?: string; bypassCache?: boolean };
     jobId = body.jobId?.trim() ?? "";
-    timingEntry = parseExtractEntry(body.entry);
     const bypassCache = body.bypassCache === true;
     if (!jobId) return NextResponse.json({ error: "jobId가 필요합니다." }, { status: 400 });
 
@@ -385,7 +337,6 @@ export async function POST(req: Request) {
     if (!job.user_id?.trim()) {
       throw new Error("작업에 사용자 정보가 없습니다.");
     }
-    timingUserId = job.user_id;
     if (job.status === "completed") return NextResponse.json({ ok: true, skipped: true });
 
     const cached = await readReelCache(supabase, job.instagram_url, { bypassCache });
@@ -437,17 +388,12 @@ export async function POST(req: Request) {
         claude_places: diagClaudePlaces,
       });
     } else {
-      {
-        const waitT0 = Date.now();
-        await waitForApifyConcurrencySlot(supabase, jobId);
-        timingWaitMs = Date.now() - waitT0;
-      }
+      await waitForApifyConcurrencySlot(supabase, jobId);
       await updateJobProgress(jobId, "인스타 캡션 가져오는 중");
       const scrapeT0 = Date.now();
       try {
         caption = await scrapeInstagramCaption(job.instagram_url);
       } catch (scrapeErr) {
-        timingApifyMs = Date.now() - scrapeT0;
         const scrapeMsg =
           scrapeErr instanceof Error ? scrapeErr.message : String(scrapeErr);
         if (isNoCaptionScrapeError(scrapeMsg)) {
@@ -460,8 +406,7 @@ export async function POST(req: Request) {
         }
         throw scrapeErr;
       }
-      timingApifyMs = Date.now() - scrapeT0;
-      console.log(`[PindMap:perf] extract.process.scrape ${timingApifyMs}ms`);
+      console.log(`[PindMap:perf] extract.process.scrape ${Date.now() - scrapeT0}ms`);
 
       const captionClass = classifyCaption(caption);
       if (captionClass === "empty") {
@@ -486,7 +431,6 @@ export async function POST(req: Request) {
       await updateJobProgress(jobId, "AI가 장소 분석하는 중");
       const aiT0 = Date.now();
       const extracted = await extractPlacesByClaude(caption);
-      timingClaudeMs = Date.now() - aiT0;
       captionCountry = normalizeCountryCode(extracted.captionCountry);
       // Persist caption_country on each place for reel_cache hit path (no schema change)
       rawPlaces = extracted.places.map((p) => ({
@@ -494,7 +438,7 @@ export async function POST(req: Request) {
         caption_country: captionCountry,
         country: typeof p.country === "string" ? normalizeCountryCode(p.country) : "unknown",
       }));
-      console.log(`[PindMap:perf] extract.process.ai ${timingClaudeMs}ms`, {
+      console.log(`[PindMap:perf] extract.process.ai ${Date.now() - aiT0}ms`, {
         caption_country: captionCountry,
         places: rawPlaces.length,
       });
@@ -727,8 +671,7 @@ export async function POST(req: Request) {
       }),
     );
 
-    timingKakaoMs = Date.now() - kakaoT0;
-    console.log(`[PindMap:perf] extract.process.kakao ${timingKakaoMs}ms`, {
+    console.log(`[PindMap:perf] extract.process.kakao ${Date.now() - kakaoT0}ms`, {
       candidates: candidates.length,
       resolved: resolved.length,
       misses: kakaoMissDiags.length,
@@ -834,8 +777,7 @@ export async function POST(req: Request) {
         }),
       );
 
-      timingPoiMs = Date.now() - poiT0;
-      console.log(`[PindMap:perf] extract.process.poi ${timingPoiMs}ms`, {
+      console.log(`[PindMap:perf] extract.process.poi ${Date.now() - poiT0}ms`, {
         misses: kakaoMissDiags.length,
         pending: pendingPlaces.length,
         resolvedTotal: resolved.length,
@@ -898,10 +840,8 @@ export async function POST(req: Request) {
         })
         .eq("id", jobId);
       if (dupDoneError) throw dupDoneError;
-      timingSaveMs = Date.now() - dbT0;
-      console.log(`[PindMap:perf] extract.process.db ${timingSaveMs}ms`);
+      console.log(`[PindMap:perf] extract.process.db ${Date.now() - dbT0}ms`);
       console.log(`[PindMap:perf] extract.process.total ${Date.now() - routeT0}ms`);
-      await flushTiming(supabase, true, null, 0);
       return NextResponse.json({ ok: true, inserted: 0 });
     }
 
@@ -973,10 +913,8 @@ export async function POST(req: Request) {
     // New places only — skip all_saved / failed (those return earlier or catch)
     await notifyExtractComplete(supabase, job, rows.length);
 
-    timingSaveMs = Date.now() - dbT0;
-    console.log(`[PindMap:perf] extract.process.db ${timingSaveMs}ms`);
+    console.log(`[PindMap:perf] extract.process.db ${Date.now() - dbT0}ms`);
     console.log(`[PindMap:perf] extract.process.total ${Date.now() - routeT0}ms`);
-    await flushTiming(supabase, true, null, rows.length);
     return NextResponse.json({ ok: true, inserted: rows.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "작업 처리 중 오류가 발생했습니다.";
@@ -1017,12 +955,6 @@ export async function POST(req: Request) {
           .eq("id", jobId);
       } catch {
         // noop
-      }
-      try {
-        const supabase = createServiceSupabase();
-        await flushTiming(supabase, false, extractFailCode(message), 0);
-      } catch {
-        // noop — timing must never affect extract response
       }
     }
     return NextResponse.json({ error: message }, { status: 500 });
