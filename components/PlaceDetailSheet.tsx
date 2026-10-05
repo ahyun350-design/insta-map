@@ -11,6 +11,7 @@ import {
   buildKakaoTransitUrl,
   buildNaverMapSearchUrl,
   displayablePhone,
+  formatPoiClosedAtMonthLabel,
   placeRefFromPlaceSheet,
   type PlaceSheetData,
   type PlaceSheetFeedPost,
@@ -174,6 +175,10 @@ export function PlaceDetailSheet({
     showAdminMapExtras && place._placeSource === "poi"
       ? displayablePhone(place._poiPhone)
       : null;
+  const adminClosedMonth =
+    showAdminMapExtras && place._placeSource === "poi"
+      ? formatPoiClosedAtMonthLabel(place._poiClosedAt)
+      : null;
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [photoViewer, setPhotoViewer] = useState<{
     postId: string;
@@ -233,6 +238,16 @@ export function PlaceDetailSheet({
       <div className="placeDetailSheetHeader">
         <div className="placeDetailSheetHeaderText">
           <p className="placeDetailSheetName">{place.place_name}</p>
+          {adminClosedMonth ? (
+            <>
+              <span className="placeDetailSheetClosedChip">
+                {`폐업한 것으로 보여요 · ${adminClosedMonth}`}
+              </span>
+              <p className="placeDetailSheetClosedHint">
+                공공데이터 기준이라 실제와 다를 수 있어요
+              </p>
+            </>
+          ) : null}
           {canEditCategory && currentCategory ? (
             <div className="placeDetailSheetCategoryBlock">
               <button

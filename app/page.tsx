@@ -2166,6 +2166,10 @@ function HomePageContent() {
   const savedPlaceCoordsRef = useRef<Record<string, LatLng>>({});
   /** public.poi.phone by poi id — never written to places */
   const poiPhoneByIdRef = useRef<Record<number, string | null>>({});
+  /** public.poi.closed_at by poi id — never written to places / bootstrap cache */
+  const poiClosedAtByIdRef = useRef<Record<number, string | null>>({});
+  /** Refresh MapLibre pins after admin poi hydrate (closed dim). */
+  const refreshAdminMapLibrePinsRef = useRef<() => void>(() => {});
   const selectedPlaceTokenRef = useRef(0);
   const homeAutoRetryCountRef = useRef(0);
   const loadDataInFlightRef = useRef(false);
@@ -3776,14 +3780,18 @@ function HomePageContent() {
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
       try {
-        const { data, error } = await supabase.from("poi").select("id, phone").in("id", chunk);
+        const { data, error } = await supabase
+          .from("poi")
+          .select("id, phone, closed_at")
+          .in("id", chunk);
         if (error || !data) {
           for (const id of chunk) {
             if (poiPhoneByIdRef.current[id] === undefined) poiPhoneByIdRef.current[id] = null;
+            if (poiClosedAtByIdRef.current[id] === undefined) poiClosedAtByIdRef.current[id] = null;
           }
           continue;
         }
-        for (const row of data as Array<{ id?: unknown; phone?: unknown }>) {
+        for (const row of data as Array<{ id?: unknown; phone?: unknown; closed_at?: unknown }>) {
           const id =
             typeof row.id === "number"
               ? row.id
@@ -3793,16 +3801,25 @@ function HomePageContent() {
           if (!Number.isFinite(id)) continue;
           const phone = typeof row.phone === "string" && row.phone.trim() ? row.phone.trim() : null;
           poiPhoneByIdRef.current[id] = phone;
+          const closedRaw = row.closed_at;
+          const closedAt =
+            typeof closedRaw === "string" && closedRaw.trim()
+              ? closedRaw.trim().slice(0, 10)
+              : null;
+          poiClosedAtByIdRef.current[id] = closedAt;
         }
         for (const id of chunk) {
           if (poiPhoneByIdRef.current[id] === undefined) poiPhoneByIdRef.current[id] = null;
+          if (poiClosedAtByIdRef.current[id] === undefined) poiClosedAtByIdRef.current[id] = null;
         }
       } catch {
         for (const id of chunk) {
           if (poiPhoneByIdRef.current[id] === undefined) poiPhoneByIdRef.current[id] = null;
+          if (poiClosedAtByIdRef.current[id] === undefined) poiClosedAtByIdRef.current[id] = null;
         }
       }
     }
+    refreshAdminMapLibrePinsRef.current();
   }, [shouldFetchPoiPhones]);
 
   const ensurePoiPhoneOnSelectedPlace = useCallback(async (place: Place) => {
@@ -3810,20 +3827,44 @@ function HomePageContent() {
     if (place.source !== "poi" || typeof place.poi_id !== "number") return;
     const poiId = place.poi_id;
     let phone = poiPhoneByIdRef.current[poiId];
-    if (phone === undefined) {
+    let closedAt = poiClosedAtByIdRef.current[poiId];
+    if (phone === undefined || closedAt === undefined) {
       try {
-        const { data } = await supabase.from("poi").select("phone").eq("id", poiId).maybeSingle();
+        const { data } = await supabase
+          .from("poi")
+          .select("phone, closed_at")
+          .eq("id", poiId)
+          .maybeSingle();
         phone = typeof data?.phone === "string" && data.phone.trim() ? data.phone.trim() : null;
+        const closedRaw = data?.closed_at;
+        closedAt =
+          typeof closedRaw === "string" && closedRaw.trim()
+            ? closedRaw.trim().slice(0, 10)
+            : null;
       } catch {
-        phone = null;
+        phone = phone === undefined ? null : phone;
+        closedAt = closedAt === undefined ? null : closedAt;
       }
-      poiPhoneByIdRef.current[poiId] = phone;
+      poiPhoneByIdRef.current[poiId] = phone ?? null;
+      poiClosedAtByIdRef.current[poiId] = closedAt ?? null;
     }
-    if (!phone) return;
     setSelectedPlace((prev: PlaceSheetData | null) => {
       if (!prev || prev._savedPlaceId !== place.id) return prev;
-      if (prev._poiPhone === phone && prev._placeSource === "poi") return prev;
-      return { ...prev, _placeSource: "poi", _poiPhone: phone };
+      const nextPhone = phone ?? null;
+      const nextClosed = closedAt ?? null;
+      if (
+        prev._poiPhone === nextPhone &&
+        prev._poiClosedAt === nextClosed &&
+        prev._placeSource === "poi"
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        _placeSource: "poi",
+        _poiPhone: nextPhone,
+        _poiClosedAt: nextClosed,
+      };
     });
   }, [shouldFetchPoiPhones]);
 
@@ -3838,6 +3879,10 @@ function HomePageContent() {
     const poiPhone =
       place.source === "poi" && typeof place.poi_id === "number"
         ? poiPhoneByIdRef.current[place.poi_id] ?? null
+        : null;
+    const poiClosedAt =
+      place.source === "poi" && typeof place.poi_id === "number"
+        ? poiClosedAtByIdRef.current[place.poi_id] ?? null
         : null;
     return {
       place_name: place.name,
@@ -3854,6 +3899,7 @@ function HomePageContent() {
       _placeRef: placeRefFromPlace(place, coords?.lat, coords?.lng),
       _placeSource: place.source ?? null,
       ...(poiPhone ? { _poiPhone: poiPhone } : {}),
+      ...(poiClosedAt ? { _poiClosedAt: poiClosedAt } : {}),
     };
   }, []);
 
@@ -9081,6 +9127,11 @@ function HomePageContent() {
           resolveListColor(place.listColor) ??
           resolveListColor(session.color) ??
           resolvePinColor(place.category);
+        const closed =
+          shouldFetchPoiPhones() &&
+          place.source === "poi" &&
+          typeof place.poi_id === "number" &&
+          Boolean(poiClosedAtByIdRef.current[place.poi_id]);
         return [{
           id: place.id,
           lat,
@@ -9088,6 +9139,7 @@ function HomePageContent() {
           category: place.category,
           fillColor,
           name: place.name,
+          ...(closed ? { closed: true } : {}),
         }];
       });
       void gl.setPins(pins);
@@ -10494,6 +10546,8 @@ function HomePageContent() {
       if (place.source === "poi" && typeof place.poi_id === "number") {
         const cachedPhone = poiPhoneByIdRef.current[place.poi_id];
         if (cachedPhone) mergedSafely._poiPhone = cachedPhone;
+        const cachedClosed = poiClosedAtByIdRef.current[place.poi_id];
+        if (cachedClosed) mergedSafely._poiClosedAt = cachedClosed;
       }
       setSelectedPlace(
         mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string },
@@ -10515,16 +10569,25 @@ function HomePageContent() {
     }
 
     const publish = () => {
-      const pins = [...byId.entries()].map(([id, entry]) => ({
-        id,
-        lat: entry.lat,
-        lng: entry.lng,
-        category: entry.category,
-        fillColor: pinFillForPlace({
+      const pins = [...byId.entries()].map(([id, entry]) => {
+        const place = places.find((p) => p.id === id);
+        const closed =
+          shouldFetchPoiPhones() &&
+          place?.source === "poi" &&
+          typeof place.poi_id === "number" &&
+          Boolean(poiClosedAtByIdRef.current[place.poi_id]);
+        return {
+          id,
+          lat: entry.lat,
+          lng: entry.lng,
           category: entry.category,
-          listColor: entry.listColor,
-        }),
-      }));
+          fillColor: pinFillForPlace({
+            category: entry.category,
+            listColor: entry.listColor,
+          }),
+          ...(closed ? { closed: true } : {}),
+        };
+      });
       void adapter.setPins(pins);
       markersRef.current.length = 0;
       byId.forEach((entry) => markersRef.current.push(entry.marker));
@@ -10603,6 +10666,11 @@ function HomePageContent() {
       if (myRunId !== placePinsRunIdRef.current.expanded) return;
       const pins = [...byId.entries()].map(([id, entry]) => {
         const place = places.find((p) => p.id === id);
+        const closed =
+          shouldFetchPoiPhones() &&
+          place?.source === "poi" &&
+          typeof place.poi_id === "number" &&
+          Boolean(poiClosedAtByIdRef.current[place.poi_id]);
         const base = {
           id,
           lat: entry.lat,
@@ -10613,6 +10681,7 @@ function HomePageContent() {
             listColor: entry.listColor,
           }),
           name: place?.name,
+          ...(closed ? { closed: true } : {}),
         };
         if (!attachPhotoMeta || !place) return base;
         const meta = getMarkerPhotoMetaForPlace(feedPostsRef.current, place, {
@@ -10676,6 +10745,15 @@ function HomePageContent() {
       });
     });
     publish();
+  };
+
+  refreshAdminMapLibrePinsRef.current = () => {
+    if (isCompactMapLibre(mapRef.current)) {
+      syncCompactMapLibrePins(savedPlacesRef.current);
+    }
+    if (isExpandedMapLibre(expandedMapRef.current)) {
+      syncExpandedMapLibrePins(savedPlacesRef.current);
+    }
   };
 
   const runExpandedMapLibrePinClick = (placeId: string, markerLat: number, markerLng: number) => {
@@ -10947,6 +11025,8 @@ function HomePageContent() {
         if (place.source === "poi" && typeof place.poi_id === "number") {
           const cachedPhone = poiPhoneByIdRef.current[place.poi_id];
           if (cachedPhone) mergedSafely._poiPhone = cachedPhone;
+          const cachedClosed = poiClosedAtByIdRef.current[place.poi_id];
+          if (cachedClosed) mergedSafely._poiClosedAt = cachedClosed;
         }
         setSelectedPlace(mergedSafely as typeof baseSelected & { _feedPosts: typeof relatedPosts; _savedPlaceId: string });
         void ensurePoiPhoneOnSelectedPlace(place);
@@ -14173,10 +14253,15 @@ function HomePageContent() {
         matchedSaved?.source === "poi" && typeof matchedSaved.poi_id === "number"
           ? poiPhoneByIdRef.current[matchedSaved.poi_id] ?? null
           : null;
+      const poiClosedAt =
+        matchedSaved?.source === "poi" && typeof matchedSaved.poi_id === "number"
+          ? poiClosedAtByIdRef.current[matchedSaved.poi_id] ?? null
+          : null;
       setHomePlaceSheet({
         ...base,
         _placeSource: matchedSaved?.source ?? null,
         ...(poiPhone ? { _poiPhone: poiPhone } : {}),
+        ...(poiClosedAt ? { _poiClosedAt: poiClosedAt } : {}),
       });
     },
     [feedPosts, savedPlaces],

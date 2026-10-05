@@ -38,7 +38,24 @@ export type PlaceSheetData = {
   _placeSource?: "kakao" | "user" | "poi" | null;
   /** public.poi.phone (never copied onto places) */
   _poiPhone?: string | null;
+  /** public.poi.closed_at ISO date (never copied onto places / bootstrap cache) */
+  _poiClosedAt?: string | null;
 };
+
+/** "2026년 9월" from poi.closed_at — null if unparseable. */
+export function formatPoiClosedAtMonthLabel(
+  closedAt: string | null | undefined,
+): string | null {
+  if (typeof closedAt !== "string") return null;
+  const s = closedAt.trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{2})/);
+  if (!m) return null;
+  const year = m[1];
+  const month = Number(m[2]);
+  if (!Number.isFinite(month) || month < 1 || month > 12) return null;
+  return `${year}년 ${month}월`;
+}
 
 /** Displayable phone: keep original formatting, hide if fewer than 7 digits. */
 export function displayablePhone(raw: string | null | undefined): string | null {

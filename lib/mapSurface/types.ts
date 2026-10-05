@@ -12,6 +12,8 @@ export type CompactPinInput = {
   photoUrl?: string | null;
   /** Related curation count — badge when > 0 */
   postCount?: number;
+  /** Admin MapLibre: dim pin when poi.closed_at is set (~45% opacity) */
+  closed?: boolean;
 };
 
 export type CompactRouteMode = "car" | "walk" | "course" | "preview";

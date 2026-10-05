@@ -543,6 +543,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
           0,
         ],
       },
+      paint: {
+        "icon-opacity": [
+          "case",
+          ["==", ["get", "closed"], 1],
+          0.45,
+          1,
+        ],
+      },
     });
 
     map.addSource(FOCUS_SOURCE, {
@@ -864,6 +872,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     const el = document.createElement("button");
     el.type = "button";
     el.className = mode === "photo" ? "mlPhotoPin" : "mlPhotoPinBadgeOnly";
+    if (pin.closed) el.classList.add("is-closed");
     el.setAttribute("aria-label", pin.name?.trim() || "장소");
     if (mode === "photo" && pin.photoUrl) {
       const img = document.createElement("img");
@@ -998,6 +1007,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
           }
           this.photoMarkers.delete(id);
         } else {
+          el.classList.toggle("is-closed", Boolean(pin.closed));
           const badgeEl = el.querySelector(".mlPhotoPinBadge");
           if ((pin.postCount ?? 0) > 0) {
             if (badgeEl) {
@@ -1059,6 +1069,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
           id: p.id,
           icon: pinImageKey("pin", p.category, p.fillColor) + (this.theme === "neon" ? ":neon" : ""),
           name: p.name ?? "",
+          closed: p.closed ? 1 : 0,
         },
         geometry: { type: "Point", coordinates: [p.lng, p.lat] },
       })),
