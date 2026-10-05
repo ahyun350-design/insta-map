@@ -30,6 +30,9 @@ scripts/localdata/raw_c/
 
 # 상가(상권)정보 raw (large)
 scripts/localdata/raw_d/
+
+# 폐업 dry-run 원본 (기존 raw 덮어쓰기 금지)
+scripts/localdata/raw_closed_check/
 .xcode-derived/
 .worktrees/
 
