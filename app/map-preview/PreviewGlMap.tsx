@@ -78,6 +78,8 @@ type Props = {
   } | null;
   /** Route style demo: walk | car | course (Seongsu fake path). */
   routeDemo?: PreviewRouteMode | null;
+  /** Directions chrome compare: dark | paper (paint-only basemap). */
+  routeTheme?: "dark" | "paper" | null;
   onReady?: () => void;
   onError?: (err: Error) => void;
   onPinClick?: (pinId: string) => void;
@@ -333,6 +335,7 @@ export default function PreviewGlMap({
   singleZoom = 11,
   zoomJump = null,
   routeDemo = null,
+  routeTheme = null,
   onReady,
   onError,
   onPinClick,
@@ -351,6 +354,8 @@ export default function PreviewGlMap({
   clusterRef.current = cluster;
   const routeDemoRef = useRef(routeDemo);
   routeDemoRef.current = routeDemo;
+  const routeThemeRef = useRef(routeTheme);
+  routeThemeRef.current = routeTheme;
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const onErrorRef = useRef(onError);
@@ -492,6 +497,7 @@ export default function PreviewGlMap({
                   map,
                   routeDemoRef.current,
                   themeRef.current === "neon" ? "neon" : "paper",
+                  routeThemeRef.current,
                 );
               }
 

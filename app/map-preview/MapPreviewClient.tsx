@@ -25,6 +25,7 @@ import PreviewGlMap, {
 import PublicListGlProbe from "./PublicListGlProbe";
 import {
   parsePreviewRouteMode,
+  parsePreviewRouteTheme,
   type PreviewRouteMode,
 } from "./routeDemo";
 import "./map-preview.css";
@@ -39,6 +40,7 @@ type PreviewQuery = {
   mode: PreviewPerfMode;
   compare: boolean;
   route: PreviewRouteMode | null;
+  routeTheme: "dark" | "paper" | null;
 };
 
 function parseMode(sp: URLSearchParams): PreviewPerfMode {
@@ -60,6 +62,7 @@ function readPreviewQuery(): PreviewQuery {
       mode: "default",
       compare: false,
       route: null,
+      routeTheme: null,
     };
   }
   const sp = new URLSearchParams(window.location.search);
@@ -79,6 +82,7 @@ function readPreviewQuery(): PreviewQuery {
     mode: parseMode(sp),
     compare: sp.get("compare") === "1",
     route: parsePreviewRouteMode(sp.get("route")),
+    routeTheme: parsePreviewRouteTheme(sp.get("routeTheme")),
   };
 }
 
@@ -228,6 +232,7 @@ export default function MapPreviewClient() {
     token: number;
   } | null>(null);
   const [routeDemo, setRouteDemo] = useState<PreviewRouteMode | null>(null);
+  const [routeTheme, setRouteTheme] = useState<"dark" | "paper" | null>(null);
 
   const leave = useCallback(() => {
     safeRouterBack(router, "/?tab=mypage");
@@ -251,6 +256,7 @@ export default function MapPreviewClient() {
     setMode(q.mode);
     setShowCompare(q.compare);
     setRouteDemo(q.route);
+    setRouteTheme(q.routeTheme);
     writeQueryPatch({ theme: q.theme });
     setHydrated(true);
   }, []);
@@ -426,7 +432,7 @@ export default function MapPreviewClient() {
       <div className="map-preview-map">
         {hydrated ? (
           <PreviewGlMap
-            key={`gl-${mode}-${theme}-${cluster ? 1 : 0}-${effectivePinCount}-${routeDemo ?? "noroute"}`}
+            key={`gl-${mode}-${theme}-${cluster ? 1 : 0}-${effectivePinCount}-${routeDemo ?? "noroute"}-${routeTheme ?? "nort"}`}
             theme={theme}
             mode={mode}
             pins={pins}
@@ -435,6 +441,7 @@ export default function MapPreviewClient() {
             cluster={cluster}
             zoomJump={zoomJump}
             routeDemo={routeDemo}
+            routeTheme={routeTheme}
             onReady={() => setStatus("ready")}
             onError={(e) => {
               setStatus("error");

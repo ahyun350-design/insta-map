@@ -1,5 +1,6 @@
 import {
   MAP_BRAND_NAVY,
+  MAP_DIRECTIONS_LIME,
   MAP_NEON_ACCENT,
   MAP_NEON_CORE,
   MAP_NEON_PREVIEW,
@@ -8,6 +9,7 @@ import {
 } from "./mapBrand";
 import type { CompactRouteMode } from "./types";
 import type { AdminMapLibreThemeId } from "./adminMapTheme";
+import type { DirectionsRouteThemeId } from "./directionsRouteTheme";
 
 /** Main stroke width by zoom (z10→3, z13→4.5, z16→6). */
 export const ROUTE_LINE_WIDTH: unknown = [
@@ -21,6 +23,9 @@ export const ROUTE_LINE_WIDTH: unknown = [
   16,
   6,
 ];
+
+/** Directions chrome — thin solid 3.5px (no dash). */
+export const DIRECTIONS_ROUTE_LINE_WIDTH = 3.5;
 
 /** Casing = main + 4px (paper). */
 export const ROUTE_CASING_WIDTH: unknown = [
@@ -140,6 +145,7 @@ export function routePaintForMode(
       },
     };
   }
+  // Minimap / default: thin solid (no walk dash) for a quieter path.
   if (mode === "walk") {
     return {
       casing: {
@@ -153,7 +159,7 @@ export function routePaintForMode(
         color: MAP_BRAND_NAVY,
         opacity: 1,
         width: ROUTE_LINE_WIDTH,
-        dasharray: [0.01, 1.9],
+        dasharray: null,
       },
     };
   }
@@ -174,6 +180,55 @@ export function routePaintForMode(
   };
 }
 
+/**
+ * Expanded directions chrome (admin MapLibre): solid lime/navy + one glow or white casing.
+ * Never uses feature-state. No dash.
+ */
+export function directionsRoutePaint(
+  mode: RouteVisualMode,
+  routeTheme: DirectionsRouteThemeId,
+): RouteVisual {
+  if (mode === "preview") {
+    return routePaintForMode("preview", routeTheme === "dark" ? "neon" : "paper");
+  }
+  if (routeTheme === "dark") {
+    return {
+      casing: null,
+      glowOuter: {
+        color: MAP_DIRECTIONS_LIME,
+        opacity: 0.4,
+        width: DIRECTIONS_ROUTE_LINE_WIDTH + 10,
+        dasharray: null,
+        blur: 10,
+      },
+      glowMid: null,
+      line: {
+        color: MAP_DIRECTIONS_LIME,
+        opacity: 1,
+        width: DIRECTIONS_ROUTE_LINE_WIDTH,
+        dasharray: null,
+        blur: 0,
+      },
+    };
+  }
+  return {
+    casing: {
+      color: MAP_ROUTE_CASING_WHITE,
+      opacity: 0.95,
+      width: DIRECTIONS_ROUTE_LINE_WIDTH + 3,
+    },
+    glowOuter: null,
+    glowMid: null,
+    line: {
+      color: MAP_BRAND_NAVY,
+      opacity: 1,
+      width: DIRECTIONS_ROUTE_LINE_WIDTH,
+      dasharray: null,
+      blur: 0,
+    },
+  };
+}
+
 export {
   MAP_BRAND_NAVY,
   MAP_ROUTE_PREVIEW_GRAY,
@@ -181,4 +236,5 @@ export {
   MAP_NEON_ACCENT,
   MAP_NEON_CORE,
   MAP_NEON_PREVIEW,
+  MAP_DIRECTIONS_LIME,
 };

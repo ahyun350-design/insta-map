@@ -49,6 +49,7 @@ import { claimMapGlSlot, releaseMapGlSlot } from "./mapGlRecovery";
 import { attachSubwayOverlay, prefetchSubwayOverlay } from "./subwayOverlay";
 import {
   MAP_BRAND_NAVY,
+  MAP_DIRECTIONS_LIME,
   MAP_NEON_ACCENT,
   MAP_NEON_CLUSTER_FILL,
   MAP_NEON_CORE,
@@ -57,8 +58,14 @@ import {
   COMPACT_ROUTE_FIT_PADDING,
   EXPANDED_ROUTE_FIT_PADDING,
   ROUTE_LAYOUT,
+  directionsRoutePaint,
   routePaintForMode,
 } from "./routeStyle";
+import {
+  applyDirectionsBasemap,
+  clearDirectionsBasemap,
+} from "./directionsBasemap";
+import type { DirectionsRouteThemeId } from "./directionsRouteTheme";
 import { installMapLibreCornerAttribution } from "./mapAttribution";
 
 const PIN_SOURCE = "compact-pins";
@@ -70,6 +77,9 @@ const ROUTE_CASING_LAYER = "compact-route-casing";
 const ROUTE_LAYER = "compact-route-line";
 const ROUTE_ORIGIN_SOURCE = "compact-route-origin";
 const ROUTE_ORIGIN_LAYER = "compact-route-origin-circle";
+const ROUTE_DEST_SOURCE = "compact-route-dest";
+const ROUTE_DEST_LAYER = "compact-route-dest-circle";
+const ROUTE_DEST_HALO_LAYER = "compact-route-dest-halo";
 const FOCUS_SOURCE = "compact-focus";
 const FOCUS_LAYER = "compact-focus-symbol";
 const MYLOC_SOURCE = "compact-myloc";
@@ -185,6 +195,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private mountStartedAt = 0;
   private fallbackReported = false;
   private courseSelectedOrder: number | null = null;
+  /** Admin directions chrome (paint basemap + hide clutter pins). */
+  private directionsChromeActive = false;
+  private directionsRouteTheme: DirectionsRouteThemeId = "dark";
+  private distanceMarker: maplibregl.Marker | null = null;
+  private cameraBeforeDirections: {
+    center: [number, number];
+    zoom: number;
+  } | null = null;
   /** Context lost while hidden — page should remount when surface is shown again. */
   pendingHiddenContextLost = false;
 
@@ -501,6 +519,34 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         "circle-color": this.theme === "neon" ? MAP_NEON_CLUSTER_FILL : "#FFFFFF",
         "circle-stroke-width": this.theme === "neon" ? 3.5 : 3,
         "circle-stroke-color": this.theme === "neon" ? MAP_NEON_ACCENT : MAP_BRAND_NAVY,
+        "circle-opacity": 1,
+      },
+    });
+
+    map.addSource(ROUTE_DEST_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: ROUTE_DEST_HALO_LAYER,
+      type: "circle",
+      source: ROUTE_DEST_SOURCE,
+      paint: {
+        "circle-radius": 14,
+        "circle-color": MAP_DIRECTIONS_LIME,
+        "circle-opacity": 0.28,
+        "circle-blur": 0.6,
+      },
+    });
+    map.addLayer({
+      id: ROUTE_DEST_LAYER,
+      type: "circle",
+      source: ROUTE_DEST_SOURCE,
+      paint: {
+        "circle-radius": 8,
+        "circle-color": MAP_DIRECTIONS_LIME,
+        "circle-stroke-width": 2.5,
+        "circle-stroke-color": "#ffffff",
         "circle-opacity": 1,
       },
     });
@@ -1243,19 +1289,28 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         },
       ],
     });
-    // Origin endpoint (destination = focus pin, managed separately)
+    // Origin endpoint; directions chrome uses dest circle instead of focus pin
     if (mode === "preview") {
       this.clearRouteOrigin();
+      this.clearRouteDest();
     } else {
       const start = path[0]!;
       this.setRouteOrigin(start.lat, start.lng);
+      if (this.directionsChromeActive) {
+        const end = path[path.length - 1]!;
+        this.setRouteDest(end.lat, end.lng);
+        this.clearFocusMarker();
+      }
     }
   }
 
   private applyRoutePaint(mode: CompactRouteMode) {
     const map = this.map;
     if (!map) return;
-    const visual = routePaintForMode(mode, this.theme);
+    const visual =
+      this.directionsChromeActive && mode !== "preview"
+        ? directionsRoutePaint(mode, this.directionsRouteTheme)
+        : routePaintForMode(mode, this.theme);
 
     const applyGlow = (
       layerId: string,
@@ -1350,6 +1405,198 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       features: [],
     });
     this.clearRouteOrigin();
+    this.clearRouteDest();
+    this.clearDistanceLabel();
+  }
+
+  private setRouteDest(lat: number, lng: number) {
+    const map = this.map;
+    if (!map?.getSource(ROUTE_DEST_SOURCE)) return;
+    (map.getSource(ROUTE_DEST_SOURCE) as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "Point", coordinates: [lng, lat] },
+        },
+      ],
+    });
+  }
+
+  private clearRouteDest() {
+    const map = this.map;
+    if (!map?.getSource(ROUTE_DEST_SOURCE)) return;
+    (map.getSource(ROUTE_DEST_SOURCE) as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: [],
+    });
+  }
+
+  private setDistanceLabel(lat: number, lng: number, label: string) {
+    const map = this.map;
+    if (!map) return;
+    this.clearDistanceLabel();
+    const el = document.createElement("div");
+    el.className = "mlDirectionsDistanceBubble";
+    el.textContent = label;
+    this.distanceMarker = new maplibregl.Marker({
+      element: el,
+      anchor: "bottom",
+      offset: [0, -8],
+    })
+      .setLngLat([lng, lat])
+      .addTo(map);
+  }
+
+  private clearDistanceLabel() {
+    if (this.distanceMarker) {
+      try {
+        this.distanceMarker.remove();
+      } catch {
+        /* ignore */
+      }
+      this.distanceMarker = null;
+    }
+  }
+
+  private setPinLayersVisible(visible: boolean) {
+    const map = this.map;
+    if (!map) return;
+    const vis = visible ? "visible" : "none";
+    for (const id of [
+      PIN_LAYER,
+      PIN_CLUSTER_LAYER,
+      PIN_CLUSTER_COUNT_LAYER,
+      FOCUS_LAYER,
+      SEARCH_LAYER,
+      DISCOVER_CIRCLE_LAYER,
+      DISCOVER_LABEL_HOT_LAYER,
+      DISCOVER_LABEL_REST_LAYER,
+    ]) {
+      if (map.getLayer(id)) {
+        try {
+          map.setLayoutProperty(id, "visibility", vis);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (!visible) {
+      this.clearPhotoPins();
+    } else {
+      this.refreshPhotoPins();
+    }
+  }
+
+  private paintDirectionsEndpoints(theme: DirectionsRouteThemeId) {
+    const map = this.map;
+    if (!map) return;
+    const lime = theme === "dark";
+    const core = lime ? MAP_DIRECTIONS_LIME : MAP_BRAND_NAVY;
+    const fill = lime ? "#0E1230" : "#FFFFFF";
+    if (map.getLayer("compact-route-origin-shadow")) {
+      map.setPaintProperty("compact-route-origin-shadow", "circle-radius", 10);
+      map.setPaintProperty(
+        "compact-route-origin-shadow",
+        "circle-color",
+        core,
+      );
+      map.setPaintProperty(
+        "compact-route-origin-shadow",
+        "circle-opacity",
+        0.35,
+      );
+    }
+    if (map.getLayer(ROUTE_ORIGIN_LAYER)) {
+      map.setPaintProperty(ROUTE_ORIGIN_LAYER, "circle-radius", 6);
+      map.setPaintProperty(ROUTE_ORIGIN_LAYER, "circle-color", fill);
+      map.setPaintProperty(ROUTE_ORIGIN_LAYER, "circle-stroke-width", 3);
+      map.setPaintProperty(ROUTE_ORIGIN_LAYER, "circle-stroke-color", core);
+    }
+    if (map.getLayer(ROUTE_DEST_HALO_LAYER)) {
+      map.setPaintProperty(ROUTE_DEST_HALO_LAYER, "circle-radius", 14);
+      map.setPaintProperty(ROUTE_DEST_HALO_LAYER, "circle-color", core);
+      map.setPaintProperty(ROUTE_DEST_HALO_LAYER, "circle-opacity", 0.3);
+    }
+    if (map.getLayer(ROUTE_DEST_LAYER)) {
+      map.setPaintProperty(ROUTE_DEST_LAYER, "circle-radius", 8);
+      map.setPaintProperty(ROUTE_DEST_LAYER, "circle-color", core);
+      map.setPaintProperty(ROUTE_DEST_LAYER, "circle-stroke-color", "#ffffff");
+    }
+  }
+
+  /**
+   * Admin expanded directions chrome. Paint-only basemap (no setStyle).
+   * Hides user pins/photo/discover; keeps course stops when mode is course.
+   */
+  setDirectionsChrome(opts: {
+    active: boolean;
+    routeTheme?: DirectionsRouteThemeId;
+    path?: MapLatLng[];
+    mode?: CompactRouteMode;
+    distanceKm?: number | null;
+    restoreCamera?: boolean;
+  }) {
+    const map = this.map;
+    if (!map || this.mode !== "expanded") return;
+
+    if (!opts.active) {
+      if (!this.directionsChromeActive) return;
+      this.directionsChromeActive = false;
+      clearDirectionsBasemap(map);
+      this.setPinLayersVisible(true);
+      this.clearRouteDest();
+      this.clearDistanceLabel();
+      if (opts.restoreCamera !== false && this.cameraBeforeDirections) {
+        map.easeTo({
+          center: this.cameraBeforeDirections.center,
+          zoom: this.cameraBeforeDirections.zoom,
+          duration: 520,
+        });
+      }
+      this.cameraBeforeDirections = null;
+      return;
+    }
+
+    const theme = opts.routeTheme ?? this.directionsRouteTheme;
+    this.directionsRouteTheme = theme;
+    if (!this.directionsChromeActive) {
+      const c = map.getCenter();
+      this.cameraBeforeDirections = {
+        center: [c.lng, c.lat],
+        zoom: map.getZoom(),
+      };
+    }
+    this.directionsChromeActive = true;
+    applyDirectionsBasemap(map, theme);
+    this.setPinLayersVisible(false);
+    this.clearFocusMarker();
+    this.paintDirectionsEndpoints(theme);
+
+    const path = opts.path;
+    const mode = opts.mode ?? "car";
+    if (path && path.length >= 2) {
+      this.applyRoutePaint(mode);
+      const end = path[path.length - 1]!;
+      this.setRouteDest(end.lat, end.lng);
+      const mid = path[Math.floor(path.length / 2)]!;
+      if (opts.distanceKm != null && Number.isFinite(opts.distanceKm)) {
+        const label = `${Number(opts.distanceKm).toFixed(1)} km`;
+        this.setDistanceLabel(mid.lat, mid.lng, label);
+      } else {
+        this.clearDistanceLabel();
+      }
+      const pad = {
+        top: 72,
+        right: 28,
+        bottom: 160,
+        left: 28,
+      };
+      const bounds = new maplibregl.LngLatBounds();
+      for (const p of path) bounds.extend([p.lng, p.lat]);
+      map.fitBounds(bounds, { padding: pad, maxZoom: 16, duration: 650 });
+    }
   }
 
   setFocusMarker(pin: CompactPinInput) {
@@ -1555,6 +1802,9 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     // Mark intentional teardown BEFORE remove — MapLibre calls WEBGL_lose_context on remove.
     this.intentionalDestroy = true;
     this.destroyed = true;
+    this.clearDistanceLabel();
+    if (this.map) clearDirectionsBasemap(this.map);
+    this.directionsChromeActive = false;
     this.clearPhotoPins();
     this.photoFailedIds.clear();
     this.selectedPinId = null;

@@ -368,11 +368,68 @@ export async function paintPreviewRouteDemo(
   map: MlMap,
   mode: PreviewRouteMode,
   theme: AdminMapLibreThemeId = "paper",
+  routeTheme?: "dark" | "paper" | null,
 ) {
   ensureRouteLayers(map);
   const path = SEONGSU_DEMO_PATH;
   const routeMode: RouteVisualMode = mode === "course" ? "course" : mode;
-  applyPaint(map, routeMode, theme);
+  if (routeTheme === "dark" || routeTheme === "paper") {
+    const { applyDirectionsBasemap } = await import(
+      "@/lib/mapSurface/directionsBasemap"
+    );
+    const { directionsRoutePaint } = await import("@/lib/mapSurface/routeStyle");
+    applyDirectionsBasemap(map, routeTheme);
+    const visual = directionsRoutePaint(routeMode, routeTheme);
+    // Reuse applyPaint structure via temporary theme mapping for endpoints
+    applyPaint(map, routeMode, routeTheme === "dark" ? "neon" : "paper");
+    // Override line paints with directions chrome (solid lime/navy)
+    if (visual.glowOuter) {
+      map.setLayoutProperty("preview-route-glow-outer", "visibility", "visible");
+      map.setPaintProperty(
+        "preview-route-glow-outer",
+        "line-color",
+        visual.glowOuter.color,
+      );
+      map.setPaintProperty(
+        "preview-route-glow-outer",
+        "line-width",
+        visual.glowOuter.width,
+      );
+      map.setPaintProperty(
+        "preview-route-glow-outer",
+        "line-opacity",
+        visual.glowOuter.opacity,
+      );
+      map.setPaintProperty(
+        "preview-route-glow-outer",
+        "line-blur",
+        visual.glowOuter.blur ?? 0,
+      );
+    } else {
+      map.setLayoutProperty("preview-route-glow-outer", "visibility", "none");
+    }
+    map.setLayoutProperty("preview-route-glow-mid", "visibility", "none");
+    if (visual.casing) {
+      map.setLayoutProperty("preview-route-casing", "visibility", "visible");
+      map.setPaintProperty(
+        "preview-route-casing",
+        "line-color",
+        visual.casing.color,
+      );
+      map.setPaintProperty(
+        "preview-route-casing",
+        "line-width",
+        visual.casing.width,
+      );
+    } else {
+      map.setLayoutProperty("preview-route-casing", "visibility", "none");
+    }
+    map.setPaintProperty("preview-route-line", "line-color", visual.line.color);
+    map.setPaintProperty("preview-route-line", "line-width", visual.line.width);
+    map.setPaintProperty("preview-route-line", "line-dasharray", [1, 0]);
+  } else {
+    applyPaint(map, routeMode, theme);
+  }
 
   (map.getSource(ROUTE_SOURCE) as GeoJSONSource).setData({
     type: "FeatureCollection",
@@ -469,5 +526,12 @@ export function parsePreviewRouteMode(
   raw: string | null | undefined,
 ): PreviewRouteMode | null {
   if (raw === "walk" || raw === "car" || raw === "course") return raw;
+  return null;
+}
+
+export function parsePreviewRouteTheme(
+  raw: string | null | undefined,
+): "dark" | "paper" | null {
+  if (raw === "dark" || raw === "paper") return raw;
   return null;
 }

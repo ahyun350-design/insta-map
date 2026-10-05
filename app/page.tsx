@@ -222,6 +222,7 @@ import { useNativeKeyboard } from "@/lib/useNativeKeyboard";
 import { FeedPostMedia } from "@/components/FeedPostCard";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
+import DirectionsMiniCard from "@/components/DirectionsMiniCard";
 import { AddToListSheet } from "@/components/AddToListSheet";
 import { PlaceMemoSheet } from "@/components/PlaceMemoSheet";
 import { MyListsScreen } from "@/components/MyListsScreen";
@@ -265,12 +266,16 @@ import {
   writeAdminMapLibreTheme,
   resolveMapLibreThemeId,
   adminMapThemeLabel,
+  readDirectionsRouteTheme,
+  writeDirectionsRouteTheme,
+  directionsRouteThemeLabel,
   canAttemptMapGlRemount,
   consumeMapGlRemountAttempt,
   trackMapGlFallback,
   trackMapGlRecovered,
   type AdminMapLibreThemeId,
   type AdminMapGlOverride,
+  type DirectionsRouteThemeId,
 } from "@/lib/mapSurface";
 import {
   MAP_ATTRIB_OPENFREEMAP_URL,
@@ -1593,6 +1598,7 @@ function HomePageContent() {
     setAdminCompactMapLibre(isAdmin ? readCompactMapLibreOverride() : "auto");
     setAdminExpandedMapLibre(isAdmin ? readExpandedMapLibreOverride() : "auto");
     setAdminMapLibreTheme(isAdmin ? readAdminMapLibreTheme() : "paper");
+    setDirectionsRouteTheme(isAdmin ? readDirectionsRouteTheme() : "dark");
     if (!isAdmin) {
       setCompactMapIsMapLibre(false);
       setExpandedMapIsMapLibre(false);
@@ -1952,6 +1958,12 @@ function HomePageContent() {
   const [directionsMode, setDirectionsMode] = useState<"car" | "walk">("car");
   /** 컴팩트에서 자동차/도보를 눌러 시간·거리를 받은 뒤에만 true — 지도 크게 보기 시 자동 길찾기 */
   const [directionsChosen, setDirectionsChosen] = useState(false);
+  /** Admin MapLibre directions chrome: dark | paper basemap. */
+  const [directionsRouteTheme, setDirectionsRouteTheme] =
+    useState<DirectionsRouteThemeId>("dark");
+  /** When false, show floating mini card instead of full place sheet (admin directions). */
+  const [directionsSheetExpanded, setDirectionsSheetExpanded] = useState(false);
+  const directionsPathRef = useRef<{ lat: number; lng: number }[] | null>(null);
   const directionsModeRef = useRef(directionsMode);
   directionsModeRef.current = directionsMode;
   const directionsChosenRef = useRef(directionsChosen);
@@ -11404,6 +11416,7 @@ function HomePageContent() {
     if (gl) gl.clearRoute();
     const glExp = getExpandedMapLibreAdapter(expandedMapRef.current);
     if (glExp) {
+      glExp.setDirectionsChrome({ active: false });
       glExp.clearRoute();
       glExp.clearCourseStops();
     }
@@ -11416,6 +11429,8 @@ function HomePageContent() {
       }
     });
     courseLabelOverlaysRef.current = [];
+    directionsPathRef.current = null;
+    setDirectionsSheetExpanded(false);
     setDirectionsInfo(null);
     setDirectionsChosen(false);
   };
@@ -11429,9 +11444,21 @@ function HomePageContent() {
     if (gl) {
       if (path.length < 2) return;
       const preview = opts?.preview === true;
+      directionsPathRef.current = path;
       gl.setRoute(path, preview ? "preview" : "course");
       routePolylineRef.current = { setMap: () => gl.clearRoute() };
-      if (fitBounds) {
+      const useChrome =
+        userIdRef.current === ADMIN_USER_ID &&
+        readExpandedMapLibreOverride() === "force_maplibre";
+      if (useChrome && !preview) {
+        gl.setDirectionsChrome({
+          active: true,
+          routeTheme: readDirectionsRouteTheme(),
+          path,
+          mode: "course",
+          distanceKm: null,
+        });
+      } else if (fitBounds) {
         const bottomPad = Math.max(96, courseNavBottomPadRef.current);
         gl.fitPoints(path, {
           top: 108,
@@ -11591,14 +11618,30 @@ function HomePageContent() {
         if (!expandedMapRef.current || path.length < 2) return;
         const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
         if (gl) {
+          directionsPathRef.current = path;
           gl.setRoute(path, mode);
           routePolylineRef.current = { setMap: () => gl.clearRoute() };
-          gl.fitPoints(path, {
-            top: 108,
-            right: 28,
-            bottom: 280,
-            left: 28,
-          });
+          const useChrome =
+            userIdRef.current === ADMIN_USER_ID &&
+            (readExpandedMapLibreOverride() === "force_maplibre" ||
+              readCompactMapLibreOverride() === "force_maplibre");
+          if (useChrome) {
+            // Distance label applied in effect once directionsInfo is set.
+            gl.setDirectionsChrome({
+              active: true,
+              routeTheme: readDirectionsRouteTheme(),
+              path,
+              mode,
+              distanceKm: null,
+            });
+          } else {
+            gl.fitPoints(path, {
+              top: 108,
+              right: 28,
+              bottom: 280,
+              left: 28,
+            });
+          }
           return;
         }
         const linePath = path.map((p) => new window.kakao.maps.LatLng(p.lat, p.lng));
@@ -13679,6 +13722,7 @@ function HomePageContent() {
       fullscreenListRef.current = null;
       setListMapActive(false);
       clearListWebMarkers();
+      clearRoute();
       setMapExpanded(false);
       setSelectedPlace(null);
       setShowCourseRoute(false);
@@ -14306,6 +14350,46 @@ function HomePageContent() {
     (adminCompactMapLibre === "force_maplibre" ||
       adminExpandedMapLibre === "force_maplibre");
 
+  /** Admin MapLibre fullscreen directions chrome (mini card + dark/paper path). */
+  const adminDirectionsChrome =
+    showAdminMapExtras &&
+    mapExpanded &&
+    expandedMapIsMapLibre &&
+    ((!!directionsInfo && !showCourseRoute) || showCourseRoute);
+
+  /** Mini card only for place car/walk directions (not course nav). */
+  const adminDirectionsMiniCard =
+    adminDirectionsChrome && !!directionsInfo && !showCourseRoute;
+
+  // Sync directions chrome paint / distance bubble when route info updates.
+  useEffect(() => {
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (!gl) return;
+    if (!adminDirectionsChrome) {
+      if (!mapExpanded || !expandedMapIsMapLibre) {
+        gl.setDirectionsChrome({ active: false, restoreCamera: false });
+      }
+      return;
+    }
+    const path = directionsPathRef.current;
+    if (!path || path.length < 2) return;
+    gl.setDirectionsChrome({
+      active: true,
+      routeTheme: directionsRouteTheme,
+      path,
+      mode: showCourseRoute ? "course" : directionsMode,
+      distanceKm: directionsInfo?.distance ?? null,
+    });
+  }, [
+    adminDirectionsChrome,
+    directionsInfo,
+    directionsMode,
+    directionsRouteTheme,
+    mapExpanded,
+    expandedMapIsMapLibre,
+    showCourseRoute,
+  ]);
+
   const publishDiscoverPins = useCallback(() => {
     const adapter = getExpandedMapLibreAdapter(expandedMapRef.current);
     if (!adapter) return;
@@ -14560,6 +14644,10 @@ function HomePageContent() {
         showAdminMapExtras={showAdminMapExtras}
         onOpenExternalMapUrl={openExternalMapUrl}
         onClose={() => {
+          if (adminDirectionsChrome && directionsInfo) {
+            setDirectionsSheetExpanded(false);
+            return;
+          }
           setSelectedPlace(null);
           setSelectedMapPlace(null);
         }}
@@ -16998,6 +17086,9 @@ function HomePageContent() {
                 const adminForcedExpandedMlUi =
                   user?.id === ADMIN_USER_ID &&
                   readExpandedMapLibreOverride() === "force_maplibre";
+                /** MapLibre chrome (no Kakao gray search / Native toggle). */
+                const useMapLibreExpandedChrome =
+                  adminExpandedMlPortal || adminForcedExpandedMlUi;
                 const showWebExpandedPortal =
                   mapExpanded &&
                   (!nativeAvail ||
@@ -17029,7 +17120,7 @@ function HomePageContent() {
                       display: "flex",
                       flexDirection: "column",
                       boxSizing: "border-box",
-                      ...(adminExpandedMlPortal
+                      ...(useMapLibreExpandedChrome
                         ? {}
                         : {
                             paddingTop: "env(safe-area-inset-top, 0px)",
@@ -17039,7 +17130,7 @@ function HomePageContent() {
                           }),
                     }}
                   >
-                    {!adminExpandedMlPortal && (
+                    {!useMapLibreExpandedChrome && (
                     <div
                       className="fullscreenMapHeaderRow"
                       style={{
@@ -17119,7 +17210,7 @@ function HomePageContent() {
                       <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "18px", color: "#1a2a7a" }}>PindMap</span>
                     </div>
                     )}
-                    {!adminExpandedMlPortal && !showCourseRoute && (
+                    {!useMapLibreExpandedChrome && !showCourseRoute && (
                     <div
                       style={{
                         padding: "12px 20px",
@@ -17192,12 +17283,13 @@ function HomePageContent() {
                     )}
                     <div
                       className={
-                        adminExpandedMlPortal
+                        useMapLibreExpandedChrome
                           ? [
                               "expandedMapLibreStage",
                               selectedPlace || isMapSearchSheetOpen
                                 ? "is-sheet-open"
                                 : "",
+                              adminDirectionsChrome ? "is-directions-chrome" : "",
                             ]
                               .filter(Boolean)
                               .join(" ")
@@ -17205,7 +17297,7 @@ function HomePageContent() {
                       }
                       style={{ flex: 1, minHeight: 0, position: "relative" }}
                     >
-                      {adminExpandedMlPortal && (
+                      {useMapLibreExpandedChrome && (
                         <div className="expandedMapLibreTopChrome expandedMapLibreTopChromeFlow">
                           <button
                             type="button"
@@ -17240,6 +17332,7 @@ function HomePageContent() {
                           fullscreenListRef.current = null;
                           setListMapActive(false);
                           clearListWebMarkers();
+                          clearRoute();
                           setMapExpanded(false);
                           setSelectedPlace(null);
                           setShowCourseRoute(false);
@@ -17255,7 +17348,7 @@ function HomePageContent() {
                               <path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                           </button>
-                          {!showCourseRoute && (
+                          {!showCourseRoute && !adminDirectionsMiniCard && (
                             <div className="expandedMapLibreSearchColumn">
                               <div className="expandedMapLibreSearchPill">
                                 <button
@@ -17326,7 +17419,9 @@ function HomePageContent() {
                           )}
                         </div>
                       )}
-                      {adminExpandedMlPortal && discoverTipVisible ? (
+                      {useMapLibreExpandedChrome &&
+                      discoverTipVisible &&
+                      !adminDirectionsMiniCard ? (
                         <div className="expandedMapLibreDiscoverTip" role="status">
                           3명 이상이 저장한 곳이에요
                         </div>
@@ -17520,7 +17615,45 @@ function HomePageContent() {
                           onPanelMetrics={handleCourseNavPanelMetrics}
                         />
                       )}
-                      {selectedPlace && renderPlaceCard()}
+                      {adminDirectionsMiniCard &&
+                      selectedPlace &&
+                      directionsInfo &&
+                      !directionsSheetExpanded ? (
+                        <DirectionsMiniCard
+                          placeName={selectedPlace.place_name || "목적지"}
+                          durationMin={directionsInfo.duration}
+                          distanceKm={directionsInfo.distance}
+                          approx={directionsInfo.approx}
+                          mode={directionsMode}
+                          loading={directionsLoading}
+                          onExpand={() => setDirectionsSheetExpanded(true)}
+                          onClose={() => {
+                            clearRoute();
+                          }}
+                          onModeChange={(m) => {
+                            if (m === "transit") {
+                              openTransitInKakaoMap(
+                                selectedPlace.place_name,
+                                parseFloat(selectedPlace.y),
+                                parseFloat(selectedPlace.x),
+                              );
+                              return;
+                            }
+                            setDirectionsMode(m);
+                            void drawRoute(
+                              parseFloat(selectedPlace.y),
+                              parseFloat(selectedPlace.x),
+                              m,
+                            );
+                          }}
+                        />
+                      ) : null}
+                      {selectedPlace &&
+                        !(
+                          adminDirectionsMiniCard &&
+                          !directionsSheetExpanded
+                        ) &&
+                        renderPlaceCard()}
                       {isMapSearchSheetOpen && mapSearchResults.length > 0 && (
                         <MapSearchResultsSheet
                           open={isMapSearchSheetOpen}
@@ -19390,6 +19523,63 @@ function HomePageContent() {
                           background:
                             adminMapLibreTheme === id ? "#1a2a7a" : "#fff",
                           color: adminMapLibreTheme === id ? "#fff" : "#444",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {user?.id === ADMIN_USER_ID ? (
+                <div
+                  data-testid="admin-directions-route-theme"
+                  style={{
+                    width: "100%",
+                    padding: "16px 20px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                    alignItems: "stretch",
+                    cursor: "default",
+                  }}
+                >
+                  <span style={{ color: "#1a2a7a", fontSize: 14, fontWeight: 600 }}>
+                    길찾기 화면(관리자) · {directionsRouteThemeLabel(directionsRouteTheme)}
+                  </span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {([
+                      ["dark", "다크"],
+                      ["paper", "페이퍼"],
+                    ] as const).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        data-testid={`admin-directions-route-theme-${id}`}
+                        onClick={() => {
+                          writeDirectionsRouteTheme(id);
+                          setDirectionsRouteTheme(id);
+                          setShowMypageSettingsSheet(false);
+                          showToast(
+                            `길찾기 화면 · ${directionsRouteThemeLabel(id)}`,
+                            "info",
+                          );
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          border:
+                            directionsRouteTheme === id
+                              ? "1.5px solid #1a2a7a"
+                              : "1px solid #ddd",
+                          background:
+                            directionsRouteTheme === id ? "#1a2a7a" : "#fff",
+                          color: directionsRouteTheme === id ? "#fff" : "#444",
                           fontSize: 13,
                           fontWeight: 600,
                           cursor: "pointer",

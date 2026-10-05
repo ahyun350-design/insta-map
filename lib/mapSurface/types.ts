@@ -108,6 +108,18 @@ export type ExpandedMapSurface = CompactMapSurface & {
     dasharray?: number[];
     opacity?: number;
   }) => void;
+  /**
+   * Admin directions chrome: paint-only basemap, hide pins, endpoint circles,
+   * distance bubble. No-op on compact.
+   */
+  setDirectionsChrome: (opts: {
+    active: boolean;
+    routeTheme?: "dark" | "paper";
+    path?: MapLatLng[];
+    mode?: CompactRouteMode;
+    distanceKm?: number | null;
+    restoreCamera?: boolean;
+  }) => void;
 };
 
 /** Alias — compact MapLibre surface for admin minimap. */

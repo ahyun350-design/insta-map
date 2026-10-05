@@ -72,6 +72,7 @@ export {
   MAP_NEON_CORE,
   MAP_NEON_PREVIEW,
   MAP_NEON_CLUSTER_FILL,
+  MAP_DIRECTIONS_LIME,
 } from "./mapBrand";
 export {
   ADMIN_MAP_THEME_STORAGE_KEY,
@@ -87,8 +88,21 @@ export {
   ROUTE_CASING_WIDTH,
   ROUTE_LAYOUT,
   ROUTE_LINE_WIDTH,
+  DIRECTIONS_ROUTE_LINE_WIDTH,
   routePaintForMode,
+  directionsRoutePaint,
 } from "./routeStyle";
+export {
+  DIRECTIONS_ROUTE_THEME_STORAGE_KEY,
+  directionsRouteThemeLabel,
+  readDirectionsRouteTheme,
+  writeDirectionsRouteTheme,
+  type DirectionsRouteThemeId,
+} from "./directionsRouteTheme";
+export {
+  applyDirectionsBasemap,
+  clearDirectionsBasemap,
+} from "./directionsBasemap";
 export {
   attachSubwayOverlay,
   prefetchSubwayOverlay,

@@ -290,7 +290,7 @@ test("map-preview dense pins: 20 all render at z11/z13/z15", async ({
           String(f.properties?.id ?? ""),
         ),
       ),
-    ].filter(Boolean);
+    ].filter((id): id is string => Boolean(id));
     return {
       allowOverlap: m.getLayoutProperty?.(
         "preview-unclustered",
@@ -301,7 +301,7 @@ test("map-preview dense pins: 20 all render at z11/z13/z15", async ({
         "icon-ignore-placement",
       ),
       sourceCount: ids.length,
-      denseIds: ids.filter((id: string) => id.startsWith("dense-")).length,
+      denseIds: ids.filter((id) => id.startsWith("dense-")).length,
     };
   });
   expect(layout.allowOverlap).toBe(true);
@@ -368,6 +368,32 @@ test("map-preview public-list probe: style fail → Kakao engine", async ({
     timeout: 10_000,
   });
 });
+
+for (const routeTheme of ["dark", "paper"] as const) {
+  test(`map-preview route=walk routeTheme=${routeTheme}: load + route line`, async ({
+    page,
+  }) => {
+    const { diag } = await openPreview(
+      page,
+      `/map-preview?route=walk&routeTheme=${routeTheme}&mode=nopins`,
+    );
+    expect(diag.loadMs).not.toBeNull();
+    expect(diag.errorCodes.length).toBe(0);
+    const route = await page.evaluate(() => {
+      const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+        .__PINDMAP_PREVIEW_MAP__;
+      const hasLine = !!map.getLayer("preview-route-line");
+      const feats = hasLine
+        ? map.queryRenderedFeatures({ layers: ["preview-route-line"] }).length
+        : 0;
+      return { hasLine, feats };
+    });
+    expect(route.hasLine).toBe(true);
+    expect(route.feats, `routeTheme=${routeTheme} rendered line features`).toBeGreaterThan(
+      0,
+    );
+  });
+}
 
 test.skip(
   "public list MapLibre load — no durable fixture list id",

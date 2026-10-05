@@ -14,3 +14,6 @@ export const MAP_NEON_ACCENT = "#F0E4C3";
 export const MAP_NEON_CORE = "#FFF8E6";
 export const MAP_NEON_PREVIEW = "#C9CEF5";
 export const MAP_NEON_CLUSTER_FILL = "#12183A";
+
+/** Directions chrome (admin MapLibre) — lime path / endpoint accent. */
+export const MAP_DIRECTIONS_LIME = "#D9F45B";
