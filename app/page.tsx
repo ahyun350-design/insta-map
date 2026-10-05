@@ -19138,8 +19138,8 @@ function HomePageContent() {
             }}
             onAdded={() => {
               const finish = addToListTarget.extractFinish;
-              setAddToListTarget(null);
               if (!finish) return;
+              setAddToListTarget(null);
               // 2+ 선택 화면: 담기 성공 → 미선택 삭제 + reviewed + 오버레이 닫기
               void confirmExtractReview(finish.keepIds, finish.removeIds);
             }}
