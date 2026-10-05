@@ -7979,14 +7979,19 @@ select:focus-visible {
   height: 44px;
   border: none;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
   padding: 0;
+  color: #1a1a1a;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+  font-family: inherit;
   -webkit-tap-highlight-color: transparent;
 }
 .expandedMapLibreRoundBtn:active {
@@ -7998,17 +8003,27 @@ select:focus-visible {
   height: 44px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px 0 14px;
+  padding: 0 12px 0 16px;
   box-sizing: border-box;
 }
 .expandedMapLibreSearchIcon {
   flex-shrink: 0;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
   color: #8b92a1;
+  -webkit-tap-highlight-color: transparent;
 }
 .expandedMapLibreSearchInput {
   flex: 1;
@@ -8093,9 +8108,12 @@ select:focus-visible {
   background: transparent;
 }
 .expandedMapLibreTopChromeFlow .expandedMapLibreRoundBtn,
-.expandedMapLibreTopChromeFlow .expandedMapLibreSearchPill,
+.expandedMapLibreTopChromeFlow .expandedMapLibreSearchPill {
+  /* Match native Kakao chrome: opacity 0.15, offset (0,2), radius 4 */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
 .expandedMapLibreTopChromeFlow .expandedMapLibreDiscoverChip {
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 .expandedMapLibreSearchIcon {
   border: none;
@@ -8124,7 +8142,7 @@ select:focus-visible {
   z-index: 3;
   font-size: 10px;
   line-height: 1.2;
-  color: rgba(0, 0, 0, 0.38);
+  color: rgba(0, 0, 0, 0.42);
   background: transparent;
   padding: 0;
   border-radius: 0;
@@ -8134,6 +8152,9 @@ select:focus-visible {
   cursor: pointer;
   pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.95),
+    0 1px 2px rgba(255, 255, 255, 0.85);
 }
 .expandedMapLibreAttrib a {
   color: inherit;
@@ -8428,12 +8449,16 @@ select:focus-visible {
   color: #fff;
 }
 
-.expandedMapLibreStage.is-directions-chrome .expandedMapLibreAttrib {
-  color: rgba(255, 255, 255, 0.45);
-  bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 100px));
+/* Mini card + mode segment (~78px + card) — sit just above, not mid-sheet */
+.expandedMapLibreStage.is-directions-chrome:not(.is-sheet-open) .expandedMapLibreAttrib {
+  color: rgba(255, 255, 255, 0.55);
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+  bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 148px));
 }
-.expandedMapLibreStage.is-directions-chrome .expandedMapLibreLocateBtn {
-  bottom: max(16px, calc(env(safe-area-inset-bottom, 0px) + 100px));
+.expandedMapLibreStage.is-directions-chrome:not(.is-sheet-open) .expandedMapLibreLocateBtn {
+  bottom: max(16px, calc(env(safe-area-inset-bottom, 0px) + 148px));
 }
 .expandedMapLibreStage.is-directions-chrome.is-sheet-open .expandedMapLibreAttrib,
 .expandedMapLibreStage.is-directions-chrome.is-sheet-open .expandedMapLibreLocateBtn {
@@ -8441,4 +8466,10 @@ select:focus-visible {
     8px,
     calc(env(safe-area-inset-bottom, 0px) + min(60vh, 420px) + 12px)
   );
+}
+.expandedMapLibreStage.is-directions-chrome.is-sheet-open .expandedMapLibreAttrib {
+  color: rgba(255, 255, 255, 0.55);
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.4);
 }

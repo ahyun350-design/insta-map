@@ -269,6 +269,8 @@ import {
   readDirectionsRouteTheme,
   writeDirectionsRouteTheme,
   directionsRouteThemeLabel,
+  readDiscoverChipEnabled,
+  writeDiscoverChipEnabled,
   canAttemptMapGlRemount,
   consumeMapGlRemountAttempt,
   trackMapGlFallback,
@@ -1599,9 +1601,12 @@ function HomePageContent() {
     setAdminExpandedMapLibre(isAdmin ? readExpandedMapLibreOverride() : "auto");
     setAdminMapLibreTheme(isAdmin ? readAdminMapLibreTheme() : "paper");
     setDirectionsRouteTheme(isAdmin ? readDirectionsRouteTheme() : "dark");
+    setDiscoverChipEnabled(isAdmin ? readDiscoverChipEnabled() : false);
     if (!isAdmin) {
       setCompactMapIsMapLibre(false);
       setExpandedMapIsMapLibre(false);
+      setDiscoverChipEnabled(false);
+      setDiscoverLayerOn(false);
     }
   }, [user?.id]);
   type Notification = {
@@ -1851,6 +1856,8 @@ function HomePageContent() {
   const [isMapSearchSheetOpen, setIsMapSearchSheetOpen] = useState(false);
   /** Admin MapLibre discover layer — session-only, default off. */
   const [discoverLayerOn, setDiscoverLayerOn] = useState(false);
+  /** Admin: show 인기 장소 chip on MapLibre fullscreen (default off). */
+  const [discoverChipEnabled, setDiscoverChipEnabled] = useState(false);
   /** One-shot tip when enabling 인기 장소 (session). */
   const [discoverTipVisible, setDiscoverTipVisible] = useState(false);
   const discoverTipShownRef = useRef(false);
@@ -17286,7 +17293,13 @@ function HomePageContent() {
                         useMapLibreExpandedChrome
                           ? [
                               "expandedMapLibreStage",
-                              selectedPlace || isMapSearchSheetOpen
+                              // Mini card must NOT use sheet-open offset (was mid-screen)
+                              isMapSearchSheetOpen ||
+                              (selectedPlace &&
+                                !(
+                                  adminDirectionsMiniCard &&
+                                  !directionsSheetExpanded
+                                ))
                                 ? "is-sheet-open"
                                 : "",
                               adminDirectionsChrome ? "is-directions-chrome" : "",
@@ -17344,28 +17357,15 @@ function HomePageContent() {
                           fullscreenCourseNavigationRef.current = null;
                             }}
                           >
-                            <svg width="22" height="22" viewBox="0 0 20 20" fill="none" aria-hidden>
-                              <path d="M13 4L7 10L13 16" stroke="#1a2a7a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
+                            ✕
                           </button>
                           {!showCourseRoute && !adminDirectionsMiniCard && (
                             <div className="expandedMapLibreSearchColumn">
                               <div className="expandedMapLibreSearchPill">
-                                <button
-                                  type="button"
-                                  className="expandedMapLibreSearchIcon"
-                                  aria-label="검색"
-                                  onClick={() => handleSearch()}
-                                >
-                                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
-                                    <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
-                                    <path d="M12.2 12.2L15.5 15.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                                  </svg>
-                                </button>
                                 <input
                                   ref={expandedMapSearchInputRef}
                                   className="expandedMapLibreSearchInput"
-                                  placeholder="장소명으로 검색"
+                                  placeholder="장소 검색"
                                   value={searchQuery}
                                   onChange={(e) => setSearchQuery(e.target.value)}
                                   onKeyDown={(e) => {
@@ -17385,8 +17385,19 @@ function HomePageContent() {
                                     ×
                                   </button>
                                 )}
+                                <button
+                                  type="button"
+                                  className="expandedMapLibreSearchIcon"
+                                  aria-label="검색"
+                                  onClick={() => handleSearch()}
+                                >
+                                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+                                    <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+                                    <path d="M12.2 12.2L15.5 15.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                  </svg>
+                                </button>
                               </div>
-                              {showAdminMapExtras ? (
+                              {showAdminMapExtras && discoverChipEnabled ? (
                                 <div className="expandedMapLibreDiscoverRow">
                                   <button
                                     type="button"
@@ -17421,6 +17432,7 @@ function HomePageContent() {
                       )}
                       {useMapLibreExpandedChrome &&
                       discoverTipVisible &&
+                      discoverChipEnabled &&
                       !adminDirectionsMiniCard ? (
                         <div className="expandedMapLibreDiscoverTip" role="status">
                           3명 이상이 저장한 곳이에요
@@ -19534,6 +19546,31 @@ function HomePageContent() {
                     ))}
                   </div>
                 </div>
+              ) : null}
+              {user?.id === ADMIN_USER_ID ? (
+                <button
+                  type="button"
+                  className="settingItem"
+                  data-testid="admin-discover-chip-toggle"
+                  style={{ width: "100%", padding: "16px 20px", color: "#1a2a7a" }}
+                  onClick={() => {
+                    const next = !discoverChipEnabled;
+                    writeDiscoverChipEnabled(next);
+                    setDiscoverChipEnabled(next);
+                    if (!next) {
+                      setDiscoverLayerOn(false);
+                      setDiscoverTipVisible(false);
+                    }
+                    showToast(
+                      next
+                        ? "인기 장소 레이어 시험 · 켜짐"
+                        : "인기 장소 레이어 시험 · 꺼짐",
+                      "info",
+                    );
+                  }}
+                >
+                  인기 장소 레이어 시험(관리자) · {discoverChipEnabled ? "켜짐" : "꺼짐"}
+                </button>
               ) : null}
               {user?.id === ADMIN_USER_ID ? (
                 <div

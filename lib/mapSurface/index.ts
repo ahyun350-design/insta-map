@@ -100,6 +100,11 @@ export {
   type DirectionsRouteThemeId,
 } from "./directionsRouteTheme";
 export {
+  DISCOVER_CHIP_STORAGE_KEY,
+  readDiscoverChipEnabled,
+  writeDiscoverChipEnabled,
+} from "./discoverChipFlag";
+export {
   applyDirectionsBasemap,
   clearDirectionsBasemap,
 } from "./directionsBasemap";

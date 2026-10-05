@@ -395,6 +395,60 @@ for (const routeTheme of ["dark", "paper"] as const) {
   });
 }
 
+test("map-preview nationwide z6–7: Seoul label + no map errors", async ({
+  page,
+}) => {
+  const { diag } = await openPreview(page, "/map-preview?mode=nopins");
+  expect(diag.errorCodes, `pre-jump errors: ${diag.errorCodes.join(",")}`).toEqual(
+    [],
+  );
+
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    map.jumpTo({ zoom: 6.5, center: [127.7, 36.4] });
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 4000);
+    });
+  });
+
+  const result = await page.evaluate(() => {
+    const w = window as unknown as {
+      __PINDMAP_PREVIEW_MAP__: PreviewMap;
+      __PINDMAP_PREVIEW_DIAG__?: PreviewDiag;
+    };
+    const map = w.__PINDMAP_PREVIEW_MAP__;
+    const layers = ["label_city", "label_town"].filter((id) => !!map.getLayer(id));
+    const feats = layers.length
+      ? map.queryRenderedFeatures({ layers })
+      : [];
+    const texts = feats.map((f) => {
+      const p = (f as { properties?: Record<string, unknown> }).properties ?? {};
+      const ko = String(p["name:ko"] ?? p.name ?? "");
+      return ko;
+    });
+    const hasSeoul = texts.some(
+      (t) => t === "서울" || t === "서울특별시" || t.includes("서울"),
+    );
+    return {
+      hasSeoul,
+      texts: texts.slice(0, 20),
+      layers,
+      errorCodes: w.__PINDMAP_PREVIEW_DIAG__?.errorCodes ?? [],
+      zoom: map.getZoom(),
+    };
+  });
+
+  expect(result.errorCodes, `z6.5 map errors: ${result.errorCodes.join(",")}`).toEqual(
+    [],
+  );
+  expect(
+    result.hasSeoul,
+    `Seoul label missing at z${result.zoom}; sample=${result.texts.join("|")}`,
+  ).toBe(true);
+});
+
 test.skip(
   "public list MapLibre load — no durable fixture list id",
   async () => {
