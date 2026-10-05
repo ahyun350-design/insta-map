@@ -8,6 +8,7 @@ import maplibregl, {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./PindmapGlMap.css";
+import MapLibreCornerAttribution from "@/components/MapLibreCornerAttribution";
 import { DEFAULT_CATEGORY_PIN, resolvePinColor } from "@/lib/categoryAppearance";
 import {
   MAP_PIN_HEIGHT,
@@ -358,7 +359,7 @@ export default function PindmapGlMap({
     >
       <div className="pindmapGlMapCanvas" />
       {showAttribution ? (
-        <div className="pindmapGlMapAttrib">© OpenStreetMap contributors</div>
+        <MapLibreCornerAttribution className="pindmapGlMapAttrib" />
       ) : null}
     </div>
   );

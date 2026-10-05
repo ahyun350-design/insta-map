@@ -273,6 +273,11 @@ import {
   type AdminMapGlOverride,
 } from "@/lib/mapSurface";
 import {
+  MAP_ATTRIB_OPENFREEMAP_URL,
+  MAP_ATTRIB_OPENMAPTILES_URL,
+  MAP_ATTRIB_OSM_COPYRIGHT_URL,
+} from "@/lib/mapSurface/mapAttribution";
+import {
   isAccountOldEnoughForWhatsNew,
   nextWhatsNewPackToShow,
   type WhatsNewPack,
@@ -10814,6 +10819,9 @@ function HomePageContent() {
       center: { lat: centerLat, lng: centerLng },
       level,
       theme: resolveMapLibreThemeId(userIdRef.current === ADMIN_USER_ID),
+      onAttributionClick: Capacitor.isNativePlatform()
+        ? () => setShowDataAttributionModal(true)
+        : undefined,
       onPinClick: (pinId) => {
         const entry = mainPlaceMarkersByIdRef.current.get(pinId);
         const lat = entry?.lat ?? savedPlaceCoordsRef.current[pinId]?.lat;
@@ -12699,6 +12707,9 @@ function HomePageContent() {
           theme: resolveMapLibreThemeId(userIdRef.current === ADMIN_USER_ID),
           center: { lat: centerLat, lng: centerLng },
           level,
+          onAttributionClick: Capacitor.isNativePlatform()
+            ? () => setShowDataAttributionModal(true)
+            : undefined,
           onPinClick: (pinId) => {
             const cached = savedPlaceCoordsRef.current[pinId];
             if (cached) {
@@ -17286,7 +17297,18 @@ function HomePageContent() {
                         </div>
                       )}
                     <div
-                      className={adminExpandedMlPortal ? "expandedMapLibreStage" : undefined}
+                      className={
+                        adminExpandedMlPortal
+                          ? [
+                              "expandedMapLibreStage",
+                              selectedPlace || isMapSearchSheetOpen
+                                ? "is-sheet-open"
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")
+                          : undefined
+                      }
                       style={{ flex: 1, minHeight: 0, position: "relative" }}
                     >
                       <div
@@ -19443,7 +19465,47 @@ function HomePageContent() {
                   gap: 8,
                 }}
               >
-                <div>지도: © OpenStreetMap contributors (OpenFreeMap)</div>
+                <div>
+                  지도:{" "}
+                  <a
+                    href={MAP_ATTRIB_OPENFREEMAP_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      openExternalMapUrl(MAP_ATTRIB_OPENFREEMAP_URL);
+                    }}
+                    style={{ color: "#1a2a7a", textDecoration: "underline" }}
+                  >
+                    OpenFreeMap
+                  </a>
+                  {" · © "}
+                  <a
+                    href={MAP_ATTRIB_OPENMAPTILES_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      openExternalMapUrl(MAP_ATTRIB_OPENMAPTILES_URL);
+                    }}
+                    style={{ color: "#1a2a7a", textDecoration: "underline" }}
+                  >
+                    OpenMapTiles
+                  </a>
+                  {" · 데이터 © "}
+                  <a
+                    href={MAP_ATTRIB_OSM_COPYRIGHT_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      openExternalMapUrl(MAP_ATTRIB_OSM_COPYRIGHT_URL);
+                    }}
+                    style={{ color: "#1a2a7a", textDecoration: "underline" }}
+                  >
+                    OpenStreetMap contributors
+                  </a>
+                </div>
                 <div>장소 정보: 행정안전부 지방행정 인허가 데이터</div>
                 <div>장소 정보: 소상공인시장진흥공단 상가(상권)정보</div>
                 <div>장소 정보: 전국 표준데이터 (공원·박물관·시장·도서관·관광지)</div>

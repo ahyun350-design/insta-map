@@ -29,6 +29,7 @@ import {
   horizontalSpanKmForMapLibreZoom,
   mapLibreZoomToKakaoLevel,
 } from "@/lib/mapSurface/kakaoZoom";
+import MapLibreCornerAttribution from "@/components/MapLibreCornerAttribution";
 import {
   claimMapGlSlot,
   releaseMapGlSlot,
@@ -507,7 +508,7 @@ export default function PreviewGlMap({
   return (
     <div ref={rootRef} className="map-preview-gl-root">
       <div className="map-preview-gl-canvas" />
-      <div className="map-preview-gl-attrib">© OpenStreetMap contributors</div>
+      <MapLibreCornerAttribution className="map-preview-gl-attrib" />
     </div>
   );
 }

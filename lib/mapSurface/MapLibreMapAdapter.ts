@@ -56,6 +56,7 @@ import {
   ROUTE_LAYOUT,
   routePaintForMode,
 } from "./routeStyle";
+import { installMapLibreCornerAttribution } from "./mapAttribution";
 
 const PIN_SOURCE = "compact-pins";
 const PIN_LAYER = "compact-pins-symbol";
@@ -123,6 +124,11 @@ export type CreateCompactMapLibreOptions = {
   /** False while minimap is under fullscreen or tab is display:none. */
   isSurfaceVisible?: () => boolean;
   onViewIdle?: (view: { lat: number; lng: number; level: number }) => void;
+  /**
+   * Capacitor: corner credit opens the data-attribution modal.
+   * Web: omit — OpenMapTiles / OSM names link to official pages.
+   */
+  onAttributionClick?: () => void;
 };
 
 function isElementVisiblyMapped(el: HTMLElement | null | undefined): boolean {
@@ -171,6 +177,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private onMapClickEmpty: (() => void) | null = null;
   private onViewIdle: ((view: { lat: number; lng: number; level: number }) => void) | null =
     null;
+  private onAttributionClick: (() => void) | null = null;
   private imageDpr = 2;
   private mode: "compact" | "expanded" = "compact";
   private mountStartedAt = 0;
@@ -191,6 +198,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     adapter.onDiscoverPinClick = options.onDiscoverPinClick ?? null;
     adapter.onMapClickEmpty = options.onMapClickEmpty ?? null;
     adapter.onViewIdle = options.onViewIdle ?? null;
+    adapter.onAttributionClick = options.onAttributionClick ?? null;
     await adapter.mount(options);
     return adapter;
   }
@@ -357,15 +365,16 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   }
 
   private installAttribution(container: HTMLElement) {
-    const el = document.createElement("div");
     const base =
       this.mode === "expanded"
         ? "expandedMapLibreAttrib"
         : "compactMapLibreAttrib";
-    el.className = this.theme === "neon" ? `${base} is-neon` : base;
-    el.textContent = "© OpenStreetMap contributors";
-    container.appendChild(el);
-    this.touchCleanups.push(() => el.remove());
+    const className = this.theme === "neon" ? `${base} is-neon` : base;
+    const cleanup = installMapLibreCornerAttribution(container, {
+      className,
+      onClick: this.onAttributionClick ?? undefined,
+    });
+    this.touchCleanups.push(cleanup);
   }
 
   private installEdgeGestureGuard(map: MlMap) {

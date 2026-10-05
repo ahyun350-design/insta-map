@@ -256,7 +256,17 @@
   background: rgba(255, 255, 255, 0.55);
   padding: 2px 6px;
   border-radius: 4px;
-  pointer-events: none;
+  white-space: nowrap;
+  border: none;
+  font-family: inherit;
+  cursor: default;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+.map-preview-gl-attrib a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 1px;
 }
 .map-preview-root.is-dark .map-preview-gl-attrib {
   color: rgba(255, 255, 255, 0.55);
