@@ -16,6 +16,8 @@ type PreviewMap = {
   getLayer: (id: string) => unknown;
   getSource: (id: string) => unknown;
   queryRenderedFeatures: (opts: { layers: string[] }) => unknown[];
+  addSource?: (id: string, spec: unknown) => void;
+  addLayer?: (spec: unknown) => void;
 };
 
 async function waitPreviewReady(page: Page, timeoutMs = 10_000) {
@@ -151,6 +153,121 @@ test("map-preview Hongdae layers at z14 / exit at z16", async ({ page }) => {
   });
 
   expect(z16.exit, `z16 exit count=${z16.exit}`).toBeGreaterThan(0);
+});
+
+test("map-preview pins: unclustered count + nationwide singles", async ({
+  page,
+}) => {
+  const N = 40;
+  await openPreview(page, `/map-preview?pins=${N}&cluster=1`);
+
+  // Nationwide: at least one unclustered pin outside dense Seoul cluster
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    map.jumpTo({ zoom: 6.2, center: [127.8, 36.2] });
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 3000);
+    });
+  });
+  const nation = await page.evaluate(() => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    const layers = ["preview-unclustered", "preview-unclustered-circle"].filter(
+      (id) => !!map.getLayer(id),
+    );
+    const singles = layers.length
+      ? map.queryRenderedFeatures({ layers }).length
+      : 0;
+    const clusters = map.getLayer("preview-clusters")
+      ? map.queryRenderedFeatures({ layers: ["preview-clusters"] }).length
+      : 0;
+    return { singles, clusters, layers };
+  });
+  expect(
+    nation.singles,
+    `nationwide singles=${nation.singles} clusters=${nation.clusters}`,
+  ).toBeGreaterThan(0);
+
+  // Unclustered zoom over Seoul: expect many individual pins
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    map.jumpTo({ zoom: 11.5, center: [126.98, 37.56] });
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 3000);
+    });
+  });
+  const city = await page.evaluate(() => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    const layers = ["preview-unclustered", "preview-unclustered-circle"].filter(
+      (id) => !!map.getLayer(id),
+    );
+    return {
+      pins: layers.length ? map.queryRenderedFeatures({ layers }).length : 0,
+      hasLayer: layers.length > 0,
+    };
+  });
+  expect(city.hasLayer).toBe(true);
+  expect(city.pins, `z11.5 pin features=${city.pins}`).toBeGreaterThan(0);
+});
+
+test("map-preview discover-style dots render when added", async ({ page }) => {
+  await openPreview(page, "/map-preview");
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    const srcId = "e2e-discover";
+    const layerId = "e2e-discover-circles";
+    if (!map.getSource(srcId)) {
+      // Mirror admin discover circle layer (compact-discover-circles)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).addSource(srcId, {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              properties: { n: 5 },
+              geometry: { type: "Point", coordinates: [126.9236, 37.5563] },
+            },
+            {
+              type: "Feature",
+              properties: { n: 3 },
+              geometry: { type: "Point", coordinates: [126.925, 37.558] },
+            },
+          ],
+        },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (map as any).addLayer({
+        id: layerId,
+        type: "circle",
+        source: srcId,
+        paint: {
+          "circle-radius": 5,
+          "circle-color": "#1a2a7a",
+          "circle-opacity": 0.85,
+        },
+      });
+    }
+    map.jumpTo({ zoom: 14, center: [126.9236, 37.5563] });
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 2500);
+    });
+  });
+  const n = await page.evaluate(() => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    if (!map.getLayer("e2e-discover-circles")) return 0;
+    return map.queryRenderedFeatures({ layers: ["e2e-discover-circles"] }).length;
+  });
+  expect(n).toBeGreaterThan(0);
 });
 
 test.skip(

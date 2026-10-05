@@ -1845,6 +1845,9 @@ function HomePageContent() {
   const [isMapSearchSheetOpen, setIsMapSearchSheetOpen] = useState(false);
   /** Admin MapLibre discover layer — session-only, default off. */
   const [discoverLayerOn, setDiscoverLayerOn] = useState(false);
+  /** One-shot tip when enabling 인기 장소 (session). */
+  const [discoverTipVisible, setDiscoverTipVisible] = useState(false);
+  const discoverTipShownRef = useRef(false);
   const discoverRowsRef = useRef<
     Array<{
       poi_id: number;
@@ -17187,6 +17190,21 @@ function HomePageContent() {
                       )}
                     </div>
                     )}
+                    <div
+                      className={
+                        adminExpandedMlPortal
+                          ? [
+                              "expandedMapLibreStage",
+                              selectedPlace || isMapSearchSheetOpen
+                                ? "is-sheet-open"
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")
+                          : undefined
+                      }
+                      style={{ flex: 1, minHeight: 0, position: "relative" }}
+                    >
                       {adminExpandedMlPortal && (
                         <div className="expandedMapLibreTopChrome expandedMapLibreTopChromeFlow">
                           <button
@@ -17285,10 +17303,22 @@ function HomePageContent() {
                                         : "expandedMapLibreDiscoverChip"
                                     }
                                     aria-pressed={discoverLayerOn}
-                                    aria-label="발견 레이어"
-                                    onClick={() => setDiscoverLayerOn((v) => !v)}
+                                    aria-label="인기 장소 레이어"
+                                    onClick={() => {
+                                      setDiscoverLayerOn((v) => {
+                                        const next = !v;
+                                        if (next && !discoverTipShownRef.current) {
+                                          discoverTipShownRef.current = true;
+                                          setDiscoverTipVisible(true);
+                                          window.setTimeout(() => {
+                                            setDiscoverTipVisible(false);
+                                          }, 2800);
+                                        }
+                                        return next;
+                                      });
+                                    }}
                                   >
-                                    발견
+                                    인기 장소
                                   </button>
                                 </div>
                               ) : null}
@@ -17296,21 +17326,11 @@ function HomePageContent() {
                           )}
                         </div>
                       )}
-                    <div
-                      className={
-                        adminExpandedMlPortal
-                          ? [
-                              "expandedMapLibreStage",
-                              selectedPlace || isMapSearchSheetOpen
-                                ? "is-sheet-open"
-                                : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" ")
-                          : undefined
-                      }
-                      style={{ flex: 1, minHeight: 0, position: "relative" }}
-                    >
+                      {adminExpandedMlPortal && discoverTipVisible ? (
+                        <div className="expandedMapLibreDiscoverTip" role="status">
+                          3명 이상이 저장한 곳이에요
+                        </div>
+                      ) : null}
                       <div
                         ref={mapExpandedRef}
                         className={`kakaoMap${expandedMapIsMapLibre ? " is-maplibre-expanded" : ""}`}

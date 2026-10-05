@@ -248,7 +248,7 @@ const LANDMARK_FILTER: unknown = [
   ["==", ["get", "class"], "stadium"],
   ["==", ["get", "class"], "castle"],
   ["==", ["get", "class"], "attraction"],
-  // 기차역·버스터미널 (지하철역은 subway_* 레이어)
+  // 기차역·버스터미널 (지하철역은 subway_* 레이어; 비행장/활주로 제외)
   [
     "all",
     ["==", ["get", "class"], "railway"],
@@ -258,6 +258,20 @@ const LANDMARK_FILTER: unknown = [
     "all",
     ["==", ["get", "class"], "bus"],
     ["==", ["get", "subclass"], "bus_station"],
+  ],
+];
+
+/** Exclude military/small airfields from landmark labels. */
+const NOT_AIRFIELD: unknown = [
+  "all",
+  ["!", ["in", ["get", "class"], ["literal", ["aerodrome", "airport"]]]],
+  [
+    "!",
+    [
+      "in",
+      ["get", "subclass"],
+      ["literal", ["aerodrome", "airfield", "heliport"]],
+    ],
   ],
 ];
 
@@ -304,6 +318,7 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
   const filter: unknown = [
     "all",
     LANDMARK_FILTER,
+    NOT_AIRFIELD,
     ["has", "name"],
     ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], rankMax],
   ];
@@ -448,7 +463,7 @@ function isRail(id: string) {
   return id.includes("rail");
 }
 
-/** Strip metro suffixes for compact city labels (keep plain "…시"). */
+/** Strip metro / 시·군 suffixes for compact city labels (고양시→고양). */
 const SHORT_CITY_KO: unknown = [
   "let",
   "n",
@@ -479,6 +494,18 @@ const SHORT_CITY_KO: unknown = [
       "특별시",
     ],
     ["slice", ["var", "n"], 0, ["-", ["length", ["var", "n"]], 3]],
+    [
+      "==",
+      ["slice", ["var", "n"], ["-", ["length", ["var", "n"]], 1]],
+      "시",
+    ],
+    ["slice", ["var", "n"], 0, ["-", ["length", ["var", "n"]], 1]],
+    [
+      "==",
+      ["slice", ["var", "n"], ["-", ["length", ["var", "n"]], 1]],
+      "군",
+    ],
+    ["slice", ["var", "n"], 0, ["-", ["length", ["var", "n"]], 1]],
     ["var", "n"],
   ],
 ];
@@ -991,8 +1018,12 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
 
     if (isRail(layer.id)) {
       if (layer.type === "line") {
+        // Quiet rail: hidden below z13; thin solid gray (no dash) above.
+        layer.minzoom = Math.max(layer.minzoom ?? 0, 13);
         paintSet(layer, "line-color", theme.rail);
-        paintSet(layer, "line-opacity", 0.55);
+        paintSet(layer, "line-opacity", theme.id === "neon" ? 0.45 : 0.5);
+        paintSet(layer, "line-width", 0.9);
+        if (layer.paint) delete layer.paint["line-dasharray"];
       }
     }
 
@@ -1037,22 +1068,96 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           }
         }
       }
-      // 시 이름: 접미사 제거, 2단계 축소, Regular(medium 대체)
+      // 시 이름: 광역시(굵게) / 그 외(연함·희소) — layout은 레이어 분리(feature 표현식 제한)
       if (layer.id === "label_city" || layer.id === "label_town") {
-        layer.minzoom = layer.id === "label_city" ? 5 : 6;
+        const isCity = layer.id === "label_city";
+        layer.minzoom = isCity ? 5 : 6;
         layer.maxzoom = 9;
-        paintSet(layer, "text-color", theme.text);
+        const metroColor =
+          theme.id === "neon" ? "#D0D4F0" : theme.id === "white" ? "#2A3348" : "#2A3144";
+        const otherColor =
+          theme.id === "neon" ? "#7A82A8" : theme.id === "white" ? "#8A90A0" : "#8A8478";
+        const metroNameFilter: unknown = [
+          "match",
+          ["coalesce", ["get", "name:ko"], ["get", "name"], ""],
+          [
+            "서울",
+            "서울특별시",
+            "부산",
+            "부산광역시",
+            "인천",
+            "인천광역시",
+            "대구",
+            "대구광역시",
+            "대전",
+            "대전광역시",
+            "광주",
+            "광주광역시",
+            "울산",
+            "울산광역시",
+            "세종",
+            "세종특별자치시",
+            "제주",
+            "제주시",
+            "제주특별자치도",
+          ],
+          true,
+          false,
+        ];
+        // Primary layer = metro only
+        layer.filter = metroNameFilter;
+        paintSet(layer, "text-color", metroColor);
         paintSet(layer, "text-halo-color", theme.textHalo);
-        paintSet(layer, "text-halo-width", 1.5);
+        paintSet(layer, "text-halo-width", 1.6);
         if (layer.layout) {
           layer.layout["text-field"] = SHORT_CITY_KO;
-          layer.layout["text-font"] = ["Noto Sans Regular"];
-          layer.layout["text-size"] =
-            layer.id === "label_city"
-              ? ["interpolate", ["exponential", 1.2], ["zoom"], 4, 10, 7, 12, 11, 14]
-              : ["interpolate", ["exponential", 1.2], ["zoom"], 7, 10, 11, 12];
+          layer.layout["text-font"] = ["Noto Sans Bold"];
+          layer.layout["text-size"] = [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            5,
+            13,
+            8,
+            14,
+          ];
+          layer.layout["text-padding"] = 2;
+          layer.layout["text-allow-overlap"] = true;
+          layer.layout["text-ignore-placement"] = true;
           layer.layout["icon-size"] = 0.45;
         }
+        layers.push(layer);
+        // Secondary: other cities/towns — lighter, lower density
+        layers.push({
+          id: isCity ? "label_city_other_ko" : "label_town_other_ko",
+          type: "symbol",
+          source: "openmaptiles",
+          "source-layer": "place",
+          filter: [
+            "all",
+            ["!", metroNameFilter],
+            ["==", ["get", "class"], isCity ? "city" : "town"],
+            ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 3],
+          ],
+          minzoom: isCity ? 5 : 6,
+          maxzoom: 9,
+          layout: {
+            "text-field": SHORT_CITY_KO,
+            "text-font": ["Noto Sans Regular"],
+            "text-size": 11,
+            "text-padding": 10,
+            "text-max-width": 8,
+            "text-allow-overlap": false,
+            "text-optional": true,
+            visibility: "visible",
+          },
+          paint: {
+            "text-color": otherColor,
+            "text-halo-color": theme.textHalo,
+            "text-halo-width": 1.2,
+          },
+        });
+        continue;
       }
       if (layer.id === "label_other") {
         // Seoul tiles: 구=borough (z14), 동=quarter (z14). suburb≠구.
@@ -1115,7 +1220,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-color", theme.textHalo);
       }
       if (layer.id === "airport" || layer.id.startsWith("airport")) {
-        // International airports only (IATA present). Hide small airfields/heliports.
+        // International airports only (IATA). Hides 수색비행장 etc. (no IATA).
         layer.filter = [
           "all",
           ["has", "iata"],
@@ -1134,8 +1239,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-width", 1.3);
       }
       if (layer.id === "poi_transit") {
-        // OpenFreeMap POI: subway/train stops are class=railway (subclass subway|station).
-        // Liberty style historically used class=rail — keep both.
+        // Quiet station names: z14+, 11px gray (dots from subway overlay).
         layer.filter = [
           "all",
           [
@@ -1152,25 +1256,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           ],
           ["has", "name"],
         ];
-        layer.minzoom = 12;
+        layer.minzoom = 14;
         const layout = { ...(layer.layout || {}) };
         delete layout["icon-image"];
         delete layout["icon-size"];
         layout["text-anchor"] = "top";
-        layout["text-offset"] = [0, 0.65];
-        layout["text-size"] = [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          12,
-          11,
-          14,
-          12,
-          16,
-          13,
-        ];
+        layout["text-offset"] = [0, 0.7];
+        layout["text-size"] = 11;
         layout["text-field"] = KO_TEXT;
-        layout["text-font"] = ["Noto Sans Bold"];
+        layout["text-font"] = ["Noto Sans Regular"];
         layout["text-optional"] = true;
         layout["text-allow-overlap"] = false;
         layout["symbol-sort-key"] = [
@@ -1179,9 +1273,11 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           ["to-number", ["coalesce", ["get", "rank"], 999]],
         ];
         layer.layout = layout;
-        paintSet(layer, "text-color", theme.stationDot);
+        const quietStation =
+          theme.id === "neon" ? "#A8B0C8" : theme.id === "white" ? "#7A808C" : "#7A756C";
+        paintSet(layer, "text-color", quietStation);
         paintSet(layer, "text-halo-color", theme.textHalo);
-        paintSet(layer, "text-halo-width", theme.id === "neon" ? 1.6 : 1.5);
+        paintSet(layer, "text-halo-width", 1.2);
       }
       // 큰 공원·산
       if (layer.id.includes("park_label") || layer.id === "label_park") {

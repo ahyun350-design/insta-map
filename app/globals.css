@@ -7939,10 +7939,10 @@ select:focus-visible {
   z-index: 3;
   font-size: 10px;
   line-height: 1.2;
-  color: rgba(0, 0, 0, 0.5);
-  background: rgba(255, 255, 255, 0.55);
-  padding: 1px 5px;
-  border-radius: 3px;
+  color: rgba(0, 0, 0, 0.38);
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
   white-space: nowrap;
   border: none;
   font-family: inherit;
@@ -8080,17 +8080,22 @@ select:focus-visible {
   color: #ffffff;
 }
 
-/* Layout chrome above the WebGL canvas (not composited over it) — avoids iOS context loss on keyboard */
+/* Floating chrome over full-bleed MapLibre (map extends under status bar) */
 .expandedMapLibreTopChromeFlow {
-  position: relative;
-  top: auto;
-  left: auto;
-  right: auto;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   flex-shrink: 0;
-  z-index: 5;
-  padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  z-index: 30;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
   padding-bottom: 8px;
   background: transparent;
+}
+.expandedMapLibreTopChromeFlow .expandedMapLibreRoundBtn,
+.expandedMapLibreTopChromeFlow .expandedMapLibreSearchPill,
+.expandedMapLibreTopChromeFlow .expandedMapLibreDiscoverChip {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
 .expandedMapLibreSearchIcon {
   border: none;
@@ -8104,12 +8109,12 @@ select:focus-visible {
   color: #8b92a1;
   -webkit-tap-highlight-color: transparent;
 }
-/* Research button: near top of map stage (chrome is outside) */
+/* Research button: below floating chrome */
 .expandedMapLibreStage .mapResearchAreaBtn {
-  top: 12px;
+  top: calc(56px + env(safe-area-inset-top, 0px));
 }
 .expandedMapLibreStage .expandedMapLibreRouteLoading {
-  top: 12px !important;
+  top: calc(56px + env(safe-area-inset-top, 0px)) !important;
 }
 
 .expandedMapLibreAttrib {
@@ -8119,10 +8124,10 @@ select:focus-visible {
   z-index: 3;
   font-size: 10px;
   line-height: 1.2;
-  color: rgba(0, 0, 0, 0.5);
-  background: rgba(255, 255, 255, 0.65);
-  padding: 2px 6px;
-  border-radius: 3px;
+  color: rgba(0, 0, 0, 0.38);
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
   white-space: nowrap;
   border: none;
   font-family: inherit;
@@ -8199,8 +8204,25 @@ select:focus-visible {
 
 .compactMapLibreAttrib.is-neon,
 .expandedMapLibreAttrib.is-neon {
-  color: rgba(201, 206, 245, 0.72);
-  background: rgba(14, 18, 48, 0.55);
+  color: rgba(201, 206, 245, 0.45);
+  background: transparent;
+}
+.expandedMapLibreDiscoverTip {
+  position: absolute;
+  left: 50%;
+  top: calc(58px + env(safe-area-inset-top, 0px));
+  transform: translateX(-50%);
+  z-index: 32;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(26, 42, 122, 0.92);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 /* Admin MapLibre photo pins (DOM Marker — no extra WebGL canvas) */

@@ -161,7 +161,6 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private intentionalDestroy = false;
   private pins: CompactPinInput[] = [];
   private selectedPinId: string | null = null;
-  private prevSelectedFeatureId: string | null = null;
   /** DOM photo / badge overlays — expanded mode, refreshed on moveend only. */
   private photoMarkers = new Map<string, maplibregl.Marker>();
   private photoFailedIds = new Set<string>();
@@ -305,7 +304,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         level: mapLibreZoomToKakaoLevel(this.map.getZoom()),
       });
       this.refreshPhotoPins();
-      this.syncSelectedFeatureState();
+      this.pushPinGeoJson();
     });
 
     this.fallbackTimer = window.setTimeout(() => {
@@ -630,6 +629,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       },
       paint: { "text-color": "#ffffff" },
     });
+    // NOTE: feature-state is paint-only in MapLibre — using it in layout rejects the layer
+    // (pins vanish; clusters still show). Selected scale uses GeoJSON property `selected`.
     map.addLayer({
       id: PIN_LAYER,
       type: "symbol",
@@ -639,21 +640,18 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         "icon-image": ["get", "icon"],
         "icon-size": [
           "case",
-          [
-            "all",
-            [">=", ["zoom"], SELECTED_PIN_MIN_ZOOM],
-            ["boolean", ["feature-state", "selected"], false],
-          ],
+          ["==", ["get", "selected"], 1],
           MAP_PIN_ICON_SIZE * SELECTED_PIN_SCALE,
           MAP_PIN_ICON_SIZE,
         ],
         "icon-anchor": "bottom",
         "icon-allow-overlap": true,
-        "icon-ignore-placement": true,
+        // Let major city labels compete for placement (서울 etc.)
+        "icon-ignore-placement": false,
         "symbol-z-order": "source",
         "symbol-sort-key": [
           "case",
-          ["boolean", ["feature-state", "selected"], false],
+          ["==", ["get", "selected"], 1],
           10,
           0,
         ],
@@ -928,35 +926,40 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   setSelectedPinId(pinId: string | null) {
     this.selectedPinId = pinId && pinId.trim() ? pinId.trim() : null;
-    this.syncSelectedFeatureState();
+    // Refresh GeoJSON `selected` prop (layout cannot use feature-state).
+    this.pushPinGeoJson();
     this.syncPhotoMarkerSelectedStyle();
   }
 
-  private syncSelectedFeatureState() {
+  /** Update pin GeoJSON only (no image reload). */
+  private pushPinGeoJson() {
     const map = this.map;
     if (!map?.getSource(PIN_SOURCE)) return;
-    if (this.prevSelectedFeatureId) {
-      try {
-        map.removeFeatureState(
-          { source: PIN_SOURCE, id: this.prevSelectedFeatureId },
-          "selected",
-        );
-      } catch {
-        /* noop */
-      }
-      this.prevSelectedFeatureId = null;
-    }
-    if (!this.selectedPinId) return;
-    if (map.getZoom() < SELECTED_PIN_MIN_ZOOM) return;
-    try {
-      map.setFeatureState(
-        { source: PIN_SOURCE, id: this.selectedPinId },
-        { selected: true },
-      );
-      this.prevSelectedFeatureId = this.selectedPinId;
-    } catch {
-      /* feature may be clustered / missing */
-    }
+    const zoomOk = map.getZoom() >= SELECTED_PIN_MIN_ZOOM;
+    const src = map.getSource(PIN_SOURCE) as GeoJSONSource;
+    src.setData({
+      type: "FeatureCollection",
+      features: this.pins.map((p) => ({
+        type: "Feature" as const,
+        id: p.id,
+        properties: {
+          id: p.id,
+          icon:
+            pinImageKey("pin", p.category, p.fillColor) +
+            (this.theme === "neon" ? ":neon" : ""),
+          name: p.name ?? "",
+          closed: p.closed ? 1 : 0,
+          selected:
+            zoomOk && this.selectedPinId && p.id === this.selectedPinId
+              ? 1
+              : 0,
+        },
+        geometry: {
+          type: "Point" as const,
+          coordinates: [p.lng, p.lat],
+        },
+      })),
+    });
   }
 
   private syncPhotoMarkerSelectedStyle() {
@@ -1194,23 +1197,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       ),
     );
     if (this.destroyed || !this.map) return;
-    const src = this.map.getSource(PIN_SOURCE) as GeoJSONSource;
-    src.setData({
-      type: "FeatureCollection",
-      features: pins.map((p) => ({
-        type: "Feature",
-        id: p.id,
-        properties: {
-          id: p.id,
-          icon: pinImageKey("pin", p.category, p.fillColor) + (this.theme === "neon" ? ":neon" : ""),
-          name: p.name ?? "",
-          closed: p.closed ? 1 : 0,
-        },
-        geometry: { type: "Point", coordinates: [p.lng, p.lat] },
-      })),
-    });
+    this.pushPinGeoJson();
     this.refreshPhotoPins();
-    this.syncSelectedFeatureState();
   }
 
   setMyLocation(lat: number, lng: number) {
@@ -1569,7 +1557,6 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.clearPhotoPins();
     this.photoFailedIds.clear();
     this.selectedPinId = null;
-    this.prevSelectedFeatureId = null;
     if (this.fallbackTimer != null) {
       window.clearTimeout(this.fallbackTimer);
       this.fallbackTimer = null;

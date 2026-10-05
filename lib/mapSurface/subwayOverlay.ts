@@ -86,6 +86,90 @@ function beforeIdForSubway(map: MlMap): string | undefined {
   return sym?.id;
 }
 
+function quietPalette(theme: ThemeId) {
+  if (theme === "neon") {
+    return {
+      line: "#3A4568",
+      stationStroke: "#0E1230",
+      transferFill: "#E8ECFF",
+      transferStroke: "#8A92B8",
+      label: "#A8B0C8",
+      labelHalo: "#0E1230",
+      exitFill: "#2A3358",
+      exitStroke: "#8A92B8",
+      exitText: "#C9CEF5",
+      exitHalo: "#0E1230",
+    };
+  }
+  if (theme === "white") {
+    return {
+      line: "#C8CDD4",
+      stationStroke: "#FFFFFF",
+      transferFill: "#FFFFFF",
+      transferStroke: "#9AA0A8",
+      label: "#7A808C",
+      labelHalo: "#FFFFFF",
+      exitFill: "#F0F1F3",
+      exitStroke: "#A0A6B0",
+      exitText: "#5A606C",
+      exitHalo: "#FFFFFF",
+    };
+  }
+  // paper
+  return {
+    line: "#C5C0B8",
+    stationStroke: "#F7F5F0",
+    transferFill: "#FFFFFF",
+    transferStroke: "#A8A29A",
+    label: "#7A756C",
+    labelHalo: "#F7F5F0",
+    exitFill: "#EDE9E1",
+    exitStroke: "#B0AAA0",
+    exitText: "#5A564E",
+    exitHalo: "#F7F5F0",
+  };
+}
+
+function upsertLayer(
+  map: MlMap,
+  spec: maplibregl.AddLayerObject,
+  before?: string,
+) {
+  const id = spec.id;
+  if (map.getLayer(id)) {
+    // Update paint/layout for quiet restyle on remount
+    const paint = (spec as { paint?: Record<string, unknown> }).paint;
+    const layout = (spec as { layout?: Record<string, unknown> }).layout;
+    if (paint) {
+      for (const [k, v] of Object.entries(paint)) {
+        try {
+          map.setPaintProperty(id, k, v as never);
+        } catch {
+          /* noop */
+        }
+      }
+    }
+    if (layout) {
+      for (const [k, v] of Object.entries(layout)) {
+        try {
+          map.setLayoutProperty(id, k, v as never);
+        } catch {
+          /* noop */
+        }
+      }
+    }
+    if ("minzoom" in spec && typeof spec.minzoom === "number") {
+      try {
+        map.setLayerZoomRange(id, spec.minzoom, spec.maxzoom ?? 24);
+      } catch {
+        /* noop */
+      }
+    }
+    return;
+  }
+  map.addLayer(spec, before);
+}
+
 function ensureLayers(map: MlMap, theme: ThemeId): void {
   if (!map.getSource(SUBWAY_SOURCE)) {
     map.addSource(SUBWAY_SOURCE, {
@@ -95,190 +179,139 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
   }
 
   const before = beforeIdForSubway(map);
-  const casingColor = theme === "neon" ? "#0E1230" : "#FFFFFF";
-  const transferFill = theme === "neon" ? "#E8ECFF" : "#FFFFFF";
-  const transferStroke = theme === "neon" ? "#C9CEF5" : "#2A2A2A";
-  const exitText = theme === "neon" ? "#E8ECFF" : "#1A1A1A";
-  const exitHalo = theme === "neon" ? "#0E1230" : "#FFFFFF";
-  const exitFill = theme === "neon" ? "#1A2250" : "#FFFFFF";
-  const exitStroke = theme === "neon" ? "#C9CEF5" : "#444444";
+  const p = quietPalette(theme);
 
-  const widthMain = [
-    "interpolate",
-    ["linear"],
-    ["zoom"],
-    10,
-    1.2,
-    13,
-    2,
-    16,
-    3,
-  ] as maplibregl.ExpressionSpecification;
-  const widthCasing = [
-    "interpolate",
-    ["linear"],
-    ["zoom"],
-    10,
-    2.4,
-    13,
-    3.6,
-    16,
-    5,
-  ] as maplibregl.ExpressionSpecification;
-
-  if (!map.getLayer(SUBWAY_LINE_CASING)) {
-    map.addLayer(
-      {
-        id: SUBWAY_LINE_CASING,
-        type: "line",
-        source: SUBWAY_SOURCE,
-        filter: ["==", ["get", "kind"], "line"],
-        minzoom: 10,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": casingColor,
-          "line-width": widthCasing,
-          "line-opacity": 0.9,
-        },
-      },
-      before,
-    );
+  // Legacy casing layer: hide (no casing in quiet style)
+  if (map.getLayer(SUBWAY_LINE_CASING)) {
+    map.setLayoutProperty(SUBWAY_LINE_CASING, "visibility", "none");
   }
 
-  if (!map.getLayer(SUBWAY_LINE)) {
-    map.addLayer(
-      {
-        id: SUBWAY_LINE,
-        type: "line",
-        source: SUBWAY_SOURCE,
-        filter: ["==", ["get", "kind"], "line"],
-        minzoom: 10,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": ["coalesce", ["get", "colour"], "#666666"],
-          "line-width": widthMain,
-          "line-opacity": 0.85,
-        },
+  upsertLayer(
+    map,
+    {
+      id: SUBWAY_LINE,
+      type: "line",
+      source: SUBWAY_SOURCE,
+      filter: ["==", ["get", "kind"], "line"],
+      minzoom: 13,
+      layout: {
+        "line-cap": "round",
+        "line-join": "round",
+        visibility: "visible",
       },
-      before,
-    );
-  }
-
-  if (!map.getLayer(SUBWAY_STATION)) {
-    map.addLayer(
-      {
-        id: SUBWAY_STATION,
-        type: "circle",
-        source: SUBWAY_SOURCE,
-        filter: [
-          "all",
-          ["==", ["get", "kind"], "station"],
-          ["!=", ["get", "transfer"], 1],
+      paint: {
+        "line-color": p.line,
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          13,
+          1.1,
+          16,
+          1.5,
         ],
-        minzoom: 11,
-        paint: {
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            11,
-            3,
-            14,
-            4,
-            16,
-            5,
-          ],
-          "circle-color": ["coalesce", ["get", "colour"], "#666666"],
-          "circle-stroke-width": 1.2,
-          "circle-stroke-color": casingColor,
-          "circle-opacity": 0.95,
-        },
+        "line-opacity": 0.85,
       },
-      before,
-    );
-  }
+    },
+    before,
+  );
 
-  if (!map.getLayer(SUBWAY_STATION_TRANSFER)) {
-    map.addLayer(
-      {
-        id: SUBWAY_STATION_TRANSFER,
-        type: "circle",
-        source: SUBWAY_SOURCE,
-        filter: [
-          "all",
-          ["==", ["get", "kind"], "station"],
-          ["==", ["get", "transfer"], 1],
-        ],
-        minzoom: 11,
-        paint: {
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            11,
-            3.6,
-            14,
-            5,
-            16,
-            6,
-          ],
-          "circle-color": transferFill,
-          "circle-stroke-width": 2,
-          "circle-stroke-color": transferStroke,
-          "circle-opacity": 0.96,
-        },
+  upsertLayer(
+    map,
+    {
+      id: SUBWAY_STATION,
+      type: "circle",
+      source: SUBWAY_SOURCE,
+      filter: [
+        "all",
+        ["==", ["get", "kind"], "station"],
+        ["!=", ["get", "transfer"], 1],
+      ],
+      minzoom: 14,
+      paint: {
+        "circle-radius": 2.5,
+        "circle-color": ["coalesce", ["get", "colour"], "#888888"],
+        "circle-stroke-width": 1,
+        "circle-stroke-color": p.stationStroke,
+        "circle-opacity": 0.95,
       },
-      before,
-    );
-  }
+      layout: { visibility: "visible" },
+    },
+    before,
+  );
 
-  if (!map.getLayer(SUBWAY_EXIT_BG)) {
-    map.addLayer(
-      {
-        id: SUBWAY_EXIT_BG,
-        type: "circle",
-        source: SUBWAY_SOURCE,
-        filter: ["==", ["get", "kind"], "exit"],
-        minzoom: 16,
-        paint: {
-          "circle-radius": 8,
-          "circle-color": exitFill,
-          "circle-stroke-width": 1.2,
-          "circle-stroke-color": exitStroke,
-          "circle-opacity": 0.94,
-        },
+  upsertLayer(
+    map,
+    {
+      id: SUBWAY_STATION_TRANSFER,
+      type: "circle",
+      source: SUBWAY_SOURCE,
+      filter: [
+        "all",
+        ["==", ["get", "kind"], "station"],
+        ["==", ["get", "transfer"], 1],
+      ],
+      minzoom: 14,
+      paint: {
+        "circle-radius": 2.8,
+        "circle-color": p.transferFill,
+        "circle-stroke-width": 1.4,
+        "circle-stroke-color": p.transferStroke,
+        "circle-opacity": 0.96,
       },
-      before,
-    );
-  }
+      layout: { visibility: "visible" },
+    },
+    before,
+  );
 
-  if (!map.getLayer(SUBWAY_EXIT)) {
-    map.addLayer(
-      {
-        id: SUBWAY_EXIT,
-        type: "symbol",
-        source: SUBWAY_SOURCE,
-        filter: ["==", ["get", "kind"], "exit"],
-        minzoom: 16,
-        layout: {
-          "text-field": ["to-string", ["get", "ref"]],
-          "text-font": ["Noto Sans Bold"],
-          "text-size": 11,
-          "text-allow-overlap": false,
-          "text-optional": true,
-          "text-padding": 2,
-        },
-        paint: {
-          "text-color": exitText,
-          "text-halo-color": exitHalo,
-          "text-halo-width": 0.4,
-        },
+  // Station names come from basemap poi_transit (overlay station `name` is line title).
+
+  upsertLayer(
+    map,
+    {
+      id: SUBWAY_EXIT_BG,
+      type: "circle",
+      source: SUBWAY_SOURCE,
+      filter: ["==", ["get", "kind"], "exit"],
+      minzoom: 16,
+      paint: {
+        "circle-radius": 7,
+        "circle-color": p.exitFill,
+        "circle-stroke-width": 1,
+        "circle-stroke-color": p.exitStroke,
+        "circle-opacity": 0.92,
       },
-      before,
-    );
-  }
+      layout: { visibility: "visible" },
+    },
+    before,
+  );
 
-  // Prefer overlay station dots over flat tile dots
+  upsertLayer(
+    map,
+    {
+      id: SUBWAY_EXIT,
+      type: "symbol",
+      source: SUBWAY_SOURCE,
+      filter: ["==", ["get", "kind"], "exit"],
+      minzoom: 16,
+      layout: {
+        "text-field": ["to-string", ["get", "ref"]],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 10,
+        "text-allow-overlap": false,
+        "text-optional": true,
+        "text-padding": 2,
+        visibility: "visible",
+      },
+      paint: {
+        "text-color": p.exitText,
+        "text-halo-color": p.exitHalo,
+        "text-halo-width": 0.3,
+      },
+    },
+    before,
+  );
+
   if (map.getLayer("subway_station_dot")) {
     map.setLayoutProperty("subway_station_dot", "visibility", "none");
   }
