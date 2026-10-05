@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
         if (!outcomeText) {
           return new Response("skip notification type", { status: 200 });
         }
-        title = "장소 추출 완료";
+        title = "장소 추출";
         body = outcomeText;
         pushData = { type: "extract_share_outcome" };
       } else {
