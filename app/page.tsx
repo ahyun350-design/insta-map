@@ -1991,6 +1991,8 @@ function HomePageContent() {
   const [addToListTarget, setAddToListTarget] = useState<{
     placeIds: string[];
     placeName?: string;
+    /** Extract review: after list-add success, apply keep/remove and close overlay */
+    extractFinish?: { keepIds: string[]; removeIds: string[] };
   } | null>(null);
   const [placeMemoTarget, setPlaceMemoTarget] = useState<{
     placeId: string;
@@ -19134,6 +19136,13 @@ function HomePageContent() {
               setSavedListsRefreshKey((k) => k + 1);
               void refreshSavedPlaceListColors();
             }}
+            onAdded={() => {
+              const finish = addToListTarget.extractFinish;
+              setAddToListTarget(null);
+              if (!finish) return;
+              // 2+ 선택 화면: 담기 성공 → 미선택 삭제 + reviewed + 오버레이 닫기
+              void confirmExtractReview(finish.keepIds, finish.removeIds);
+            }}
             showToast={showToast}
           />
         )}
@@ -20089,17 +20098,31 @@ function HomePageContent() {
               return;
             }
             if (placeIds.length === 0) return;
-            // 1곳: 오버레이 닫고 목록 시트 (자동 닫힘 타이머도 멈춤)
-            if ((extractReviewPlaces?.length ?? 0) < 2) {
+            const reviewPlaces = extractReviewPlaces;
+            const placeCount = reviewPlaces?.length ?? 0;
+            const jobId = extractReviewJobId;
+            const keepSet = new Set(placeIds);
+            const removeIds =
+              reviewPlaces && jobId
+                ? reviewPlaces.filter((p) => !keepSet.has(p.id)).map((p) => p.id)
+                : [];
+            const extractFinish =
+              jobId && placeCount >= 2
+                ? { keepIds: placeIds, removeIds }
+                : undefined;
+            // 1곳: 오버레이 닫고 목록 시트 (자동 닫힘 타이머도 멈춤) + reviewed 기록
+            if (placeCount < 2) {
+              if (jobId) void completeExtractReview(jobId);
               resetExtractOverlayUi();
             }
             setAddToListTarget({
               placeIds,
               placeName:
                 placeIds.length === 1
-                  ? extractReviewPlaces?.find((p) => p.id === placeIds[0])?.name ??
+                  ? reviewPlaces?.find((p) => p.id === placeIds[0])?.name ??
                     savedPlacesRef.current.find((p) => p.id === placeIds[0])?.name
                   : undefined,
+              extractFinish,
             });
           }}
           onViewMap={undefined}

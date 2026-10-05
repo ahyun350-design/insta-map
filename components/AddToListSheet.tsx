@@ -26,6 +26,8 @@ type Props = {
   keyboardHeight?: number;
   onClose: () => void;
   onChanged?: () => void;
+  /** Fired only after a successful add (not remove). Used by extract review to auto-dismiss. */
+  onAdded?: () => void;
   showToast: (message: string, type?: "success" | "error" | "info") => void;
 };
 
@@ -43,6 +45,7 @@ export function AddToListSheet({
   keyboardHeight = 0,
   onClose,
   onChanged,
+  onAdded,
   showToast,
 }: Props) {
   const bulk = placeIds.length > 1;
@@ -185,6 +188,7 @@ export function AddToListSheet({
       showToast(`${placeIds.length}곳을 목록에 담았어요`, "success");
     }
     onChanged?.();
+    if (!wasChecked) onAdded?.();
   };
 
   const handleCreate = async () => {
@@ -264,6 +268,7 @@ export function AddToListSheet({
       "success",
     );
     onChanged?.();
+    onAdded?.();
   };
 
   const subtitle = bulk
