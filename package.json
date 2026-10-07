@@ -10,6 +10,7 @@
     "validate:map-style": "npx tsx scripts/validate-map-style.ts",
     "test:extract-share-notify": "npx tsx --test lib/extractShareNotify.test.ts",
     "test:extract-review-batch": "npx tsx --test lib/extractReviewBatch.test.ts",
+    "test:apify-wait": "npx tsx --test app/api/extract/_apifyWait.test.ts",
     "e2e": "npm run validate:map-style && playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:install": "playwright install chromium",

@@ -3,6 +3,7 @@ import {
   kakaoPlaceNameMatchesBranch,
 } from "@/lib/extractPlaceFilters";
 import type { FeedPostCategory } from "@/lib/feedPost";
+import { waitForApifyRunFinish } from "@/app/api/extract/_apifyWait";
 
 export { isValidInstagramPostUrl } from "@/lib/instagramUrl";
 
@@ -564,14 +565,16 @@ export async function scrapeInstagramCaption(url: string): Promise<string> {
 
   if (!runId) throw new Error("Apify run ID를 가져올 수 없습니다.");
 
-  for (let i = 0; i < 12; i++) {
-    await new Promise((r) => setTimeout(r, 5000));
-    const statusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
-    const statusData = await statusRes.json() as { data?: { status?: string; defaultDatasetId?: string } };
-    const status = statusData.data?.status;
-    datasetId = statusData.data?.defaultDatasetId ?? datasetId;
-    if (status === "SUCCEEDED") break;
-    if (status === "FAILED" || status === "ABORTED") throw new Error("Apify 작업 실패");
+  // Wait via Apify waitForFinish (≤60s/chunk) instead of fixed 5s sleep polling.
+  // Total budget unchanged (~60s). Start/retry logic above is untouched — no extra runs.
+  const waited = await waitForApifyRunFinish({
+    runId,
+    token,
+    initialDatasetId: datasetId,
+  });
+  datasetId = waited.datasetId ?? datasetId;
+  if (waited.reason === "failed") {
+    throw new Error("Apify 작업 실패");
   }
 
   if (!datasetId) throw new Error("Dataset ID를 가져올 수 없습니다.");
