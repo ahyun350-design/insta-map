@@ -7472,6 +7472,35 @@ select:focus-visible {
   margin-top: 4px;
 }
 
+.extractReviewBatchList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.extractReviewReelSection {
+  padding: 0;
+}
+
+.extractReviewReelLabel {
+  margin: 0;
+  padding: 10px 4px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #6b7a99;
+  letter-spacing: -0.01em;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+
+.extractReviewReelPlaces {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 /* ── Coachmark (spotlight tip) ── */
 .coachmarkRoot {
   position: fixed;

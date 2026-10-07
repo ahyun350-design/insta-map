@@ -144,6 +144,31 @@ export function getFreshExtractReviewPending(now = Date.now()): ExtractReviewPen
   return null;
 }
 
+function filterReviewPlaces(raw: unknown): ExtractReviewPlace[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (p): p is ExtractReviewPlace =>
+      !!p &&
+      typeof p === "object" &&
+      typeof (p as ExtractReviewPlace).id === "string" &&
+      String((p as ExtractReviewPlace).id).trim().length > 0 &&
+      typeof (p as ExtractReviewPlace).name === "string" &&
+      typeof (p as ExtractReviewPlace).address === "string" &&
+      typeof (p as ExtractReviewPlace).category === "string",
+  ).map((p) => ({
+    id: String(p.id).trim(),
+    name: p.name,
+    address: p.address,
+    category: p.category,
+    subcategory:
+      typeof p.subcategory === "string"
+        ? p.subcategory
+        : p.subcategory === null
+          ? null
+          : null,
+  }));
+}
+
 /** Server: latest completed & unreviewed job (24h, places ≥ 1). */
 export async function fetchPendingExtractReview(
   accessToken: string,
@@ -164,15 +189,7 @@ export async function fetchPendingExtractReview(
     };
     const jobId = typeof data.jobId === "string" ? data.jobId.trim() : "";
     if (!jobId || !Array.isArray(data.places) || data.places.length < 1) return null;
-    const places = data.places.filter(
-      (p): p is ExtractReviewPlace =>
-        !!p &&
-        typeof p.id === "string" &&
-        p.id.trim().length > 0 &&
-        typeof p.name === "string" &&
-        typeof p.address === "string" &&
-        typeof p.category === "string",
-    );
+    const places = filterReviewPlaces(data.places);
     if (places.length < 1) return null;
     const at =
       typeof data.at === "number" && Number.isFinite(data.at) ? data.at : Date.now();
@@ -185,6 +202,65 @@ export async function fetchPendingExtractReview(
     };
   } catch {
     return null;
+  }
+}
+
+export type ExtractReviewPendingJob = {
+  jobId: string;
+  places: ExtractReviewPlace[];
+  at: number;
+};
+
+/**
+ * Server: up to 20 unreviewed jobs (additive `jobs` on pending-review).
+ * Falls back to the legacy single jobId/places when `jobs` is absent.
+ */
+export async function fetchPendingExtractReviewJobs(
+  accessToken: string,
+): Promise<ExtractReviewPendingJob[]> {
+  const token = accessToken.trim();
+  if (!token) return [];
+  try {
+    const res = await fetch("/api/extract/pending-review", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      jobId?: string | null;
+      places?: ExtractReviewPlace[];
+      at?: number | null;
+      jobs?: Array<{
+        jobId?: string;
+        places?: ExtractReviewPlace[];
+        at?: number | null;
+      }>;
+    };
+
+    if (Array.isArray(data.jobs) && data.jobs.length > 0) {
+      const out: ExtractReviewPendingJob[] = [];
+      for (const row of data.jobs) {
+        const jobId = typeof row.jobId === "string" ? row.jobId.trim() : "";
+        const places = filterReviewPlaces(row.places);
+        if (!jobId || places.length < 1) continue;
+        const at =
+          typeof row.at === "number" && Number.isFinite(row.at) ? row.at : Date.now();
+        if (!isExtractReviewFresh(at)) continue;
+        out.push({ jobId, places, at });
+      }
+      return out;
+    }
+
+    const jobId = typeof data.jobId === "string" ? data.jobId.trim() : "";
+    const places = filterReviewPlaces(data.places);
+    if (!jobId || places.length < 1) return [];
+    const at =
+      typeof data.at === "number" && Number.isFinite(data.at) ? data.at : Date.now();
+    if (!isExtractReviewFresh(at)) return [];
+    return [{ jobId, places, at }];
+  } catch {
+    return [];
   }
 }
 

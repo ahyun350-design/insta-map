@@ -3,6 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatCategoryWithSubcategory } from "@/lib/kakaoSubcategory";
 import type { ExtractReviewPlace } from "@/lib/extractReviewPending";
+import {
+  batchReviewTitle,
+  countBatchPlaces,
+} from "@/lib/extractReviewBatch";
+
+export type ExtractReviewJobSection = {
+  jobId: string;
+  places: ExtractReviewPlace[];
+};
 
 const PROGRESS_MESSAGES = [
   "맛집 냄새 맡는 중 🐕",
@@ -111,6 +120,11 @@ type Props = {
   errorRaw?: string | null;
   /** Newly inserted places for complete UI (1 = add-to-list line, 2+ = checklist) */
   reviewPlaces?: ExtractReviewPlace[] | null;
+  /**
+   * Restore-path 모아 보기: 2+ jobs. When set (≥2), takes precedence over
+   * single-job multi checklist. In-app extract still uses reviewPlaces only.
+   */
+  reviewJobs?: ExtractReviewJobSection[] | null;
   onDismiss: () => void;
   onRetry?: () => void;
   /** all_saved 시 「지도에서 보기」 */
@@ -132,6 +146,7 @@ export function ExtractLoadingOverlay({
   errorMessage = null,
   errorRaw = null,
   reviewPlaces = null,
+  reviewJobs = null,
   onDismiss,
   onRetry,
   onViewMap,
@@ -147,19 +162,32 @@ export function ExtractLoadingOverlay({
   );
   const tip = TIPS[tipIndex];
 
-  const places = useMemo(
-    () => (Array.isArray(reviewPlaces) ? reviewPlaces : []),
-    [reviewPlaces],
-  );
-  const multiReview = complete && completeVariant === "success" && places.length >= 2;
-  const singleReview = complete && completeVariant === "success" && places.length === 1;
+  const jobSections = useMemo(() => {
+    if (!Array.isArray(reviewJobs)) return [] as ExtractReviewJobSection[];
+    return reviewJobs.filter(
+      (j) => j && typeof j.jobId === "string" && Array.isArray(j.places) && j.places.length > 0,
+    );
+  }, [reviewJobs]);
+
+  const batchReview =
+    complete && completeVariant === "success" && jobSections.length >= 2;
+
+  const places = useMemo(() => {
+    if (batchReview) return jobSections.flatMap((j) => j.places);
+    return Array.isArray(reviewPlaces) ? reviewPlaces : [];
+  }, [batchReview, jobSections, reviewPlaces]);
+
+  const multiReview =
+    complete && completeVariant === "success" && !batchReview && places.length >= 2;
+  const singleReview =
+    complete && completeVariant === "success" && !batchReview && places.length === 1;
 
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
-    if (!multiReview) return;
+    if (!multiReview && !batchReview) return;
     setCheckedIds(new Set(places.map((p) => p.id)));
-  }, [multiReview, places]);
+  }, [multiReview, batchReview, places]);
 
   // Priority: error > complete > background > loading (never mix)
   const mode: ExtractOverlayMode = errorMessage
@@ -209,8 +237,9 @@ export function ExtractLoadingOverlay({
 
   const checkedCount = places.reduce((n, p) => n + (checkedIds.has(p.id) ? 1 : 0), 0);
   const uncheckedCount = places.length - checkedCount;
-  const allUnchecked = multiReview && checkedCount === 0;
-  const allChecked = multiReview && checkedCount === places.length;
+  const checklistActive = multiReview || batchReview;
+  const allUnchecked = checklistActive && checkedCount === 0;
+  const allChecked = checklistActive && checkedCount === places.length;
 
   const togglePlace = (id: string) => {
     setCheckedIds((prev) => {
@@ -238,13 +267,15 @@ export function ExtractLoadingOverlay({
       ? "추출 실패"
       : showAllSaved
         ? "이미 저장한 장소"
-        : multiReview
-          ? "추출 장소 선택"
-          : mode === "complete"
-            ? "추출 완료"
-            : mode === "background"
-              ? "백그라운드 저장 중"
-              : "장소 추출 중";
+        : batchReview
+          ? "추출 결과 모아 보기"
+          : multiReview
+            ? "추출 장소 선택"
+            : mode === "complete"
+              ? "추출 완료"
+              : mode === "background"
+                ? "백그라운드 저장 중"
+                : "장소 추출 중";
 
   const footerNote =
     mode === "error" && captionTipError
@@ -255,9 +286,71 @@ export function ExtractLoadingOverlay({
           ? "알림이 오면 지도에서 확인해 주세요"
           : mode === "loading"
             ? "앱을 닫아도 계속 저장돼요 · 여러 개 OK"
-            : multiReview
-              ? null
-              : null;
+            : null;
+
+  const renderPlaceRow = (p: ExtractReviewPlace) => {
+    const checked = checkedIds.has(p.id);
+    const catLabel = formatCategoryWithSubcategory(p.category, p.subcategory);
+    return (
+      <li key={p.id}>
+        <label className="extractReviewRow">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={() => togglePlace(p.id)}
+            data-testid="extract-review-check"
+            data-place-id={p.id}
+          />
+          <span className="extractReviewRowText">
+            <span className="extractReviewName">{p.name}</span>
+            {catLabel ? <span className="extractReviewMeta">{catLabel}</span> : null}
+            <span className="extractReviewAddr">{p.address}</span>
+          </span>
+        </label>
+      </li>
+    );
+  };
+
+  const reviewActions = (
+    <>
+      {uncheckedCount > 0 ? (
+        <p className="extractReviewHint" data-testid="extract-review-hint">
+          선택하지 않은 {uncheckedCount}곳은 저장되지 않아요
+        </p>
+      ) : (
+        <p className="extractReviewHint extractReviewHintSpacer" aria-hidden>
+          &nbsp;
+        </p>
+      )}
+      <div className="extractReviewActions">
+        <button
+          type="button"
+          className="extractLoadingSecondaryBtn"
+          disabled={checkedCount === 0 || reviewConfirming}
+          data-testid="extract-review-add-to-list"
+          onClick={() => {
+            if (!onAddToList || checkedCount === 0) return;
+            onAddToList(places.filter((p) => checkedIds.has(p.id)).map((p) => p.id));
+          }}
+        >
+          목록에 담기
+        </button>
+        <button
+          type="button"
+          className="extractLoadingDismissBtn"
+          disabled={reviewConfirming}
+          data-testid="extract-review-confirm"
+          onClick={handleConfirm}
+        >
+          {reviewConfirming
+            ? "처리 중…"
+            : allUnchecked
+              ? "모두 저장 안 함"
+              : "완료"}
+        </button>
+      </div>
+    </>
+  );
 
   return (
     <div
@@ -266,11 +359,11 @@ export function ExtractLoadingOverlay({
       aria-modal="true"
       aria-label={ariaLabel}
       data-testid="extract-loading-overlay"
-      onClick={multiReview || reviewConfirming ? undefined : onDismiss}
+      onClick={checklistActive || reviewConfirming ? undefined : onDismiss}
     >
       <div
         className={
-          multiReview ? "extractLoadingCard extractLoadingCardReview" : "extractLoadingCard"
+          checklistActive ? "extractLoadingCard extractLoadingCardReview" : "extractLoadingCard"
         }
         onClick={(e) => e.stopPropagation()}
       >
@@ -444,6 +537,41 @@ export function ExtractLoadingOverlay({
               {onViewMap ? "지도에서 보기" : "확인"}
             </button>
           </div>
+        ) : batchReview ? (
+          <div className="extractReview" data-testid="extract-review-batch">
+            <p className="extractReviewTitle">
+              {batchReviewTitle(jobSections.length, countBatchPlaces(jobSections))}
+            </p>
+            <div className="extractReviewHeaderRow">
+              <button
+                type="button"
+                className="extractReviewSelectAll"
+                onClick={toggleAll}
+                data-testid="extract-review-select-all"
+              >
+                {allChecked ? "전체 해제" : "전체 선택"}
+              </button>
+              <span className="extractReviewCheckedCount">
+                {checkedCount}/{places.length}
+              </span>
+            </div>
+            <div className="extractReviewList extractReviewBatchList" data-testid="extract-review-list">
+              {jobSections.map((section, idx) => (
+                <section
+                  key={section.jobId}
+                  className="extractReviewReelSection"
+                  data-testid="extract-review-reel-section"
+                  data-job-id={section.jobId}
+                >
+                  <h3 className="extractReviewReelLabel">릴스 {idx + 1}</h3>
+                  <ul className="extractReviewReelPlaces">
+                    {section.places.map((p) => renderPlaceRow(p))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+            {reviewActions}
+          </div>
         ) : multiReview ? (
           <div className="extractReview" data-testid="extract-review-multi">
             <p className="extractReviewTitle">{places.length}곳 찾았어요</p>
@@ -459,67 +587,9 @@ export function ExtractLoadingOverlay({
               <span className="extractReviewCheckedCount">{checkedCount}/{places.length}</span>
             </div>
             <ul className="extractReviewList" data-testid="extract-review-list">
-              {places.map((p) => {
-                const checked = checkedIds.has(p.id);
-                const catLabel = formatCategoryWithSubcategory(p.category, p.subcategory);
-                return (
-                  <li key={p.id}>
-                    <label className="extractReviewRow">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => togglePlace(p.id)}
-                        data-testid="extract-review-check"
-                        data-place-id={p.id}
-                      />
-                      <span className="extractReviewRowText">
-                        <span className="extractReviewName">{p.name}</span>
-                        {catLabel ? (
-                          <span className="extractReviewMeta">{catLabel}</span>
-                        ) : null}
-                        <span className="extractReviewAddr">{p.address}</span>
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
+              {places.map((p) => renderPlaceRow(p))}
             </ul>
-            {uncheckedCount > 0 ? (
-              <p className="extractReviewHint" data-testid="extract-review-hint">
-                선택하지 않은 {uncheckedCount}곳은 저장되지 않아요
-              </p>
-            ) : (
-              <p className="extractReviewHint extractReviewHintSpacer" aria-hidden>
-                &nbsp;
-              </p>
-            )}
-            <div className="extractReviewActions">
-              <button
-                type="button"
-                className="extractLoadingSecondaryBtn"
-                disabled={checkedCount === 0 || reviewConfirming}
-                data-testid="extract-review-add-to-list"
-                onClick={() => {
-                  if (!onAddToList || checkedCount === 0) return;
-                  onAddToList(places.filter((p) => checkedIds.has(p.id)).map((p) => p.id));
-                }}
-              >
-                목록에 담기
-              </button>
-              <button
-                type="button"
-                className="extractLoadingDismissBtn"
-                disabled={reviewConfirming}
-                data-testid="extract-review-confirm"
-                onClick={handleConfirm}
-              >
-                {reviewConfirming
-                  ? "처리 중…"
-                  : allUnchecked
-                    ? "모두 저장 안 함"
-                    : "완료"}
-              </button>
-            </div>
+            {reviewActions}
           </div>
         ) : singleReview ? (
           <div className="extractLoadingComplete" data-testid="extract-review-single">

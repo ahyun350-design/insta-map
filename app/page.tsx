@@ -41,7 +41,7 @@ import { InAppNotificationToast } from "@/components/InAppNotificationToast";
 import { ExtractLoadingOverlay, EXTRACT_EMPTY_RESULT_RAW } from "@/components/ExtractLoadingOverlay";
 import {
   clearExtractReviewPending,
-  fetchPendingExtractReview,
+  fetchPendingExtractReviewJobs,
   getFreshExtractReviewPending,
   isExtractReviewDone,
   markExtractReviewDone,
@@ -49,6 +49,13 @@ import {
   writeExtractReviewPending,
   type ExtractReviewPlace,
 } from "@/lib/extractReviewPending";
+import {
+  decideExtractReviewUiMode,
+  planBatchPlaceActions,
+  summarizeBatchProcessResults,
+  takeBatchJobs,
+  type ExtractReviewJobItem,
+} from "@/lib/extractReviewBatch";
 import { mapExtractErrorToUserMessage } from "@/lib/extractUserError";
 import { toUserMessage } from "@/lib/userErrorMessage";
 import {
@@ -1842,6 +1849,8 @@ function HomePageContent() {
   /** Newly inserted places for complete UI (1 = list CTA, 2+ = checklist) */
   const [extractReviewPlaces, setExtractReviewPlaces] = useState<ExtractReviewPlace[] | null>(null);
   const [extractReviewJobId, setExtractReviewJobId] = useState<string | null>(null);
+  /** Restore-path 모아 보기 (2+ jobs). Null for in-app / single-job UI. */
+  const [extractReviewJobs, setExtractReviewJobs] = useState<ExtractReviewJobItem[] | null>(null);
   const [extractReviewConfirming, setExtractReviewConfirming] = useState(false);
   const [extractRetryUrl, setExtractRetryUrl] = useState<string | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<any>(null);
@@ -5587,6 +5596,7 @@ function HomePageContent() {
     setExtractRetryUrl(null);
     setExtractReviewPlaces(null);
     setExtractReviewJobId(null);
+    setExtractReviewJobs(null);
     setExtractReviewConfirming(false);
   }, []);
 
@@ -5617,6 +5627,14 @@ function HomePageContent() {
 
   /** × / backdrop — keep all places; mark review done so it won't reappear */
   const dismissExtractOverlay = useCallback(() => {
+    const batch = extractReviewJobs;
+    if (batch && batch.length >= 2) {
+      for (const j of batch) {
+        void completeExtractReview(j.jobId);
+      }
+      resetExtractOverlayUi();
+      return;
+    }
     const jobId = extractReviewJobId;
     const placeCount = extractReviewPlaces?.length ?? 0;
     if (jobId && placeCount >= 1) {
@@ -5625,10 +5643,17 @@ function HomePageContent() {
       clearExtractReviewPending();
     }
     resetExtractOverlayUi();
-  }, [extractReviewJobId, extractReviewPlaces, completeExtractReview, resetExtractOverlayUi]);
+  }, [
+    extractReviewJobs,
+    extractReviewJobId,
+    extractReviewPlaces,
+    completeExtractReview,
+    resetExtractOverlayUi,
+  ]);
 
   const presentExtractReview = useCallback((jobId: string, places: ExtractReviewPlace[]) => {
     if (places.length === 0) return;
+    setExtractReviewJobs(null);
     setExtractReviewJobId(jobId);
     setExtractReviewPlaces(places);
     setExtractOverlayError(null);
@@ -5639,8 +5664,29 @@ function HomePageContent() {
     setShowExtractOverlay(true);
   }, []);
 
+  const presentExtractReviewBatch = useCallback((jobs: ExtractReviewJobItem[]) => {
+    const taken = takeBatchJobs(jobs);
+    if (taken.length < 2) {
+      const one = taken[0];
+      if (one) presentExtractReview(one.jobId, one.places);
+      return;
+    }
+    // No localStorage dump of batch addresses — server is source of truth for restore.
+    clearExtractReviewPending();
+    setExtractReviewJobs(taken);
+    setExtractReviewJobId(null);
+    setExtractReviewPlaces(null);
+    setExtractOverlayError(null);
+    setExtractOverlayErrorRaw(null);
+    setExtractOverlayBackground(false);
+    setExtractOverlayCompleteVariant("success");
+    setExtractOverlayComplete(true);
+    setShowExtractOverlay(true);
+  }, [presentExtractReview]);
+
   /**
-   * Restore unreviewed complete job from server (24h, places ≥ 1).
+   * Restore unreviewed complete job(s) from server (24h, places ≥ 1).
+   * 2+ jobs → 모아 보기; 1 job → existing single UI.
    * Skip when extract overlay is already open or an in-flight extract is tracked.
    */
   const tryRestoreExtractReview = useCallback(() => {
@@ -5678,17 +5724,26 @@ function HomePageContent() {
           return;
         }
 
-        const pending = await fetchPendingExtractReview(token);
+        const serverJobs = await fetchPendingExtractReviewJobs(token);
         if (showExtractOverlayRef.current) return;
         const stillInFlight = activeJobsRef.current.some(
           (job) => job.status === "pending" || job.status === "processing",
         );
         if (stillInFlight) return;
 
-        if (!pending) {
+        const pendingJobs: ExtractReviewJobItem[] = [];
+        for (const j of serverJobs) {
+          if (isExtractReviewDone(j.jobId)) {
+            await markExtractReviewReviewedOnServer(token, j.jobId);
+            continue;
+          }
+          pendingJobs.push(j);
+        }
+
+        const mode = decideExtractReviewUiMode(pendingJobs.length);
+        if (mode === "none") {
           const local = getFreshExtractReviewPending();
           if (!local) return;
-          // Local-only pending: sync server mark if already done locally
           if (isExtractReviewDone(local.jobId)) return;
           writeExtractReviewPending({
             ...local,
@@ -5699,31 +5754,144 @@ function HomePageContent() {
           return;
         }
 
-        // Already dismissed on this device before server column existed
-        if (isExtractReviewDone(pending.jobId)) {
-          await markExtractReviewReviewedOnServer(token, pending.jobId);
-          clearExtractReviewPending();
+        if (mode === "single") {
+          const pending = pendingJobs[0]!;
+          writeExtractReviewPending({
+            jobId: pending.jobId,
+            places: pending.places,
+            at: pending.at,
+            ...(pending.places.length === 1 ? { allowSingle: true } : {}),
+          });
+          presentExtractReview(pending.jobId, pending.places);
           return;
         }
 
-        writeExtractReviewPending({
-          jobId: pending.jobId,
-          places: pending.places,
-          at: pending.at,
-          ...(pending.places.length === 1 ? { allowSingle: true } : {}),
-        });
-        presentExtractReview(pending.jobId, pending.places);
+        presentExtractReviewBatch(pendingJobs);
       } finally {
         extractReviewRestoreInFlightRef.current = false;
       }
     })();
-  }, [presentExtractReview]);
+  }, [presentExtractReview, presentExtractReviewBatch]);
+
+  const deletePlacesForReview = useCallback(
+    async (removeIds: string[], accessToken: string) => {
+      if (removeIds.length === 0) return;
+      const chunks = chunkPlaceIds(removeIds, PLACES_BULK_DELETE_MAX);
+      for (const chunk of chunks) {
+        const res = await fetch("/api/places/bulk-delete", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ids: chunk }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error || "delete_failed");
+        }
+        await res.json().catch(() => null);
+      }
+    },
+    [],
+  );
 
   const confirmExtractReview = useCallback(
     async (keepIds: string[], removeIds: string[]) => {
       if (extractReviewConfirming) return;
-      const jobId = extractReviewJobId;
+      const batch = extractReviewJobs;
       setExtractReviewConfirming(true);
+
+      // ── 모아 보기: per-job success/fail, no duplicate delete on retry ──
+      if (batch && batch.length >= 2) {
+        const { perJob } = planBatchPlaceActions(batch, keepIds);
+        const snapshotBefore = savedPlacesRef.current.slice();
+        const results: { jobId: string; ok: boolean }[] = [];
+        let anyDeleted = false;
+
+        try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const token = session?.access_token;
+          if (!token) throw new Error("세션 만료");
+
+          for (const plan of perJob) {
+            const jobSnapshot = savedPlacesRef.current.slice();
+            try {
+              if (plan.removeIds.length > 0) {
+                const removeSet = new Set(plan.removeIds);
+                const now = Date.now();
+                for (const id of plan.removeIds) {
+                  recentlyRemovedPlaceIdsRef.current.set(id, now);
+                  delete savedPlaceCoordsRef.current[id];
+                }
+                setSavedPlaces((prev) => {
+                  const next = prev.filter((p) => !removeSet.has(p.id));
+                  savedPlacesRef.current = next;
+                  const uid = userIdRef.current;
+                  if (uid) void writeCachedPlaces(uid, next);
+                  return next;
+                });
+                await deletePlacesForReview(plan.removeIds, token);
+                anyDeleted = true;
+              }
+              await completeExtractReview(plan.jobId);
+              results.push({ jobId: plan.jobId, ok: true });
+            } catch {
+              for (const id of plan.removeIds) {
+                recentlyRemovedPlaceIdsRef.current.delete(id);
+              }
+              setSavedPlaces(() => {
+                savedPlacesRef.current = jobSnapshot;
+                const uid = userIdRef.current;
+                if (uid) void writeCachedPlaces(uid, jobSnapshot);
+                return jobSnapshot;
+              });
+              results.push({ jobId: plan.jobId, ok: false });
+            }
+          }
+
+          if (anyDeleted) void refreshSavedPlaceListColors();
+
+          const summary = summarizeBatchProcessResults(results);
+          if (summary.allOk) {
+            resetExtractOverlayUi();
+            const totalRemove = perJob.reduce((n, p) => n + p.removeIds.length, 0);
+            const totalKeep = perJob.reduce((n, p) => n + p.keepIds.length, 0);
+            if (totalRemove > 0 && totalKeep === 0) {
+              showToast("저장을 취소했어요", "info");
+            } else if (totalRemove > 0) {
+              showToast(`${totalKeep}곳만 저장했어요`, "success");
+            }
+          } else if (summary.partialFail) {
+            resetExtractOverlayUi();
+            if (summary.message) showToast(summary.message, "info");
+          } else {
+            setSavedPlaces(() => {
+              savedPlacesRef.current = snapshotBefore;
+              const uid = userIdRef.current;
+              if (uid) void writeCachedPlaces(uid, snapshotBefore);
+              return snapshotBefore;
+            });
+            showToast(summary.message || "처리에 실패했어요", "error");
+          }
+        } catch (err) {
+          setSavedPlaces(() => {
+            savedPlacesRef.current = snapshotBefore;
+            const uid = userIdRef.current;
+            if (uid) void writeCachedPlaces(uid, snapshotBefore);
+            return snapshotBefore;
+          });
+          showToast(toUserMessage(err, "처리에 실패했어요"), "error");
+        } finally {
+          setExtractReviewConfirming(false);
+        }
+        return;
+      }
+
+      // ── Single-job (in-app extract / 1 pending) — unchanged ──
+      const jobId = extractReviewJobId;
       const previousPlaces = savedPlacesRef.current.slice();
       try {
         if (removeIds.length > 0) {
@@ -5733,7 +5901,6 @@ function HomePageContent() {
             recentlyRemovedPlaceIdsRef.current.set(id, now);
             delete savedPlaceCoordsRef.current[id];
           }
-          // Optimistic — avoid bootstrap refetch resurrecting rows before DELETE returns
           setSavedPlaces((prev) => {
             const next = prev.filter((p) => !removeSet.has(p.id));
             savedPlacesRef.current = next;
@@ -5747,22 +5914,7 @@ function HomePageContent() {
           } = await supabase.auth.getSession();
           if (!session?.access_token) throw new Error("세션 만료");
 
-          const chunks = chunkPlaceIds(removeIds, PLACES_BULK_DELETE_MAX);
-          for (const chunk of chunks) {
-            const res = await fetch("/api/places/bulk-delete", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${session.access_token}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ ids: chunk }),
-            });
-            if (!res.ok) {
-              const data = (await res.json().catch(() => ({}))) as { error?: string };
-              throw new Error(data.error || "delete_failed");
-            }
-            await res.json().catch(() => null);
-          }
+          await deletePlacesForReview(removeIds, session.access_token);
           void refreshSavedPlaceListColors();
         }
         await completeExtractReview(jobId);
@@ -5789,8 +5941,10 @@ function HomePageContent() {
     },
     [
       extractReviewConfirming,
+      extractReviewJobs,
       extractReviewJobId,
       completeExtractReview,
+      deletePlacesForReview,
       resetExtractOverlayUi,
       refreshSavedPlaceListColors,
       showToast,
@@ -5798,10 +5952,11 @@ function HomePageContent() {
   );
 
   useEffect(() => {
-    // all_saved / background / 2+ review — 사용자가 닫을 때까지 유지
+    // all_saved / background / 2+ review / batch — 사용자가 닫을 때까지 유지
     if (!showExtractOverlay || !extractOverlayComplete || extractOverlayError) return;
     if (extractOverlayBackground) return;
     if (extractOverlayCompleteVariant === "all_saved") return;
+    if ((extractReviewJobs?.length ?? 0) >= 2) return;
     if ((extractReviewPlaces?.length ?? 0) >= 2) return;
     // 목록 시트 연 동안 자동 닫힘 보류
     if (addToListTarget) return;
@@ -5819,6 +5974,7 @@ function HomePageContent() {
     extractOverlayBackground,
     extractOverlayCompleteVariant,
     extractReviewPlaces,
+    extractReviewJobs,
     extractReviewJobId,
     addToListTarget,
     completeExtractReview,
@@ -6034,6 +6190,7 @@ function HomePageContent() {
             category: p.category,
             subcategory: p.subcategory ?? null,
           }));
+          setExtractReviewJobs(null);
           setExtractReviewJobId(jobId);
           setExtractReviewPlaces(reviewPlaces);
           if (reviewPlaces.length >= 2) {
@@ -20089,6 +20246,7 @@ function HomePageContent() {
           errorMessage={extractOverlayError}
           errorRaw={extractOverlayErrorRaw}
           reviewPlaces={extractReviewPlaces}
+          reviewJobs={extractReviewJobs}
           reviewConfirming={extractReviewConfirming}
           onDismiss={dismissExtractOverlay}
           onConfirmReview={confirmExtractReview}
@@ -20098,6 +20256,20 @@ function HomePageContent() {
               return;
             }
             if (placeIds.length === 0) return;
+
+            const batch = extractReviewJobs;
+            if (batch && batch.length >= 2) {
+              const plan = planBatchPlaceActions(batch, placeIds);
+              setAddToListTarget({
+                placeIds: plan.keepIds,
+                extractFinish: {
+                  keepIds: plan.keepIds,
+                  removeIds: plan.removeIds,
+                },
+              });
+              return;
+            }
+
             const reviewPlaces = extractReviewPlaces;
             const placeCount = reviewPlaces?.length ?? 0;
             const jobId = extractReviewJobId;
