@@ -18133,31 +18133,21 @@ function HomePageContent() {
             )}
           </div>
           {savedSelectMode && (
-            <>
-              <button
-                type="button"
-                className="savedSelectAllPill"
-                disabled={savedVisiblePlaceIds.length === 0}
-                onClick={() => {
-                  if (savedVisiblePlaceIds.length === 0) return;
-                  if (savedAllVisibleSelected) {
-                    setSavedSelectedIds(new Set());
-                  } else {
-                    setSavedSelectedIds(new Set(savedVisiblePlaceIds));
-                  }
-                }}
-              >
-                {savedAllVisibleSelected ? "선택 해제" : "전체 선택"}
-              </button>
-              <button
-                type="button"
-                className="savedSelectDeletePill"
-                disabled={savedSelectedIds.size === 0 || savedBulkDeleting}
-                onClick={() => setSavedBulkDeleteConfirm(true)}
-              >
-                선택 삭제
-              </button>
-            </>
+            <button
+              type="button"
+              className="savedSelectAllPill"
+              disabled={savedVisiblePlaceIds.length === 0}
+              onClick={() => {
+                if (savedVisiblePlaceIds.length === 0) return;
+                if (savedAllVisibleSelected) {
+                  setSavedSelectedIds(new Set());
+                } else {
+                  setSavedSelectedIds(new Set(savedVisiblePlaceIds));
+                }
+              }}
+            >
+              {savedAllVisibleSelected ? "선택 해제" : "전체 선택"}
+            </button>
           )}
         </div>
       </>
