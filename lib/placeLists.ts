@@ -112,10 +112,14 @@ function mapListRow(row: Record<string, unknown>): PlaceListSummary {
 
 /** Preview tiles for saved-tab list rows (category only — no names in UI meta) */
 export type ListPlacePreview = {
+  placeId: string;
+  name: string;
   category: string;
+  lat: number | null;
+  lng: number | null;
 };
 
-/** Up to 3 place categories per list, in sort_order (for colored thumb tiles). */
+/** Up to 3 places per list (sort_order) for thumb tiles — category + coords for photo match. */
 export async function fetchListsPlacePreviews(
   listIds: string[],
 ): Promise<{ data: Record<string, ListPlacePreview[]>; error: string | null }> {
@@ -124,7 +128,7 @@ export async function fetchListsPlacePreviews(
 
   const { data, error } = await supabase
     .from("place_list_items")
-    .select("list_id, sort_order, places ( category )")
+    .select("list_id, sort_order, places ( id, name, category, lat, lng )")
     .in("list_id", ids)
     .order("sort_order", { ascending: true });
 
@@ -138,17 +142,40 @@ export async function fetchListsPlacePreviews(
   for (const row of data ?? []) {
     const r = row as {
       list_id?: string;
-      places?: { category?: string } | { category?: string }[] | null;
+      places?:
+        | {
+            id?: string;
+            name?: string;
+            category?: string;
+            lat?: number | null;
+            lng?: number | null;
+          }
+        | {
+            id?: string;
+            name?: string;
+            category?: string;
+            lat?: number | null;
+            lng?: number | null;
+          }[]
+        | null;
     };
     const listId = typeof r.list_id === "string" ? r.list_id : "";
     if (!listId || !out[listId] || out[listId]!.length >= 3) continue;
     const raw = Array.isArray(r.places) ? r.places[0] : r.places;
+    const placeId =
+      raw && typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : "";
+    const name =
+      raw && typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : "";
     const category =
       raw && typeof raw.category === "string" && raw.category.trim()
         ? raw.category.trim()
         : "";
-    if (!category) continue;
-    out[listId]!.push({ category });
+    if (!placeId || !name || !category) continue;
+    const lat =
+      raw && typeof raw.lat === "number" && Number.isFinite(raw.lat) ? raw.lat : null;
+    const lng =
+      raw && typeof raw.lng === "number" && Number.isFinite(raw.lng) ? raw.lng : null;
+    out[listId]!.push({ placeId, name, category, lat, lng });
   }
 
   return { data: out, error: null };

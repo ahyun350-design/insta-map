@@ -18018,6 +18018,24 @@ function HomePageContent() {
       categoryColors={CATEGORY_COLORS}
       refreshKey={savedListsRefreshKey}
       showToast={showToast}
+      resolvePlaceThumbUrl={(preview) => {
+        const placeRef = {
+          placeId: preview.placeId,
+          placeName: preview.name,
+          address: "",
+          ...(typeof preview.lat === "number" && typeof preview.lng === "number"
+            ? { lat: preview.lat, lng: preview.lng }
+            : {}),
+        };
+        const { photos } = getMarkerPhotoMetaForPlaceRef(
+          feedPostsRef.current,
+          placeRef,
+          preview.name,
+        );
+        const raw = photos[0];
+        if (!raw) return null;
+        return derivePostImageThumbUrl(raw) || raw;
+      }}
       onListsChanged={() => {
         setSavedListsRefreshKey((k) => k + 1);
         void refreshSavedPlaceListColors();
@@ -18153,6 +18171,14 @@ function HomePageContent() {
           onClick={exitSavedSelectMode}
         >
           취소
+        </button>
+        <button
+          type="button"
+          className="savedSelectBarBtn savedSelectBarBtnDanger"
+          disabled={savedSelectedIds.size === 0 || savedBulkDeleting}
+          onClick={() => setSavedBulkDeleteConfirm(true)}
+        >
+          삭제
         </button>
         <button
           type="button"

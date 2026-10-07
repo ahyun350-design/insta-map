@@ -15,6 +15,8 @@ import {
 } from "@/components/ListColorSwatches";
 import type { ListColorPresetId } from "@/lib/listColors";
 import { LIST_COLOR_PRESETS, resolveListColor } from "@/lib/listColors";
+import { DEFAULT_CATEGORY_PIN } from "@/lib/categoryAppearance";
+import type { FeedPostCategory } from "@/lib/feedPost";
 import { track } from "@/lib/track";
 
 type Props = {
@@ -25,7 +27,16 @@ type Props = {
   showToast: (message: string, type?: "success" | "error" | "info") => void;
   /** Bump to refetch after MyListsScreen mutations */
   refreshKey?: number;
+  /** Optional: resolve curation photo thumb for a list place preview */
+  resolvePlaceThumbUrl?: (preview: ListPlacePreview) => string | null;
 };
+
+function categoryEmoji(category: string): string {
+  if (category in DEFAULT_CATEGORY_PIN) {
+    return DEFAULT_CATEGORY_PIN[category as FeedPostCategory].emoji;
+  }
+  return "📍";
+}
 
 export function SavedListsPanel({
   userId,
@@ -34,6 +45,7 @@ export function SavedListsPanel({
   onListsChanged,
   showToast,
   refreshKey = 0,
+  resolvePlaceThumbUrl,
 }: Props) {
   const [lists, setLists] = useState<PlaceListSummary[]>([]);
   const [previews, setPreviews] = useState<Record<string, ListPlacePreview[]>>({});
@@ -192,22 +204,35 @@ export function SavedListsPanel({
                       <span className="savedListRowMeta">{list.place_count}곳</span>
                     </span>
                   </span>
-                  <span className="savedListThumbs" aria-hidden>
-                    {[0, 1, 2].map((i) => {
-                      const tile = tiles[i];
-                      const bg = tile
-                        ? categoryColors[tile.category] ?? listHex
-                        : listHex;
-                      const empty = !tile;
-                      return (
-                        <span
-                          key={i}
-                          className={`savedListThumb${empty ? " savedListThumbEmpty" : ""}`}
-                          style={{ background: bg, opacity: empty ? 0.35 : 1 }}
-                        />
-                      );
-                    })}
-                  </span>
+                  {tiles.length > 0 ? (
+                    <span className="savedListThumbs" aria-hidden>
+                      {tiles.map((tile) => {
+                        const bg = categoryColors[tile.category] ?? listHex;
+                        const thumbUrl = resolvePlaceThumbUrl?.(tile) ?? null;
+                        return (
+                          <span
+                            key={tile.placeId}
+                            className="savedListThumb"
+                            style={{ background: bg }}
+                          >
+                            {thumbUrl ? (
+                              <img
+                                className="savedListThumbImg"
+                                src={thumbUrl}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                              />
+                            ) : (
+                              <span className="savedListThumbEmoji">
+                                {categoryEmoji(tile.category)}
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </span>
+                  ) : null}
                 </button>
               </li>
             );
