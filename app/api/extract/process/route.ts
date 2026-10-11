@@ -62,6 +62,12 @@ import {
   recordExtractTiming,
 } from "@/app/api/extract/_timing";
 import { notifyExtractShareOutcome } from "@/app/api/extract/_shareNotify";
+import {
+  createOnceRunner,
+  createOrderedAsyncQueue,
+  saveJobDiagnostics,
+  updateJobProgress,
+} from "@/app/api/extract/_jobWrites";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -136,32 +142,6 @@ type PendingPlaceJson = {
   candidates: ReturnType<typeof toPoiSearchResult>[];
 };
 
-/** 진단 컬럼만 갱신 (status 변경 없음) — 중간 실패에도 부분 기록 유지 */
-async function saveJobDiagnostics(
-  jobId: string,
-  patch: {
-    claude_places?: RawPlace[] | PlaceCandidateJson[] | null;
-    kakao_misses?: string[] | null;
-    pending_places?: PendingPlaceJson[] | null;
-  },
-): Promise<void> {
-  try {
-    const supabase = createServiceSupabase();
-    const { error } = await supabase
-      .from("extract_jobs")
-      .update({
-        ...patch,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", jobId);
-    if (error) {
-      console.error("[extract] saveJobDiagnostics failed", { jobId, error });
-    }
-  } catch (e) {
-    console.error("[extract] saveJobDiagnostics threw", { jobId, e });
-  }
-}
-
 type PlaceCandidateJson = {
   name: string;
   hint: string;
@@ -174,18 +154,6 @@ function parseRegion(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const t = raw.trim();
   return t.length > 0 ? t : null;
-}
-
-async function updateJobProgress(jobId: string, progressStep: string) {
-  const supabase = createServiceSupabase();
-  await supabase
-    .from("extract_jobs")
-    .update({
-      status: "processing",
-      progress_step: progressStep,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", jobId);
 }
 
 async function countProcessingExtractJobs(
@@ -324,11 +292,18 @@ export async function POST(req: Request) {
   let timingKakaoErr: number | null = null;
   let timingPoiMs: number | null = null;
   let timingSaveMs: number | null = null;
+  let timingPreMs: number | null = null;
+  let timingBetweenMs: number | null = null;
+  let timingNotifyMs: number | null = null;
+  let timingDoneMs: number | null = null;
   let timingRecorded = false;
   /** 성공/실패 최종 UPDATE에도 포함 */
   let diagClaudePlaces: RawPlace[] | PlaceCandidateJson[] | null = null;
   let diagKakaoMisses: string[] | null = null;
   let diagPendingPlaces: PendingPlaceJson[] | null = null;
+  let writeQueue: ReturnType<typeof createOrderedAsyncQueue> | null = null;
+  let runNotifyOnce: ReturnType<typeof createOnceRunner> | null = null;
+  let supabase: ReturnType<typeof createServiceSupabase> | undefined;
 
   const flushTiming = async (
     supabase: ReturnType<typeof createServiceSupabase>,
@@ -349,6 +324,10 @@ export async function POST(req: Request) {
       kakao_err: timingKakaoErr,
       poi_ms: timingPoiMs,
       save_ms: timingSaveMs,
+      pre_ms: timingPreMs,
+      between_ms: timingBetweenMs,
+      notify_ms: timingNotifyMs,
+      done_ms: timingDoneMs,
       total_ms: Date.now() - routeT0,
       place_count: placeCount,
     });
@@ -377,8 +356,21 @@ export async function POST(req: Request) {
     const bypassCache = body.bypassCache === true;
     if (!jobId) return NextResponse.json({ error: "jobId가 필요합니다." }, { status: 400 });
 
-    const supabase = createServiceSupabase();
-    const { data: job, error: jobError } = await supabase
+    supabase = createServiceSupabase();
+    const db = supabase;
+    writeQueue = createOrderedAsyncQueue();
+    runNotifyOnce = createOnceRunner();
+    const enqueueProgress = (step: string) => {
+      writeQueue!.enqueue(() => updateJobProgress(db, jobId, step));
+    };
+    const enqueueDiagnostics = (patch: {
+      claude_places?: RawPlace[] | PlaceCandidateJson[] | null;
+      kakao_misses?: string[] | null;
+      pending_places?: PendingPlaceJson[] | null;
+    }) => {
+      writeQueue!.enqueue(() => saveJobDiagnostics(db, jobId, patch));
+    };
+    const { data: job, error: jobError } = await db
       .from("extract_jobs")
       .select("id, user_id, instagram_url, status")
       .eq("id", jobId)
@@ -392,7 +384,8 @@ export async function POST(req: Request) {
     timingUserId = job.user_id;
     if (job.status === "completed") return NextResponse.json({ ok: true, skipped: true });
 
-    const cached = await readReelCache(supabase, job.instagram_url, { bypassCache });
+    const preT0 = Date.now();
+    const cached = await readReelCache(db, job.instagram_url, { bypassCache });
     let caption: string;
     let rawPlaces: RawPlace[];
     /** Caption text available for overseas city hints (empty on ok-cache hit) */
@@ -413,9 +406,7 @@ export async function POST(req: Request) {
         error_code: cached.error_code,
       });
       diagClaudePlaces = cached.claude_places;
-      await saveJobDiagnostics(jobId, {
-        claude_places: diagClaudePlaces,
-      });
+      enqueueDiagnostics({ claude_places: diagClaudePlaces });
       throw new Error(reelCacheFailToErrorMessage(cached));
     }
 
@@ -437,16 +428,15 @@ export async function POST(req: Request) {
         }
       }
       diagClaudePlaces = rawPlaces;
-      await saveJobDiagnostics(jobId, {
-        claude_places: diagClaudePlaces,
-      });
+      enqueueDiagnostics({ claude_places: diagClaudePlaces });
     } else {
       {
         const waitT0 = Date.now();
-        await waitForApifyConcurrencySlot(supabase, jobId);
+        await waitForApifyConcurrencySlot(db, jobId);
         timingWaitMs = Date.now() - waitT0;
       }
-      await updateJobProgress(jobId, "인스타 캡션 가져오는 중");
+      enqueueProgress("인스타 캡션 가져오는 중");
+      timingPreMs = Date.now() - preT0;
       const scrapeT0 = Date.now();
       try {
         caption = await scrapeInstagramCaption(job.instagram_url);
@@ -455,7 +445,7 @@ export async function POST(req: Request) {
         const scrapeMsg =
           scrapeErr instanceof Error ? scrapeErr.message : String(scrapeErr);
         if (isNoCaptionScrapeError(scrapeMsg)) {
-          void writeReelCache(supabase, job.instagram_url, {
+          void writeReelCache(db, job.instagram_url, {
             status: "failed",
             claudePlaces: null,
             errorCode: "caption_empty",
@@ -469,7 +459,7 @@ export async function POST(req: Request) {
 
       const captionClass = classifyCaption(caption);
       if (captionClass === "empty") {
-        void writeReelCache(supabase, job.instagram_url, {
+        void writeReelCache(db, job.instagram_url, {
           status: "failed",
           claudePlaces: null,
           errorCode: "caption_empty",
@@ -477,7 +467,7 @@ export async function POST(req: Request) {
         throw new Error("caption_empty");
       }
       if (captionClass === "too_short") {
-        void writeReelCache(supabase, job.instagram_url, {
+        void writeReelCache(db, job.instagram_url, {
           status: "failed",
           claudePlaces: null,
           errorCode: "caption_too_short",
@@ -487,7 +477,7 @@ export async function POST(req: Request) {
 
       captionForHints = caption;
 
-      await updateJobProgress(jobId, "AI가 장소 분석하는 중");
+      enqueueProgress("AI가 장소 분석하는 중");
       const aiT0 = Date.now();
       const extracted = await extractPlacesByClaude(caption);
       timingClaudeMs = Date.now() - aiT0;
@@ -503,7 +493,7 @@ export async function POST(req: Request) {
         places: rawPlaces.length,
       });
       diagClaudePlaces = rawPlaces;
-      await saveJobDiagnostics(jobId, { claude_places: diagClaudePlaces });
+      enqueueDiagnostics({ claude_places: diagClaudePlaces });
     }
 
     type PlaceCandidate = {
@@ -525,20 +515,21 @@ export async function POST(req: Request) {
     }
 
     // Single gate before Kakao — cache hit and fresh Claude share this path
+    if (timingPreMs == null) timingPreMs = Date.now() - preT0;
     const prepared = preparePlaceCandidatesForKakao(parsedCandidates, {
       caption: captionForHints,
       captionCountry,
     });
     if (prepared.onlyAccountHandles || prepared.candidates.length + prepared.hardOverseas.length === 0) {
       if (prepared.onlyAccountHandles || prepared.droppedHandles.length > 0) {
-        void writeReelCache(supabase, job.instagram_url, {
+        void writeReelCache(db, job.instagram_url, {
           status: "no_places",
           claudePlaces: rawPlaces,
           errorCode: "only_account_handles",
         });
         throw new Error("only_account_handles");
       }
-      void writeReelCache(supabase, job.instagram_url, {
+      void writeReelCache(db, job.instagram_url, {
         status: "no_places",
         claudePlaces: rawPlaces,
         errorCode: "no_places_in_caption",
@@ -554,7 +545,7 @@ export async function POST(req: Request) {
 
     // All hard-overseas, nothing to resolve domestically
     if (candidates.length === 0 && prepared.hardOverseas.length > 0) {
-      void writeReelCache(supabase, job.instagram_url, {
+      void writeReelCache(db, job.instagram_url, {
         status: "failed",
         claudePlaces: rawPlaces,
         errorCode: "overseas_unsupported",
@@ -572,13 +563,13 @@ export async function POST(req: Request) {
     }
 
     // 성공 경로 — Apify+Claude 결과 캐시 (캐시 히트로 온 경우에도 TTL 갱신)
-    void writeReelCache(supabase, job.instagram_url, {
+    void writeReelCache(db, job.instagram_url, {
       status: "ok",
       claudePlaces: rawPlaces,
     });
 
     // 카카오 장소별 병렬 검색 → 성공 시 좌표를 origin 으로 poi 재해결
-    await updateJobProgress(jobId, "카카오맵에서 좌표 찾는 중");
+    enqueueProgress("카카오맵에서 좌표 찾는 중");
     const kakaoT0 = Date.now();
     const resolved: ResolvedPlace[] = [];
     const kakaoMissDiags: {
@@ -606,7 +597,7 @@ export async function POST(req: Request) {
         const soft = prepared.softOverseasNames.has(item.name);
         const kakaoQuery = item.kakaoQueryName || item.name;
         if (!soft) {
-          const cachedMiss = await readKakaoMissCache(supabase, item.name);
+          const cachedMiss = await readKakaoMissCache(db, item.name);
           if (cachedMiss) {
             console.log("[extract] kakao_miss_cache hit", { name: item.name });
             kakaoMissDiags.push({
@@ -656,7 +647,7 @@ export async function POST(req: Request) {
               completedAllQueryStages,
             })
           ) {
-            void writeKakaoMissCache(supabase, item.name);
+            void writeKakaoMissCache(db, item.name);
           }
           kakaoMissDiags.push({ name: item.name, tried, stages, candidate: item });
           return;
@@ -670,7 +661,7 @@ export async function POST(req: Request) {
           console.log("[extract] kakao branch_tag reject", {
             name: item.name,
           });
-          void writeKakaoMissCache(supabase, item.name);
+          void writeKakaoMissCache(db, item.name);
           kakaoMissDiags.push({
             name: item.name,
             tried,
@@ -687,7 +678,7 @@ export async function POST(req: Request) {
           categoryName: kakaoResult.category_name,
           claudeCategory: item.category,
         });
-        const poiResolved = await resolvePlaceViaPoi(supabase, {
+        const poiResolved = await resolvePlaceViaPoi(db, {
           placeName: item.name,
           originLat: kakaoResult.lat,
           originLng: kakaoResult.lng,
@@ -697,7 +688,7 @@ export async function POST(req: Request) {
         let poiSource: string | null = null;
         if (poiResolved.ok) {
           poiSource = poiResolved.match.poi.source ?? null;
-          poiRaw = await fetchPoiRawCategory(supabase, poiResolved.poiId);
+          poiRaw = await fetchPoiRawCategory(db, poiResolved.poiId);
         }
         // sangga 매칭이어도 category는 추출 결과 유지(상가 업종으로 덮지 않음).
         const category = resolveExtractPlaceCategory({
@@ -766,7 +757,7 @@ export async function POST(req: Request) {
     const unresolvedAfterPoi: { name: string; tried: number; stages: string[] }[] = [];
 
     if (kakaoMissDiags.length > 0) {
-      await updateJobProgress(jobId, "내부 장소 DB에서 찾는 중");
+      enqueueProgress("내부 장소 DB에서 찾는 중");
       const poiT0 = Date.now();
       const origin = averageOrigin(resolved);
 
@@ -782,7 +773,7 @@ export async function POST(req: Request) {
           }
           const item = miss.candidate;
           const hintRegion = item.region || item.hint || null;
-          const hits: PoiSearchHit[] = await searchPoi(supabase, {
+          const hits: PoiSearchHit[] = await searchPoi(db, {
             q: item.name,
             hint_region: hintRegion,
             origin_lat: origin?.lat ?? null,
@@ -870,10 +861,7 @@ export async function POST(req: Request) {
     diagPendingPlaces = pendingPlaces;
     const resolvedNames = new Set(resolved.map((r) => r.name));
     diagKakaoMisses = candidateNames.filter((n) => !resolvedNames.has(n));
-    await saveJobDiagnostics(jobId, {
-      kakao_misses: diagKakaoMisses,
-      pending_places: diagPendingPlaces,
-    });
+    // Diagnostics folded into final completed/failed UPDATE (await drain first).
 
     if (resolved.length === 0) {
       const missList =
@@ -888,7 +876,7 @@ export async function POST(req: Request) {
     }
 
     const dbT0 = Date.now();
-    const { data: existingRows, error: existingErr } = await supabase
+    const { data: existingRows, error: existingErr } = await db
       .from("places")
       .select("name, address")
       .eq("user_id", job.user_id);
@@ -908,7 +896,9 @@ export async function POST(req: Request) {
     const places = buildPlaces(uniqueResolved);
 
     if (places.length === 0 && resolved.length > 0) {
-      const { error: dupDoneError } = await supabase
+      await writeQueue!.drain();
+      timingBetweenMs = writeQueue!.getBetweenMs();
+      const { error: dupDoneError } = await db
         .from("extract_jobs")
         .update({
           status: "completed",
@@ -923,17 +913,24 @@ export async function POST(req: Request) {
         })
         .eq("id", jobId);
       if (dupDoneError) throw dupDoneError;
+      timingDoneMs = Date.now() - routeT0;
       // Share quiet-result: all_saved had no extract_complete push
-      await notifyExtractShareOutcome(supabase, {
-        userId: job.user_id,
-        jobId,
-        entry: timingEntry,
-        outcome: "all_saved",
-      });
+      {
+        const notifyT0 = Date.now();
+        await runNotifyOnce!(async () => {
+          await notifyExtractShareOutcome(db, {
+            userId: job.user_id,
+            jobId,
+            entry: timingEntry,
+            outcome: "all_saved",
+          });
+        });
+        timingNotifyMs = Date.now() - notifyT0;
+      }
       timingSaveMs = Date.now() - dbT0;
       console.log(`[PindMap:perf] extract.process.db ${timingSaveMs}ms`);
       console.log(`[PindMap:perf] extract.process.total ${Date.now() - routeT0}ms`);
-      await flushTiming(supabase, true, null, 0);
+      await flushTiming(db, true, null, 0);
       return NextResponse.json({ ok: true, inserted: 0 });
     }
 
@@ -972,7 +969,7 @@ export async function POST(req: Request) {
       poi_id: p.poi_id ?? null,
     }));
 
-    const { error: insertErr } = await supabase.from("places").insert(rows);
+    const { error: insertErr } = await db.from("places").insert(rows);
     if (insertErr) throw insertErr;
 
     const resultPlacesWithIds = rows.map((r) => ({
@@ -986,7 +983,9 @@ export async function POST(req: Request) {
       source: r.source,
     }));
 
-    const { error: doneError } = await supabase
+    await writeQueue!.drain();
+    timingBetweenMs = writeQueue!.getBetweenMs();
+    const { error: doneError } = await db
       .from("extract_jobs")
       .update({
         status: "completed",
@@ -1001,14 +1000,21 @@ export async function POST(req: Request) {
       })
       .eq("id", jobId);
     if (doneError) throw doneError;
+    timingDoneMs = Date.now() - routeT0;
 
-    // New places only — skip all_saved / failed (those return earlier or catch)
-    await notifyExtractComplete(supabase, job, rows.length);
+    // Notify after completed so clients observing job status see done first.
+    {
+      const notifyT0 = Date.now();
+      await runNotifyOnce!(async () => {
+        await notifyExtractComplete(db, job, rows.length);
+      });
+      timingNotifyMs = Date.now() - notifyT0;
+    }
 
     timingSaveMs = Date.now() - dbT0;
     console.log(`[PindMap:perf] extract.process.db ${timingSaveMs}ms`);
     console.log(`[PindMap:perf] extract.process.total ${Date.now() - routeT0}ms`);
-    await flushTiming(supabase, true, null, rows.length);
+    await flushTiming(db, true, null, rows.length);
     return NextResponse.json({ ok: true, inserted: rows.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "작업 처리 중 오류가 발생했습니다.";
@@ -1019,15 +1025,19 @@ export async function POST(req: Request) {
     console.log(`[PindMap:perf] extract.process.failed ${Date.now() - routeT0}ms`);
     if (jobId) {
       try {
-        const supabase = createServiceSupabase();
-        const { data: jobRow } = await supabase
+        const client = supabase ?? createServiceSupabase();
+        if (writeQueue) {
+          await writeQueue.drain();
+          timingBetweenMs = writeQueue.getBetweenMs();
+        }
+        const { data: jobRow } = await client
           .from("extract_jobs")
           .select("instagram_url")
           .eq("id", jobId)
           .maybeSingle();
         if (jobRow?.instagram_url) {
           cacheNegativeFailure(
-            supabase,
+            client,
             jobRow.instagram_url,
             message,
             Array.isArray(diagClaudePlaces)
@@ -1035,7 +1045,7 @@ export async function POST(req: Request) {
               : null,
           );
         }
-        await supabase
+        await client
           .from("extract_jobs")
           .update({
             status: "failed",
@@ -1047,22 +1057,23 @@ export async function POST(req: Request) {
             updated_at: new Date().toISOString(),
           })
           .eq("id", jobId);
+        timingDoneMs = Date.now() - routeT0;
         // Share quiet-result: failures had no push
         if (timingUserId) {
-          await notifyExtractShareOutcome(supabase, {
-            userId: timingUserId,
-            jobId,
-            entry: timingEntry,
-            outcome: "failed",
-            failCode: extractFailCode(message),
+          const notifyT0 = Date.now();
+          const once = runNotifyOnce ?? createOnceRunner();
+          await once(async () => {
+            await notifyExtractShareOutcome(client, {
+              userId: timingUserId,
+              jobId,
+              entry: timingEntry,
+              outcome: "failed",
+              failCode: extractFailCode(message),
+            });
           });
+          timingNotifyMs = Date.now() - notifyT0;
         }
-      } catch {
-        // noop
-      }
-      try {
-        const supabase = createServiceSupabase();
-        await flushTiming(supabase, false, extractFailCode(message), 0);
+        await flushTiming(client, false, extractFailCode(message), 0);
       } catch {
         // noop — timing must never affect extract response
       }

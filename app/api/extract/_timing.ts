@@ -13,9 +13,18 @@ export type ExtractTimingMeta = {
   kakao_err?: number | null;
   poi_ms: number | null;
   save_ms: number | null;
+  /** job lookup / cache / wait until Apify (or prepare) starts */
+  pre_ms?: number | null;
+  /** time spent on ordered progress/diag writes (incl. drain) */
+  between_ms?: number | null;
+  /** notifyExtractComplete / share outcome after terminal status */
+  notify_ms?: number | null;
+  /** route start → job row written completed/failed */
+  done_ms?: number | null;
   total_ms: number;
   place_count: number;
 };
+
 
 /** Short fail code only — strip payload after `|`, cap length. */
 export function extractFailCode(message: string): string {
@@ -48,9 +57,14 @@ export async function recordExtractTiming(
       kakao_err: numOrNull(meta.kakao_err),
       poi_ms: numOrNull(meta.poi_ms),
       save_ms: numOrNull(meta.save_ms),
+      pre_ms: numOrNull(meta.pre_ms),
+      between_ms: numOrNull(meta.between_ms),
+      notify_ms: numOrNull(meta.notify_ms),
+      done_ms: numOrNull(meta.done_ms),
       total_ms: Math.max(0, Math.round(Number(meta.total_ms) || 0)),
       place_count: Math.max(0, Math.round(Number(meta.place_count) || 0)),
     };
+
     const { error } = await supabase.from("user_events").insert({
       user_id: uid,
       event: "extract_timing",
