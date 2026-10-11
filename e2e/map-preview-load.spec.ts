@@ -20,6 +20,7 @@ type PreviewMap = {
   getLayer: (id: string) => unknown;
   getSource: (id: string) => unknown;
   getLayoutProperty: (id: string, name: string) => unknown;
+  getStyle?: () => { layers?: { id: string }[] };
   queryRenderedFeatures: (opts: { layers: string[] }) => unknown[];
   addSource?: (id: string, spec: unknown) => void;
   addLayer?: (spec: unknown) => void;
@@ -535,7 +536,12 @@ test("map-preview Mangwon: shop labels z16≥1, z14=0, roads=0", async ({
     return page.evaluate((roads) => {
       const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
         .__PINDMAP_PREVIEW_MAP__;
-      const shopLayers = ["shop_poi_label"].filter((id) => !!map.getLayer(id));
+      const style = (
+        map as unknown as { getStyle?: () => { layers?: { id: string }[] } }
+      ).getStyle?.();
+      const shopLayers = (style?.layers ?? [])
+        .map((l) => l.id)
+        .filter((id) => id.startsWith("shop_poi_label"));
       const shop = shopLayers.length
         ? map.queryRenderedFeatures({ layers: shopLayers })
         : [];
@@ -547,13 +553,16 @@ test("map-preview Mangwon: shop labels z16≥1, z14=0, roads=0", async ({
         shopCount: shop.length,
         roadNames: roadFeats.length,
         zoom: map.getZoom(),
-        hasShopLayer: shopLayers.length > 0,
+        shopLayers,
       };
     }, roadIds);
   }
 
   const z14 = await measureAt(14);
-  expect(z14.hasShopLayer, "shop_poi_label layer missing").toBe(true);
+  expect(
+    z14.shopLayers.length,
+    `shop_poi_label_* missing: ${z14.shopLayers.join(",")}`,
+  ).toBeGreaterThanOrEqual(1);
   expect(
     z14.shopCount,
     `Mangwon z14: shop labels must be 0, got ${z14.shopCount}`,

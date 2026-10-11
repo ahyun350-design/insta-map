@@ -555,110 +555,106 @@ function shopPoiColor(theme: MapPreviewTheme): unknown {
 
 function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = shopPoiColor(theme);
-  // Lower OMT rank number = more important → higher sort-key
+  // Lower OMT rank number = more important → higher sort-key (layout data only)
   const sortKey: unknown = [
     "-",
     500,
     ["to-number", ["coalesce", ["get", "rank"], 999]],
   ];
-  // z16: top ranks only; denser at z17; open at z18+
-  const rankMax: unknown = [
-    "step",
-    ["zoom"],
-    4,
-    16,
-    6,
-    17,
-    16,
-    18,
-    999,
+  const rankAtMost = (max: number): unknown => [
+    "<=",
+    ["to-number", ["coalesce", ["get", "rank"], 999]],
+    max,
   ];
-  const classByZoom: unknown = [
-    "any",
-    ["all", [">=", ["zoom"], 16], ["<", ["zoom"], 17], SHOP_Z16],
-    [
+
+  type Band = {
+    idSuffix: string;
+    minzoom: number;
+    maxzoom?: number;
+    classFilter: unknown;
+    rankMax: number;
+  };
+  // Separate bands (min/maxzoom) — more reliable than zoom-in-filter for class gates
+  const bands: Band[] = [
+    {
+      idSuffix: "z16",
+      minzoom: 16,
+      maxzoom: 17,
+      classFilter: SHOP_Z16,
+      rankMax: 12,
+    },
+    {
+      idSuffix: "z17",
+      minzoom: 17,
+      maxzoom: 18,
+      classFilter: ["any", SHOP_Z16, SHOP_Z17_EXTRA],
+      rankMax: 24,
+    },
+    {
+      idSuffix: "z18",
+      minzoom: 18,
+      classFilter: true, // named remainder after SHOP_EXCLUDE
+      rankMax: 999,
+    },
+  ];
+
+  for (const band of bands) {
+    const filter: unknown = [
       "all",
-      [">=", ["zoom"], 17],
-      ["<", ["zoom"], 18],
-      ["any", SHOP_Z16, SHOP_Z17_EXTRA],
-    ],
-    // z18+: named remainder (bus/landmarks excluded above)
-    [">=", ["zoom"], 18],
-  ];
-  const filter: unknown = [
-    "all",
-    HAS_SHOP_NAME,
-    SHOP_EXCLUDE,
-    classByZoom,
-    ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], rankMax],
-  ];
+      HAS_SHOP_NAME,
+      SHOP_EXCLUDE,
+      ...(band.classFilter === true ? [] : [band.classFilter]),
+      rankAtMost(band.rankMax),
+    ];
+    const base = {
+      source: "openmaptiles",
+      "source-layer": "poi",
+      minzoom: band.minzoom,
+      ...(band.maxzoom != null ? { maxzoom: band.maxzoom } : {}),
+      filter,
+    };
 
-  layers.push({
-    id: "shop_poi_dot",
-    type: "circle",
-    source: "openmaptiles",
-    "source-layer": "poi",
-    minzoom: 16,
-    filter,
-    layout: { visibility: "visible" },
-    paint: {
-      "circle-radius": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        16,
-        3,
-        17,
-        3.5,
-        18,
-        4,
-      ],
-      "circle-color": color,
-      "circle-opacity": theme.id === "neon" ? 0.9 : 0.85,
-      "circle-stroke-width": 1,
-      "circle-stroke-color": theme.textHalo,
-    },
-  });
+    layers.push({
+      ...base,
+      id: `shop_poi_dot_${band.idSuffix}`,
+      type: "circle",
+      layout: { visibility: "visible" },
+      paint: {
+        "circle-radius": band.minzoom >= 18 ? 4 : band.minzoom >= 17 ? 3.5 : 3,
+        "circle-color": color,
+        "circle-opacity": theme.id === "neon" ? 0.9 : 0.85,
+        "circle-stroke-width": 1,
+        "circle-stroke-color": theme.textHalo,
+      },
+    });
 
-  layers.push({
-    id: "shop_poi_label",
-    type: "symbol",
-    source: "openmaptiles",
-    "source-layer": "poi",
-    minzoom: 16,
-    filter,
-    layout: {
-      visibility: "visible",
-      "text-field": SHOP_TEXT,
-      "text-font": ["Noto Sans Regular"],
-      "text-size": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        16,
-        11,
-        17,
-        11.5,
-        18,
-        12,
-      ],
-      "text-anchor": "left",
-      "text-offset": [0.65, 0],
-      "text-max-width": 7,
-      "text-padding": 1.5,
-      "text-optional": true,
-      "text-allow-overlap": false,
-      "text-ignore-placement": false,
-      "symbol-sort-key": sortKey,
-      "symbol-z-order": "source",
-    },
-    paint: {
-      "text-color": color,
-      "text-halo-color": "#FFFFFF",
-      "text-halo-width": theme.id === "neon" ? 1.5 : 1.35,
-      "text-halo-blur": 0.15,
-    },
-  });
+    layers.push({
+      ...base,
+      id: `shop_poi_label_${band.idSuffix}`,
+      type: "symbol",
+      layout: {
+        visibility: "visible",
+        "text-field": SHOP_TEXT,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": band.minzoom >= 18 ? 12 : band.minzoom >= 17 ? 11.5 : 11,
+        "text-anchor": "left",
+        "text-offset": [0.65, 0],
+        "text-max-width": 7,
+        "text-padding": 1.5,
+        "text-optional": true,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-sort-key": sortKey,
+        "symbol-z-order": "source",
+      },
+      paint: {
+        "text-color": color,
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": theme.id === "neon" ? 1.5 : 1.35,
+        "text-halo-blur": 0.15,
+      },
+    });
+  }
 }
 
 type AnyLayer = {
