@@ -580,11 +580,18 @@ test("map-preview Mangwon: shop labels z16≥1, z14=0, roads=0", async ({
 
   const z17 = await measureAt(17);
   const z18 = await measureAt(18);
-  // Surface counts for the agent report (not hard thresholds beyond z16)
+  // Surface counts for the agent report
   console.log(
     `[Mangwon shop labels] z14=${z14.shopCount} z16=${z16.shopCount} z17=${z17.shopCount} z18=${z18.shopCount}`,
   );
-  expect(z17.shopCount).toBeGreaterThanOrEqual(z16.shopCount);
+  expect(
+    z17.shopCount,
+    `Mangwon z17: expected ≥1 shop labels (got ${z17.shopCount})`,
+  ).toBeGreaterThanOrEqual(1);
+  expect(
+    z18.shopCount,
+    `Mangwon z18: expected ≥1 shop labels (got ${z18.shopCount})`,
+  ).toBeGreaterThanOrEqual(1);
   expect(z18.roadNames).toBe(0);
 });
 

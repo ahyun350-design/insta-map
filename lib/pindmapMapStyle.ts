@@ -567,34 +567,44 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
     max,
   ];
 
-  type Band = {
+  // Overlapping bands (no maxzoom) so z16 cores stay visible at z17+;
+  // z17/z18 only add new classes. Avoids maxzoom=minzoom seam bugs.
+  const bands: Array<{
     idSuffix: string;
     minzoom: number;
-    maxzoom?: number;
     classFilter: unknown;
     rankMax: number;
-  };
-  // Separate bands (min/maxzoom) — more reliable than zoom-in-filter for class gates
-  const bands: Band[] = [
+    radius: number;
+    textSize: number;
+  }> = [
     {
       idSuffix: "z16",
       minzoom: 16,
-      maxzoom: 17,
       classFilter: SHOP_Z16,
       rankMax: 12,
+      radius: 3,
+      textSize: 11,
     },
     {
       idSuffix: "z17",
       minzoom: 17,
-      maxzoom: 18,
-      classFilter: ["any", SHOP_Z16, SHOP_Z17_EXTRA],
+      classFilter: SHOP_Z17_EXTRA,
       rankMax: 24,
+      radius: 3.5,
+      textSize: 11.5,
     },
     {
       idSuffix: "z18",
       minzoom: 18,
-      classFilter: true, // named remainder after SHOP_EXCLUDE
+      // Remainder: named POIs not in z16/z17 class sets (hairdresser etc.)
+      classFilter: [
+        "all",
+        ["!", SHOP_Z16],
+        ["!", SHOP_Z17_EXTRA],
+      ],
       rankMax: 999,
+      radius: 4,
+      textSize: 12,
     },
   ];
 
@@ -603,14 +613,13 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       "all",
       HAS_SHOP_NAME,
       SHOP_EXCLUDE,
-      ...(band.classFilter === true ? [] : [band.classFilter]),
+      band.classFilter,
       rankAtMost(band.rankMax),
     ];
     const base = {
       source: "openmaptiles",
       "source-layer": "poi",
       minzoom: band.minzoom,
-      ...(band.maxzoom != null ? { maxzoom: band.maxzoom } : {}),
       filter,
     };
 
@@ -620,7 +629,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       type: "circle",
       layout: { visibility: "visible" },
       paint: {
-        "circle-radius": band.minzoom >= 18 ? 4 : band.minzoom >= 17 ? 3.5 : 3,
+        "circle-radius": band.radius,
         "circle-color": color,
         "circle-opacity": theme.id === "neon" ? 0.9 : 0.85,
         "circle-stroke-width": 1,
@@ -636,7 +645,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         visibility: "visible",
         "text-field": SHOP_TEXT,
         "text-font": ["Noto Sans Regular"],
-        "text-size": band.minzoom >= 18 ? 12 : band.minzoom >= 17 ? 11.5 : 11,
+        "text-size": band.textSize,
         "text-anchor": "left",
         "text-offset": [0.65, 0],
         "text-max-width": 7,
