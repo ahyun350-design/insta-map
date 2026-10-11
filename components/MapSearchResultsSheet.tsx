@@ -107,7 +107,8 @@ export function MapSearchResultsSheet({
 
   if (!open || results.length === 0) return null;
 
-  const sheetHeight = expanded ? "70vh" : "30vh";
+  /* Native searchResultsSheetHeight = 260pt; expanded keeps prior 70vh affordance */
+  const sheetHeight = expanded ? "70vh" : "260px";
   const sheetBottom = keyboardHeight > 0 ? keyboardHeight : 0;
   const dragStyle =
     dragDelta !== 0
@@ -130,22 +131,17 @@ export function MapSearchResultsSheet({
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        className="mapSearchResultsSheetHandle"
+        className="mapSearchResultsSheetHeader"
         onPointerDown={onHandlePointerDown}
         onPointerMove={onHandlePointerMove}
         onPointerUp={onHandlePointerUp}
         onPointerCancel={onHandlePointerUp}
-        role="presentation"
       >
-        <span className="mapSearchResultsSheetHandleBar" />
-      </div>
-
-      <div className="mapSearchResultsSheetHeader">
         <h2 className="mapSearchResultsSheetTitle">
           <span className="mapSearchResultsSheetQuery">{queryLabel}</span> 검색 결과 {results.length}개
         </h2>
         <button type="button" className="mapSearchResultsSheetCloseBtn" aria-label="닫기" onClick={onClose}>
-          ×
+          ✕
         </button>
       </div>
 

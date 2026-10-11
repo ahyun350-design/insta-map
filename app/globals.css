@@ -2570,7 +2570,10 @@ select:focus-visible {
   opacity: 0.88;
 }
 
-/* 확장 지도 — 키워드 검색 결과 바텀시트 */
+/* 확장 지도 — 키워드 검색 결과 바텀시트
+   Native (PindmapNativeMapPlugin.swift ensureSearchResultsSheetChrome):
+   height 260, cornerRadius 16 top, shadow (0,-2)/8 @0.12,
+   title 15 semibold, close 32×32 font 16, rowHeight 64 */
 .mapSearchResultsSheet {
   position: absolute;
   left: 0;
@@ -2581,17 +2584,21 @@ select:focus-visible {
   flex-direction: column;
   background: #fff;
   border-radius: 16px 16px 0 0;
-  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.12);
   transition: height 0.22s ease, transform 0.22s ease;
   pointer-events: auto;
   max-height: 70vh;
+  height: 260px;
 }
 
+/* Native sheet has no drag handle — keep hit area for expand/collapse only */
 .mapSearchResultsSheetHandle {
   flex-shrink: 0;
   display: flex;
   justify-content: center;
-  padding: 10px 0 6px;
+  padding: 0;
+  height: 0;
+  overflow: hidden;
   cursor: grab;
   touch-action: none;
 }
@@ -2608,33 +2615,41 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 16px 12px;
-  border-bottom: 0.5px solid #efefef;
+  padding: 14px 12px 8px 20px;
+  border-bottom: none;
+  cursor: grab;
+  touch-action: none;
 }
 
 .mapSearchResultsSheetTitle {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
-  color: #1a2a7a;
+  color: #1a1a1a;
   flex: 1;
   min-width: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
 }
 
 .mapSearchResultsSheetQuery {
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .mapSearchResultsSheetCloseBtn {
   border: none;
   background: transparent;
-  font-size: 22px;
-  color: #666;
+  font-size: 16px;
+  font-weight: 600;
+  color: #8e8e93;
   cursor: pointer;
-  width: 36px;
-  height: 36;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
   line-height: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .mapSearchResultsSheetList {
@@ -2649,12 +2664,14 @@ select:focus-visible {
 
 .mapSearchResultsSheetItem {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   width: 100%;
   text-align: left;
-  padding: 12px 16px;
+  min-height: 64px;
+  padding: 10px 16px;
+  box-sizing: border-box;
   background: transparent;
   border: none;
   border-bottom: 0.5px solid #f5f5f5;
@@ -2694,7 +2711,9 @@ select:focus-visible {
   padding-top: 2px;
 }
 
-/* 확장 지도 — 이 지역 재검색 */
+/* 확장 지도 — 이 지역 재검색
+   Native ensureResearchAreaButton: cornerRadius 18, font 14 semibold,
+   insets 8/14, shadow (0,2)/6 @0.12, top = search.bottom + 10 */
 .mapResearchAreaBtn {
   position: absolute;
   top: 12px;
@@ -2703,17 +2722,17 @@ select:focus-visible {
   z-index: 950;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 8px 14px;
   border: none;
-  border-radius: 999px;
+  border-radius: 18px;
   background: #fff;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.14);
-  font-size: 13px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  font-size: 14px;
   font-weight: 600;
-  color: #1a2a7a;
+  color: #1a297a;
   cursor: pointer;
-  font-family: inherit;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
 }
@@ -8046,7 +8065,9 @@ select:focus-visible {
   text-decoration: underline;
   text-underline-offset: 1px;
 }
-/* MapLibre fullscreen floating chrome (native production parity) */
+/* MapLibre fullscreen floating chrome — native installProductionChrome parity
+   (PindmapNativeMapPlugin.swift ~1210–1276): close/search 44×44, radius 22,
+   shadow (0,2)/4 @0.15, top safe+12, lead 12, gap 8, trail −16, field font 16 */
 .expandedMapLibreTopChrome {
   position: absolute;
   top: 0;
@@ -8054,7 +8075,7 @@ select:focus-visible {
   right: 0;
   z-index: 30;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   box-sizing: border-box;
   padding-top: calc(12px + env(safe-area-inset-top, 0px));
@@ -8068,6 +8089,8 @@ select:focus-visible {
 .expandedMapLibreRoundBtn {
   width: 44px;
   height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   border: none;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.92);
@@ -8082,16 +8105,20 @@ select:focus-visible {
   font-size: 18px;
   font-weight: 600;
   line-height: 1;
-  font-family: inherit;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   -webkit-tap-highlight-color: transparent;
 }
 .expandedMapLibreRoundBtn:active {
   transform: scale(0.97);
 }
 .expandedMapLibreSearchPill {
-  flex: 1;
+  /* width grows via SearchColumn; never flex-grow vertically (was flex:1 in column) */
+  flex: 0 0 44px;
+  width: 100%;
   min-width: 0;
   height: 44px;
+  min-height: 44px;
+  max-height: 44px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.95);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
@@ -8113,24 +8140,33 @@ select:focus-visible {
   padding: 0;
   margin: 0;
   cursor: pointer;
-  color: #8b92a1;
+  color: #8e8e93;
   -webkit-tap-highlight-color: transparent;
 }
 .expandedMapLibreSearchInput {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   border: none;
   outline: none;
   background: transparent;
   font-size: 16px;
   line-height: 1.2;
-  font-family: inherit;
-  color: #1a1a2e;
+  font-weight: 400;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  color: #1a1a1a;
   padding: 0;
   -webkit-appearance: none;
+  appearance: none;
+}
+.expandedMapLibreSearchInput:focus,
+.expandedMapLibreSearchInput:focus-visible {
+  outline: none;
+  box-shadow: none;
+  background-color: transparent;
 }
 .expandedMapLibreSearchInput::placeholder {
   color: #9aa0a6;
+  opacity: 1;
 }
 .expandedMapLibreSearchClear {
   flex-shrink: 0;
@@ -8150,12 +8186,14 @@ select:focus-visible {
 }
 
 .expandedMapLibreSearchColumn {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
+  /* Keep search pill top-aligned with close button (native centerY on 44pt peers) */
+  align-self: flex-start;
 }
 /* Admin MapLibre discover chip (below search pill) */
 .expandedMapLibreDiscoverRow {
@@ -8186,7 +8224,7 @@ select:focus-visible {
   color: #ffffff;
 }
 
-/* Floating chrome over full-bleed MapLibre (map extends under status bar) */
+/* Floating chrome over full-bleed MapLibre — same insets as TopChrome (do not override to 10px) */
 .expandedMapLibreTopChromeFlow {
   position: absolute;
   top: 0;
@@ -8194,36 +8232,23 @@ select:focus-visible {
   right: 0;
   flex-shrink: 0;
   z-index: 30;
-  padding-top: calc(10px + env(safe-area-inset-top, 0px));
-  padding-bottom: 8px;
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  padding-bottom: 0;
   background: transparent;
 }
 .expandedMapLibreTopChromeFlow .expandedMapLibreRoundBtn,
 .expandedMapLibreTopChromeFlow .expandedMapLibreSearchPill {
-  /* Match native Kakao chrome: opacity 0.15, offset (0,2), radius 4 */
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 .expandedMapLibreTopChromeFlow .expandedMapLibreDiscoverChip {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
-.expandedMapLibreSearchIcon {
-  border: none;
-  background: transparent;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #8b92a1;
-  -webkit-tap-highlight-color: transparent;
-}
-/* Research button: below floating chrome */
+/* Research: search bottom (safe+12+44) + 10 = safe+66 */
 .expandedMapLibreStage .mapResearchAreaBtn {
-  top: calc(56px + env(safe-area-inset-top, 0px));
+  top: calc(66px + env(safe-area-inset-top, 0px));
 }
 .expandedMapLibreStage .expandedMapLibreRouteLoading {
-  top: calc(56px + env(safe-area-inset-top, 0px)) !important;
+  top: calc(66px + env(safe-area-inset-top, 0px)) !important;
 }
 
 .expandedMapLibreAttrib {
