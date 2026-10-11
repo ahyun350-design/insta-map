@@ -71,18 +71,19 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
   paper: {
     id: "paper",
     label: "페이퍼",
-    background: "#F7F5F0",
-    land: "#F7F5F0",
+    // Very light cool gray (avoid cream/beige) — Kakao-like contrast at street zoom
+    background: "#F2F2F2",
+    land: "#F2F2F2",
     water: "#BFDDF2",
-    park: "#DCEAD0",
-    building: "#EEEAE2",
+    park: "#D8E8D0",
+    building: "#E6E6E6",
     showBuildings: true,
     road: "#FFFFFF",
     roadMinor: "#FFFFFF",
-    rail: "#C5C0B8",
+    rail: "#C8C8C8",
     text: "#3A4155",
     textHalo: "#FFFFFF",
-    boundary: "#D8D2C8",
+    boundary: "#D0D0D0",
     stationDot: "#3A4155",
   },
   white: {
@@ -207,11 +208,15 @@ const KO_TEXT: unknown = [
 ];
 
 /**
- * Guide landmarks from OpenMapTiles `poi` (commercial shop/cafe/restaurant stay hidden).
- * Color groups: culture | medical | transit (2–3 calm tones).
+ * Neighborhood anchor labels from OpenMapTiles `poi`.
+ * Commercial shop/cafe/restaurant/bank stay hidden. No invented apartment labels
+ * (OMT has no apartment-complex name layer in KR tiles — verified Mangwon z14).
+ * Color groups: culture | medical | transit.
  */
 const LANDMARK_FILTER: unknown = [
   "any",
+  // 학교
+  ["all", ["==", ["get", "class"], "school"], ["==", ["get", "subclass"], "school"]],
   // 대학교
   [
     "all",
@@ -224,45 +229,40 @@ const LANDMARK_FILTER: unknown = [
     ["==", ["get", "class"], "hospital"],
     ["==", ["get", "subclass"], "hospital"],
   ],
-  // 백화점·대형몰
-  [
-    "all",
-    ["==", ["get", "class"], "shop"],
-    ["==", ["get", "subclass"], "mall"],
-  ],
+  // 공원
+  ["all", ["==", ["get", "class"], "park"], ["==", ["get", "subclass"], "park"]],
+  // 전통시장
   [
     "all",
     ["==", ["get", "class"], "grocery"],
-    ["==", ["get", "subclass"], "department_store"],
+    ["==", ["get", "subclass"], "marketplace"],
   ],
-  // 시청·구청 (주민센터/경로당 community_centre 제외)
+  // 구청·주민센터 (OMT: town_hall / townhall)
   [
     "all",
     ["==", ["get", "class"], "town_hall"],
     ["==", ["get", "subclass"], "townhall"],
   ],
-  // 박물관·미술관
-  ["all", ["==", ["get", "class"], "museum"], ["==", ["get", "subclass"], "museum"]],
-  [
-    "all",
-    ["==", ["get", "class"], "art_gallery"],
-    ["match", ["get", "subclass"], ["gallery", "arts_centre"], true, false],
-  ],
-  // 경기장·궁·관광명소
-  ["==", ["get", "class"], "stadium"],
-  ["==", ["get", "class"], "castle"],
-  ["==", ["get", "class"], "attraction"],
-  // 기차역·버스터미널 (지하철역은 subway_* 레이어; 비행장/활주로 제외)
+  // 경찰서·파출소
+  ["all", ["==", ["get", "class"], "police"], ["==", ["get", "subclass"], "police"]],
+  // 우체국
+  ["all", ["==", ["get", "class"], "post"], ["==", ["get", "subclass"], "post_office"]],
+  // 지하철·기차역
   [
     "all",
     ["==", ["get", "class"], "railway"],
-    ["==", ["get", "subclass"], "station"],
+    ["match", ["get", "subclass"], ["subway", "station"], true, false],
   ],
+  // 버스터미널
   [
     "all",
     ["==", ["get", "class"], "bus"],
     ["==", ["get", "subclass"], "bus_station"],
   ],
+  // 도시 스케일 비상업 앵커
+  ["all", ["==", ["get", "class"], "museum"], ["==", ["get", "subclass"], "museum"]],
+  ["==", ["get", "class"], "stadium"],
+  ["==", ["get", "class"], "attraction"],
 ];
 
 /** Exclude military/small airfields from landmark labels. */
@@ -308,7 +308,11 @@ function landmarkGroupColor(theme: MapPreviewTheme): unknown {
     medical,
     [
       "any",
-      ["all", ["==", ["get", "class"], "railway"], ["==", ["get", "subclass"], "station"]],
+      [
+        "all",
+        ["==", ["get", "class"], "railway"],
+        ["match", ["get", "subclass"], ["subway", "station"], true, false],
+      ],
       ["all", ["==", ["get", "class"], "bus"], ["==", ["get", "subclass"], "bus_station"]],
     ],
     transit,
@@ -318,7 +322,8 @@ function landmarkGroupColor(theme: MapPreviewTheme): unknown {
 
 function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = landmarkGroupColor(theme);
-  const rankMax = landmarkRankMaxExpr(2, 6, 14);
+  // Neighborhood anchors denser at z15+ (Mangwon street zoom)
+  const rankMax = landmarkRankMaxExpr(3, 10, 24);
   const filter: unknown = [
     "all",
     LANDMARK_FILTER,
@@ -334,7 +339,7 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     type: "circle",
     source: "openmaptiles",
     "source-layer": "poi",
-    minzoom: 12,
+    minzoom: 15,
     filter,
     layout: {
       visibility: "visible",
@@ -344,11 +349,11 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
         "interpolate",
         ["linear"],
         ["zoom"],
-        12,
-        2.2,
-        14,
-        2.8,
+        15,
+        2.4,
         16,
+        2.8,
+        17,
         3.2,
       ],
       "circle-color": color,
@@ -364,7 +369,7 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     type: "symbol",
     source: "openmaptiles",
     "source-layer": "poi",
-    minzoom: 12,
+    minzoom: 15,
     filter,
     layout: {
       visibility: "visible",
@@ -374,11 +379,11 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
         "interpolate",
         ["linear"],
         ["zoom"],
-        12,
-        10.5,
-        14,
+        15,
         11.5,
         16,
+        12,
+        17,
         12.5,
       ],
       "text-anchor": "left",
@@ -626,9 +631,13 @@ function roadFillWidth(kind: RoadKind): unknown {
         11,
         0.7,
         14,
-        2.2,
+        2.6,
+        15,
+        3.4,
+        16,
+        4.6,
         18,
-        6.5,
+        8,
       ];
     case "tertiary":
       return [
@@ -636,11 +645,13 @@ function roadFillWidth(kind: RoadKind): unknown {
         ["exponential", 1.2],
         ["zoom"],
         13,
-        0.6,
+        0.7,
         15,
-        1.7,
+        2.8,
+        16,
+        3.8,
         18,
-        5,
+        7,
       ];
     case "link":
       return [
@@ -650,22 +661,27 @@ function roadFillWidth(kind: RoadKind): unknown {
         12,
         0.5,
         14,
-        1.4,
+        1.6,
+        16,
+        3.2,
         18,
-        5.5,
+        6,
       ];
     case "minor":
     case "service":
+      // Street grid readable at Mangwon z15–18
       return [
         "interpolate",
         ["exponential", 1.2],
         ["zoom"],
         14,
-        0.5,
+        1.1,
+        15,
+        2.4,
         16,
-        1.6,
+        3.6,
         18,
-        4.2,
+        7,
       ];
     case "path":
       return [
@@ -673,9 +689,11 @@ function roadFillWidth(kind: RoadKind): unknown {
         ["exponential", 1.2],
         ["zoom"],
         14,
-        0.4,
+        0.7,
+        16,
+        2.2,
         18,
-        2.5,
+        4,
       ];
     default:
       return [
@@ -683,9 +701,11 @@ function roadFillWidth(kind: RoadKind): unknown {
         ["exponential", 1.2],
         ["zoom"],
         14,
-        0.5,
+        1.0,
+        16,
+        3.2,
         18,
-        4,
+        6,
       ];
   }
 }
@@ -744,9 +764,13 @@ function roadCasingWidth(kind: RoadKind): unknown {
         11,
         1.2,
         14,
-        3.2,
+        3.6,
+        15,
+        4.6,
+        16,
+        5.8,
         18,
-        8,
+        9.5,
       ];
     case "tertiary":
       return [
@@ -754,11 +778,13 @@ function roadCasingWidth(kind: RoadKind): unknown {
         ["exponential", 1.2],
         ["zoom"],
         13,
-        1.05,
+        1.2,
         15,
-        2.5,
+        3.8,
+        16,
+        5,
         18,
-        6.5,
+        8.5,
       ];
     case "link":
       return [
@@ -768,9 +794,11 @@ function roadCasingWidth(kind: RoadKind): unknown {
         12,
         1.0,
         14,
-        2.2,
+        2.4,
+        16,
+        4.2,
         18,
-        7,
+        7.5,
       ];
     case "minor":
     case "service":
@@ -779,11 +807,13 @@ function roadCasingWidth(kind: RoadKind): unknown {
         ["exponential", 1.2],
         ["zoom"],
         14,
-        0.9,
+        1.8,
+        15,
+        3.4,
         16,
-        2.4,
+        4.8,
         18,
-        5.5,
+        8.5,
       ];
     case "path":
       return [
@@ -791,9 +821,11 @@ function roadCasingWidth(kind: RoadKind): unknown {
         ["exponential", 1.2],
         ["zoom"],
         14,
-        0.8,
+        1.2,
+        16,
+        3,
         18,
-        3.5,
+        5,
       ];
     default:
       return [
@@ -801,9 +833,11 @@ function roadCasingWidth(kind: RoadKind): unknown {
         ["exponential", 1.2],
         ["zoom"],
         14,
-        0.9,
+        1.6,
+        16,
+        4.2,
         18,
-        5,
+        7.5,
       ];
   }
 }
@@ -814,7 +848,7 @@ function roadFillColor(
 ): string {
   const yellow = kind === "motorway" || kind === "trunk";
   if (theme.id === "paper") {
-    // Motorway/trunk a touch clearer at far zoom (still soft cream)
+    // Keep major arterials (강변북로 등) in current soft cream; locals stay white
     if (yellow) return "#F5E8C0";
     return theme.road;
   }
@@ -838,7 +872,8 @@ function roadCasingColor(
 ): string {
   const yellow = kind === "motorway" || kind === "trunk";
   if (theme.id === "paper") {
-    return yellow ? "#EFE2B8" : "#E6E1D6";
+    // Cool gray casing for white local streets (not warm beige)
+    return yellow ? "#EFE2B8" : "#D4D4D4";
   }
   if (theme.id === "white") {
     return yellow ? "#E0E0E0" : "#E8E8E8";
@@ -921,13 +956,17 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         ? "#F5F7F3"
         : theme.id === "neon"
           ? "#0A2424"
-          : "#E8F0E0";
+          : theme.id === "paper"
+            ? "#E4ECDC"
+            : "#E8F0E0";
     const buildingOutline =
       theme.id === "white"
         ? "#E6E6E6"
         : theme.id === "neon"
           ? "#242C5C"
-          : "#E2DDD2";
+          : theme.id === "paper"
+            ? "#DEDEDE"
+            : "#E2DDD2";
 
     if (isCasing(layer.id)) {
       if (!useGuideRoads) {
@@ -1025,6 +1064,23 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     if (layer.id === "building") {
       if (!theme.showBuildings) {
         setVisibility(layer, false);
+      } else if (theme.id === "paper") {
+        // Hidden / invisible below z17; cool gray (not beige) at z17+
+        paintSet(layer, "fill-color", theme.building);
+        paintSet(layer, "fill-opacity", [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          16.99,
+          0,
+          17,
+          0.88,
+          18,
+          0.95,
+        ]);
+        paintSet(layer, "fill-outline-color", buildingOutline);
+        layer.minzoom = 17;
+        delete layer.maxzoom;
       } else {
         paintSet(layer, "fill-color", theme.building);
         paintSet(layer, "fill-opacity", 0.95);

@@ -175,9 +175,10 @@ function isElementVisiblyMapped(el: HTMLElement | null | undefined): boolean {
   return rect.width > 0 && rect.height > 0;
 }
 
+/** Navy place/search dot — match native myLocationSize (~27 pt; Swift ~417–419). */
 function searchPinSvg(): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-  <circle cx="14" cy="14" r="9" fill="${MAP_BRAND_NAVY}" stroke="#ffffff" stroke-width="3"/>
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="27" height="27" viewBox="0 0 27 27">
+  <circle cx="13.5" cy="13.5" r="10" fill="${MAP_BRAND_NAVY}" stroke="#ffffff" stroke-width="2.5"/>
 </svg>`;
 }
 
@@ -511,8 +512,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
             this.map,
             SEARCH_IMAGE_ID,
             searchPinSvg(),
-            28,
-            28,
+            MAP_MYLOC_SIZE,
+            MAP_MYLOC_SIZE,
             this.imageDpr,
           );
           this.addLayers(this.map);
@@ -931,7 +932,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       source: SEARCH_SOURCE,
       layout: {
         "icon-image": SEARCH_IMAGE_ID,
-        "icon-size": 0.9,
+        "icon-size": 1,
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
       },

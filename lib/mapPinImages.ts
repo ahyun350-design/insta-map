@@ -1,12 +1,17 @@
 import { DEFAULT_CATEGORY_PIN } from "@/lib/categoryAppearance";
 import type { FeedPostCategory } from "@/lib/feedPost";
 
-/** Matches Kakao MarkerImage Size(36, 44) on the compact minimap. */
-export const MAP_PIN_WIDTH = 36;
-export const MAP_PIN_HEIGHT = 44;
+/**
+ * Native fullscreen pin canvas (PindmapNativeMapPlugin.swift
+ * NativeMapMarkerStyleHelper.PIN_DISPLAY_SIZE) = 40×48 pt.
+ * React Kakao MarkerImage reference was 36×44; native draws at 40×48.
+ */
+export const MAP_PIN_WIDTH = 40;
+export const MAP_PIN_HEIGHT = 48;
 export const MAP_FOCUS_PIN_WIDTH = 48;
 export const MAP_FOCUS_PIN_HEIGHT = 58;
-export const MAP_MYLOC_SIZE = 24;
+/** Native myLocationSize ≈ 40×24/36 ≈ 26.67 pt — use 27 CSS px. */
+export const MAP_MYLOC_SIZE = 27;
 
 /** CSS-pixel icon-size (image is registered with device pixelRatio). */
 export const MAP_PIN_ICON_SIZE = 1;
@@ -32,7 +37,7 @@ export function pinMarkerSvg(
   const shadow = opts?.glow
     ? `<feDropShadow dx="0" dy="0" stdDeviation="1.6" flood-color="#ffffff" flood-opacity="0.45"/><feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-color="#000000" flood-opacity="0.35"/>`
     : `<feDropShadow dx="0" dy="1.2" stdDeviation="1.1" flood-color="#000000" flood-opacity="0.28"/>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="44" viewBox="0 0 36 44"><defs><filter id="s" x="-40%" y="-30%" width="180%" height="180%">${shadow}</filter></defs><path filter="url(#s)" d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 26 18 26S36 31.5 36 18C36 8.06 27.94 0 18 0z" fill="${fillColor}" stroke="${stroke}" stroke-width="${strokeWidth}"/><circle cx="18" cy="18" r="13" fill="white" opacity="0.9"/><text x="18" y="23" text-anchor="middle" font-size="14">${emoji}</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="48" viewBox="0 0 40 48"><defs><filter id="s" x="-40%" y="-30%" width="180%" height="180%">${shadow}</filter></defs><path filter="url(#s)" d="M20 0C8.95 0 0 8.95 0 20c0 15 20 28 20 28s20-13 20-28C40 8.95 31.05 0 20 0z" fill="${fillColor}" stroke="${stroke}" stroke-width="${strokeWidth}"/><circle cx="20" cy="20" r="14.5" fill="white" opacity="0.9"/><text x="20" y="25" text-anchor="middle" font-size="15">${emoji}</text></svg>`;
 }
 
 export function focusMarkerSvg(
@@ -51,9 +56,9 @@ export function focusMarkerSvg(
   return `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58"><defs><filter id="s" x="-40%" y="-30%" width="180%" height="180%">${shadow}</filter></defs><path filter="url(#s)" d="M24 1C11.3 1 1 11.3 1 24c0 17.5 23 33 23 33s23-15.5 23-33C47 11.3 36.7 1 24 1z" fill="${fillColor}" stroke="${stroke}" stroke-width="2.5"/><circle cx="24" cy="24" r="15" fill="white" opacity="0.95"/><text x="24" y="30" text-anchor="middle" font-size="16">${emoji}</text></svg>`;
 }
 
-/** Same asset as Kakao compact `makeMyLocationImage` (24×24 ring). */
+/** Native my-location ring (~27 pt). */
 export function myLocationMarkerSvg(): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#1a2a7a" stroke="white" stroke-width="2.5"/><circle cx="12" cy="12" r="4" fill="white"/></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="27" height="27" viewBox="0 0 27 27"><circle cx="13.5" cy="13.5" r="11" fill="#1a2a7a" stroke="white" stroke-width="2.5"/><circle cx="13.5" cy="13.5" r="4.5" fill="white"/></svg>`;
 }
 
 export function pinImageKey(kind: "pin" | "focus", category: string, fillColor: string) {
