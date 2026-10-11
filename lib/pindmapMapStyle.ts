@@ -321,8 +321,8 @@ function landmarkGroupColor(theme: MapPreviewTheme): unknown {
 
 function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = landmarkGroupColor(theme);
-  // Neighborhood anchors denser at z15+ (Mangwon street zoom)
-  const rankMax = landmarkRankMaxExpr(3, 10, 24);
+  // Neighborhood anchors at z15+; keep rank cap modest so shop_poi_* can fill gaps at z16–18
+  const rankMax = landmarkRankMaxExpr(3, 8, 12);
   const filter: unknown = [
     "all",
     LANDMARK_FILTER,
@@ -581,7 +581,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       idSuffix: "z16",
       minzoom: 16,
       classFilter: SHOP_Z16,
-      rankMax: 12,
+      rankMax: 18,
       radius: 3,
       textSize: 11,
     },
@@ -589,7 +589,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       idSuffix: "z17",
       minzoom: 17,
       classFilter: SHOP_Z17_EXTRA,
-      rankMax: 24,
+      rankMax: 32,
       radius: 3.5,
       textSize: 11.5,
     },
@@ -649,7 +649,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         "text-anchor": "left",
         "text-offset": [0.65, 0],
         "text-max-width": 7,
-        "text-padding": 1.5,
+        "text-padding": 0.8,
         "text-optional": true,
         "text-allow-overlap": false,
         "text-ignore-placement": false,
@@ -658,6 +658,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       },
       paint: {
         "text-color": color,
+        "text-opacity": 0.92,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": theme.id === "neon" ? 1.5 : 1.35,
         "text-halo-blur": 0.15,
