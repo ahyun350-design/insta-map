@@ -507,84 +507,76 @@ test("map-preview Seoul z10.5: ≥20 gu labels", async ({ page }) => {
   ).toBeGreaterThanOrEqual(20);
 });
 
-test("map-preview Mangwon z16: anchors ≥1, commercial 0, road names 0", async ({
+test("map-preview Mangwon: shop labels z16≥1, z14=0, roads=0", async ({
   page,
 }) => {
   await openPreview(page, "/map-preview?mode=nopins&theme=paper");
   // 망원동 ≈ 126.9015, 37.5563
-  await page.evaluate(async () => {
-    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
-      .__PINDMAP_PREVIEW_MAP__;
-    map.jumpTo({ zoom: 16, center: [126.9015, 37.5563] });
-    await new Promise<void>((resolve) => {
-      map.once("idle", () => resolve());
-      window.setTimeout(() => resolve(), 4500);
-    });
-  });
+  const roadIds = [
+    "highway-name-path",
+    "highway-name-minor",
+    "highway-name-major",
+    "highway-shield-non-us",
+    "highway-shield-us-interstate",
+    "road_shield_us",
+    "label_bridge_ko",
+  ];
 
-  const result = await page.evaluate(() => {
-    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
-      .__PINDMAP_PREVIEW_MAP__;
-    const anchorLayers = ["landmark_label", "poi_transit"].filter(
-      (id) => !!map.getLayer(id),
-    );
-    const anchors = anchorLayers.length
-      ? map.queryRenderedFeatures({ layers: anchorLayers })
-      : [];
-    const commercialClasses = new Set([
-      "restaurant",
-      "cafe",
-      "fast_food",
-      "bar",
-      "shop",
-      "bank",
-      "convenience",
-      "supermarket",
-      "clothes",
-      "hairdresser",
-    ]);
-    let commercial = 0;
-    for (const f of anchors) {
-      const p =
-        (f as { properties?: Record<string, unknown> }).properties ?? {};
-      const cls = String(p.class ?? "");
-      const sub = String(p.subclass ?? "");
-      if (commercialClasses.has(cls) || commercialClasses.has(sub)) {
-        commercial += 1;
-      }
-    }
-    const roadIds = [
-      "highway-name-path",
-      "highway-name-minor",
-      "highway-name-major",
-      "highway-shield-non-us",
-      "highway-shield-us-interstate",
-      "road_shield_us",
-      "label_bridge_ko",
-    ].filter((id) => !!map.getLayer(id));
-    const roadFeats = roadIds.length
-      ? map.queryRenderedFeatures({ layers: roadIds })
-      : [];
-    return {
-      anchorCount: anchors.length,
-      commercial,
-      roadNames: roadFeats.length,
-      zoom: map.getZoom(),
-    };
-  });
+  async function measureAt(zoom: number) {
+    await page.evaluate(async (z) => {
+      const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+        .__PINDMAP_PREVIEW_MAP__;
+      map.jumpTo({ zoom: z, center: [126.9015, 37.5563] });
+      await new Promise<void>((resolve) => {
+        map.once("idle", () => resolve());
+        window.setTimeout(() => resolve(), 4500);
+      });
+    }, zoom);
+    return page.evaluate((roads) => {
+      const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+        .__PINDMAP_PREVIEW_MAP__;
+      const shopLayers = ["shop_poi_label"].filter((id) => !!map.getLayer(id));
+      const shop = shopLayers.length
+        ? map.queryRenderedFeatures({ layers: shopLayers })
+        : [];
+      const roadPresent = roads.filter((id) => !!map.getLayer(id));
+      const roadFeats = roadPresent.length
+        ? map.queryRenderedFeatures({ layers: roadPresent })
+        : [];
+      return {
+        shopCount: shop.length,
+        roadNames: roadFeats.length,
+        zoom: map.getZoom(),
+        hasShopLayer: shopLayers.length > 0,
+      };
+    }, roadIds);
+  }
 
+  const z14 = await measureAt(14);
+  expect(z14.hasShopLayer, "shop_poi_label layer missing").toBe(true);
   expect(
-    result.anchorCount,
-    `Mangwon z${result.zoom}: expected ≥1 anchor labels`,
+    z14.shopCount,
+    `Mangwon z14: shop labels must be 0, got ${z14.shopCount}`,
+  ).toBe(0);
+
+  const z16 = await measureAt(16);
+  expect(
+    z16.shopCount,
+    `Mangwon z16: expected ≥1 shop labels, got ${z16.shopCount}`,
   ).toBeGreaterThanOrEqual(1);
   expect(
-    result.commercial,
-    `Mangwon z${result.zoom}: commercial labels must be 0`,
+    z16.roadNames,
+    `Mangwon z16: road name/shield labels must be 0`,
   ).toBe(0);
-  expect(
-    result.roadNames,
-    `Mangwon z${result.zoom}: road name/shield labels must be 0`,
-  ).toBe(0);
+
+  const z17 = await measureAt(17);
+  const z18 = await measureAt(18);
+  // Surface counts for the agent report (not hard thresholds beyond z16)
+  console.log(
+    `[Mangwon shop labels] z14=${z14.shopCount} z16=${z16.shopCount} z17=${z17.shopCount} z18=${z18.shopCount}`,
+  );
+  expect(z17.shopCount).toBeGreaterThanOrEqual(z16.shopCount);
+  expect(z18.roadNames).toBe(0);
 });
 
 test("map-preview road name / shield labels are hidden (0 features)", async ({

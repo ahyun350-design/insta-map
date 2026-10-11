@@ -209,8 +209,7 @@ const KO_TEXT: unknown = [
 
 /**
  * Neighborhood anchor labels from OpenMapTiles `poi`.
- * Commercial shop/cafe/restaurant/bank stay hidden. No invented apartment labels
- * (OMT has no apartment-complex name layer in KR tiles — verified Mangwon z14).
+ * Shops/cafes use shop_poi_* layers (z16+). Landmarks always stack above shops.
  * Color groups: culture | medical | transit.
  */
 const LANDMARK_FILTER: unknown = [
@@ -402,6 +401,262 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
       "text-halo-color": theme.textHalo,
       "text-halo-width": theme.id === "neon" ? 1.6 : 1.4,
       "text-halo-blur": 0.2,
+    },
+  });
+}
+
+/** Shop/facility name only — name:ko then name (no nonlatin fallback clutter). */
+const SHOP_TEXT: unknown = ["coalesce", ["get", "name:ko"], ["get", "name"]];
+
+const HAS_SHOP_NAME: unknown = [
+  ">",
+  ["length", ["to-string", ["coalesce", ["get", "name:ko"], ["get", "name"], ""]]],
+  0,
+];
+
+/** Exclude bus stops and landmark classes (those stay on landmark_*). */
+const SHOP_EXCLUDE: unknown = [
+  "all",
+  ["!", ["==", ["get", "class"], "bus"]],
+  ["!", ["==", ["get", "subclass"], "bus_stop"]],
+  [
+    "!",
+    [
+      "in",
+      ["get", "class"],
+      [
+        "literal",
+        [
+          "school",
+          "college",
+          "hospital",
+          "park",
+          "town_hall",
+          "police",
+          "railway",
+          "museum",
+          "stadium",
+          "attraction",
+          "aerodrome",
+          "airport",
+        ],
+      ],
+    ],
+  ],
+  // Traditional market + post office stay on landmark_label
+  [
+    "!",
+    [
+      "all",
+      ["==", ["get", "class"], "post"],
+      ["==", ["get", "subclass"], "post_office"],
+    ],
+  ],
+  [
+    "!",
+    [
+      "all",
+      ["==", ["get", "class"], "grocery"],
+      ["==", ["get", "subclass"], "marketplace"],
+    ],
+  ],
+];
+
+/** z16 core amenities (rank-limited). */
+const SHOP_Z16: unknown = [
+  "any",
+  ["all", ["==", ["get", "class"], "cafe"], ["==", ["get", "subclass"], "cafe"]],
+  [
+    "all",
+    ["==", ["get", "class"], "restaurant"],
+    ["==", ["get", "subclass"], "restaurant"],
+  ],
+  [
+    "all",
+    ["==", ["get", "class"], "shop"],
+    ["==", ["get", "subclass"], "convenience"],
+  ],
+  ["all", ["==", ["get", "class"], "bank"], ["==", ["get", "subclass"], "bank"]],
+  [
+    "all",
+    ["==", ["get", "class"], "pharmacy"],
+    ["==", ["get", "subclass"], "pharmacy"],
+  ],
+  [
+    "all",
+    ["==", ["get", "class"], "grocery"],
+    ["==", ["get", "subclass"], "supermarket"],
+  ],
+];
+
+/** z17+ adds bars, fast food, general shops. */
+const SHOP_Z17_EXTRA: unknown = [
+  "any",
+  ["all", ["==", ["get", "class"], "bar"], ["==", ["get", "subclass"], "bar"]],
+  [
+    "all",
+    ["==", ["get", "class"], "fast_food"],
+    ["==", ["get", "subclass"], "fast_food"],
+  ],
+  ["all", ["==", ["get", "class"], "bakery"], ["==", ["get", "subclass"], "bakery"]],
+  [
+    "all",
+    ["==", ["get", "class"], "shop"],
+    ["!", ["==", ["get", "subclass"], "convenience"]],
+  ],
+  [
+    "all",
+    ["==", ["get", "class"], "grocery"],
+    ["!", ["==", ["get", "subclass"], "marketplace"]],
+  ],
+];
+
+/**
+ * Four calm tint groups (not Kakao icons):
+ * food | retail | daily (bank/pharmacy) | other
+ */
+function shopPoiColor(theme: MapPreviewTheme): unknown {
+  const food =
+    theme.id === "neon" ? "#C4A090" : theme.id === "white" ? "#8A6A5A" : "#8B6B5C";
+  const retail =
+    theme.id === "neon" ? "#8AB8A0" : theme.id === "white" ? "#5A7A68" : "#5B7A6A";
+  const daily =
+    theme.id === "neon" ? "#9AA8D0" : theme.id === "white" ? "#5A6A88" : "#5A6B8C";
+  const other =
+    theme.id === "neon" ? "#A0A0B0" : theme.id === "white" ? "#6E6874" : "#7A7580";
+  return [
+    "case",
+    [
+      "any",
+      ["==", ["get", "class"], "cafe"],
+      ["==", ["get", "class"], "restaurant"],
+      ["==", ["get", "class"], "bar"],
+      ["==", ["get", "class"], "fast_food"],
+      ["==", ["get", "class"], "bakery"],
+    ],
+    food,
+    [
+      "any",
+      ["==", ["get", "class"], "shop"],
+      ["==", ["get", "class"], "grocery"],
+      ["==", ["get", "class"], "clothes"],
+    ],
+    retail,
+    [
+      "any",
+      ["==", ["get", "class"], "bank"],
+      ["==", ["get", "class"], "post"],
+      ["==", ["get", "class"], "pharmacy"],
+    ],
+    daily,
+    other,
+  ];
+}
+
+function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
+  const color = shopPoiColor(theme);
+  // Lower OMT rank number = more important → higher sort-key
+  const sortKey: unknown = [
+    "-",
+    500,
+    ["to-number", ["coalesce", ["get", "rank"], 999]],
+  ];
+  // z16: top ranks only; denser at z17; open at z18+
+  const rankMax: unknown = [
+    "step",
+    ["zoom"],
+    4,
+    16,
+    6,
+    17,
+    16,
+    18,
+    999,
+  ];
+  const classByZoom: unknown = [
+    "any",
+    ["all", [">=", ["zoom"], 16], ["<", ["zoom"], 17], SHOP_Z16],
+    [
+      "all",
+      [">=", ["zoom"], 17],
+      ["<", ["zoom"], 18],
+      ["any", SHOP_Z16, SHOP_Z17_EXTRA],
+    ],
+    // z18+: named remainder (bus/landmarks excluded above)
+    [">=", ["zoom"], 18],
+  ];
+  const filter: unknown = [
+    "all",
+    HAS_SHOP_NAME,
+    SHOP_EXCLUDE,
+    classByZoom,
+    ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], rankMax],
+  ];
+
+  layers.push({
+    id: "shop_poi_dot",
+    type: "circle",
+    source: "openmaptiles",
+    "source-layer": "poi",
+    minzoom: 16,
+    filter,
+    layout: { visibility: "visible" },
+    paint: {
+      "circle-radius": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        16,
+        3,
+        17,
+        3.5,
+        18,
+        4,
+      ],
+      "circle-color": color,
+      "circle-opacity": theme.id === "neon" ? 0.9 : 0.85,
+      "circle-stroke-width": 1,
+      "circle-stroke-color": theme.textHalo,
+    },
+  });
+
+  layers.push({
+    id: "shop_poi_label",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "poi",
+    minzoom: 16,
+    filter,
+    layout: {
+      visibility: "visible",
+      "text-field": SHOP_TEXT,
+      "text-font": ["Noto Sans Regular"],
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        16,
+        11,
+        17,
+        11.5,
+        18,
+        12,
+      ],
+      "text-anchor": "left",
+      "text-offset": [0.65, 0],
+      "text-max-width": 7,
+      "text-padding": 1.5,
+      "text-optional": true,
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
+      "symbol-sort-key": sortKey,
+      "symbol-z-order": "source",
+    },
+    paint: {
+      "text-color": color,
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": theme.id === "neon" ? 1.5 : 1.35,
+      "text-halo-blur": 0.15,
     },
   });
 }
@@ -1815,7 +2070,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
 
   // No transportation_name labels (road / bridge names) — place / water / station stay.
 
-  // Guide landmarks (below adapter pins — pins are added after style load)
+  // Shop/facility names (z16+) below landmarks; adapter pins added later on top
+  appendShopPoiLayers(layers, theme);
+  // Neighborhood anchors — after shops so they paint above and keep placement priority
   appendLandmarkLayers(layers, theme);
 
   style.layers = layers;
