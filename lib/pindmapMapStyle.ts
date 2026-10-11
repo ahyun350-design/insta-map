@@ -462,25 +462,23 @@ const SHOP_EXCLUDE: unknown = [
   ],
 ];
 
-/** z16 core amenities (rank-limited). */
+/**
+ * z16: food + convenience + supermarket + bank + pharmacy only.
+ * Hairdresser / general retail start at z17. No rank hard-filter.
+ */
 const SHOP_Z16: unknown = [
   "any",
-  ["all", ["==", ["get", "class"], "cafe"], ["==", ["get", "subclass"], "cafe"]],
-  [
-    "all",
-    ["==", ["get", "class"], "restaurant"],
-    ["==", ["get", "subclass"], "restaurant"],
-  ],
+  ["==", ["get", "class"], "cafe"],
+  ["==", ["get", "class"], "restaurant"],
+  ["==", ["get", "class"], "fast_food"],
+  ["==", ["get", "class"], "bakery"],
+  ["==", ["get", "class"], "bar"],
+  ["==", ["get", "class"], "bank"],
+  ["==", ["get", "class"], "pharmacy"],
   [
     "all",
     ["==", ["get", "class"], "shop"],
     ["==", ["get", "subclass"], "convenience"],
-  ],
-  ["all", ["==", ["get", "class"], "bank"], ["==", ["get", "subclass"], "bank"]],
-  [
-    "all",
-    ["==", ["get", "class"], "pharmacy"],
-    ["==", ["get", "subclass"], "pharmacy"],
   ],
   [
     "all",
@@ -489,16 +487,10 @@ const SHOP_Z16: unknown = [
   ],
 ];
 
-/** z17+ adds bars, fast food, general shops. */
+/** z17+: general retail / personal care (not already in z16). */
 const SHOP_Z17_EXTRA: unknown = [
   "any",
-  ["all", ["==", ["get", "class"], "bar"], ["==", ["get", "subclass"], "bar"]],
-  [
-    "all",
-    ["==", ["get", "class"], "fast_food"],
-    ["==", ["get", "subclass"], "fast_food"],
-  ],
-  ["all", ["==", ["get", "class"], "bakery"], ["==", ["get", "subclass"], "bakery"]],
+  ["==", ["get", "class"], "beer"],
   [
     "all",
     ["==", ["get", "class"], "shop"],
@@ -507,7 +499,81 @@ const SHOP_Z17_EXTRA: unknown = [
   [
     "all",
     ["==", ["get", "class"], "grocery"],
-    ["!", ["==", ["get", "subclass"], "marketplace"]],
+    [
+      "!",
+      [
+        "in",
+        ["get", "subclass"],
+        ["literal", ["marketplace", "supermarket"]],
+      ],
+    ],
+  ],
+  ["==", ["get", "class"], "hairdresser"],
+  ["==", ["get", "class"], "laundry"],
+  ["==", ["get", "class"], "clothes"],
+  ["==", ["get", "class"], "florist"],
+  ["==", ["get", "class"], "books"],
+  ["==", ["get", "class"], "library"],
+];
+
+/**
+ * z18 remainder: other named commercial / service POIs not in z16/z17 sets.
+ * Must NOT reuse bare !SHOP_Z16 on class alone after a rank gate — that hid
+ * high-rank restaurants forever. Rank is sort-only now, so !SHOP_Z16 is safe.
+ */
+const SHOP_Z18_REMAINDER: unknown = [
+  "all",
+  ["!", SHOP_Z16],
+  ["!", SHOP_Z17_EXTRA],
+  [
+    "any",
+    ["==", ["get", "class"], "shop"],
+    ["==", ["get", "class"], "grocery"],
+    ["==", ["get", "class"], "mall"],
+    ["==", ["get", "class"], "furniture"],
+    ["==", ["get", "class"], "gift"],
+    ["==", ["get", "class"], "jewelry"],
+    ["==", ["get", "class"], "shoes"],
+    ["==", ["get", "class"], "sports"],
+    ["==", ["get", "class"], "stationery"],
+    ["==", ["get", "class"], "toys"],
+    ["==", ["get", "class"], "optician"],
+    ["==", ["get", "class"], "chemist"],
+    ["==", ["get", "class"], "doityourself"],
+    ["==", ["get", "class"], "hardware"],
+    ["==", ["get", "class"], "electronics"],
+    ["==", ["get", "class"], "mobile_phone"],
+    ["==", ["get", "class"], "bicycle"],
+    ["==", ["get", "class"], "car"],
+    ["==", ["get", "class"], "travel_agent"],
+    ["==", ["get", "class"], "copyshop"],
+    ["==", ["get", "class"], "art"],
+    ["==", ["get", "class"], "music"],
+    ["==", ["get", "class"], "pet"],
+    ["==", ["get", "class"], "wine"],
+    ["==", ["get", "class"], "beverages"],
+    ["==", ["get", "class"], "butcher"],
+    ["==", ["get", "class"], "confectionery"],
+    ["==", ["get", "class"], "deli"],
+    ["==", ["get", "class"], "greengrocer"],
+    ["==", ["get", "class"], "seafood"],
+    ["==", ["get", "class"], "tea"],
+    ["==", ["get", "class"], "pastry"],
+    ["==", ["get", "class"], "ice_cream"],
+    ["==", ["get", "class"], "alcohol"],
+    ["==", ["get", "class"], "kiosk"],
+    ["==", ["get", "class"], "newsagent"],
+    ["==", ["get", "class"], "tobacco"],
+    ["==", ["get", "class"], "perfumery"],
+    ["==", ["get", "class"], "cosmetics"],
+    ["==", ["get", "class"], "dentist"],
+    ["==", ["get", "class"], "doctors"],
+    ["==", ["get", "class"], "clinic"],
+    ["==", ["get", "class"], "veterinary"],
+    ["==", ["get", "class"], "beauty"],
+    ["==", ["get", "subclass"], "beauty"],
+    ["==", ["get", "subclass"], "hairdresser"],
+    ["==", ["get", "subclass"], "laundry"],
   ],
 ];
 
@@ -531,8 +597,10 @@ function shopPoiColor(theme: MapPreviewTheme): unknown {
       ["==", ["get", "class"], "cafe"],
       ["==", ["get", "class"], "restaurant"],
       ["==", ["get", "class"], "bar"],
+      ["==", ["get", "class"], "beer"],
       ["==", ["get", "class"], "fast_food"],
       ["==", ["get", "class"], "bakery"],
+      ["==", ["get", "class"], "ice_cream"],
     ],
     food,
     [
@@ -555,16 +623,46 @@ function shopPoiColor(theme: MapPreviewTheme): unknown {
 
 function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = shopPoiColor(theme);
-  // Lower OMT rank number = more important → higher sort-key (layout data only)
+  // Priority (data-only): food > convenience/mart > bank/pharmacy > other,
+  // then better (lower) OMT rank within a bucket.
+  // Bases stay below landmark_label (1000−rank) so anchors win collisions.
   const sortKey: unknown = [
     "-",
-    500,
-    ["to-number", ["coalesce", ["get", "rank"], 999]],
-  ];
-  const rankAtMost = (max: number): unknown => [
-    "<=",
-    ["to-number", ["coalesce", ["get", "rank"], 999]],
-    max,
+    [
+      "case",
+      [
+        "any",
+        ["==", ["get", "class"], "cafe"],
+        ["==", ["get", "class"], "restaurant"],
+        ["==", ["get", "class"], "fast_food"],
+        ["==", ["get", "class"], "bakery"],
+        ["==", ["get", "class"], "bar"],
+        ["==", ["get", "class"], "beer"],
+      ],
+      700,
+      [
+        "any",
+        [
+          "all",
+          ["==", ["get", "class"], "shop"],
+          ["==", ["get", "subclass"], "convenience"],
+        ],
+        [
+          "all",
+          ["==", ["get", "class"], "grocery"],
+          ["==", ["get", "subclass"], "supermarket"],
+        ],
+      ],
+      600,
+      [
+        "any",
+        ["==", ["get", "class"], "bank"],
+        ["==", ["get", "class"], "pharmacy"],
+      ],
+      500,
+      400,
+    ],
+    ["/", ["to-number", ["coalesce", ["get", "rank"], 999]], 10],
   ];
 
   // Overlapping bands (no maxzoom) so z16 cores stay visible at z17+;
@@ -573,38 +671,34 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
     idSuffix: string;
     minzoom: number;
     classFilter: unknown;
-    rankMax: number;
     radius: number;
     textSize: number;
+    textPadding: number;
   }> = [
     {
       idSuffix: "z16",
       minzoom: 16,
       classFilter: SHOP_Z16,
-      rankMax: 18,
       radius: 3,
       textSize: 11,
+      // Larger padding thins phone density into ~30–60 labels.
+      textPadding: 14,
     },
     {
       idSuffix: "z17",
       minzoom: 17,
       classFilter: SHOP_Z17_EXTRA,
-      rankMax: 32,
       radius: 3.5,
       textSize: 11.5,
+      textPadding: 1.0,
     },
     {
       idSuffix: "z18",
       minzoom: 18,
-      // Remainder: named POIs not in z16/z17 class sets (hairdresser etc.)
-      classFilter: [
-        "all",
-        ["!", SHOP_Z16],
-        ["!", SHOP_Z17_EXTRA],
-      ],
-      rankMax: 999,
+      classFilter: SHOP_Z18_REMAINDER,
       radius: 4,
       textSize: 12,
+      textPadding: 0.7,
     },
   ];
 
@@ -614,7 +708,6 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       HAS_SHOP_NAME,
       SHOP_EXCLUDE,
       band.classFilter,
-      rankAtMost(band.rankMax),
     ];
     const base = {
       source: "openmaptiles",
@@ -646,10 +739,11 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         "text-field": SHOP_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": band.textSize,
-        "text-anchor": "left",
-        "text-offset": [0.65, 0],
+        // Try multiple sides so dense blocks still place (no allow-overlap).
+        "text-variable-anchor": ["right", "left", "top", "bottom"],
+        "text-radial-offset": 0.75,
         "text-max-width": 7,
-        "text-padding": 0.8,
+        "text-padding": band.textPadding,
         "text-optional": true,
         "text-allow-overlap": false,
         "text-ignore-placement": false,
@@ -666,7 +760,6 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
     });
   }
 }
-
 type AnyLayer = {
   id: string;
   type: string;
