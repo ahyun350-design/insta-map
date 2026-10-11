@@ -94,6 +94,11 @@ const FEED_CATS = Object.keys(DEFAULT_CATEGORY_PIN) as FeedPostCategory[];
 export type PindmapPreviewMapDiag = {
   loadMs: number | null;
   styleLoadMs: number | null;
+  /** Lab phase segments (ms). MapLibre is static-imported → jsMs=0. */
+  jsMs: number | null;
+  createMs: number | null;
+  idleMs: number | null;
+  pinsMs: number | null;
   /** Short codes only (no message text / URLs). */
   errorCodes: string[];
   layerIds: string[];
@@ -120,6 +125,10 @@ function publishPreviewDiag(partial: Partial<PindmapPreviewMapDiag>) {
   const prev = window.__PINDMAP_PREVIEW_DIAG__ ?? {
     loadMs: null,
     styleLoadMs: null,
+    jsMs: null,
+    createMs: null,
+    idleMs: null,
+    pinsMs: null,
     errorCodes: [],
     layerIds: [],
     hasSubwaySource: false,
@@ -411,6 +420,9 @@ export default function PreviewGlMap({
           }
           mapRef.current = null;
         });
+        // Static import — JS already in page bundle when this effect runs.
+        const jsMs = 0;
+        const createT0 = performance.now();
         const map = new maplibregl.Map({
           container: canvas,
           style: style as StyleSpecification,
@@ -428,12 +440,17 @@ export default function PreviewGlMap({
           renderWorldCopies: modeRef.current !== "lite",
           pixelRatio: dpr,
         });
+        const createMs = Math.round(performance.now() - createT0);
         mapRef.current = map;
         // E2E / QA hook — map-preview route only
         window.__PINDMAP_PREVIEW_MAP__ = map;
         publishPreviewDiag({
           loadMs: null,
           styleLoadMs: null,
+          jsMs,
+          createMs,
+          idleMs: null,
+          pinsMs: null,
           errorCodes: [],
           layerIds: [],
           hasSubwaySource: false,
@@ -442,9 +459,18 @@ export default function PreviewGlMap({
           ),
         });
         const mapCreatedAt = performance.now();
+        let styleLoadAt: number | null = null;
         map.on("style.load", () => {
+          styleLoadAt = performance.now();
           publishPreviewDiag({
-            styleLoadMs: Math.round(performance.now() - mapCreatedAt),
+            styleLoadMs: Math.round(styleLoadAt - mapCreatedAt),
+          });
+        });
+        map.once("idle", () => {
+          const idleAt = performance.now();
+          const base = styleLoadAt ?? mapCreatedAt;
+          publishPreviewDiag({
+            idleMs: Math.round(idleAt - base),
           });
         });
         map.touchZoomRotate.disableRotation();
@@ -484,6 +510,7 @@ export default function PreviewGlMap({
                 await ensurePinImages(map, themeRef.current === "neon");
               }
               if (cancelled) return;
+              const pinsT0 = performance.now();
               addPinLayers(
                 map,
                 pinsRef.current,
@@ -491,6 +518,9 @@ export default function PreviewGlMap({
                 modeRef.current,
                 themeRef.current,
               );
+              publishPreviewDiag({
+                pinsMs: Math.round(performance.now() - pinsT0),
+              });
               fitToPins(map, pinsRef.current, fitPadding, singleZoom);
               if (routeDemoRef.current) {
                 await paintPreviewRouteDemo(

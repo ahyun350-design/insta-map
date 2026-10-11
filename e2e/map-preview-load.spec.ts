@@ -3,6 +3,10 @@ import { test, expect, type Page } from "@playwright/test";
 type PreviewDiag = {
   loadMs: number | null;
   styleLoadMs: number | null;
+  jsMs?: number | null;
+  createMs?: number | null;
+  idleMs?: number | null;
+  pinsMs?: number | null;
   errorCodes: string[];
   layerIds: string[];
   hasSubwaySource: boolean;

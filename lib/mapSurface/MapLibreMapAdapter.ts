@@ -44,7 +44,12 @@ import type {
   SearchPinInput,
   SetCourseStopsOptions,
 } from "./types";
-import { trackMapGlFallback, trackMapGlReady } from "./mapGlTelemetry";
+import {
+  trackMapGlFallback,
+  trackMapGlReady,
+  trackMapGlTiming,
+} from "./mapGlTelemetry";
+import { msSinceWebviewStart } from "@/lib/bootTiming";
 import { claimMapGlSlot, releaseMapGlSlot } from "./mapGlRecovery";
 import { attachSubwayOverlay, prefetchSubwayOverlay } from "./subwayOverlay";
 import {
@@ -193,6 +198,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private imageDpr = 2;
   private mode: "compact" | "expanded" = "compact";
   private mountStartedAt = 0;
+  private timingJsMs = 0;
+  private timingCreateMs = 0;
+  private timingStyleMs = 0;
+  private timingIdleMs = 0;
+  private timingPinsMs = 0;
+  private timingIdleAt: number | null = null;
+  private timingPinsAt: number | null = null;
+  private timingReported = false;
   private fallbackReported = false;
   private courseSelectedOrder: number | null = null;
   /** Admin directions chrome (paint basemap + hide clutter pins). */
@@ -250,11 +263,38 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     return isElementVisiblyMapped(this.containerEl);
   }
 
+
+  private flushMapGlTiming() {
+    if (this.timingReported || this.destroyed) return;
+    if (this.mode !== "compact" && this.mode !== "expanded") return;
+    if (this.timingIdleAt == null) return;
+    this.timingReported = true;
+    try {
+      trackMapGlTiming(this.mode, {
+        from_app_start_ms: msSinceWebviewStart(),
+        js_ms: this.timingJsMs,
+        create_ms: this.timingCreateMs,
+        style_ms: this.timingStyleMs,
+        idle_ms: this.timingIdleMs,
+        pins_ms: this.timingPinsMs,
+      });
+    } catch {
+      /* never block map */
+    }
+  }
+
   private async mount(options: CreateCompactMapLibreOptions) {
-    this.mountStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const now = () =>
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    this.mountStartedAt = now();
+    this.timingReported = false;
+    this.timingIdleAt = null;
+    this.timingPinsAt = null;
     this.containerEl = options.container;
     this.isSurfaceVisibleFn = options.isSurfaceVisible ?? null;
     this.onContextLostCb = options.onContextLost ?? null;
+    // maplibre-gl is statically imported with this module — js already resolved.
+    this.timingJsMs = 0;
     prefetchSubwayOverlay();
     const style = await buildPindmapStyle(this.theme);
     if (this.destroyed || this.intentionalDestroy) return;
@@ -271,6 +311,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       if (!this.destroyed && !this.intentionalDestroy) this.destroy();
     });
 
+    const createT0 = now();
     const map = new maplibregl.Map({
       container: options.container,
       style: style as StyleSpecification,
@@ -288,6 +329,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       pixelRatio: dpr,
     });
     this.map = map;
+    this.timingCreateMs = Math.round(now() - createT0);
     map.touchZoomRotate.disableRotation();
     this.installEdgeGestureGuard(map);
     this.installAttribution(options.container);
@@ -360,6 +402,33 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       }
     });
 
+    let styleLoadAt: number | null = null;
+    map.once("style.load", () => {
+      styleLoadAt = now();
+      // Segment: map constructed → style.load
+      this.timingStyleMs = Math.round(styleLoadAt - (createT0 + this.timingCreateMs));
+      if (this.timingStyleMs < 0) {
+        this.timingStyleMs = Math.round(styleLoadAt - createT0);
+      }
+    });
+    map.once("idle", () => {
+      if (this.timingIdleAt != null) return;
+      this.timingIdleAt = now();
+      const base = styleLoadAt ?? this.mountStartedAt + this.timingCreateMs;
+      this.timingIdleMs = Math.round(this.timingIdleAt - base);
+      // Pins may already be applied before first idle — flush now if so.
+      if (this.timingPinsAt != null) {
+        this.flushMapGlTiming();
+        return;
+      }
+      // Empty pin set still counts — report after short settle if pins never arrive.
+      window.setTimeout(() => {
+        if (this.timingPinsAt == null) {
+          this.timingPinsMs = 0;
+          this.flushMapGlTiming();
+        }
+      }, 50);
+    });
     map.on("load", () => {
       void (async () => {
         try {
@@ -982,6 +1051,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private pushPinGeoJson() {
     const map = this.map;
     if (!map?.getSource(PIN_SOURCE)) return;
+    if (this.styleReady && this.timingPinsAt == null) {
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      this.timingPinsAt = now;
+      const base = this.timingIdleAt ?? now;
+      this.timingPinsMs = Math.max(0, Math.round(now - base));
+      this.flushMapGlTiming();
+    }
     const zoomOk = map.getZoom() >= SELECTED_PIN_MIN_ZOOM;
     const src = map.getSource(PIN_SOURCE) as GeoJSONSource;
     src.setData({

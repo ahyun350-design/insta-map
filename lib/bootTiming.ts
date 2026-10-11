@@ -72,6 +72,18 @@ try {
   /* ignore */
 }
 
+/** Elapsed ms since webview_start (or performance.now() if unset). */
+export function msSinceWebviewStart(): number {
+  try {
+    const start = marks.webview_start;
+    const now = nowMs();
+    if (start == null) return Math.max(0, Math.round(now));
+    return Math.max(0, Math.round(now - start));
+  } catch {
+    return 0;
+  }
+}
+
 export function mark(name: BootMarkName): void {
   try {
     if (marks[name] != null) return;
