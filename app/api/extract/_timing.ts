@@ -9,6 +9,8 @@ export type ExtractTimingMeta = {
   apify_ms: number | null;
   claude_ms: number | null;
   kakao_ms: number | null;
+  /** Count of Kakao transport/API errors (after retry) in this extract. */
+  kakao_err?: number | null;
   poi_ms: number | null;
   save_ms: number | null;
   total_ms: number;
@@ -43,6 +45,7 @@ export async function recordExtractTiming(
       apify_ms: numOrNull(meta.apify_ms),
       claude_ms: numOrNull(meta.claude_ms),
       kakao_ms: numOrNull(meta.kakao_ms),
+      kakao_err: numOrNull(meta.kakao_err),
       poi_ms: numOrNull(meta.poi_ms),
       save_ms: numOrNull(meta.save_ms),
       total_ms: Math.max(0, Math.round(Number(meta.total_ms) || 0)),

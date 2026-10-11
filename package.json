@@ -11,11 +11,13 @@
     "test:extract-share-notify": "npx tsx --test lib/extractShareNotify.test.ts",
     "test:extract-review-batch": "npx tsx --test lib/extractReviewBatch.test.ts",
     "test:apify-wait": "npx tsx --test app/api/extract/_apifyWait.test.ts",
+    "test:kakao-keyword-fetch": "npx tsx --test lib/kakaoKeywordFetch.test.ts",
     "e2e": "npm run validate:map-style && playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:install": "playwright install chromium",
     "measure:detail": "npx tsx e2e/measure-detail-first-pixel.ts",
-    "generate:subway-overlay": "npx tsx scripts/generate-subway-overlay.ts"
+    "generate:subway-overlay": "npx tsx scripts/generate-subway-overlay.ts",
+    "test:kakao-search-diag": "npx tsx --test lib/kakaoSearchDiag.test.ts"
   },
   "dependencies": {
     "@capacitor-firebase/messaging": "^8.2.0",

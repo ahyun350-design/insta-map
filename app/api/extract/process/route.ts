@@ -26,6 +26,7 @@ import {
   readKakaoMissCache,
   writeKakaoMissCache,
 } from "@/lib/kakaoMissCache";
+import { shouldWriteKakaoMissCache } from "@/lib/kakaoKeywordFetch";
 import {
   isNegativeCacheableError,
   isNoCaptionScrapeError,
@@ -320,6 +321,7 @@ export async function POST(req: Request) {
   let timingApifyMs: number | null = null;
   let timingClaudeMs: number | null = null;
   let timingKakaoMs: number | null = null;
+  let timingKakaoErr: number | null = null;
   let timingPoiMs: number | null = null;
   let timingSaveMs: number | null = null;
   let timingRecorded = false;
@@ -344,6 +346,7 @@ export async function POST(req: Request) {
       apify_ms: timingApifyMs,
       claude_ms: timingClaudeMs,
       kakao_ms: timingKakaoMs,
+      kakao_err: timingKakaoErr,
       poi_ms: timingPoiMs,
       save_ms: timingSaveMs,
       total_ms: Date.now() - routeT0,
@@ -585,6 +588,7 @@ export async function POST(req: Request) {
       candidate: PlaceCandidate;
       overseas?: boolean;
     }[] = [];
+    const kakaoErrParts: number[] = [];
 
     // Hard overseas: no Kakao
     for (const item of prepared.hardOverseas) {
@@ -615,7 +619,14 @@ export async function POST(req: Request) {
           }
         }
 
-        const { lookup: kakaoResult, tried, stages } = await searchKakaoPlaceWithDiag(
+        const {
+          lookup: kakaoResult,
+          tried,
+          stages,
+          hadTransportError,
+          errorCount,
+          completedAllQueryStages,
+        } = await searchKakaoPlaceWithDiag(
           kakaoQuery,
           item.hint,
           undefined,
@@ -624,6 +635,9 @@ export async function POST(req: Request) {
             ? { maxAttempts: 1, branchMatchName: item.name }
             : { branchMatchName: item.name },
         );
+        if (errorCount > 0) {
+          kakaoErrParts.push(errorCount);
+        }
         if (!kakaoResult) {
           if (soft) {
             kakaoMissDiags.push({
@@ -635,7 +649,15 @@ export async function POST(req: Request) {
             });
             return;
           }
-          void writeKakaoMissCache(supabase, item.name);
+          if (
+            shouldWriteKakaoMissCache({
+              hadTransportError,
+              attemptedStages: tried,
+              completedAllQueryStages,
+            })
+          ) {
+            void writeKakaoMissCache(supabase, item.name);
+          }
           kakaoMissDiags.push({ name: item.name, tried, stages, candidate: item });
           return;
         }
@@ -729,7 +751,9 @@ export async function POST(req: Request) {
     );
 
     timingKakaoMs = Date.now() - kakaoT0;
+    timingKakaoErr = kakaoErrParts.reduce((a, b) => a + b, 0);
     console.log(`[PindMap:perf] extract.process.kakao ${timingKakaoMs}ms`, {
+      kakao_err: timingKakaoErr,
       candidates: candidates.length,
       resolved: resolved.length,
       misses: kakaoMissDiags.length,

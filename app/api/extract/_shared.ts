@@ -2,6 +2,11 @@ import {
   extractBranchTags,
   kakaoPlaceNameMatchesBranch,
 } from "@/lib/extractPlaceFilters";
+import {
+  fetchKakaoKeywordWithRetry,
+  type KakaoFetchDeps,
+  type KakaoTransportErrorCode,
+} from "@/lib/kakaoKeywordFetch";
 import type { FeedPostCategory } from "@/lib/feedPost";
 import { waitForApifyRunFinish } from "@/app/api/extract/_apifyWait";
 
@@ -138,6 +143,8 @@ export type SearchKakaoPlaceOptions = {
    * 없으면 `name`(검색 쿼리)으로 지점 매칭.
    */
   branchMatchName?: string;
+  /** Test-only / injectable Kakao transport deps */
+  fetchDeps?: KakaoFetchDeps;
 };
 
 const KAKAO_SEARCH_MAX_ATTEMPTS = 6;
@@ -247,6 +254,12 @@ export type SearchKakaoPlaceDiag = {
   lookup: KakaoPlaceLookup | null;
   tried: number;
   stages: string[];
+  /** True if any Kakao call failed with 429/5xx/timeout/network (after retry). */
+  hadTransportError: boolean;
+  /** Count of transport/API errors after retries (for extract_timing.kakao_err). */
+  errorCount: number;
+  /** False when deadline/maxAttempts stopped before exhausting planned fallbacks. */
+  completedAllQueryStages: boolean;
 };
 
 /**
@@ -263,7 +276,14 @@ export async function searchKakaoPlaceWithDiag(
   _caption: string = "",
   options?: SearchKakaoPlaceOptions,
 ): Promise<SearchKakaoPlaceDiag> {
-  const empty: SearchKakaoPlaceDiag = { lookup: null, tried: 0, stages: [] };
+  const empty: SearchKakaoPlaceDiag = {
+    lookup: null,
+    tried: 0,
+    stages: [],
+    hadTransportError: false,
+    errorCount: 0,
+    completedAllQueryStages: true,
+  };
   const kakaoKey = process.env.KAKAO_REST_API_KEY;
   if (!kakaoKey) return empty;
 
@@ -329,38 +349,33 @@ export async function searchKakaoPlaceWithDiag(
     );
   };
 
+  let hadTransportError = false;
+  let errorCount = 0;
+  let completedAllQueryStages = true;
+
+  type FetchOutcome =
+    | { kind: "ok"; docs: Doc[] }
+    | { kind: "error"; code: KakaoTransportErrorCode };
+
   const fetchDocuments = async (
     query: string,
     queryIndex: number,
     stage: string,
-  ): Promise<Doc[] | null> => {
-    try {
-      const res = await fetch(
-        `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=15`,
-        { headers: { Authorization: `KakaoAK ${kakaoKey}` } },
-      );
-      if (!res.ok) {
-        console.log("[extract] kakao search", {
-          query,
-          queryIndex,
-          stage,
-          hit: false,
-          status: res.status,
-        });
-        return null;
-      }
-      const data = (await res.json()) as { documents?: Doc[] };
-      return data.documents ?? [];
-    } catch {
+  ): Promise<FetchOutcome> => {
+    const result = await fetchKakaoKeywordWithRetry(query, kakaoKey, options?.fetchDeps);
+    if (result.kind === "error") {
+      hadTransportError = true;
+      errorCount += 1;
       console.log("[extract] kakao search", {
         query,
         queryIndex,
         stage,
         hit: false,
-        reason: "exception",
+        error: result.code,
       });
-      return null;
+      return { kind: "error", code: result.code };
     }
+    return { kind: "ok", docs: result.docs as Doc[] };
   };
 
   const logPick = (
@@ -417,8 +432,16 @@ export async function searchKakaoPlaceWithDiag(
             reason: "deadline",
           });
         } else {
-          const hintDocs = await fetchDocuments(hintQuery, queryIndex, `${stage}+hint_query`);
-          if (hintDocs && hintDocs.length > 0) {
+          const hintOutcome = await fetchDocuments(
+            hintQuery,
+            queryIndex,
+            `${stage}+hint_query`,
+          );
+          if (hintOutcome.kind === "error") {
+            attemptedStages.push(`${stage}+hint_query`);
+            attemptedStages.push(hintOutcome.code);
+          } else if (hintOutcome.docs.length > 0) {
+            const hintDocs = hintOutcome.docs;
             const branchDoc = pickBranchMatch(hintDocs);
             const chosen = branchDoc ?? hintDocs[0]!;
             const lookup = toLookup(chosen, queryIndex);
@@ -470,6 +493,7 @@ export async function searchKakaoPlaceWithDiag(
     return lookup;
   };
 
+  let queryAttempts = 0;
   for (let i = 0; i < queries.length; i++) {
     const item = queries[i]!;
     if (deadlineMs != null && Date.now() >= deadlineMs) {
@@ -480,11 +504,24 @@ export async function searchKakaoPlaceWithDiag(
         hit: false,
         reason: "deadline",
       });
-      return { lookup: null, tried: attemptedStages.length, stages: attemptedStages };
+      completedAllQueryStages = false;
+      return {
+        lookup: null,
+        tried: queryAttempts,
+        stages: attemptedStages,
+        hadTransportError,
+        errorCount,
+        completedAllQueryStages,
+      };
     }
     attemptedStages.push(item.stage);
-    const docs = await fetchDocuments(item.query, i, item.stage);
-    if (docs == null) continue;
+    queryAttempts += 1;
+    const outcome = await fetchDocuments(item.query, i, item.stage);
+    if (outcome.kind === "error") {
+      attemptedStages.push(outcome.code);
+      continue;
+    }
+    const docs = outcome.docs;
     if (docs.length === 0) {
       console.log("[extract] kakao search", {
         query: item.query,
@@ -496,10 +533,24 @@ export async function searchKakaoPlaceWithDiag(
     }
     const picked = await pickFromDocuments(docs, item.query, i, item.stage);
     if (picked) {
-      return { lookup: picked, tried: attemptedStages.length, stages: attemptedStages };
+      return {
+        lookup: picked,
+        tried: queryAttempts,
+        stages: attemptedStages,
+        hadTransportError,
+        errorCount,
+        completedAllQueryStages,
+      };
     }
   }
-  return { lookup: null, tried: attemptedStages.length, stages: attemptedStages };
+  return {
+    lookup: null,
+    tried: queryAttempts,
+    stages: attemptedStages,
+    hadTransportError,
+    errorCount,
+    completedAllQueryStages,
+  };
 }
 
 export async function searchKakaoPlace(
