@@ -2,6 +2,10 @@ import {
   extractBranchTags,
   kakaoPlaceNameMatchesBranch,
 } from "@/lib/extractPlaceFilters";
+import {
+  buildKakaoRescueAttempts,
+  shouldAdoptRescueResult,
+} from "@/lib/kakaoQueryRescue";
 import type { FeedPostCategory } from "@/lib/feedPost";
 import { waitForApifyRunFinish } from "@/app/api/extract/_apifyWait";
 
@@ -499,6 +503,87 @@ export async function searchKakaoPlaceWithDiag(
       return { lookup: picked, tried: attemptedStages.length, stages: attemptedStages };
     }
   }
+
+  // Post-fail rescue variants (a/b/c) — only after full 6-stage + hint path missed.
+  // Soft-overseas (maxAttempts capped) must not change; skip rescue there.
+  if (typeof maxAttempts === "number" && maxAttempts > 0) {
+    return { lookup: null, tried: attemptedStages.length, stages: attemptedStages };
+  }
+
+  const rescueAttempts = buildKakaoRescueAttempts(
+    trimmed,
+    hintTrimmed,
+    queries.map((q) => q.query),
+  );
+  for (let r = 0; r < rescueAttempts.length; r++) {
+    const attempt = rescueAttempts[r]!;
+    if (deadlineMs != null && Date.now() >= deadlineMs) {
+      console.log("[extract] kakao search", {
+        query: attempt.query,
+        queryIndex: queries.length + r,
+        stage: attempt.stage,
+        hit: false,
+        reason: "deadline",
+      });
+      break;
+    }
+    attemptedStages.push(attempt.stage);
+    const docs = await fetchDocuments(attempt.query, queries.length + r, attempt.stage);
+    if (docs == null || docs.length === 0) {
+      console.log("[extract] kakao search", {
+        query: attempt.query,
+        queryIndex: queries.length + r,
+        stage: attempt.stage,
+        hit: false,
+      });
+      continue;
+    }
+    const adopted = docs.find((d) =>
+      shouldAdoptRescueResult(
+        {
+          placeName: (d.place_name || "").trim(),
+          address: d.address_name || "",
+          roadAddress: d.road_address_name || "",
+        },
+        { cleanedName: attempt.cleanedName, hint: attempt.adoptHint },
+      ),
+    );
+    if (!adopted) {
+      console.log("[extract] kakao search", {
+        query: attempt.query,
+        queryIndex: queries.length + r,
+        stage: attempt.stage,
+        hit: false,
+        reason: "rescue_reject",
+        candidates: docs.length,
+      });
+      continue;
+    }
+    const lookup = toLookup(adopted, queries.length + r);
+    if (!lookup) {
+      console.log("[extract] kakao search", {
+        query: attempt.query,
+        queryIndex: queries.length + r,
+        stage: attempt.stage,
+        hit: false,
+        reason: "invalid_coords",
+      });
+      continue;
+    }
+    console.log("[extract] kakao search", {
+      pick: "rescue",
+      stage: attempt.stage,
+      hint: attempt.adoptHint || undefined,
+      candidates: docs.length,
+      placeName: lookup.placeName,
+      query: attempt.query,
+      queryIndex: queries.length + r,
+      hit: true,
+      address: lookup.roadAddress,
+    });
+    return { lookup, tried: attemptedStages.length, stages: attemptedStages };
+  }
+
   return { lookup: null, tried: attemptedStages.length, stages: attemptedStages };
 }
 
