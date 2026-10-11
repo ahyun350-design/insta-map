@@ -183,7 +183,11 @@ const HIDE_LAYER_IDS = new Set([
   // airport kept visible (guide label) — shop/POI icons stay hidden via poi_* above
   "road_one_way_arrow",
   "road_one_way_arrow_opposite",
-  // US interstate shields only — KR highway numbers restored below
+  // Road name labels + highway number shields (all themes / zooms). Road lines stay.
+  "highway-name-path",
+  "highway-name-minor",
+  "highway-name-major",
+  "highway-shield-non-us",
   "highway-shield-us-interstate",
   "road_shield_us",
   "building-3d",
@@ -1533,23 +1537,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         });
         continue;
       }
-      if (layer.id.startsWith("highway-name")) {
-        // 주요 도로 이름 z13+
-        if (layer.id.includes("major")) layer.minzoom = 13;
-        else if (layer.id.includes("minor")) layer.minzoom = 15.2;
-        else layer.minzoom = 16;
-      }
-      if (layer.id === "highway-shield-non-us" || layer.id.startsWith("highway-shield")) {
-        // 고속도로 번호 — 도 단위부터
-        layer.minzoom = Math.max(layer.minzoom ?? 0, 8);
-        setVisibility(layer, true);
-      }
-      // 다리 이름 (한강 다리 등)
-      if (layer.id.includes("bridge") && layer.type === "symbol") {
-        layer.minzoom = 12;
-        paintSet(layer, "text-color", theme.text);
-        paintSet(layer, "text-halo-color", theme.textHalo);
-      }
+      // highway-name-* / highway-shield-* are in HIDE_LAYER_IDS (no road labels)
       if (layer.id === "airport" || layer.id.startsWith("airport")) {
         // International airports only (IATA). Hides 수색비행장 etc. (no IATA).
         layer.filter = [
@@ -1769,28 +1757,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     },
   });
 
-  // transportation_name bridge labels if liberty didn't already expose them
-  layers.push({
-    id: "label_bridge_ko",
-    type: "symbol",
-    source: "openmaptiles",
-    "source-layer": "transportation_name",
-    minzoom: 12,
-    filter: ["==", ["get", "brunnel"], "bridge"],
-    layout: {
-      "text-field": KO_TEXT,
-      "text-font": ["Noto Sans Regular"],
-      "text-size": 11,
-      "symbol-placement": "line",
-      "text-max-angle": 30,
-      visibility: "visible",
-    },
-    paint: {
-      "text-color": theme.text,
-      "text-halo-color": theme.textHalo,
-      "text-halo-width": 1.2,
-    },
-  });
+  // No transportation_name labels (road / bridge names) — place / water / station stay.
 
   // Guide landmarks (below adapter pins — pins are added after style load)
   appendLandmarkLayers(layers, theme);

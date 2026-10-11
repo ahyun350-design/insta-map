@@ -19,6 +19,7 @@ type PreviewMap = {
   once: (type: string, fn: () => void) => void;
   getLayer: (id: string) => unknown;
   getSource: (id: string) => unknown;
+  getLayoutProperty: (id: string, name: string) => unknown;
   queryRenderedFeatures: (opts: { layers: string[] }) => unknown[];
   addSource?: (id: string, spec: unknown) => void;
   addLayer?: (spec: unknown) => void;
@@ -503,6 +504,63 @@ test("map-preview Seoul z10.5: ≥20 gu labels", async ({ page }) => {
     result.count,
     `expected ≥20 gu labels at z${result.zoom}; got ${result.count}: ${result.texts.join("|")}`,
   ).toBeGreaterThanOrEqual(20);
+});
+
+test("map-preview road name / shield labels are hidden (0 features)", async ({
+  page,
+}) => {
+  await openPreview(page, "/map-preview?mode=nopins");
+  // Zooms where highway-name / shields previously appeared (major z13+, shields z8+)
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    map.jumpTo({ zoom: 14, center: [126.92, 37.56] });
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 4000);
+    });
+  });
+
+  const result = await page.evaluate(() => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    const roadLabelIds = [
+      "highway-name-path",
+      "highway-name-minor",
+      "highway-name-major",
+      "highway-shield-non-us",
+      "highway-shield-us-interstate",
+      "road_shield_us",
+      "label_bridge_ko",
+    ];
+    const present = roadLabelIds.filter((id) => !!map.getLayer(id));
+    const visibility = Object.fromEntries(
+      present.map((id) => [
+        id,
+        map.getLayoutProperty(id, "visibility") ?? "visible",
+      ]),
+    );
+    const feats = present.length
+      ? map.queryRenderedFeatures({ layers: present })
+      : [];
+    return {
+      present,
+      visibility,
+      featureCount: feats.length,
+      zoom: map.getZoom(),
+    };
+  });
+
+  for (const id of result.present) {
+    expect(
+      result.visibility[id],
+      `${id} should be visibility:none`,
+    ).toBe("none");
+  }
+  expect(
+    result.featureCount,
+    `road name/shield labels must be 0 at z${result.zoom}; layers=${result.present.join(",")}`,
+  ).toBe(0);
 });
 
 test.skip(
