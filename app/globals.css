@@ -8309,6 +8309,15 @@ select:focus-visible {
 .screenMapTab .mapCompactMap.is-maplibre-pins {
   background: #f7f5f0;
 }
+.screenMapTab .mapCompactMap.is-maplibre-pins.is-neon-basemap {
+  background: #0e1230;
+}
+.screenMapTab .mapCompactMap.is-maplibre-pins .maplibregl-canvas {
+  background: #f7f5f0;
+}
+.screenMapTab .mapCompactMap.is-maplibre-pins.is-neon-basemap .maplibregl-canvas {
+  background: #0e1230;
+}
 .screenMapTab .mapCompactMap.is-maplibre-pins .maplibregl-canvas-container,
 .screenMapTab .mapCompactMap.is-maplibre-pins .maplibregl-canvas {
   z-index: 6;

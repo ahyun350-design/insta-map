@@ -72,6 +72,10 @@ import {
 } from "./directionsBasemap";
 import type { DirectionsRouteThemeId } from "./directionsRouteTheme";
 import { installMapLibreCornerAttribution } from "./mapAttribution";
+import {
+  composeMapCanvasToJpeg,
+  snapshotBackgroundCss,
+} from "./mapGlSnapshot";
 
 const PIN_SOURCE = "compact-pins";
 const PIN_LAYER = "compact-pins-symbol";
@@ -459,17 +463,23 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       this.attachDeferredDecoration();
       if (!this.firstIdleNotified) {
         this.firstIdleNotified = true;
-        try {
-          const c = this.getCenter();
-          options.onFirstIdle?.({
-            dataUrl: this.captureSnapshotDataUrl(0.72),
-            lat: c.lat,
-            lng: c.lng,
-            level: this.getLevel(),
-          });
-        } catch {
-          /* never block */
-        }
+        const c = this.getCenter();
+        const level = this.getLevel();
+        void this.captureSnapshotDataUrl(0.72)
+          .then((dataUrl) => {
+            if (this.destroyed) return;
+            try {
+              options.onFirstIdle?.({
+                dataUrl,
+                lat: c.lat,
+                lng: c.lng,
+                level,
+              });
+            } catch {
+              /* never block */
+            }
+          })
+          .catch(() => {});
       }
       // Pins may already be applied before first idle — flush now if so.
       if (this.timingPinsAt != null) {
@@ -540,20 +550,50 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     void attachSubwayOverlay(map, theme).catch(() => {});
   }
 
-  /** JPEG data URL of current WebGL canvas; null if unavailable. */
-  captureSnapshotDataUrl(quality = 0.72): string | null {
-    try {
-      const map = this.map;
-      if (!map || this.destroyed) return null;
-      const canvas = map.getCanvas();
-      if (!canvas || canvas.width < 2 || canvas.height < 2) return null;
-      return canvas.toDataURL("image/jpeg", quality);
-    } catch {
-      return null;
-    }
+  /**
+   * Capture after the next painted frame (render), compositing onto theme bg.
+   * Never enables preserveDrawingBuffer.
+   */
+  captureSnapshotDataUrl(quality = 0.72): Promise<string | null> {
+    const map = this.map;
+    if (!map || this.destroyed) return Promise.resolve(null);
+    const bg = snapshotBackgroundCss(this.theme);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (url: string | null) => {
+        if (settled) return;
+        settled = true;
+        try {
+          map.off("render", onRender);
+        } catch {
+          /* ignore */
+        }
+        resolve(url);
+      };
+      const onRender = () => {
+        if (this.destroyed || !this.map) {
+          finish(null);
+          return;
+        }
+        try {
+          const canvas = this.map.getCanvas();
+          finish(composeMapCanvasToJpeg(canvas, bg, quality));
+        } catch {
+          finish(null);
+        }
+      };
+      try {
+        map.on("render", onRender);
+        map.triggerRepaint();
+      } catch {
+        finish(null);
+        return;
+      }
+      window.setTimeout(() => finish(null), 800);
+    });
   }
 
-    private installAttribution(container: HTMLElement) {
+  private installAttribution(container: HTMLElement) {
     const base =
       this.mode === "expanded"
         ? "expandedMapLibreAttrib"

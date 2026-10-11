@@ -11,6 +11,13 @@ export const MAP_GL_SNAPSHOT_MAX_BYTES = 300 * 1024;
 export const MAP_GL_SNAPSHOT_MAX_DISTANCE_KM = 30;
 /** Discard if Kakao-equivalent level differs by more than this. */
 export const MAP_GL_SNAPSHOT_MAX_LEVEL_DELTA = 2;
+/** Live map replaces snapshot after idle/ready — fade then clear. */
+export const MAP_GL_SNAPSHOT_FADE_MS = 200;
+/** Hard cap: remove stuck placeholder even if fade path failed. */
+export const MAP_GL_SNAPSHOT_FAILSAFE_MS = 5000;
+
+export const MAP_GL_SNAPSHOT_BG_PAPER = "#F7F5F0";
+export const MAP_GL_SNAPSHOT_BG_NEON = "#0E1230";
 
 export type MapGlSnapshotMeta = {
   /** Schema version */
@@ -27,12 +34,21 @@ export type MapGlSnapshotRecord = {
   meta: MapGlSnapshotMeta;
 };
 
+export type SnapshotRgba = { r: number; g: number; b: number; a: number };
+
+export type SnapshotSampleVerdict = "ok" | "black" | "transparent" | "flat";
+
 export function themeToCode(theme: "paper" | "neon"): 0 | 1 {
   return theme === "neon" ? 1 : 0;
 }
 
 export function codeToTheme(code: 0 | 1): "paper" | "neon" {
   return code === 1 ? "neon" : "paper";
+}
+
+export function snapshotBackgroundCss(theme: "paper" | "neon" | 0 | 1): string {
+  if (theme === "neon" || theme === 1) return MAP_GL_SNAPSHOT_BG_NEON;
+  return MAP_GL_SNAPSHOT_BG_PAPER;
 }
 
 /** Approximate great-circle distance in km. */
@@ -55,7 +71,6 @@ export function distanceKm(
 export function dataUrlByteLength(dataUrl: string): number {
   const i = dataUrl.indexOf(",");
   const b64 = i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
-  // base64 → bytes
   const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
   return Math.max(0, Math.floor((b64.length * 3) / 4) - padding);
 }
@@ -124,6 +139,140 @@ export function parseMapGlSnapshotMeta(raw: string | null): MapGlSnapshotMeta | 
   }
 }
 
+function luminance(s: SnapshotRgba): number {
+  return 0.299 * s.r + 0.587 * s.g + 0.114 * s.b;
+}
+
+/** Sample a grid of pixels from raw RGBA image data (row-major). */
+export function sampleImageDataPixels(
+  image: { data: ArrayLike<number>; width: number; height: number },
+  grid = 5,
+): SnapshotRgba[] {
+  const { data, width, height } = image;
+  if (width < 2 || height < 2) return [];
+  const n = Math.max(2, Math.min(8, Math.floor(grid)));
+  const out: SnapshotRgba[] = [];
+  for (let gy = 0; gy < n; gy++) {
+    for (let gx = 0; gx < n; gx++) {
+      const x = Math.min(
+        width - 1,
+        Math.max(0, Math.round(((gx + 0.5) / n) * (width - 1))),
+      );
+      const y = Math.min(
+        height - 1,
+        Math.max(0, Math.round(((gy + 0.5) / n) * (height - 1))),
+      );
+      const i = (y * width + x) * 4;
+      out.push({
+        r: data[i] ?? 0,
+        g: data[i + 1] ?? 0,
+        b: data[i + 2] ?? 0,
+        a: data[i + 3] ?? 0,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Reject cleared WebGL buffers (black/transparent) and paper-only flat fills.
+ * A real map frame has enough luminance range across a 5×5 sample grid.
+ */
+export function classifySnapshotSamples(
+  samples: SnapshotRgba[],
+): SnapshotSampleVerdict {
+  if (samples.length < 4) return "flat";
+  let transparent = 0;
+  let nearBlack = 0;
+  let minL = 255;
+  let maxL = 0;
+  for (const s of samples) {
+    if (s.a < 16) transparent += 1;
+    const l = luminance(s);
+    if (l < minL) minL = l;
+    if (l > maxL) maxL = l;
+    if (s.a >= 16 && s.r < 18 && s.g < 18 && s.b < 18) nearBlack += 1;
+  }
+  const n = samples.length;
+  if (transparent / n >= 0.8) return "transparent";
+  if (nearBlack / n >= 0.85) return "black";
+  if (maxL - minL < 8) return "flat";
+  return "ok";
+}
+
+export function isUsableSnapshotSamples(samples: SnapshotRgba[]): boolean {
+  return classifySnapshotSamples(samples) === "ok";
+}
+
+/**
+ * Paint theme background, draw GL canvas, JPEG-encode.
+ * Sync — call only inside a MapLibre `render` handler (or with a live buffer).
+ * Does not enable preserveDrawingBuffer.
+ */
+export function composeMapCanvasToJpeg(
+  glCanvas: HTMLCanvasElement,
+  bgCss: string,
+  quality = 0.72,
+): string | null {
+  try {
+    const w = glCanvas.width;
+    const h = glCanvas.height;
+    if (w < 2 || h < 2) return null;
+    const out = document.createElement("canvas");
+    out.width = w;
+    out.height = h;
+    const ctx = out.getContext("2d", { alpha: false });
+    if (!ctx) return null;
+    ctx.fillStyle = bgCss || MAP_GL_SNAPSHOT_BG_PAPER;
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(glCanvas, 0, 0, w, h);
+    const imageData = ctx.getImageData(0, 0, w, h);
+    if (!isUsableSnapshotSamples(sampleImageDataPixels(imageData, 5))) {
+      return null;
+    }
+    const dataUrl = out.toDataURL("image/jpeg", quality);
+    if (!canPersistMapGlSnapshot(dataUrl)) return null;
+    return dataUrl;
+  } catch {
+    return null;
+  }
+}
+
+/** Decode data URL → sample → usable? (browser only). */
+export async function isUsableSnapshotDataUrl(
+  dataUrl: string,
+): Promise<boolean> {
+  if (typeof document === "undefined") return false;
+  if (!dataUrl.startsWith("data:image/")) return false;
+  try {
+    const img = await loadHtmlImage(dataUrl);
+    if (!img || img.naturalWidth < 2 || img.naturalHeight < 2) return false;
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext("2d", { alpha: true });
+    if (!ctx) return false;
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, c.width, c.height);
+    return isUsableSnapshotSamples(sampleImageDataPixels(imageData, 5));
+  } catch {
+    return false;
+  }
+}
+
+function loadHtmlImage(src: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 async function prefsGet(key: string): Promise<string | null> {
   if (typeof window === "undefined") return null;
   try {
@@ -177,8 +326,19 @@ export async function readMapGlSnapshot(): Promise<MapGlSnapshotRecord | null> {
     ]);
     if (!img || !img.startsWith("data:image/")) return null;
     const meta = parseMapGlSnapshotMeta(metaRaw);
-    if (!meta) return null;
-    if (!canPersistMapGlSnapshot(img)) return null;
+    if (!meta) {
+      await clearMapGlSnapshot();
+      return null;
+    }
+    if (!canPersistMapGlSnapshot(img)) {
+      await clearMapGlSnapshot();
+      return null;
+    }
+    const usable = await isUsableSnapshotDataUrl(img);
+    if (!usable) {
+      await clearMapGlSnapshot();
+      return null;
+    }
     return { dataUrl: img, meta };
   } catch {
     return null;
@@ -191,6 +351,8 @@ export async function writeMapGlSnapshot(
 ): Promise<boolean> {
   try {
     if (!canPersistMapGlSnapshot(dataUrl)) return false;
+    const usable = await isUsableSnapshotDataUrl(dataUrl);
+    if (!usable) return false;
     const payload: MapGlSnapshotMeta = {
       v: 1,
       lat: meta.lat,
@@ -212,10 +374,6 @@ export async function clearMapGlSnapshot(): Promise<void> {
     prefsRemove(MAP_GL_SNAPSHOT_META_KEY),
   ]);
 }
-
-
-/** Live map replaces snapshot after idle/ready — fade then clear. */
-export const MAP_GL_SNAPSHOT_FADE_MS = 200;
 
 export function shouldFadeSnapshotAfterReady(input: {
   liveMapReady: boolean;

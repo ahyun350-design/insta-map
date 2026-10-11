@@ -289,6 +289,8 @@ import {
   themeToCode,
   writeMapGlSnapshot,
   canPersistMapGlSnapshot,
+  MAP_GL_SNAPSHOT_FADE_MS,
+  MAP_GL_SNAPSHOT_FAILSAFE_MS,
   type AdminMapLibreThemeId,
   type AdminMapGlOverride,
   type DirectionsRouteThemeId,
@@ -5150,15 +5152,24 @@ function HomePageContent() {
   /** Fade out snapshot once live MapLibre minimap is ready. */
   useEffect(() => {
     if (!compactMapReady || !compactMapIsMapLibre) return;
-    if (!mapGlPlaceholderUrl && mapGlSnapshotUsedRef.current === 0) return;
     if (!mapGlPlaceholderUrl) return;
     setMapGlPlaceholderFading(true);
     const t = window.setTimeout(() => {
       setMapGlPlaceholderUrl(null);
       setMapGlPlaceholderFading(false);
-    }, 200);
+    }, MAP_GL_SNAPSHOT_FADE_MS);
     return () => window.clearTimeout(t);
   }, [compactMapReady, compactMapIsMapLibre, mapGlPlaceholderUrl]);
+
+  /** Failsafe: never leave a snapshot (or black JPEG) covering the live map. */
+  useEffect(() => {
+    if (!mapGlPlaceholderUrl) return;
+    const t = window.setTimeout(() => {
+      setMapGlPlaceholderUrl(null);
+      setMapGlPlaceholderFading(false);
+    }, MAP_GL_SNAPSHOT_FAILSAFE_MS);
+    return () => window.clearTimeout(t);
+  }, [mapGlPlaceholderUrl]);
 
   /** 인증과 병렬: Preferences 캐시로 places/mapview 즉시 반영 */
   useEffect(() => {
@@ -10207,23 +10218,25 @@ function HomePageContent() {
     void App.addListener("appStateChange", (state) => {
       if (cancelled || state.isActive) return;
       if (!shouldUseCompactMapLibre(true, user.id)) return;
-      try {
-        const adapter = getCompactMapLibreAdapter(mapRef.current);
-        if (!adapter) return;
-        const dataUrl = adapter.captureSnapshotDataUrl(0.72);
-        if (!dataUrl || !canPersistMapGlSnapshot(dataUrl)) return;
-        const c = adapter.getCenter();
-        const lv = adapter.getLevel();
-        const theme = resolveMapLibreThemeId(true);
-        void writeMapGlSnapshot(dataUrl, {
-          lat: c.lat,
-          lng: c.lng,
-          level: lv,
-          theme: themeToCode(theme),
-        });
-      } catch {
-        /* ignore */
-      }
+      void (async () => {
+        try {
+          const adapter = getCompactMapLibreAdapter(mapRef.current);
+          if (!adapter) return;
+          const dataUrl = await adapter.captureSnapshotDataUrl(0.72);
+          if (!dataUrl || !canPersistMapGlSnapshot(dataUrl)) return;
+          const c = adapter.getCenter();
+          const lv = adapter.getLevel();
+          const theme = resolveMapLibreThemeId(true);
+          await writeMapGlSnapshot(dataUrl, {
+            lat: c.lat,
+            lng: c.lng,
+            level: lv,
+            theme: themeToCode(theme),
+          });
+        } catch {
+          /* ignore */
+        }
+      })();
     }).then((h) => {
       if (cancelled) {
         void h.remove();
@@ -17433,6 +17446,15 @@ function HomePageContent() {
                         user?.id,
                       )
                         ? " is-maplibre-pins"
+                        : ""
+                    }${
+                      (compactMapIsMapLibre ||
+                        shouldUseCompactMapLibre(
+                          user?.id === ADMIN_USER_ID,
+                          user?.id,
+                        )) &&
+                      mapGlPlaceholderThemeRef.current === "neon"
+                        ? " is-neon-basemap"
                         : ""
                     }`}
                   />
