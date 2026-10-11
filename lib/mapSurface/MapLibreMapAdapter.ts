@@ -147,6 +147,16 @@ export type CreateCompactMapLibreOptions = {
    * Web: omit — OpenMapTiles / OSM names link to official pages.
    */
   onAttributionClick?: () => void;
+  /** Compact timing: set by page when snapshot/paper first shown */
+  timingFirstVisibleMs?: number;
+  timingSnapshotUsed?: 0 | 1;
+  /** After first idle (tiles drawn). Payload for device-local snapshot persist. */
+  onFirstIdle?: (shot: {
+    dataUrl: string | null;
+    lat: number;
+    lng: number;
+    level: number;
+  }) => void;
 };
 
 function isElementVisiblyMapped(el: HTMLElement | null | undefined): boolean {
@@ -206,6 +216,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private timingIdleAt: number | null = null;
   private timingPinsAt: number | null = null;
   private timingReported = false;
+  private timingFirstVisibleMs = 0;
+  private timingSnapshotUsed: 0 | 1 = 0;
+  private firstIdleNotified = false;
+  private deferredDecorDone = false;
   private fallbackReported = false;
   private courseSelectedOrder: number | null = null;
   /** Admin directions chrome (paint basemap + hide clutter pins). */
@@ -270,6 +284,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     if (this.timingIdleAt == null) return;
     this.timingReported = true;
     try {
+      const firstVisible =
+        this.timingFirstVisibleMs > 0
+          ? this.timingFirstVisibleMs
+          : msSinceWebviewStart();
       trackMapGlTiming(this.mode, {
         from_app_start_ms: msSinceWebviewStart(),
         js_ms: this.timingJsMs,
@@ -277,6 +295,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         style_ms: this.timingStyleMs,
         idle_ms: this.timingIdleMs,
         pins_ms: this.timingPinsMs,
+        first_visible_ms: firstVisible,
+        snapshot_used: this.timingSnapshotUsed,
       });
     } catch {
       /* never block map */
@@ -290,6 +310,13 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.timingReported = false;
     this.timingIdleAt = null;
     this.timingPinsAt = null;
+    this.firstIdleNotified = false;
+    this.deferredDecorDone = false;
+    this.timingFirstVisibleMs = Math.max(
+      0,
+      Math.round(Number(options.timingFirstVisibleMs) || 0),
+    );
+    this.timingSnapshotUsed = options.timingSnapshotUsed === 1 ? 1 : 0;
     this.containerEl = options.container;
     this.isSurfaceVisibleFn = options.isSurfaceVisible ?? null;
     this.onContextLostCb = options.onContextLost ?? null;
@@ -410,12 +437,40 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       if (this.timingStyleMs < 0) {
         this.timingStyleMs = Math.round(styleLoadAt - createT0);
       }
+      // Defer landmarks until first idle (not needed for L9 minimap first paint).
+      for (const id of ["landmark_dot", "landmark_label"] as const) {
+        try {
+          if (map.getLayer(id)) {
+            map.setLayoutProperty(id, "visibility", "none");
+          }
+        } catch {
+          /* ignore */
+        }
+      }
     });
     map.once("idle", () => {
       if (this.timingIdleAt != null) return;
       this.timingIdleAt = now();
       const base = styleLoadAt ?? this.mountStartedAt + this.timingCreateMs;
       this.timingIdleMs = Math.round(this.timingIdleAt - base);
+      if (this.timingFirstVisibleMs <= 0) {
+        this.timingFirstVisibleMs = msSinceWebviewStart();
+      }
+      this.attachDeferredDecoration();
+      if (!this.firstIdleNotified) {
+        this.firstIdleNotified = true;
+        try {
+          const c = this.getCenter();
+          options.onFirstIdle?.({
+            dataUrl: this.captureSnapshotDataUrl(0.72),
+            lat: c.lat,
+            lng: c.lng,
+            level: this.getLevel(),
+          });
+        } catch {
+          /* never block */
+        }
+      }
       // Pins may already be applied before first idle — flush now if so.
       if (this.timingPinsAt != null) {
         this.flushMapGlTiming();
@@ -460,10 +515,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
             this.mountStartedAt;
           trackMapGlReady(this.mode, ms);
           options.onReady?.();
-          // Subway overlay: after first paint; failure must not affect the map.
-          const theme = this.theme;
-          const mapRef = this.map;
-          void attachSubwayOverlay(mapRef, theme).catch(() => {});
+          // Subway + landmarks: attached on first idle (attachDeferredDecoration).
         } catch {
           this.reportFallback(options, "error");
         }
@@ -471,7 +523,37 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     });
   }
 
-  private installAttribution(container: HTMLElement) {
+  private attachDeferredDecoration() {
+    if (this.deferredDecorDone || this.destroyed || !this.map) return;
+    this.deferredDecorDone = true;
+    const map = this.map;
+    const theme = this.theme;
+    for (const id of ["landmark_dot", "landmark_label"] as const) {
+      try {
+        if (map.getLayer(id)) {
+          map.setLayoutProperty(id, "visibility", "visible");
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    void attachSubwayOverlay(map, theme).catch(() => {});
+  }
+
+  /** JPEG data URL of current WebGL canvas; null if unavailable. */
+  captureSnapshotDataUrl(quality = 0.72): string | null {
+    try {
+      const map = this.map;
+      if (!map || this.destroyed) return null;
+      const canvas = map.getCanvas();
+      if (!canvas || canvas.width < 2 || canvas.height < 2) return null;
+      return canvas.toDataURL("image/jpeg", quality);
+    } catch {
+      return null;
+    }
+  }
+
+    private installAttribution(container: HTMLElement) {
     const base =
       this.mode === "expanded"
         ? "expandedMapLibreAttrib"

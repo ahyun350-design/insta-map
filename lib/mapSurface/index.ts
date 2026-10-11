@@ -113,6 +113,17 @@ export {
   prefetchSubwayOverlay,
 } from "./subwayOverlay";
 export { softenSubwayColour } from "./subwayColour";
+export { prefetchAdminMapGlAssets } from "./mapGlPrefetch";
+export {
+  MAP_GL_SNAPSHOT_MAX_BYTES,
+  canPersistMapGlSnapshot,
+  clearMapGlSnapshot,
+  readMapGlSnapshot,
+  shouldUseMapGlSnapshot,
+  themeToCode,
+  writeMapGlSnapshot,
+  type MapGlSnapshotMeta,
+} from "./mapGlSnapshot";
 export {
   COMPACT_MAPLIBRE_BRAND,
   createCompactMapLibreShim,

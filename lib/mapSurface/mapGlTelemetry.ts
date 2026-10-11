@@ -27,6 +27,10 @@ export type MapGlTimingMeta = {
   style_ms: number;
   idle_ms: number;
   pins_ms: number;
+  /** App start → snapshot or live map first shown in minimap slot */
+  first_visible_ms: number;
+  /** 1 if last-frame snapshot was shown before live map */
+  snapshot_used: 0 | 1;
 };
 
 function safeMs(v: number): number {
@@ -87,6 +91,8 @@ export function trackMapGlTiming(
         style_ms: safeMs(phases.style_ms),
         idle_ms: safeMs(phases.idle_ms),
         pins_ms: safeMs(phases.pins_ms),
+        first_visible_ms: safeMs(phases.first_visible_ms),
+        snapshot_used: phases.snapshot_used === 1 ? 1 : 0,
       };
 
       const { error } = await supabase.from("user_events").insert({

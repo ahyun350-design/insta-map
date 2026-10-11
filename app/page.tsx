@@ -34,6 +34,7 @@ import {
   loadLastBootTimingReport,
   mark,
   type BootTimingReport,
+  msSinceWebviewStart,
 } from "@/lib/bootTiming";
 import { loadBootFailReport, type BootFailReport } from "@/lib/webviewRecovery";
 import { usePushNotifications } from "@/lib/usePushNotifications";
@@ -282,6 +283,12 @@ import {
   consumeMapGlRemountAttempt,
   trackMapGlFallback,
   trackMapGlRecovered,
+  prefetchAdminMapGlAssets,
+  readMapGlSnapshot,
+  shouldUseMapGlSnapshot,
+  themeToCode,
+  writeMapGlSnapshot,
+  canPersistMapGlSnapshot,
   type AdminMapLibreThemeId,
   type AdminMapGlOverride,
   type DirectionsRouteThemeId,
@@ -1781,6 +1788,14 @@ function HomePageContent() {
   const [adminCompactMapLibre, setAdminCompactMapLibre] =
     useState<AdminMapGlOverride>("auto");
   const [compactMapIsMapLibre, setCompactMapIsMapLibre] = useState(false);
+  /** Admin MapLibre last-frame image in minimap slot (device-local). */
+  const [mapGlPlaceholderUrl, setMapGlPlaceholderUrl] = useState<string | null>(null);
+  const [mapGlPlaceholderFading, setMapGlPlaceholderFading] = useState(false);
+  const mapGlFirstVisibleMsRef = useRef<number | null>(null);
+  const mapGlSnapshotUsedRef = useRef<0 | 1>(0);
+  const mapGlPlaceholderThemeRef = useRef<"paper" | "neon">("paper");
+  /** Admin snapshot Preferences read finished (non-admin: true immediately). */
+  const [mapGlSnapReady, setMapGlSnapReady] = useState(false);
   const [compactMapRemountKey, setCompactMapRemountKey] = useState(0);
   const compactMapLibreFallbackToastedRef = useRef(false);
   /** Expect map_gl_recovered after a contextlost remount. */
@@ -5054,6 +5069,96 @@ function HomePageContent() {
     void hideNativeSplash();
     track("app_open");
   }, [sessionChecked, userLoading, user, loading, bootstrapCacheResolved, bootstrapCacheHit]);
+
+  /** Admin MapLibre only: warm style/glyphs/sprite into memory + HTTP cache. */
+  useEffect(() => {
+    if (!user || user.id !== ADMIN_USER_ID) return;
+    if (!shouldUseCompactMapLibre(true, user.id)) return;
+    prefetchAdminMapGlAssets();
+  }, [user, adminCompactMapLibre]);
+
+  /** Admin MapLibre: show last-frame snapshot (or paper fill) instead of loading copy. */
+  useEffect(() => {
+    if (!user || user.id !== ADMIN_USER_ID) {
+      setMapGlSnapReady(true);
+      return;
+    }
+    if (!shouldUseCompactMapLibre(true, user.id)) {
+      setMapGlPlaceholderUrl(null);
+      setMapGlPlaceholderFading(false);
+      mapGlSnapshotUsedRef.current = 0;
+      setMapGlSnapReady(true);
+      return;
+    }
+    setMapGlSnapReady(false);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const theme = resolveMapLibreThemeId(true);
+        mapGlPlaceholderThemeRef.current = theme;
+        const loc = myLocationLatLngRef.current;
+        const cached = mapViewBootstrapRef.current;
+        const lat =
+          loc && Number.isFinite(loc.lat)
+            ? loc.lat
+            : cached && Number.isFinite(cached.lat)
+              ? cached.lat
+              : 37.5665;
+        const lng =
+          loc && Number.isFinite(loc.lng)
+            ? loc.lng
+            : cached && Number.isFinite(cached.lng)
+              ? cached.lng
+              : 126.978;
+        const level = 9;
+        const rec = await readMapGlSnapshot();
+        if (cancelled) return;
+        const ok =
+          !!rec &&
+          shouldUseMapGlSnapshot(rec.meta, {
+            lat,
+            lng,
+            level,
+            theme: themeToCode(theme),
+          });
+        if (ok && rec) {
+          setMapGlPlaceholderUrl(rec.dataUrl);
+          setMapGlPlaceholderFading(false);
+          mapGlSnapshotUsedRef.current = 1;
+          if (mapGlFirstVisibleMsRef.current == null) {
+            mapGlFirstVisibleMsRef.current = msSinceWebviewStart();
+          }
+        } else {
+          setMapGlPlaceholderUrl(null);
+          mapGlSnapshotUsedRef.current = 0;
+          // Paper fill counts as first visible content in the slot (no loading copy).
+          if (mapGlFirstVisibleMsRef.current == null) {
+            mapGlFirstVisibleMsRef.current = msSinceWebviewStart();
+          }
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        if (!cancelled) setMapGlSnapReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, adminCompactMapLibre, compactMapRemountKey]);
+
+  /** Fade out snapshot once live MapLibre minimap is ready. */
+  useEffect(() => {
+    if (!compactMapReady || !compactMapIsMapLibre) return;
+    if (!mapGlPlaceholderUrl && mapGlSnapshotUsedRef.current === 0) return;
+    if (!mapGlPlaceholderUrl) return;
+    setMapGlPlaceholderFading(true);
+    const t = window.setTimeout(() => {
+      setMapGlPlaceholderUrl(null);
+      setMapGlPlaceholderFading(false);
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [compactMapReady, compactMapIsMapLibre, mapGlPlaceholderUrl]);
 
   /** 인증과 병렬: Preferences 캐시로 places/mapview 즉시 반영 */
   useEffect(() => {
@@ -10093,6 +10198,45 @@ function HomePageContent() {
     };
   }, [consumeAppGroupShareAndExtract, tryRestoreExtractReview]);
 
+  /** Admin MapLibre: save minimap frame when app backgrounds. */
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    if (!user || user.id !== ADMIN_USER_ID) return;
+    let cancelled = false;
+    let handle: { remove: () => Promise<void> } | undefined;
+    void App.addListener("appStateChange", (state) => {
+      if (cancelled || state.isActive) return;
+      if (!shouldUseCompactMapLibre(true, user.id)) return;
+      try {
+        const adapter = getCompactMapLibreAdapter(mapRef.current);
+        if (!adapter) return;
+        const dataUrl = adapter.captureSnapshotDataUrl(0.72);
+        if (!dataUrl || !canPersistMapGlSnapshot(dataUrl)) return;
+        const c = adapter.getCenter();
+        const lv = adapter.getLevel();
+        const theme = resolveMapLibreThemeId(true);
+        void writeMapGlSnapshot(dataUrl, {
+          lat: c.lat,
+          lng: c.lng,
+          level: lv,
+          theme: themeToCode(theme),
+        });
+      } catch {
+        /* ignore */
+      }
+    }).then((h) => {
+      if (cancelled) {
+        void h.remove();
+        return;
+      }
+      handle = h;
+    });
+    return () => {
+      cancelled = true;
+      void handle?.remove();
+    };
+  }, [user, adminCompactMapLibre]);
+
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let cancelled = false;
@@ -11013,6 +11157,22 @@ function HomePageContent() {
       center: { lat: centerLat, lng: centerLng },
       level,
       theme: resolveMapLibreThemeId(userIdRef.current === ADMIN_USER_ID),
+      timingFirstVisibleMs: mapGlFirstVisibleMsRef.current ?? undefined,
+      timingSnapshotUsed: mapGlSnapshotUsedRef.current,
+      onFirstIdle: (shot) => {
+        try {
+          if (!shot?.dataUrl || !canPersistMapGlSnapshot(shot.dataUrl)) return;
+          const theme = resolveMapLibreThemeId(userIdRef.current === ADMIN_USER_ID);
+          void writeMapGlSnapshot(shot.dataUrl, {
+            lat: shot.lat,
+            lng: shot.lng,
+            level: shot.level,
+            theme: themeToCode(theme),
+          });
+        } catch {
+          /* ignore */
+        }
+      },
       onAttributionClick: Capacitor.isNativePlatform()
         ? () => setShowDataAttributionModal(true)
         : undefined,
@@ -12327,6 +12487,14 @@ function HomePageContent() {
     if (kakaoStatus !== "ready" || activeTab !== "map") return;
     // Never recreate compact MapLibre under fullscreen (dual WebGL).
     if (mapExpanded) return;
+    // Admin MapLibre: wait for snapshot Preferences read so timing extras are correct.
+    if (
+      (userIdRef.current === ADMIN_USER_ID || user?.id === ADMIN_USER_ID) &&
+      shouldUseCompactMapLibre(true, userIdRef.current || user?.id) &&
+      !mapGlSnapReady
+    ) {
+      return;
+    }
     if (mapRef.current) {
       return;
     }
@@ -12369,7 +12537,7 @@ function HomePageContent() {
       cancelled = true;
       timeouts.forEach((tid) => window.clearTimeout(tid));
     };
-  }, [kakaoStatus, activeTab, savedPlaces, feedPosts, mapExpanded, compactMapRemountKey]);
+  }, [kakaoStatus, activeTab, savedPlaces, feedPosts, mapExpanded, compactMapRemountKey, mapGlSnapReady, user?.id]);
 
   // 탭 전환·미니맵 생성 시 지도 relayout
   useEffect(() => {
@@ -17208,27 +17376,82 @@ function HomePageContent() {
               <div className="mapTabScrollBody">
               <div className="mapHeroBlock">
                 <div className="mapCompactWrap">
-                  {(kakaoStatus === "idle" || kakaoStatus === "loading" || (kakaoStatus === "ready" && !compactMapReady)) && (
-                    <div
-                      className="mapCompactLoading"
-                      aria-hidden={compactMapReady}
-                    >
-                      <span style={{ fontSize: "28px", lineHeight: 1 }}>🗺️</span>
-                      <p className="mapCompactLoadingTitle">지도를 불러오는 중...</p>
-                      <p className="mapCompactLoadingSub">
-                        {kakaoStatus !== "ready" ? "카카오맵 SDK를 불러오고 있어요" : "지도를 그리고 있어요"}
-                      </p>
-                    </div>
-                  )}
+                  {(() => {
+                    const adminMl = shouldUseCompactMapLibre(
+                      user?.id === ADMIN_USER_ID,
+                      user?.id,
+                    );
+                    if (adminMl) {
+                      if (compactMapReady && !mapGlPlaceholderUrl) return null;
+                      return (
+                        <div
+                          className={`mapCompactGlPlaceholder${
+                            mapGlPlaceholderThemeRef.current === "neon" ? " is-neon" : ""
+                          }${mapGlPlaceholderFading ? " is-fading" : ""}`}
+                          aria-hidden
+                        >
+                          {mapGlPlaceholderUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              className="mapCompactGlPlaceholderImg"
+                              src={mapGlPlaceholderUrl}
+                              alt=""
+                              draggable={false}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    }
+                    if (
+                      kakaoStatus === "idle" ||
+                      kakaoStatus === "loading" ||
+                      (kakaoStatus === "ready" && !compactMapReady)
+                    ) {
+                      return (
+                        <div
+                          className="mapCompactLoading"
+                          aria-hidden={compactMapReady}
+                        >
+                          <span style={{ fontSize: "28px", lineHeight: 1 }}>🗺️</span>
+                          <p className="mapCompactLoadingTitle">지도를 불러오는 중...</p>
+                          <p className="mapCompactLoadingSub">
+                            {kakaoStatus !== "ready"
+                              ? "카카오맵 SDK를 불러오고 있어요"
+                              : "지도를 그리고 있어요"}
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                   <div
                     ref={mapContainerRef}
-                    className={`kakaoMap mapCompactMap${compactMapIsMapLibre ? " is-maplibre-pins" : ""}`}
+                    className={`kakaoMap mapCompactMap${
+                      compactMapIsMapLibre ||
+                      shouldUseCompactMapLibre(
+                        user?.id === ADMIN_USER_ID,
+                        user?.id,
+                      )
+                        ? " is-maplibre-pins"
+                        : ""
+                    }`}
                   />
                   <button
                     type="button"
                     className={`mapCompactTapLayer${compactMapIsMapLibre ? " is-maplibre-passthrough" : ""}`}
                     aria-label="지도를 열어 검색 및 길찾기"
-                    onClick={openMapFullscreen}
+                    onClick={() => {
+                      if (
+                        shouldUseCompactMapLibre(
+                          user?.id === ADMIN_USER_ID,
+                          user?.id,
+                        ) &&
+                        !compactMapReady
+                      ) {
+                        return;
+                      }
+                      openMapFullscreen();
+                    }}
                   />
                   <button
                     type="button"
@@ -17236,6 +17459,15 @@ function HomePageContent() {
                     data-coach="map_search"
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (
+                        shouldUseCompactMapLibre(
+                          user?.id === ADMIN_USER_ID,
+                          user?.id,
+                        ) &&
+                        !compactMapReady
+                      ) {
+                        return;
+                      }
                       openMapFullscreen();
                     }}
                   >
