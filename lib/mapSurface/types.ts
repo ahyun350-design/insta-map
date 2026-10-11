@@ -78,7 +78,12 @@ export type CompactMapSurface = {
    */
   setSelectedPinId: (pinId: string | null) => void;
   /** Smooth camera to lat/lng at Kakao-equivalent level (expanded locate button). */
-  easeToView: (lat: number, lng: number, kakaoLevel: number) => void;
+  easeToView: (
+    lat: number,
+    lng: number,
+    kakaoLevel: number,
+    opts?: { durationMs?: number },
+  ) => void;
   /** Admin minimap last-frame JPEG data URL (null if canvas unavailable). */
   captureSnapshotDataUrl: (quality?: number) => Promise<string | null>;
   destroy: () => void;

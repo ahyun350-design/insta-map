@@ -1845,11 +1845,20 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.map?.easeTo({ center: [lng, lat], duration: 450 });
   }
 
-  easeToView(lat: number, lng: number, kakaoLevel: number) {
+  easeToView(
+    lat: number,
+    lng: number,
+    kakaoLevel: number,
+    opts?: { durationMs?: number },
+  ) {
+    const duration = Math.max(
+      200,
+      Math.min(800, opts?.durationMs ?? 400),
+    );
     this.map?.easeTo({
       center: [lng, lat],
       zoom: kakaoLevelToMapLibreZoom(kakaoLevel),
-      duration: 520,
+      duration,
     });
   }
 

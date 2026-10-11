@@ -2223,6 +2223,8 @@ function HomePageContent() {
   const expandedMlLocateInFlightRef = useRef(false);
   const expandedMlFollowMyLocationRef = useRef(false);
   const [expandedMlFollowMyLocation, setExpandedMlFollowMyLocation] = useState(false);
+  /** Brief locate spinner while waiting for first GPS (no cached position). */
+  const [expandedMlLocateLoading, setExpandedMlLocateLoading] = useState(false);
   /** 확장 지도 직접 검색 시 Location bias — addMyLocation 성공 시 저장, 없으면 지도 center */
   const myLocationLatLngRef = useRef<{ lat: number; lng: number } | null>(null);
   const myLocationMarkerRef = useRef<{ main: any | null; expanded: any | null }>({ main: null, expanded: null });
@@ -10581,7 +10583,7 @@ function HomePageContent() {
     latitude: number,
     longitude: number,
     moveCenter: boolean,
-    opts?: { neighborhoodZoom?: boolean },
+    opts?: { neighborhoodZoom?: boolean; easeDurationMs?: number },
   ) => {
     myLocationLatLngRef.current = { lat: latitude, lng: longitude };
     if (scope === "main" && isCompactMapLibre(map)) {
@@ -10608,7 +10610,9 @@ function HomePageContent() {
       if (moveCenter && opts?.neighborhoodZoom) {
         const adapter = getExpandedMapLibreAdapter(map);
         if (adapter?.easeToView) {
-          adapter.easeToView(latitude, longitude, 5);
+          adapter.easeToView(latitude, longitude, 5, {
+            durationMs: opts.easeDurationMs ?? 400,
+          });
         }
       }
       return;
@@ -10675,53 +10679,109 @@ function HomePageContent() {
     })();
   };
 
-  /** Admin MapLibre fullscreen locate — reuses GPS stages + applyMyLocationOnMap; centers at Kakao L5. */
+  /**
+   * Admin MapLibre fullscreen locate.
+   * Latency: previously blocked on Stage1 GPS (lib/getCurrentPositionForMap.ts
+   * STAGE1 timeout 5s + native requestPermissions) before any camera move;
+   * easeToView was 520ms. Now: snap to cached myLocationLatLngRef immediately,
+   * refine in background; short ease (300–400ms).
+   */
   const goToMyLocationExpandedMapLibre = useCallback(() => {
     if (expandedMlLocateInFlightRef.current) return;
     const map = expandedMapRef.current;
     if (!map || !isExpandedMapLibre(map)) return;
     expandedMlLocateInFlightRef.current = true;
     const token = ++locationRenderTokenRef.current.expanded;
+
+    const cached = myLocationLatLngRef.current;
+    const hasCache =
+      !!cached &&
+      Number.isFinite(cached.lat) &&
+      Number.isFinite(cached.lng);
+    /** Re-pan only if fresh GPS differs by more than this (meters). */
+    const RECENTER_IF_MOVED_M = 80;
+
+    if (hasCache && cached) {
+      applyMyLocationOnMap(map, "expanded", cached.lat, cached.lng, true, {
+        neighborhoodZoom: true,
+        easeDurationMs: 350,
+      });
+      expandedMlFollowMyLocationRef.current = true;
+      setExpandedMlFollowMyLocation(true);
+      setExpandedMlLocateLoading(false);
+    } else {
+      setExpandedMlLocateLoading(true);
+    }
+
     void (async () => {
-      let stage1Ok = false;
+      let stage1Ok = hasCache;
       try {
         try {
           const { latitude, longitude } = await getCurrentPositionForMapStage1();
-          if (expandedMapRef.current !== map || token !== locationRenderTokenRef.current.expanded) {
+          if (
+            expandedMapRef.current !== map ||
+            token !== locationRenderTokenRef.current.expanded
+          ) {
             return;
           }
-          applyMyLocationOnMap(map, "expanded", latitude, longitude, true, {
-            neighborhoodZoom: true,
-          });
-          stage1Ok = true;
-          expandedMlFollowMyLocationRef.current = true;
-          setExpandedMlFollowMyLocation(true);
-        } catch (err) {
-          if (isGeolocationPermissionDenied(err)) {
-            showToast("위치 권한이 필요해요. 설정에서 위치를 허용해 주세요.", "info");
-            return;
-          }
-        }
-
-        try {
-          const { latitude, longitude } = await getCurrentPositionForMapStage2();
-          if (expandedMapRef.current !== map || token !== locationRenderTokenRef.current.expanded) {
-            return;
-          }
+          const prev = myLocationLatLngRef.current;
+          const movedFar =
+            !prev ||
+            distanceMeters(prev.lat, prev.lng, latitude, longitude) >=
+              RECENTER_IF_MOVED_M;
+          const shouldPan = !hasCache || movedFar;
           applyMyLocationOnMap(
             map,
             "expanded",
             latitude,
             longitude,
-            !stage1Ok,
-            stage1Ok ? undefined : { neighborhoodZoom: true },
+            shouldPan,
+            shouldPan
+              ? { neighborhoodZoom: true, easeDurationMs: hasCache ? 350 : 400 }
+              : undefined,
+          );
+          stage1Ok = true;
+          expandedMlFollowMyLocationRef.current = true;
+          setExpandedMlFollowMyLocation(true);
+        } catch (err) {
+          if (!hasCache && isGeolocationPermissionDenied(err)) {
+            showToast("위치 권한이 필요해요. 설정에서 위치를 허용해 주세요.", "info");
+            return;
+          }
+        } finally {
+          setExpandedMlLocateLoading(false);
+        }
+
+        try {
+          const { latitude, longitude } = await getCurrentPositionForMapStage2();
+          if (
+            expandedMapRef.current !== map ||
+            token !== locationRenderTokenRef.current.expanded
+          ) {
+            return;
+          }
+          const prev = myLocationLatLngRef.current;
+          const movedFar =
+            !prev ||
+            distanceMeters(prev.lat, prev.lng, latitude, longitude) >=
+              RECENTER_IF_MOVED_M;
+          const shouldPan = !stage1Ok || movedFar;
+          applyMyLocationOnMap(
+            map,
+            "expanded",
+            latitude,
+            longitude,
+            shouldPan,
+            shouldPan
+              ? { neighborhoodZoom: true, easeDurationMs: 300 }
+              : undefined,
           );
           if (!stage1Ok) {
             expandedMlFollowMyLocationRef.current = true;
             setExpandedMlFollowMyLocation(true);
           }
         } catch (err) {
-          if (!stage1Ok) {
+          if (!stage1Ok && !hasCache) {
             const denied = isGeolocationPermissionDenied(err);
             showToast(
               denied
@@ -10732,6 +10792,7 @@ function HomePageContent() {
           }
         }
       } finally {
+        setExpandedMlLocateLoading(false);
         expandedMlLocateInFlightRef.current = false;
       }
     })();
@@ -17977,6 +18038,7 @@ function HomePageContent() {
                           className={[
                             "expandedMapLibreLocateBtn",
                             expandedMlFollowMyLocation ? "is-following" : "",
+                            expandedMlLocateLoading ? "is-locating" : "",
                             selectedPlace || isMapSearchSheetOpen ? "is-sheet-open" : "",
                             adminMapLibreTheme === "neon" ? "is-neon" : "",
                           ]
@@ -17984,6 +18046,7 @@ function HomePageContent() {
                             .join(" ")}
                           aria-label="현재 위치로 이동"
                           aria-pressed={expandedMlFollowMyLocation}
+                          aria-busy={expandedMlLocateLoading || undefined}
                           onClick={goToMyLocationExpandedMapLibre}
                         >
                           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>

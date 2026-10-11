@@ -8313,6 +8313,22 @@ select:focus-visible {
   color: #1a2a7a;
   background: #ffffff;
 }
+/* Brief pulse while waiting for first GPS (no new chrome / copy) */
+.expandedMapLibreLocateBtn.is-locating {
+  opacity: 0.72;
+}
+.expandedMapLibreLocateBtn.is-locating svg {
+  animation: expandedMlLocatePulse 0.55s ease-in-out infinite;
+}
+@keyframes expandedMlLocatePulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 .expandedMapLibreLocateBtn:not(.is-following) {
   color: #5b6470;
 }
