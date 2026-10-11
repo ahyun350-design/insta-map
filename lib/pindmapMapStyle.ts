@@ -6,6 +6,7 @@
  */
 
 import { koreaGuLabelsGeoJson } from "@/lib/koreaGuLabels";
+import { koreaPlaceLabelsGeoJson } from "@/lib/koreaPlaceLabels";
 
 /** Production-adopted themes */
 export type PindmapMapThemeId = "paper" | "white";
@@ -182,115 +183,16 @@ const HIDE_LAYER_IDS = new Set([
   // airport kept visible (guide label) — shop/POI icons stay hidden via poi_* above
   "road_one_way_arrow",
   "road_one_way_arrow_opposite",
-  "highway-shield-non-us",
+  // US interstate shields only — KR highway numbers restored below
   "highway-shield-us-interstate",
   "road_shield_us",
   "building-3d",
   "label_country_1",
   "label_country_2",
   "label_country_3",
-  // label_state restored below as faint province labels (z6–8)
+  // label_state / label_village restored with Korean zoom ladder
   "label_city_capital",
-  "label_village",
 ]);
-
-/** Mid-tier cities restored at far zoom (name:ko / name variants). */
-const MID_CITY_NAMES = [
-  "수원",
-  "수원시",
-  "춘천",
-  "춘천시",
-  "강릉",
-  "강릉시",
-  "원주",
-  "원주시",
-  "청주",
-  "청주시",
-  "천안",
-  "천안시",
-  "전주",
-  "전주시",
-  "포항",
-  "포항시",
-  "창원",
-  "창원시",
-  "목포",
-  "목포시",
-  "여수",
-  "여수시",
-  "안동",
-  "안동시",
-  "고양",
-  "고양시",
-  "용인",
-  "용인시",
-  "성남",
-  "성남시",
-  "부천",
-  "부천시",
-  "안산",
-  "안산시",
-  "남양주",
-  "남양주시",
-  "화성",
-  "화성시",
-  "김해",
-  "김해시",
-  "구미",
-  "구미시",
-  "진주",
-  "진주시",
-  "익산",
-  "익산시",
-  "순천",
-  "순천시",
-  "경주",
-  "경주시",
-  "아산",
-  "아산시",
-  "충주",
-  "충주시",
-  "제천",
-  "제천시",
-  "속초",
-  "속초시",
-  "김포",
-  "김포시",
-  "광명",
-  "광명시",
-  "하남",
-  "하남시",
-  "안양",
-  "안양시",
-  "의정부",
-  "의정부시",
-  "파주",
-  "파주시",
-  "시흥",
-  "시흥시",
-  "평택",
-  "평택시",
-  "양산",
-  "양산시",
-  "거제",
-  "거제시",
-  "통영",
-  "통영시",
-  "군산",
-  "군산시",
-  "정읍",
-  "정읍시",
-  "남원",
-  "남원시",
-  "나주",
-  "나주시",
-  "광양",
-  "광양시",
-  "서산",
-  "서산시",
-  "당진",
-  "당진시",
-];
 
 /** Prefer Korean name fields from OpenMapTiles. */
 const KO_TEXT: unknown = [
@@ -561,13 +463,18 @@ function isRail(id: string) {
   return id.includes("rail");
 }
 
-/** Strip metro / 시·군 suffixes for compact city labels (고양시→고양). */
+/**
+ * Compact city labels: strip 특별시/광역시/시.
+ * Keep 군 (고성군×2) and 광주시 (≠광주광역시).
+ */
 const SHORT_CITY_KO: unknown = [
   "let",
   "n",
   ["to-string", ["coalesce", ["get", "name:ko"], ["get", "name:nonlatin"], ["get", "name"], ""]],
   [
     "case",
+    ["match", ["var", "n"], ["광주시", "고성군"], true, false],
+    ["var", "n"],
     [
       "==",
       ["slice", ["var", "n"], ["-", ["length", ["var", "n"]], 5]],
@@ -596,12 +503,6 @@ const SHORT_CITY_KO: unknown = [
       "==",
       ["slice", ["var", "n"], ["-", ["length", ["var", "n"]], 1]],
       "시",
-    ],
-    ["slice", ["var", "n"], 0, ["-", ["length", ["var", "n"]], 1]],
-    [
-      "==",
-      ["slice", ["var", "n"], ["-", ["length", ["var", "n"]], 1]],
-      "군",
     ],
     ["slice", ["var", "n"], 0, ["-", ["length", ["var", "n"]], 1]],
     ["var", "n"],
@@ -1189,30 +1090,53 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       paintSet(layer, "text-halo-width", 1.5);
 
       if (layer.id.startsWith("water") && layer.type === "symbol") {
-        layer.minzoom = 10;
+        // Seas/ocean readable at nationwide zoom; lakes/rivers from z10.
+        layer.minzoom = 5;
         paintSet(layer, "text-color", theme.id === "white" ? "#6A8FA8" : theme.id === "neon" ? "#8AA0D8" : "#4A8BB8");
+        paintSet(layer, "text-opacity", [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          5,
+          0.55,
+          8,
+          0.85,
+          11,
+          1,
+        ]);
         paintSet(layer, "text-halo-color", theme.textHalo);
         paintSet(layer, "text-halo-width", 1.5);
         if (layer.layout) {
           layer.layout["text-font"] = ["Noto Sans Italic"];
+          layer.layout["text-letter-spacing"] = 0.12;
           if (layer.id === "water_name_point_label") {
             layer.layout["text-size"] = [
               "interpolate",
               ["linear"],
               ["zoom"],
-              0,
-              9,
+              5,
+              11,
               8,
+              13,
+              12,
               12,
             ];
           } else {
-            layer.layout["text-size"] = 12;
+            layer.layout["text-size"] = [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              5,
+              10,
+              10,
+              12,
+            ];
           }
         }
       }
       // Province (도) names: z6–8, very light, wide tracking
       if (layer.id === "label_state") {
-        layer.minzoom = 6;
+        layer.minzoom = 5;
         layer.maxzoom = 8.5;
         // Hide NK admin units (*직할*); keep SK provinces only via name list
         layer.filter = [
@@ -1257,8 +1181,16 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             ],
           ];
           layer.layout["text-font"] = ["Noto Sans Regular"];
-          layer.layout["text-size"] = 11;
-          layer.layout["text-letter-spacing"] = 0.35;
+          layer.layout["text-size"] = [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            5,
+            10,
+            7,
+            12,
+          ];
+          layer.layout["text-letter-spacing"] = 0.4;
           layer.layout["text-padding"] = 8;
           layer.layout["text-allow-overlap"] = false;
           layer.layout["text-optional"] = true;
@@ -1273,16 +1205,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         layers.push(layer);
         continue;
       }
-      // 시 이름: 광역시(굵게) / 그 외(연함·희소) — layout은 레이어 분리(feature 표현식 제한)
+      // 시 이름: 광역시(굵게) / 모든 시(점+이름) / 군·읍면은 별도 레이어
       if (layer.id === "label_city" || layer.id === "label_town") {
         const isCity = layer.id === "label_city";
-        layer.minzoom = isCity ? 5 : 6;
-        layer.maxzoom = 9;
+        layer.minzoom = isCity ? 5 : 8;
+        layer.maxzoom = isCity ? 10 : 11.5;
         const metroColor =
           theme.id === "neon" ? "#D0D4F0" : theme.id === "white" ? "#2A3348" : "#2A3144";
         const otherColor =
-          theme.id === "neon" ? "#7A82A8" : theme.id === "white" ? "#8A90A0" : "#8A8478";
-        // Jeju: only 제주특별자치도 (SHORT → 제주). Drop 제주/제주시 to avoid triple stack.
+          theme.id === "neon" ? "#8A92B8" : theme.id === "white" ? "#6A7080" : "#6A6570";
         const metroNameFilter: unknown = [
           "match",
           ["coalesce", ["get", "name:ko"], ["get", "name"], ""],
@@ -1317,7 +1248,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           ],
           -1,
         ];
-        // Primary layer = metro only (Seoul always allowed to overlap)
+        // Primary = metro (bold)
         layer.filter = ["all", metroNameFilter, nkAdminHide];
         paintSet(layer, "text-color", metroColor);
         paintSet(layer, "text-halo-color", theme.textHalo);
@@ -1332,10 +1263,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             5,
             13,
             8,
-            14,
+            15,
           ];
           layer.layout["text-padding"] = 2;
-          // Seoul first: always place even beside clusters/pins
           layer.layout["text-allow-overlap"] = true;
           layer.layout["text-ignore-placement"] = true;
           layer.layout["symbol-sort-key"] = [
@@ -1348,60 +1278,131 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           layer.layout["icon-size"] = 0.45;
         }
         layers.push(layer);
-        // Secondary: mid cities — 11px, lighter than metro; population list + rank
-        layers.push({
-          id: isCity ? "label_city_other_ko" : "label_town_other_ko",
-          type: "symbol",
-          source: "openmaptiles",
-          "source-layer": "place",
-          filter: [
-            "all",
-            ["!", metroNameFilter],
-            nkAdminHide,
-            ["==", ["get", "class"], isCity ? "city" : "town"],
-            [
-              "any",
-              ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 5],
-              [
-                "match",
-                ["coalesce", ["get", "name:ko"], ["get", "name"], ""],
-                MID_CITY_NAMES,
-                true,
-                false,
-              ],
-            ],
-            // Drop bare 제주/제주시 (covered by metro 제주특별자치도)
-            [
-              "!",
-              [
-                "match",
-                ["coalesce", ["get", "name:ko"], ["get", "name"], ""],
-                ["제주", "제주시"],
-                true,
-                false,
-              ],
-            ],
-          ],
-          minzoom: isCity ? 5.5 : 6,
-          maxzoom: 9,
-          layout: {
-            "text-field": SHORT_CITY_KO,
-            "text-font": ["Noto Sans Regular"],
-            "text-size": 11,
-            "text-padding": 8,
-            "text-max-width": 8,
-            "text-allow-overlap": false,
-            "text-optional": true,
-            visibility: "visible",
-          },
-          paint: {
-            "text-color": otherColor,
-            "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.2,
-          },
-        });
-        // 평양 only (faint) — hide 평양직할*
         if (isCity) {
+          // All other cities — population/rank sort; denser nationwide coverage
+          layers.push({
+            id: "label_city_other_ko",
+            type: "symbol",
+            source: "openmaptiles",
+            "source-layer": "place",
+            filter: [
+              "all",
+              ["!", metroNameFilter],
+              nkAdminHide,
+              ["==", ["get", "class"], "city"],
+              [
+                "!",
+                [
+                  "match",
+                  ["coalesce", ["get", "name:ko"], ["get", "name"], ""],
+                  ["제주", "제주시"],
+                  true,
+                  false,
+                ],
+              ],
+            ],
+            minzoom: 5.5,
+            maxzoom: 10,
+            layout: {
+              "text-field": SHORT_CITY_KO,
+              "text-font": ["Noto Sans Regular"],
+              "text-size": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                5.5,
+                10,
+                8,
+                12,
+              ],
+              "text-padding": 4,
+              "text-max-width": 8,
+              "text-allow-overlap": false,
+              "text-optional": true,
+              "symbol-sort-key": [
+                "to-number",
+                ["coalesce", ["get", "rank"], 999],
+              ],
+              visibility: "visible",
+            },
+            paint: {
+              "text-color": otherColor,
+              "text-halo-color": theme.textHalo,
+              "text-halo-width": 1.2,
+            },
+          });
+          layers.push({
+            id: "place_city_dot_ko",
+            type: "circle",
+            source: "openmaptiles",
+            "source-layer": "place",
+            filter: [
+              "all",
+              ["!", metroNameFilter],
+              nkAdminHide,
+              ["==", ["get", "class"], "city"],
+            ],
+            minzoom: 5.5,
+            maxzoom: 9.5,
+            paint: {
+              "circle-radius": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                5.5,
+                1.6,
+                8,
+                2.4,
+              ],
+              "circle-color": otherColor,
+              "circle-opacity": 0.8,
+              "circle-stroke-width": 0.6,
+              "circle-stroke-color": theme.textHalo,
+            },
+          });
+          // Towns (smaller 시 + many 군 in OMT) from province zoom
+          layers.push({
+            id: "label_town_all_ko",
+            type: "symbol",
+            source: "openmaptiles",
+            "source-layer": "place",
+            filter: [
+              "all",
+              nkAdminHide,
+              ["==", ["get", "class"], "town"],
+              [
+                "!",
+                [
+                  "match",
+                  ["coalesce", ["get", "name:ko"], ["get", "name"], ""],
+                  ["제주", "제주시"],
+                  true,
+                  false,
+                ],
+              ],
+            ],
+            minzoom: 8,
+            maxzoom: 11.5,
+            layout: {
+              "text-field": SHORT_CITY_KO,
+              "text-font": ["Noto Sans Regular"],
+              "text-size": 11,
+              "text-padding": 5,
+              "text-max-width": 8,
+              "text-allow-overlap": false,
+              "text-optional": true,
+              "symbol-sort-key": [
+                "to-number",
+                ["coalesce", ["get", "rank"], 999],
+              ],
+              visibility: "visible",
+            },
+            paint: {
+              "text-color": otherColor,
+              "text-halo-color": theme.textHalo,
+              "text-halo-width": 1.15,
+            },
+          });
           layers.push({
             id: "label_pyongyang_ko",
             type: "symbol",
@@ -1435,8 +1436,36 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         }
         continue;
       }
+      if (layer.id === "label_village") {
+        // 읍·면 (OMT village) — city unit zoom
+        layer.minzoom = 10;
+        layer.maxzoom = 13.5;
+        layer.filter = ["==", ["get", "class"], "village"];
+        paintSet(
+          layer,
+          "text-color",
+          theme.id === "neon" ? "#9AA2C8" : "#5A6170",
+        );
+        paintSet(layer, "text-halo-color", theme.textHalo);
+        paintSet(layer, "text-halo-width", 1.1);
+        if (layer.layout) {
+          layer.layout["text-field"] = KO_TEXT;
+          layer.layout["text-font"] = ["Noto Sans Regular"];
+          layer.layout["text-size"] = 11;
+          layer.layout["text-padding"] = 4;
+          layer.layout["text-optional"] = true;
+          layer.layout["text-allow-overlap"] = false;
+          layer.layout["symbol-sort-key"] = [
+            "to-number",
+            ["coalesce", ["get", "rank"], 999],
+          ];
+        }
+        setVisibility(layer, true);
+        layers.push(layer);
+        continue;
+      }
       if (layer.id === "label_other") {
-        // Seoul tiles: 구=borough (z14), 동=quarter (z14). suburb≠구.
+        // 구·동 — tiles often late; korea_gu_overlay covers 구 at z10–13
         setVisibility(layer, false);
         layers.push(layer);
         layers.push({
@@ -1445,7 +1474,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           source: "openmaptiles",
           "source-layer": "place",
           filter: ["==", ["get", "class"], "borough"],
-          minzoom: 13,
+          minzoom: 10,
           maxzoom: 16,
           layout: {
             "text-field": KO_TEXT,
@@ -1459,6 +1488,27 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             "text-color": theme.id === "neon" ? "#A8B0E0" : "#4A5166",
             "text-halo-color": theme.textHalo,
             "text-halo-width": 1.2,
+          },
+        });
+        layers.push({
+          id: "label_suburb_ko",
+          type: "symbol",
+          source: "openmaptiles",
+          "source-layer": "place",
+          filter: ["==", ["get", "class"], "suburb"],
+          minzoom: 11,
+          maxzoom: 14,
+          layout: {
+            "text-field": KO_TEXT,
+            "text-font": ["Noto Sans Regular"],
+            "text-size": 11.5,
+            "text-max-width": 8,
+            visibility: "visible",
+          },
+          paint: {
+            "text-color": theme.id === "neon" ? "#9AA2D0" : "#5A6175",
+            "text-halo-color": theme.textHalo,
+            "text-halo-width": 1.1,
           },
         });
         layers.push({
@@ -1484,10 +1534,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         continue;
       }
       if (layer.id.startsWith("highway-name")) {
-        // 주요 도로 이름 z13+, 방패/번호는 HIDE
+        // 주요 도로 이름 z13+
         if (layer.id.includes("major")) layer.minzoom = 13;
         else if (layer.id.includes("minor")) layer.minzoom = 15.2;
         else layer.minzoom = 16;
+      }
+      if (layer.id === "highway-shield-non-us" || layer.id.startsWith("highway-shield")) {
+        // 고속도로 번호 — 도 단위부터
+        layer.minzoom = Math.max(layer.minzoom ?? 0, 8);
+        setVisibility(layer, true);
       }
       // 다리 이름 (한강 다리 등)
       if (layer.id.includes("bridge") && layer.type === "symbol") {
@@ -1515,7 +1570,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-width", 1.3);
       }
       if (layer.id === "poi_transit") {
-        // Quiet station names: z14+, 11px gray (dots from subway overlay).
+        // Quiet station names: z13+, 11px gray (dots from subway overlay).
         layer.filter = [
           "all",
           [
@@ -1532,7 +1587,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           ],
           ["has", "name"],
         ];
-        layer.minzoom = 14;
+        layer.minzoom = 13;
         const layout = { ...(layer.layout || {}) };
         delete layout["icon-image"];
         delete layout["icon-size"];
@@ -1557,15 +1612,28 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       }
       // 큰 공원·산
       if (layer.id.includes("park_label") || layer.id === "label_park") {
-        layer.minzoom = 11;
+        layer.minzoom = 10;
         paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : theme.id === "neon" ? "#7AB8A0" : "#4F7A4A");
         paintSet(layer, "text-halo-color", theme.textHalo);
         paintSet(layer, "text-halo-width", 1.5);
       }
       if (layer.id.includes("mountain") || layer.id.includes("peak")) {
-        layer.minzoom = 11;
+        // Peaks from province zoom (Kakao shows major mountains earlier)
+        layer.minzoom = 8;
         paintSet(layer, "text-color", theme.text);
         paintSet(layer, "text-halo-color", theme.textHalo);
+        if (layer.layout) {
+          layer.layout["text-size"] = [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            10,
+            12,
+            12,
+          ];
+          layer.layout["text-optional"] = true;
+        }
       }
     }
 
@@ -1614,19 +1682,77 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     }
   }
 
-  // 구·군 이름 z9–13: tiles lack borough until z14 → static Korea overlay
+  // 시·군 supplement (poi medians) + 구 overlay — tiles often sparse
   style.sources = {
     ...style.sources,
+    korea_place_labels: {
+      type: "geojson",
+      data: koreaPlaceLabelsGeoJson(),
+    },
     korea_gu_labels: {
       type: "geojson",
       data: koreaGuLabelsGeoJson(),
     },
   };
   layers.push({
+    id: "label_korea_place_si",
+    type: "symbol",
+    source: "korea_place_labels",
+    filter: ["==", ["get", "kind"], "si"],
+    minzoom: 6,
+    maxzoom: 10,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        6,
+        10,
+        9,
+        12,
+      ],
+      "text-padding": 3,
+      "text-max-width": 8,
+      "text-optional": true,
+      "text-allow-overlap": false,
+      visibility: "visible",
+    },
+    paint: {
+      "text-color": theme.id === "neon" ? "#8A92B8" : "#6A6570",
+      "text-halo-color": theme.textHalo,
+      "text-halo-width": 1.15,
+    },
+  });
+  layers.push({
+    id: "label_korea_place_gun",
+    type: "symbol",
+    source: "korea_place_labels",
+    filter: ["==", ["get", "kind"], "gun"],
+    minzoom: 8,
+    maxzoom: 11.5,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 11,
+      "text-padding": 4,
+      "text-max-width": 8,
+      "text-optional": true,
+      "text-allow-overlap": false,
+      visibility: "visible",
+    },
+    paint: {
+      "text-color": theme.id === "neon" ? "#7A82A8" : "#6E6874",
+      "text-halo-color": theme.textHalo,
+      "text-halo-width": 1.1,
+    },
+  });
+  layers.push({
     id: "label_korea_gu_overlay",
     type: "symbol",
     source: "korea_gu_labels",
-    minzoom: 9,
+    minzoom: 10,
     maxzoom: 13.5,
     layout: {
       "text-field": ["get", "name"],

@@ -399,7 +399,7 @@ for (const routeTheme of ["dark", "paper"] as const) {
   });
 }
 
-test("map-preview nationwide z6–7: Seoul label + no map errors", async ({
+test("map-preview nationwide z6–7: metro + ≥10 city labels", async ({
   page,
 }) => {
   const { diag } = await openPreview(page, "/map-preview?mode=nopins");
@@ -423,22 +423,30 @@ test("map-preview nationwide z6–7: Seoul label + no map errors", async ({
       __PINDMAP_PREVIEW_DIAG__?: PreviewDiag;
     };
     const map = w.__PINDMAP_PREVIEW_MAP__;
-    const layers = ["label_city", "label_town"].filter((id) => !!map.getLayer(id));
-    const feats = layers.length
-      ? map.queryRenderedFeatures({ layers })
+    const layerIds = [
+      "label_city",
+      "label_town",
+      "label_city_other_ko",
+      "label_town_all_ko",
+      "label_korea_place_si",
+      "label_state",
+    ].filter((id) => !!map.getLayer(id));
+    const feats = layerIds.length
+      ? map.queryRenderedFeatures({ layers: layerIds })
       : [];
     const texts = feats.map((f) => {
       const p = (f as { properties?: Record<string, unknown> }).properties ?? {};
-      const ko = String(p["name:ko"] ?? p.name ?? "");
-      return ko;
+      return String(p["name:ko"] ?? p.name ?? "");
     });
-    const hasSeoul = texts.some(
+    const unique = [...new Set(texts.filter(Boolean))];
+    const hasSeoul = unique.some(
       (t) => t === "서울" || t === "서울특별시" || t.includes("서울"),
     );
     return {
       hasSeoul,
-      texts: texts.slice(0, 20),
-      layers,
+      uniqueCount: unique.length,
+      texts: unique.slice(0, 30),
+      layers: layerIds,
       errorCodes: w.__PINDMAP_PREVIEW_DIAG__?.errorCodes ?? [],
       zoom: map.getZoom(),
     };
@@ -451,6 +459,50 @@ test("map-preview nationwide z6–7: Seoul label + no map errors", async ({
     result.hasSeoul,
     `Seoul label missing at z${result.zoom}; sample=${result.texts.join("|")}`,
   ).toBe(true);
+  expect(
+    result.uniqueCount,
+    `expected ≥10 city/place labels at z${result.zoom}; got ${result.uniqueCount}: ${result.texts.join("|")}`,
+  ).toBeGreaterThanOrEqual(10);
+});
+
+test("map-preview Seoul z10.5: ≥20 gu labels", async ({ page }) => {
+  await openPreview(page, "/map-preview?mode=nopins");
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    map.jumpTo({ zoom: 10.5, center: [126.98, 37.56] });
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 4000);
+    });
+  });
+
+  const result = await page.evaluate(() => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    const layerIds = [
+      "label_korea_gu_overlay",
+      "label_borough_ko",
+    ].filter((id) => !!map.getLayer(id));
+    const feats = layerIds.length
+      ? map.queryRenderedFeatures({ layers: layerIds })
+      : [];
+    const texts = [
+      ...new Set(
+        feats.map((f) => {
+          const p =
+            (f as { properties?: Record<string, unknown> }).properties ?? {};
+          return String(p.name ?? p["name:ko"] ?? "");
+        }).filter(Boolean),
+      ),
+    ];
+    return { count: texts.length, texts: texts.slice(0, 40), zoom: map.getZoom() };
+  });
+
+  expect(
+    result.count,
+    `expected ≥20 gu labels at z${result.zoom}; got ${result.count}: ${result.texts.join("|")}`,
+  ).toBeGreaterThanOrEqual(20);
 });
 
 test.skip(
