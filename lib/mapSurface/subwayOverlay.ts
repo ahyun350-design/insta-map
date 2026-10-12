@@ -1,7 +1,7 @@
 "use client";
 
 import maplibregl, { type Map as MlMap } from "maplibre-gl";
-import { softenSubwayColour } from "./subwayColour";
+import { softenSubwayColour, subwayLineColourExpr } from "./subwayColour";
 
 export const SUBWAY_SOURCE = "pindmap_subway";
 export const SUBWAY_LINE_CASING = "subway_overlay_line_casing";
@@ -74,7 +74,7 @@ function beforeIdForSubway(map: MlMap): string | undefined {
   const order = [
     "subway_station_dot",
     "poi_transit",
-    "landmark_dot",
+    "shop_poi_label_z16",
     "landmark_label",
     "label_korea_gu_overlay",
   ];
@@ -186,6 +186,7 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
     map.setLayoutProperty(SUBWAY_LINE_CASING, "visibility", "none");
   }
 
+  // Far: thin gray. Near (z14+): official line colour (ref table fallback).
   upsertLayer(
     map,
     {
@@ -193,24 +194,43 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
       type: "line",
       source: SUBWAY_SOURCE,
       filter: ["==", ["get", "kind"], "line"],
-      minzoom: 13,
+      minzoom: 12,
       layout: {
         "line-cap": "round",
         "line-join": "round",
         visibility: "visible",
       },
       paint: {
-        "line-color": p.line,
+        // z12–13: quiet gray; z14+: official / ref-mapped colour
+        "line-color": [
+          "step",
+          ["zoom"],
+          p.line,
+          14,
+          subwayLineColourExpr(p.line),
+        ] as never,
         "line-width": [
           "interpolate",
           ["linear"],
           ["zoom"],
+          12,
+          1.0,
           13,
-          1.1,
+          1.2,
+          14,
+          2.4,
           16,
-          1.5,
+          3.2,
+          18,
+          4.0,
         ],
-        "line-opacity": 0.85,
+        "line-opacity": [
+          "step",
+          ["zoom"],
+          0.7,
+          14,
+          0.95,
+        ],
       },
     },
     before,
@@ -229,9 +249,19 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
       ],
       minzoom: 14,
       paint: {
-        "circle-radius": 2.5,
-        "circle-color": ["coalesce", ["get", "colour"], "#888888"],
-        "circle-stroke-width": 1,
+        "circle-radius": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          14,
+          3.2,
+          16,
+          4.2,
+          18,
+          5,
+        ],
+        "circle-color": subwayLineColourExpr("#888888") as never,
+        "circle-stroke-width": 1.5,
         "circle-stroke-color": p.stationStroke,
         "circle-opacity": 0.95,
       },
@@ -253,9 +283,19 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
       ],
       minzoom: 14,
       paint: {
-        "circle-radius": 2.8,
+        "circle-radius": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          14,
+          3.6,
+          16,
+          4.8,
+          18,
+          5.6,
+        ],
         "circle-color": p.transferFill,
-        "circle-stroke-width": 1.4,
+        "circle-stroke-width": 1.6,
         "circle-stroke-color": p.transferStroke,
         "circle-opacity": 0.96,
       },
@@ -273,7 +313,7 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
       type: "circle",
       source: SUBWAY_SOURCE,
       filter: ["==", ["get", "kind"], "exit"],
-      minzoom: 16,
+      minzoom: 17,
       paint: {
         "circle-radius": 7,
         "circle-color": p.exitFill,
@@ -293,7 +333,7 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
       type: "symbol",
       source: SUBWAY_SOURCE,
       filter: ["==", ["get", "kind"], "exit"],
-      minzoom: 16,
+      minzoom: 17,
       layout: {
         "text-field": ["to-string", ["get", "ref"]],
         "text-font": ["Noto Sans Regular"],
