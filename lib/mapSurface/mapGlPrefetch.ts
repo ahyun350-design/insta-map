@@ -1,9 +1,10 @@
 /**
- * Admin-only MapLibre asset warm-up (memory + HTTP cache).
- * Does not persist style/tile URLs to disk.
+ * MapLibre asset warm-up (memory + HTTP cache).
+ * Does not persist style/tile URLs or tile bytes to disk / localStorage / IndexedDB.
  */
 
 import { fetchLibertyStyle } from "@/lib/pindmapMapStyle";
+import { prefetchZ14Around } from "./tilePrefetch";
 
 let prefetchStarted = false;
 
@@ -14,7 +15,10 @@ function glyphUrl(template: string, fontstack: string, range: string): string {
 }
 
 /** Fire-and-forget; safe to call multiple times (session-once). */
-export function prefetchAdminMapGlAssets(): void {
+export function prefetchAdminMapGlAssets(opts?: {
+  lat?: number;
+  lng?: number;
+}): void {
   if (typeof window === "undefined") return;
   if (prefetchStarted) return;
   prefetchStarted = true;
@@ -50,6 +54,12 @@ export function prefetchAdminMapGlAssets(): void {
             credentials: "omit",
           }).catch(() => {});
         }
+      }
+      // z14 3×3 around last / my location (HTTP cache only)
+      const lat = opts?.lat;
+      const lng = opts?.lng;
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        void prefetchZ14Around(lat!, lng!);
       }
     } catch {
       /* never block boot */

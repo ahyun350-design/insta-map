@@ -115,6 +115,13 @@ export {
 export { softenSubwayColour } from "./subwayColour";
 export { prefetchAdminMapGlAssets } from "./mapGlPrefetch";
 export {
+  prefetchZ14Around,
+  prefetchTilesForSearchResults,
+  haversineMeters,
+  lngLatToTile,
+  resetTilePrefetchForTests,
+} from "./tilePrefetch";
+export {
   MAP_GL_SNAPSHOT_MAX_BYTES,
   MAP_GL_SNAPSHOT_FADE_MS,
   MAP_GL_SNAPSHOT_FAILSAFE_MS,

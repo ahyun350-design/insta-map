@@ -1053,6 +1053,164 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
   console.log(`[density] labelFirstMs=${labelLatencyMs}; ${rows.join(" | ")}`);
 });
 
+test("map-preview search-nav: far/near camera + shop labels", async ({
+  page,
+}) => {
+  await openPreview(page, "/map-preview?mode=nopins&theme=paper");
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    map.jumpTo({ zoom: 16, center: [126.9055, 37.556] });
+    await new Promise<void>((r) => window.setTimeout(r, 4000));
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 3000);
+    });
+  });
+
+  type NavResult = {
+    caseId: string;
+    cameraMs: number;
+    labelMs: number;
+    tileCount: number;
+    tileAvgMs: number | null;
+    totalMs: number;
+  };
+
+  async function measureNav(
+    from: [number, number],
+    to: [number, number],
+    caseId: string,
+    warm: boolean,
+  ): Promise<NavResult> {
+    return page.evaluate(
+      async ({ from: f, to: t, caseId: id, warm: doWarm }) => {
+        const map = (
+          window as unknown as {
+            __PINDMAP_PREVIEW_MAP__: PreviewMap & {
+              getCenter?: () => { lng: number; lat: number };
+              areTilesLoaded?: () => boolean;
+            };
+          }
+        ).__PINDMAP_PREVIEW_MAP__;
+        const nav = (
+          window as unknown as {
+            __PINDMAP_SEARCH_NAV__?: {
+              prefetchZ14Around: (
+                lat: number,
+                lng: number,
+              ) => Promise<unknown>;
+              goToSearchResult: (lat: number, lng: number, lv?: number) => void;
+            };
+          }
+        ).__PINDMAP_SEARCH_NAV__;
+        if (!nav) throw new Error("missing __PINDMAP_SEARCH_NAV__");
+
+        // Leave origin so destination labels are not already on-screen
+        map.jumpTo({ zoom: 16, center: f });
+        await new Promise<void>((r) => window.setTimeout(r, 2500));
+        await new Promise<void>((resolve) => {
+          map.once("idle", () => resolve());
+          window.setTimeout(() => resolve(), 2000);
+        });
+
+        if (doWarm) {
+          await nav.prefetchZ14Around(t[1], t[0]);
+          await new Promise<void>((r) => window.setTimeout(r, 1000));
+        }
+
+        const tileTimes: number[] = [];
+        const obs = new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) {
+            const pe = e as PerformanceResourceTiming;
+            if (!/tiles\.openfreemap\.org\/planet\/.+\.pbf/.test(pe.name)) continue;
+            tileTimes.push(pe.responseEnd - pe.startTime);
+          }
+        });
+        obs.observe({ entryTypes: ["resource"] });
+        performance.clearResourceTimings();
+
+        const t0 = performance.now();
+        nav.goToSearchResult(t[1], t[0], 3);
+
+        const deadline = t0 + 5000;
+        let labelMs: number | null = null;
+        let cameraMs = 0;
+        const nearDest = () => {
+          const c = map.getCenter?.() ?? { lng: 0, lat: 0 };
+          const dLng = (c.lng - t[0]) * 111320 * Math.cos((c.lat * Math.PI) / 180);
+          const dLat = (c.lat - t[1]) * 110540;
+          return Math.hypot(dLng, dLat) < 350; // within ~350m of target
+        };
+        while (performance.now() < deadline) {
+          if (!nearDest()) {
+            await new Promise<void>((r) => window.setTimeout(r, 20));
+            continue;
+          }
+          if (!cameraMs) cameraMs = Math.round(performance.now() - t0);
+          const style = (
+            map as unknown as { getStyle?: () => { layers?: { id: string }[] } }
+          ).getStyle?.();
+          const shopLayers = (style?.layers ?? [])
+            .map((l) => l.id)
+            .filter((sid) => sid.startsWith("shop_poi_label"));
+          const n = shopLayers.length
+            ? map.queryRenderedFeatures({ layers: shopLayers }).length
+            : 0;
+          if (n > 0) {
+            labelMs = Math.round(performance.now() - t0);
+            break;
+          }
+          await new Promise<void>((r) => window.setTimeout(r, 20));
+        }
+        if (!cameraMs) cameraMs = Math.round(performance.now() - t0);
+        obs.disconnect();
+        const tileAvgMs =
+          tileTimes.length > 0
+            ? Math.round(
+                tileTimes.reduce((a, b) => a + b, 0) / tileTimes.length,
+              )
+            : null;
+        return {
+          caseId: id,
+          cameraMs,
+          labelMs: labelMs ?? -1,
+          tileCount: tileTimes.length,
+          tileAvgMs,
+          totalMs: labelMs ?? Math.round(performance.now() - t0),
+        };
+      },
+      { from, to, caseId, warm },
+    );
+  }
+
+  const mangwon: [number, number] = [126.9055, 37.556];
+  const gangnam: [number, number] = [127.0276, 37.4979];
+  const mangwonNear: [number, number] = [126.9015, 37.556];
+
+  const farCold = await measureNav(mangwon, gangnam, "far-cold", false);
+  const nearCold = await measureNav(mangwon, mangwonNear, "near-cold", false);
+  const farWarm = await measureNav(mangwon, gangnam, "far-warm", true);
+
+  console.log(
+    `[search-nav] farCold=${JSON.stringify(farCold)} nearCold=${JSON.stringify(nearCold)} farWarm=${JSON.stringify(farWarm)}`,
+  );
+
+  expect(farCold.labelMs, `far-cold labelMs=${farCold.labelMs}`).toBeGreaterThan(0);
+  expect(
+    farCold.totalMs,
+    `far-cold total ${farCold.totalMs}ms (tiles avg ${farCold.tileAvgMs} n=${farCold.tileCount})`,
+  ).toBeLessThanOrEqual(1000);
+  expect(
+    nearCold.totalMs,
+    `near-cold total ${nearCold.totalMs}ms`,
+  ).toBeLessThanOrEqual(400);
+  expect(
+    farWarm.totalMs,
+    `far-warm total ${farWarm.totalMs}ms`,
+  ).toBeLessThanOrEqual(400);
+});
+
 test("map-preview road name / shield labels are hidden (0 features)", async ({
   page,
 }) => {

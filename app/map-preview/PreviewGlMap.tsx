@@ -28,6 +28,7 @@ import {
 import { invalidateLibertyStyleCache } from "@/lib/pindmapMapStyle";
 import {
   horizontalSpanKmForMapLibreZoom,
+  kakaoLevelToMapLibreZoom,
   mapLibreZoomToKakaoLevel,
 } from "@/lib/mapSurface/kakaoZoom";
 import MapLibreCornerAttribution from "@/components/MapLibreCornerAttribution";
@@ -40,6 +41,10 @@ import {
   prefetchSubwayOverlay,
 } from "@/lib/mapSurface/subwayOverlay";
 import { MAP_LOCAL_IDEOGRAPH_FONT_FAMILY } from "@/lib/mapSurface/mapBrand";
+import {
+  haversineMeters,
+  prefetchZ14Around,
+} from "@/lib/mapSurface/tilePrefetch";
 import {
   paintPreviewRouteDemo,
   type PreviewRouteMode,
@@ -447,6 +452,32 @@ export default function PreviewGlMap({
         mapRef.current = map;
         // E2E / QA hook — map-preview route only
         window.__PINDMAP_PREVIEW_MAP__ = map;
+        // e2e / QA: search-nav helpers (HTTP tile warm + fast camera)
+        (
+          window as unknown as {
+            __PINDMAP_SEARCH_NAV__?: {
+              prefetchZ14Around: typeof prefetchZ14Around;
+              goToSearchResult: (
+                lat: number,
+                lng: number,
+                kakaoLevel?: number,
+              ) => void;
+            };
+          }
+        ).__PINDMAP_SEARCH_NAV__ = {
+          prefetchZ14Around,
+          goToSearchResult: (lat, lng, kakaoLevel = 3) => {
+            const zoom = kakaoLevelToMapLibreZoom(kakaoLevel);
+            const c = map.getCenter();
+            const dist = haversineMeters(c.lat, c.lng, lat, lng);
+            if (dist <= 1000) {
+              map.easeTo({ center: [lng, lat], zoom, duration: 300 });
+              return;
+            }
+            map.jumpTo({ center: [lng, lat], zoom: Math.max(1, zoom - 1) });
+            map.easeTo({ center: [lng, lat], zoom, duration: 200 });
+          },
+        };
         publishPreviewDiag({
           loadMs: null,
           styleLoadMs: null,

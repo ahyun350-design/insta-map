@@ -33,6 +33,7 @@ import {
   kakaoLevelToMapLibreZoom,
   mapLibreZoomToKakaoLevel,
 } from "./kakaoZoom";
+import { haversineMeters } from "./tilePrefetch";
 import type {
   CompactMapSurface,
   CompactPinInput,
@@ -1844,7 +1845,26 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   }
 
   panTo(lat: number, lng: number) {
-    this.map?.easeTo({ center: [lng, lat], duration: 450 });
+    this.goToSearchResult(lat, lng, this.getLevel());
+  }
+
+  /**
+   * ≤1km: easeTo 300ms. Farther: jumpTo then 200ms zoom settle. No flyTo.
+   */
+  goToSearchResult(lat: number, lng: number, kakaoLevel: number = 3) {
+    const map = this.map;
+    if (!map) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const zoom = kakaoLevelToMapLibreZoom(kakaoLevel);
+    const c = map.getCenter();
+    const dist = haversineMeters(c.lat, c.lng, lat, lng);
+    if (dist <= 1000) {
+      map.easeTo({ center: [lng, lat], zoom, duration: 300 });
+      return;
+    }
+    // Instant relocate, then short zoom settle (feels fast; no long fly)
+    map.jumpTo({ center: [lng, lat], zoom: Math.max(1, zoom - 1) });
+    map.easeTo({ center: [lng, lat], zoom, duration: 200 });
   }
 
   easeToView(

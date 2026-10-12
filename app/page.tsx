@@ -284,6 +284,8 @@ import {
   trackMapGlFallback,
   trackMapGlRecovered,
   prefetchAdminMapGlAssets,
+  prefetchTilesForSearchResults,
+  prefetchZ14Around,
   readMapGlSnapshot,
   shouldUseMapGlSnapshot,
   themeToCode,
@@ -2741,13 +2743,18 @@ function HomePageContent() {
     setShowMapResearchButton(false);
   }, [clearSearchResultPins]);
 
-  /** 확장 지도 카메라: panTo 우선(부드러운 이동), SDK 미지원 시 setCenter 폴백 */
+  /** 확장 지도 카메라: 근거리 easeTo 300ms / 원거리 jumpTo+200ms (flyTo 금지) */
   const applyExpandedMapCameraLatLng = (lat: number, lng: number, level: number = 3) => {
     try {
       const map = expandedMapRef.current;
       if (!map) return;
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       if (isExpandedMapLibre(map)) {
+        const gl = getExpandedMapLibreAdapter(map);
+        if (gl && typeof gl.goToSearchResult === "function") {
+          gl.goToSearchResult(lat, lng, level);
+          return;
+        }
         map.panTo({ getLat: () => lat, getLng: () => lng });
         map.setLevel(level);
         return;
@@ -5074,11 +5081,19 @@ function HomePageContent() {
     track("app_open");
   }, [sessionChecked, userLoading, user, loading, bootstrapCacheResolved, bootstrapCacheHit]);
 
-  /** Admin MapLibre only: warm style/glyphs/sprite into memory + HTTP cache. */
+  /** Admin MapLibre: warm style/glyphs/sprite + local z14 tiles (HTTP cache only). */
   useEffect(() => {
     if (!user || user.id !== ADMIN_USER_ID) return;
     if (!shouldUseCompactMapLibre(true, user.id)) return;
-    prefetchAdminMapGlAssets();
+    const loc = myLocationLatLngRef.current;
+    const boot = mapViewBootstrapRef.current;
+    const lat = loc?.lat ?? boot?.lat;
+    const lng = loc?.lng ?? boot?.lng;
+    prefetchAdminMapGlAssets(
+      Number.isFinite(lat) && Number.isFinite(lng)
+        ? { lat: lat!, lng: lng! }
+        : undefined,
+    );
   }, [user, adminCompactMapLibre]);
 
   /** Admin MapLibre: show last-frame snapshot (or paper fill) instead of loading copy. */
@@ -12277,8 +12292,12 @@ function HomePageContent() {
             lng: parseFloat(p.x),
           }));
           if (pts.length === 1) {
-            gl.setCenter(pts[0]!.lat, pts[0]!.lng);
-            gl.setLevel(3);
+            if (typeof gl.goToSearchResult === "function") {
+              gl.goToSearchResult(pts[0]!.lat, pts[0]!.lng, 3);
+            } else {
+              gl.setCenter(pts[0]!.lat, pts[0]!.lng);
+              gl.setLevel(3);
+            }
           } else {
             gl.fitPoints(pts, { top: 108, right: 28, bottom: 280, left: 28 });
           }
@@ -12307,6 +12326,8 @@ function HomePageContent() {
         setMapSearchResults(data);
         setMapSearchLabel(trimmed);
         setIsMapSearchSheetOpen(true);
+        // Warm z14 tiles for top hits (HTTP cache only; no extra Kakao search calls)
+        prefetchTilesForSearchResults(data, 3);
         fitExpandedMapToKeywordResults(data);
         setSearchQuery("");
       };
@@ -12347,6 +12368,7 @@ function HomePageContent() {
           setMapSearchResults([placeObj]);
           setMapSearchLabel(trimmed);
           setIsMapSearchSheetOpen(true);
+          prefetchTilesForSearchResults([placeObj], 1);
           {
             const glAddr = getExpandedMapLibreAdapter(expandedMapRef.current);
             if (glAddr && Number.isFinite(addrLat) && Number.isFinite(addrLng)) {
@@ -12355,8 +12377,12 @@ function HomePageContent() {
               } catch {
                 /* noop */
               }
-              glAddr.setCenter(addrLat, addrLng);
-              glAddr.setLevel(3);
+              if (typeof glAddr.goToSearchResult === "function") {
+                glAddr.goToSearchResult(addrLat, addrLng, 3);
+              } else {
+                glAddr.setCenter(addrLat, addrLng);
+                glAddr.setLevel(3);
+              }
             } else {
               expandedMapRef.current.setCenter(new window.kakao.maps.LatLng(addr.y, addr.x));
               expandedMapRef.current.setLevel(3);
@@ -18166,12 +18192,14 @@ function HomePageContent() {
                           userLocation={myLocationLatLngRef.current}
                           keyboardHeight={keyboardHeight}
                           onSelect={(place) => {
+                            // Pin + card first (do not wait for tiles); then camera
+                            openExpandedSearchPlaceCard(place, "sheet-list-tap");
                             const py = parseFloat(String(place.y ?? ""));
                             const px = parseFloat(String(place.x ?? ""));
                             if (Number.isFinite(py) && Number.isFinite(px)) {
+                              void prefetchZ14Around(py, px);
                               applyExpandedMapCameraLatLng(py, px, 3);
                             }
-                            openExpandedSearchPlaceCard(place, "sheet-list-tap");
                           }}
                           onClose={() => setIsMapSearchSheetOpen(false)}
                         />

@@ -27,6 +27,14 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ko">
+      <head>
+        <link
+          rel="preconnect"
+          href="https://tiles.openfreemap.org"
+          crossOrigin="anonymous"
+        />
+        <link rel="dns-prefetch" href="https://tiles.openfreemap.org" />
+      </head>
       <body>
         <DebugBoxLoader />
         <KeyboardAccessoryBarInit />
