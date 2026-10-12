@@ -40,3 +40,5 @@ scripts/localdata/raw_closed_check/
 **/xcuserdata/
 plugins/**/.swiftpm/
 tsconfig.tsbuildinfo
+
+scripts/localdata/raw_sangga/
