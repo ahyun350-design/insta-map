@@ -1992,9 +1992,20 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           layout: {
             "text-field": KO_TEXT,
             "text-font": ["Noto Sans Regular"],
-            "text-size": 18,
+            "text-size": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              10,
+              14,
+              11.5,
+              16,
+              12.5,
+              18,
+            ],
             "text-letter-spacing": 0.06,
             "text-max-width": 8,
+            "text-padding": 1.5,
             visibility: "visible",
           },
           paint: {
@@ -2315,9 +2326,21 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     layout: {
       "text-field": ["get", "name"],
       "text-font": ["Noto Sans Regular"],
-      "text-size": 18,
+      // z10–11 keep denser; z12+ reach ≥18px (Kakao-like)
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        10,
+        14,
+        11.5,
+        16,
+        12.5,
+        18,
+      ],
       "text-letter-spacing": 0.08,
       "text-max-width": 8,
+      "text-padding": 1.5,
       visibility: "visible",
     },
     paint: {
