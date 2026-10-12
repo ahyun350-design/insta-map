@@ -530,6 +530,197 @@ test("map-preview Seoul z10.5: ≥20 gu labels", async ({ page }) => {
   ).toBeGreaterThanOrEqual(20);
 });
 
+test("map-preview mid-zoom place labels: Mapo/Gangnam × z11–13", async ({
+  page,
+}) => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const outDir = path.join(process.cwd(), "e2e/artifacts");
+  fs.mkdirSync(outDir, { recursive: true });
+
+  await openPreview(page, "/map-preview?mode=nopins&theme=paper");
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    map.jumpTo({ zoom: 12, center: [126.9015, 37.5663] });
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 5000));
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 3000);
+    });
+  });
+
+  const hubs: Array<{
+    id: "mapo" | "gangnam";
+    center: [number, number];
+  }> = [
+    { id: "mapo", center: [126.9015, 37.5663] },
+    { id: "gangnam", center: [127.0276, 37.4979] },
+  ];
+  const targets: Record<number, { totalMin: number; totalMax: number }> = {
+    11: { totalMin: 15, totalMax: 25 },
+    12: { totalMin: 20, totalMax: 35 },
+    13: { totalMin: 25, totalMax: 40 },
+  };
+  const roadIds = [
+    "highway-name-path",
+    "highway-name-minor",
+    "highway-name-major",
+    "highway-shield-non-us",
+    "highway-shield-us-interstate",
+    "road_shield_us",
+    "label_bridge_ko",
+  ];
+
+  async function measureMid(zoom: number, center: [number, number]) {
+    await page.evaluate(
+      async ({ z, center: c }) => {
+        const map = (
+          window as unknown as {
+            __PINDMAP_PREVIEW_MAP__: PreviewMap & {
+              areTilesLoaded?: () => boolean;
+              loaded?: () => boolean;
+            };
+          }
+        ).__PINDMAP_PREVIEW_MAP__;
+        const sleep = (ms: number) =>
+          new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+        const waitReady = async (budgetMs: number) => {
+          const t0 = Date.now();
+          while (Date.now() - t0 < budgetMs) {
+            const tilesOk =
+              typeof map.areTilesLoaded === "function"
+                ? map.areTilesLoaded()
+                : true;
+            if (tilesOk && (typeof map.loaded !== "function" || map.loaded())) {
+              await new Promise<void>((resolve) => {
+                map.once("idle", () => resolve());
+                window.setTimeout(() => resolve(), 800);
+              });
+              return;
+            }
+            await sleep(200);
+          }
+        };
+        map.jumpTo({ zoom: z, center: c });
+        await waitReady(8000);
+        await sleep(2500);
+        map.jumpTo({ zoom: z, center: c });
+        await waitReady(5000);
+        await sleep(2000);
+      },
+      { z: zoom, center },
+    );
+    return page.evaluate((roads) => {
+      const map = (
+        window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap }
+      ).__PINDMAP_PREVIEW_MAP__;
+      const style = (
+        map as unknown as { getStyle?: () => { layers?: { id: string }[] } }
+      ).getStyle?.();
+      const layerIds = (style?.layers ?? []).map((l) => l.id);
+      const present = (ids: string[]) => ids.filter((id) => !!map.getLayer(id));
+      const countUnique = (ids: string[]) => {
+        const layers = present(ids);
+        if (!layers.length) return 0;
+        const feats = map.queryRenderedFeatures({ layers });
+        const seen = new Set<string>();
+        for (const f of feats) {
+          const p =
+            (f as { properties?: Record<string, unknown> }).properties ?? {};
+          const name = String(p["name:ko"] || p.name || "").trim();
+          if (!name) continue;
+          seen.add(name);
+        }
+        return seen.size;
+      };
+      const gu = countUnique([
+        "label_korea_gu_overlay",
+        "label_borough_ko",
+      ]);
+      const dong = countUnique([
+        "label_suburb_ko",
+        "label_dong_major_ko",
+        "label_dong_ko",
+        "label_korea_dong_overlay",
+      ]);
+      const station = countUnique(["poi_transit", "poi_transit_mid"]);
+      const landmark = countUnique([
+        "landmark_label",
+        "label_korea_landmark_overlay",
+        "label_korea_landmark_overlay_z13",
+        "label_park",
+        "park_label",
+      ].filter((id) => layerIds.includes(id) || !!map.getLayer(id)));
+      const mountain = countUnique([
+        "label_korea_mountain_overlay",
+        ...layerIds.filter(
+          (id) => id.includes("mountain") || id.includes("peak"),
+        ),
+      ]);
+      const roadPresent = roads.filter((id) => !!map.getLayer(id));
+      const roadNames = roadPresent.length
+        ? map.queryRenderedFeatures({ layers: roadPresent }).length
+        : 0;
+      const total = gu + dong + station + landmark + mountain;
+      return {
+        gu,
+        dong,
+        station,
+        landmark,
+        mountain,
+        total,
+        roadNames,
+        zoom: map.getZoom(),
+      };
+    }, roadIds);
+  }
+
+  const rows: string[] = [];
+  for (const hub of hubs) {
+    for (const z of [11, 12, 13] as const) {
+      const m = await measureMid(z, hub.center);
+      const t = targets[z];
+      expect(m.roadNames, `${hub.id} z${z} road names must be 0`).toBe(0);
+      expect(
+        m.total,
+        `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (gu=${m.gu} dong=${m.dong} st=${m.station} lm=${m.landmark} mt=${m.mountain})`,
+      ).toBeGreaterThanOrEqual(t.totalMin);
+      expect(
+        m.total,
+        `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (gu=${m.gu} dong=${m.dong} st=${m.station} lm=${m.landmark} mt=${m.mountain})`,
+      ).toBeLessThanOrEqual(t.totalMax);
+      rows.push(
+        `${hub.id} z${z}: total=${m.total} gu=${m.gu} dong=${m.dong} st=${m.station} lm=${m.landmark} mt=${m.mountain}`,
+      );
+    }
+  }
+
+  for (const hub of hubs) {
+    for (const z of [11, 12, 13] as const) {
+      await page.evaluate(
+        async ({ z, center: c }) => {
+          const map = (
+            window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap }
+          ).__PINDMAP_PREVIEW_MAP__;
+          map.jumpTo({ zoom: z, center: c });
+          await new Promise<void>((resolve) => {
+            map.once("idle", () => resolve());
+            window.setTimeout(() => resolve(), 3500);
+          });
+        },
+        { z, center: hub.center },
+      );
+      await page.screenshot({
+        path: path.join(outDir, `midzoom-z${z}-${hub.id}.png`),
+        fullPage: false,
+      });
+    }
+  }
+
+  console.log(`[midzoom] ${rows.join(" | ")}`);
+});
+
 test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
   const fs = await import("node:fs");
   const path = await import("node:path");

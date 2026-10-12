@@ -76,7 +76,8 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
     background: "#F2F2F2",
     land: "#F2F2F2",
     water: "#BFDDF2",
-    park: "#D8E8D0",
+    // Slightly deeper green so parks/mountains read at z11–12 (still paper-cool)
+    park: "#C5DDB8",
     building: "#E8E8E8",
     showBuildings: true,
     road: "#FFFFFF",
@@ -397,11 +398,15 @@ function poiSpriteIcon(): unknown {
 
 function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = landmarkGroupColor(theme);
-  // Leave room for shops at z14–16 (totals ≤50); slightly denser anchors at z17
+  // z11–13: few major anchors; z14 tight for shops; denser late
   const rankMax: unknown = [
     "step",
     ["zoom"],
+    3,
+    12,
     5,
+    13,
+    12,
     14,
     6,
     15.5,
@@ -425,17 +430,37 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     type: "symbol",
     source: "openmaptiles",
     "source-layer": "poi",
-    minzoom: 13,
+    minzoom: 11,
     filter,
     layout: {
       visibility: "visible",
       "icon-image": poiSpriteIcon(),
       // cafe_11 is 34px@2x → 17 CSS px at size 1; ~18px ≈ 1.1
-      "icon-size": 1.1,
+      "icon-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        11,
+        0.85,
+        13,
+        1.0,
+        14,
+        1.1,
+      ],
       "icon-optional": false,
       "text-field": KO_TEXT,
       "text-font": ["Noto Sans Bold"],
-      "text-size": 14,
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        11,
+        12,
+        13,
+        13,
+        14,
+        14,
+      ],
       "text-variable-anchor": ["right", "left", "top", "bottom"],
       "text-radial-offset": 1.05,
       "text-max-width": 8,
@@ -443,8 +468,10 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
         "interpolate",
         ["linear"],
         ["zoom"],
+        11,
+        6,
         13,
-        4,
+        2.2,
         14,
         3,
         16,
@@ -1487,7 +1514,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         : theme.id === "neon"
           ? "#0A2424"
           : theme.id === "paper"
-            ? "#E4ECDC"
+            ? "#D2E0C8"
             : "#E8F0E0";
     const buildingOutline =
       theme.id === "white"
@@ -1583,13 +1610,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             ["linear"],
             ["zoom"],
             5,
-            0.22,
+            0.28,
             8,
-            0.35,
+            0.45,
             9,
-            0.75,
+            0.82,
+            11,
+            0.92,
             12,
-            0.9,
+            0.95,
           ]);
         } else if (layer.id.includes("sand") || layer.id.includes("ice")) {
           paintSet(layer, "fill-color", theme.land);
@@ -2143,6 +2172,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             "text-letter-spacing": 0.06,
             "text-max-width": 8,
             "text-padding": 1.5,
+            "symbol-sort-key": 2000,
             visibility: "visible",
           },
           paint: {
@@ -2156,7 +2186,16 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           type: "symbol",
           source: "openmaptiles",
           "source-layer": "place",
-          filter: ["==", ["get", "class"], "suburb"],
+          filter: [
+            "all",
+            ["==", ["get", "class"], "suburb"],
+            // z11: major only; z12+: more suburbs
+            [
+              "<=",
+              ["to-number", ["coalesce", ["get", "rank"], 999]],
+              ["step", ["zoom"], 10, 12, 22, 13, 40],
+            ],
+          ],
           minzoom: 11,
           maxzoom: 14,
           layout: {
@@ -2164,6 +2203,22 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             "text-font": ["Noto Sans Regular"],
             "text-size": 16,
             "text-max-width": 8,
+            "text-padding": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              11,
+              5,
+              13,
+              3,
+            ],
+            "text-optional": true,
+            // Below gu (~2000), above landmarks (~1000)
+            "symbol-sort-key": [
+              "-",
+              1400,
+              ["to-number", ["coalesce", ["get", "rank"], 999]],
+            ],
             visibility: "visible",
           },
           paint: {
@@ -2172,7 +2227,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             "text-halo-width": 1.5,
           },
         });
-        // 주요 동 — z13 (rank-limited); 전부는 label_dong_ko z14+
+        // 주요 동 — z12+ (rank-limited); 전부는 label_dong_ko z14+
         layers.push({
           id: "label_dong_major_ko",
           type: "symbol",
@@ -2187,20 +2242,25 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
               true,
               false,
             ],
-            ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 14],
+            [
+              "<=",
+              ["to-number", ["coalesce", ["get", "rank"], 999]],
+              ["step", ["zoom"], 8, 13, 18, 14, 30],
+            ],
           ],
-          minzoom: 13,
+          minzoom: 12,
           maxzoom: 14,
           layout: {
             "text-field": KO_TEXT,
             "text-font": ["Noto Sans Regular"],
-            "text-size": 16,
+            "text-size": 15,
             "text-max-width": 8,
             "text-padding": 3,
             "text-optional": true,
             "symbol-sort-key": [
-              "to-number",
-              ["coalesce", ["get", "rank"], 999],
+              "-",
+              1350,
+              ["to-number", ["coalesce", ["get", "rank"], 999]],
             ],
             visibility: "visible",
           },
@@ -2267,7 +2327,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-width", 1.3);
       }
       if (layer.id === "poi_transit") {
-        // Station names — z13+ (line colour from overlay).
+        // Street zoom station names (shops dense) — mid-zoom uses poi_transit_mid
         layer.filter = [
           "all",
           [
@@ -2284,7 +2344,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           ],
           ["has", "name"],
         ];
-        layer.minzoom = 13;
+        layer.minzoom = 14;
         const layout = { ...(layer.layout || {}) };
         delete layout["icon-image"];
         delete layout["icon-size"];
@@ -2294,13 +2354,12 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         layout["text-field"] = KO_TEXT;
         layout["text-font"] = ["Noto Sans Bold"];
         layout["text-optional"] = false;
-        // Stations must stay visible among dense shop labels
         layout["text-allow-overlap"] = true;
         layout["text-ignore-placement"] = true;
         layout["text-padding"] = 0.5;
         layout["symbol-sort-key"] = [
           "-",
-          1100,
+          1600,
           ["to-number", ["coalesce", ["get", "rank"], 999]],
         ];
         layer.layout = layout;
@@ -2310,33 +2369,70 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-color", "#FFFFFF");
         paintSet(layer, "text-halo-width", 1.5);
       }
-      // 큰 공원·산 — major names from z13 alongside landmark_label
+      // 큰 공원 이름 — z12+ with landmarks
       if (layer.id.includes("park_label") || layer.id === "label_park") {
-        layer.minzoom = 13;
-        paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : theme.id === "neon" ? "#7AB8A0" : "#4F7A4A");
+        layer.minzoom = 12;
+        paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : theme.id === "neon" ? "#7AB8A0" : "#3F6B3A");
         paintSet(layer, "text-halo-color", "#FFFFFF");
         paintSet(layer, "text-halo-width", 1.5);
         if (layer.layout) {
-          layer.layout["text-size"] = 14;
+          layer.layout["text-size"] = [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            12,
+            12,
+            14,
+            14,
+          ];
           layer.layout["text-font"] = ["Noto Sans Bold"];
+          layer.layout["text-padding"] = 3;
+          layer.layout["symbol-sort-key"] = [
+            "-",
+            1200,
+            ["to-number", ["coalesce", ["get", "rank"], 999]],
+          ];
         }
       }
       if (layer.id.includes("mountain") || layer.id.includes("peak")) {
-        // Peaks from province zoom (Kakao shows major mountains earlier)
-        layer.minzoom = 8;
-        paintSet(layer, "text-color", theme.text);
+        // Major peaks z10+; more names as we zoom in
+        layer.minzoom = 10;
+        const peakFilter = layer.filter;
+        layer.filter = [
+          "all",
+          ...(Array.isArray(peakFilter) && peakFilter[0] === "all"
+            ? peakFilter.slice(1)
+            : peakFilter
+              ? [peakFilter]
+              : []),
+          ["has", "name"],
+          [
+            "<=",
+            ["to-number", ["coalesce", ["get", "rank"], 999]],
+            ["step", ["zoom"], 4, 11, 8, 12, 16, 13, 30],
+          ],
+        ];
+        paintSet(layer, "text-color", theme.id === "neon" ? "#8A9278" : "#4A5A48");
         paintSet(layer, "text-halo-color", theme.textHalo);
         if (layer.layout) {
           layer.layout["text-size"] = [
             "interpolate",
             ["linear"],
             ["zoom"],
-            8,
             10,
+            11,
             12,
-            12,
+            13,
+            14,
+            14,
           ];
           layer.layout["text-optional"] = true;
+          layer.layout["text-padding"] = 4;
+          layer.layout["symbol-sort-key"] = [
+            "-",
+            1700,
+            ["to-number", ["coalesce", ["get", "rank"], 999]],
+          ];
         }
       }
     }
@@ -2344,42 +2440,92 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     layers.push(layer);
 
     if (layer.id === "poi_transit") {
+      const stationFilter: unknown = [
+        "all",
+        [
+          "any",
+          ["==", ["get", "class"], "rail"],
+          ["==", ["get", "class"], "railway"],
+        ],
+        [
+          "match",
+          ["get", "subclass"],
+          ["subway", "station", "halt", "tram_stop"],
+          true,
+          false,
+        ],
+        ["has", "name"],
+      ];
+      const quietStation =
+        theme.id === "neon" ? "#A8B0C8" : theme.id === "white" ? "#5A606C" : "#3A4155";
+      // Mid-zoom names: collision-limited (OMT ranks are mostly 1 in Seoul)
+      layers.splice(layers.length - 1, 0, {
+        id: "poi_transit_mid",
+        type: "symbol",
+        source: "openmaptiles",
+        "source-layer": "poi",
+        minzoom: 11,
+        maxzoom: 14,
+        filter: stationFilter,
+        layout: {
+          visibility: "visible",
+          "text-field": KO_TEXT,
+          "text-font": ["Noto Sans Bold"],
+          "text-size": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11,
+            11,
+            13,
+            12,
+          ],
+          "text-anchor": "top",
+          "text-offset": [0, 0.7],
+          "text-optional": false,
+          "text-allow-overlap": false,
+          "text-ignore-placement": false,
+          "text-padding": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11,
+            14,
+            12,
+            13,
+            13,
+            1.8,
+          ],
+          "symbol-sort-key": 1600,
+          "symbol-z-order": "source",
+        },
+        paint: {
+          "text-color": quietStation,
+          "text-halo-color": "#FFFFFF",
+          "text-halo-width": 1.5,
+        },
+      });
       layers.splice(layers.length - 1, 0, {
         id: "subway_station_dot",
         type: "circle",
         source: "openmaptiles",
         "source-layer": "poi",
-        filter: [
-          "all",
-          [
-            "any",
-            ["==", ["get", "class"], "rail"],
-            ["==", ["get", "class"], "railway"],
-          ],
-          [
-            "match",
-            ["get", "subclass"],
-            ["subway", "station", "halt", "tram_stop"],
-            true,
-            false,
-          ],
-        ],
-        minzoom: 12,
+        minzoom: 11,
+        maxzoom: 14,
+        filter: stationFilter,
         paint: {
           "circle-radius": [
             "interpolate",
             ["linear"],
             ["zoom"],
-            12,
-            3.2,
-            14,
-            4,
-            16,
-            4.6,
+            11,
+            2.0,
+            13,
+            2.8,
           ],
           "circle-color": theme.stationDot,
-          "circle-opacity": 0.95,
-          "circle-stroke-width": theme.id === "neon" ? 1.4 : 1.2,
+          "circle-opacity": 0.88,
+          "circle-stroke-width": theme.id === "neon" ? 1.3 : 1.0,
           "circle-stroke-color": theme.textHalo,
         },
       });
@@ -2480,6 +2626,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       "text-letter-spacing": 0.08,
       "text-max-width": 8,
       "text-padding": 1.5,
+      // Gu wins over dong / landmark / mountain when colliding
+      "symbol-sort-key": 2000,
       visibility: "visible",
     },
     paint: {
@@ -2488,21 +2636,52 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       "text-halo-width": 1.5,
     },
   });
-  // OMT omits 동 / large POIs until z14 — bridge the z13 gap for Seoul hubs
+  // Famous 동 — z11+ (OMT suburb sparse until later)
   layers.push({
     id: "label_korea_dong_overlay",
     type: "symbol",
     source: "korea_major_labels",
-    filter: ["==", ["get", "kind"], "dong"],
-    minzoom: 13,
-    maxzoom: 14.5,
+    filter: [
+      "all",
+      ["==", ["get", "kind"], "dong"],
+      [
+        "<=",
+        ["to-number", ["coalesce", ["get", "priority"], 99]],
+        ["step", ["zoom"], 6, 12, 8, 13, 50],
+      ],
+    ],
+    minzoom: 11,
+    maxzoom: 14,
     layout: {
       "text-field": ["get", "name"],
       "text-font": ["Noto Sans Regular"],
-      "text-size": 16,
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        11,
+        14,
+        13,
+        16,
+      ],
       "text-max-width": 8,
-      "text-padding": 2,
+      "text-padding": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        11,
+        5,
+        12,
+        3.5,
+        13,
+        1.6,
+      ],
       "text-optional": true,
+      "symbol-sort-key": [
+        "-",
+        1450,
+        ["to-number", ["coalesce", ["get", "priority"], 50]],
+      ],
       visibility: "visible",
     },
     paint: {
@@ -2512,19 +2691,121 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     },
   });
   layers.push({
+    id: "label_korea_mountain_overlay",
+    type: "symbol",
+    source: "korea_major_labels",
+    filter: [
+      "all",
+      ["==", ["get", "kind"], "mountain"],
+      [
+        "<=",
+        ["to-number", ["coalesce", ["get", "priority"], 99]],
+        ["step", ["zoom"], 3, 11, 4, 12, 5, 13, 12],
+      ],
+    ],
+    minzoom: 10,
+    maxzoom: 14,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        10,
+        12,
+        12,
+        13,
+      ],
+      "text-max-width": 8,
+      "text-padding": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        10,
+        5,
+        13,
+        1.2,
+      ],
+      "text-optional": true,
+      // Few peaks — always show when in view; do not crowd other labels out
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+      "symbol-sort-key": [
+        "-",
+        1750,
+        ["to-number", ["coalesce", ["get", "priority"], 50]],
+      ],
+      visibility: "visible",
+    },
+    paint: {
+      "text-color": theme.id === "neon" ? "#8A9278" : "#4A5A48",
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.5,
+    },
+  });
+  layers.push({
     id: "label_korea_landmark_overlay",
     type: "symbol",
     source: "korea_major_labels",
-    filter: ["==", ["get", "kind"], "landmark"],
-    minzoom: 13,
-    maxzoom: 14.5,
+    filter: [
+      "all",
+      ["==", ["get", "kind"], "landmark"],
+      [
+        "<=",
+        ["to-number", ["coalesce", ["get", "priority"], 99]],
+        ["step", ["zoom"], 5, 12, 7],
+      ],
+    ],
+    minzoom: 11.5,
+    maxzoom: 13,
     layout: {
       "text-field": ["get", "name"],
       "text-font": ["Noto Sans Bold"],
-      "text-size": 14,
+      "text-size": 12,
       "text-max-width": 8,
-      "text-padding": 3,
+      "text-padding": 3.5,
       "text-optional": true,
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
+      "symbol-sort-key": [
+        "-",
+        1050,
+        ["to-number", ["coalesce", ["get", "priority"], 50]],
+      ],
+      visibility: "visible",
+    },
+    paint: {
+      "text-color": theme.id === "neon" ? "#A8B0E0" : "#5A6B8C",
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.5,
+    },
+  });
+  layers.push({
+    id: "label_korea_landmark_overlay_z13",
+    type: "symbol",
+    source: "korea_major_labels",
+    filter: [
+      "all",
+      ["==", ["get", "kind"], "landmark"],
+      ["<=", ["to-number", ["coalesce", ["get", "priority"], 99]], 28],
+    ],
+    minzoom: 13,
+    maxzoom: 14,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Bold"],
+      "text-size": 13,
+      "text-max-width": 8,
+      "text-padding": 1.0,
+      "text-optional": true,
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+      "symbol-sort-key": [
+        "-",
+        1050,
+        ["to-number", ["coalesce", ["get", "priority"], 50]],
+      ],
       visibility: "visible",
     },
     paint: {

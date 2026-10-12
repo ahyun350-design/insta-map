@@ -308,7 +308,39 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
     before,
   );
 
-  // Station names come from basemap poi_transit (overlay station `name` is line title).
+  // Mid-zoom station dots (quiet); colored dots stay z14+. Names: basemap poi_transit*.
+  upsertLayer(
+    map,
+    {
+      id: `${SUBWAY_STATION_TRANSFER}_mid`,
+      type: "circle",
+      source: SUBWAY_SOURCE,
+      filter: [
+        "all",
+        ["==", ["get", "kind"], "station"],
+        ["==", ["get", "transfer"], 1],
+      ],
+      minzoom: 11,
+      maxzoom: 14,
+      paint: {
+        "circle-radius": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          11,
+          2.4,
+          13,
+          3.2,
+        ],
+        "circle-color": p.line,
+        "circle-stroke-width": 1.1,
+        "circle-stroke-color": p.stationStroke,
+        "circle-opacity": 0.85,
+      },
+      layout: { visibility: "visible" },
+    },
+    before,
+  );
 
   upsertLayer(
     map,
@@ -358,9 +390,7 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
     before,
   );
 
-  if (map.getLayer("subway_station_dot")) {
-    map.setLayoutProperty("subway_station_dot", "visibility", "none");
-  }
+  // Keep basemap subway_station_dot for z11–14 mid-zoom; overlay colored dots from z14.
 }
 
 /**
