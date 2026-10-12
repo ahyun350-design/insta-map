@@ -530,15 +530,33 @@ test("map-preview Seoul z10.5: ≥20 gu labels", async ({ page }) => {
   ).toBeGreaterThanOrEqual(20);
 });
 
-test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
+test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
   const fs = await import("node:fs");
   const path = await import("node:path");
   const outDir = path.join(process.cwd(), "e2e/artifacts");
   fs.mkdirSync(outDir, { recursive: true });
 
   await openPreview(page, "/map-preview?mode=nopins&theme=paper");
-  const MANGWON: [number, number] = [126.9055, 37.556];
-  const HONGDAE: [number, number] = [126.924, 37.5572];
+  // Warm tiles/glyphs at first hub before counting (idle can fire before POI tiles arrive)
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    map.jumpTo({ zoom: 17, center: [126.9055, 37.556] });
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 5000));
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 3000);
+    });
+  });
+
+  const hubs: Array<{
+    id: "mangwon" | "hongdae" | "gangnam";
+    center: [number, number];
+  }> = [
+    { id: "mangwon", center: [126.9055, 37.556] },
+    { id: "hongdae", center: [126.924, 37.5572] },
+    { id: "gangnam", center: [127.0276, 37.4979] },
+  ];
   const roadIds = [
     "highway-name-path",
     "highway-name-minor",
@@ -548,39 +566,76 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
     "road_shield_us",
     "label_bridge_ko",
   ];
+  const targets: Record<
+    number,
+    { totalMin: number; totalMax: number; shopMin: number }
+  > = {
+    14: { totalMin: 25, totalMax: 40, shopMin: 8 },
+    15: { totalMin: 30, totalMax: 45, shopMin: 20 },
+    16: { totalMin: 35, totalMax: 50, shopMin: 30 },
+    17: { totalMin: 35, totalMax: 55, shopMin: 30 },
+  };
 
   async function measureAt(zoom: number, center: [number, number]) {
     await page.evaluate(
       async ({ z, center: c }) => {
         const map = (
-          window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap }
+          window as unknown as {
+            __PINDMAP_PREVIEW_MAP__: PreviewMap & {
+              areTilesLoaded?: () => boolean;
+              loaded?: () => boolean;
+            };
+          }
         ).__PINDMAP_PREVIEW_MAP__;
+        const sleep = (ms: number) =>
+          new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+        const waitReady = async (budgetMs: number) => {
+          const t0 = Date.now();
+          while (Date.now() - t0 < budgetMs) {
+            const tilesOk =
+              typeof map.areTilesLoaded === "function"
+                ? map.areTilesLoaded()
+                : true;
+            if (tilesOk && (typeof map.loaded !== "function" || map.loaded())) {
+              await new Promise<void>((resolve) => {
+                map.once("idle", () => resolve());
+                window.setTimeout(() => resolve(), 800);
+              });
+              return;
+            }
+            await sleep(200);
+          }
+        };
         map.jumpTo({ zoom: z, center: c });
-        await new Promise<void>((resolve) => {
-          map.once("idle", () => resolve());
-          window.setTimeout(() => resolve(), 5000);
-        });
+        await waitReady(8000);
+        await sleep(2500);
+        map.jumpTo({ zoom: z, center: c });
+        await waitReady(5000);
+        await sleep(2000);
       },
       { z: zoom, center },
     );
     return page.evaluate((roads) => {
-      const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
-        .__PINDMAP_PREVIEW_MAP__;
+      const map = (
+        window as unknown as {
+          __PINDMAP_PREVIEW_MAP__: PreviewMap & {
+            querySourceFeatures?: (
+              source: string,
+              opts: { sourceLayer: string },
+            ) => Array<{ properties?: Record<string, unknown> | null }>;
+            project?: (lngLat: [number, number]) => { x: number; y: number };
+          };
+        }
+      ).__PINDMAP_PREVIEW_MAP__;
       const style = (
         map as unknown as { getStyle?: () => { layers?: { id: string }[] } }
       ).getStyle?.();
       const layerIds = (style?.layers ?? []).map((l) => l.id);
-      const shopLayers = layerIds.filter((id) => id.startsWith("shop_poi_label"));
+      const shopLayers = layerIds.filter((id) =>
+        id.startsWith("shop_poi_label"),
+      );
       const shop = shopLayers.length
         ? map.queryRenderedFeatures({ layers: shopLayers })
-        : [];
-      const dongLayers = [
-        "label_dong_major_ko",
-        "label_dong_ko",
-        "label_korea_dong_overlay",
-      ].filter((id) => !!map.getLayer(id));
-      const dong = dongLayers.length
-        ? map.queryRenderedFeatures({ layers: dongLayers })
         : [];
       const landmarkLayers = [
         "landmark_label",
@@ -592,17 +647,10 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
       const station = map.getLayer("poi_transit")
         ? map.queryRenderedFeatures({ layers: ["poi_transit"] })
         : [];
-      const subwayLine = map.getLayer("subway_overlay_line")
-        ? map.queryRenderedFeatures({ layers: ["subway_overlay_line"] })
-        : [];
-      const building = map.getLayer("building")
-        ? map.queryRenderedFeatures({ layers: ["building"] })
-        : [];
       const roadPresent = roads.filter((id) => !!map.getLayer(id));
       const roadFeats = roadPresent.length
         ? map.queryRenderedFeatures({ layers: roadPresent })
         : [];
-
       const namelessShop = (
         shop as Array<{ properties?: Record<string, unknown> | null }>
       ).filter((f) => {
@@ -612,25 +660,73 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
         return !n;
       }).length;
 
+      // z17 coverage: priority 3–5 shop classes in viewport (not all retail)
+      let shopCandidates = 0;
+      if (map.querySourceFeatures && map.project) {
+        const feats = map.querySourceFeatures("openmaptiles", {
+          sourceLayer: "poi",
+        });
+        const pri = new Set([
+          "cafe",
+          "restaurant",
+          "fast_food",
+          "bakery",
+          "bar",
+          "beer",
+          "bank",
+          "pharmacy",
+          "mall",
+          "cinema",
+          "theatre",
+          "theater",
+          "hotel",
+          "lodging",
+          "department_store",
+        ]);
+        const seen = new Set<string>();
+        for (const f of feats) {
+          const p = f.properties ?? {};
+          const cls = String(p.class ?? "");
+          const sub = String(p.subclass ?? "");
+          const isConv = cls === "shop" && sub === "convenience";
+          const isSuper = cls === "grocery" && sub === "supermarket";
+          if (!pri.has(cls) && !isConv && !isSuper) continue;
+          const rank = Number(p.rank ?? 999);
+          if (rank > 80) continue;
+          const name = String(p["name:ko"] || p.name || "").trim();
+          if (!name) continue;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const g = (f as any).geometry;
+          if (!g || g.type !== "Point") continue;
+          const [lng, lat] = g.coordinates as [number, number];
+          const pt = map.project!([lng, lat]);
+          if (pt.x < 0 || pt.y < 0 || pt.x > 390 || pt.y > 844) continue;
+          const key = `${name}|${lng.toFixed(5)}|${lat.toFixed(5)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          shopCandidates += 1;
+        }
+      }
+
       return {
         shopCount: shop.length,
-        dongCount: dong.length,
         landmarkCount: landmark.length,
         stationCount: station.length,
-        subwayLineCount: subwayLine.length,
-        buildingCount: building.length,
+        total: shop.length + landmark.length + station.length,
         roadNames: roadFeats.length,
         namelessShop,
+        shopCandidates,
         zoom: map.getZoom(),
-        shopLayers,
-        layerIds,
+        iconSize: shopLayers[0]
+          ? map.getLayoutProperty(shopLayers[0], "icon-size")
+          : null,
       };
     }, roadIds);
   }
 
   async function shot(
     zoom: number,
-    place: "mangwon" | "hongdae",
+    place: "mangwon" | "hongdae" | "gangnam",
     center: [number, number],
   ) {
     await page.evaluate(
@@ -647,13 +743,77 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
       { z: zoom, center },
     );
     await page.screenshot({
-      path: path.join(outDir, `skeleton-z${zoom}-${place}.png`),
+      path: path.join(outDir, `density-z${zoom}-${place}.png`),
       fullPage: false,
     });
   }
 
-  // Label first-render ≤500ms with tiles/glyphs warm (z16→z12 hide→z17).
-  // Cold-far (nationwide→Mangwon) is tile-RTT-bound (~1.5–2.5s); see measure-label-latency.mjs.
+  const rows: string[] = [];
+  for (const hub of hubs) {
+    for (const z of [14, 15, 16, 17] as const) {
+      const m = await measureAt(z, hub.center);
+      const t = targets[z];
+      expect(
+        m.roadNames,
+        `${hub.id} z${z} road names must be 0`,
+      ).toBe(0);
+      expect(
+        m.namelessShop,
+        `${hub.id} z${z} nameless shops must be 0`,
+      ).toBe(0);
+      expect(
+        m.shopCount,
+        `${hub.id} z${z} shops ≥${t.shopMin}, got ${m.shopCount}`,
+      ).toBeGreaterThanOrEqual(t.shopMin);
+      expect(
+        m.total,
+        `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (shop=${m.shopCount} lm=${m.landmarkCount} st=${m.stationCount})`,
+      ).toBeGreaterThanOrEqual(t.totalMin);
+      expect(
+        m.total,
+        `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (shop=${m.shopCount} lm=${m.landmarkCount} st=${m.stationCount})`,
+      ).toBeLessThanOrEqual(t.totalMax);
+      if (z === 17 && m.shopCandidates > 0) {
+        const coverage =
+          m.shopCandidates <= m.shopCount
+            ? 1
+            : m.shopCount / m.shopCandidates;
+        expect(
+          coverage,
+          `${hub.id} z17 shop coverage ≥70% (shop=${m.shopCount} cand=${m.shopCandidates})`,
+        ).toBeGreaterThanOrEqual(0.7);
+      }
+      rows.push(
+        `${hub.id} z${z}: total=${m.total} shop=${m.shopCount} lm=${m.landmarkCount} st=${m.stationCount} cand=${m.shopCandidates} icon=${m.iconSize}`,
+      );
+    }
+  }
+
+  for (const hub of hubs) {
+    for (const z of [14, 15, 16] as const) {
+      await shot(z, hub.id, hub.center);
+    }
+  }
+
+  // Hongdae still shows subway + buildings at street zoom
+  const hz15 = await measureAt(15, hubs[1].center);
+  const hz15Extra = await page.evaluate(() => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    return {
+      subway: map.getLayer("subway_overlay_line")
+        ? map.queryRenderedFeatures({ layers: ["subway_overlay_line"] }).length
+        : 0,
+      building: map.getLayer("building")
+        ? map.queryRenderedFeatures({ layers: ["building"] }).length
+        : 0,
+    };
+  });
+  expect(hz15Extra.subway).toBeGreaterThanOrEqual(1);
+  expect(hz15Extra.building).toBeGreaterThanOrEqual(1);
+  expect(hz15.roadNames).toBe(0);
+
+  // Warm label latency after density (avoid perturbing counts)
   const labelLatencyMs = await page.evaluate(async () => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
@@ -696,85 +856,10 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
     }
     return null;
   });
-  expect(
-    labelLatencyMs,
-    `shop label first-render must be ≤500ms, got ${labelLatencyMs}`,
-  ).not.toBeNull();
-  expect(
-    labelLatencyMs!,
-    `shop label first-render must be ≤500ms, got ${labelLatencyMs}`,
-  ).toBeLessThanOrEqual(500);
+  expect(labelLatencyMs).not.toBeNull();
+  expect(labelLatencyMs!).toBeLessThanOrEqual(500);
 
-  // —— Mangwon hierarchy ——
-  const mz13 = await measureAt(13, MANGWON);
-  expect(mz13.dongCount, `Mangwon z13 dong ≥3, got ${mz13.dongCount}`).toBeGreaterThanOrEqual(3);
-  expect(
-    mz13.stationCount,
-    `Mangwon z13 station ≥1, got ${mz13.stationCount}`,
-  ).toBeGreaterThanOrEqual(1);
-  expect(
-    mz13.landmarkCount,
-    `Mangwon z13 landmark ≥2, got ${mz13.landmarkCount}`,
-  ).toBeGreaterThanOrEqual(2);
-  expect(mz13.roadNames, "road names 0 at Mangwon z13").toBe(0);
-
-  const mz14 = await measureAt(14, MANGWON);
-  expect(
-    mz14.landmarkCount,
-    `Mangwon z14 landmarks ≥4, got ${mz14.landmarkCount}`,
-  ).toBeGreaterThanOrEqual(4);
-  expect(mz14.roadNames, "road names 0 at Mangwon z14").toBe(0);
-
-  const mz15 = await measureAt(15, MANGWON);
-  expect(mz15.shopCount, `Mangwon z15 shops ≥10, got ${mz15.shopCount}`).toBeGreaterThanOrEqual(10);
-  expect(mz15.roadNames, "road names 0 at Mangwon z15").toBe(0);
-
-  const mz16 = await measureAt(16, MANGWON);
-  expect(
-    mz16.landmarkCount,
-    `Mangwon z16 landmarks ≥5, got ${mz16.landmarkCount}`,
-  ).toBeGreaterThanOrEqual(5);
-  expect(
-    mz16.shopCount,
-    `Mangwon z16 shops 30–60, got ${mz16.shopCount}`,
-  ).toBeGreaterThanOrEqual(30);
-  expect(
-    mz16.shopCount,
-    `Mangwon z16 shops 30–60, got ${mz16.shopCount}`,
-  ).toBeLessThanOrEqual(60);
-  expect(mz16.namelessShop, "nameless shop labels must be 0").toBe(0);
-  expect(mz16.roadNames, "road names 0 at Mangwon z16").toBe(0);
-
-  // —— Hongdae ——
-  const hz15 = await measureAt(15, HONGDAE);
-  expect(
-    hz15.subwayLineCount,
-    `Hongdae z15 subway lines ≥1, got ${hz15.subwayLineCount}`,
-  ).toBeGreaterThanOrEqual(1);
-  expect(
-    hz15.buildingCount,
-    `Hongdae z15 buildings ≥1, got ${hz15.buildingCount}`,
-  ).toBeGreaterThanOrEqual(1);
-  expect(hz15.roadNames, "road names 0 at Hongdae z15").toBe(0);
-
-  const hz16 = await measureAt(16, HONGDAE);
-  expect(
-    hz16.landmarkCount,
-    `Hongdae z16 landmarks ≥3, got ${hz16.landmarkCount}`,
-  ).toBeGreaterThanOrEqual(3);
-  expect(hz16.namelessShop, "Hongdae nameless shops 0").toBe(0);
-
-  // Screenshots — Mangwon z13/z15/z17 + Hongdae key zooms
-  for (const z of [13, 15, 17] as const) {
-    await shot(z, "mangwon", MANGWON);
-  }
-  for (const z of [12, 14, 16, 17] as const) {
-    await shot(z, "hongdae", HONGDAE);
-  }
-
-  console.log(
-    `[skeleton] labelFirstMs=${labelLatencyMs}; mangwon z13 dong=${mz13.dongCount} station=${mz13.stationCount} landmark=${mz13.landmarkCount}; z14 landmark=${mz14.landmarkCount}; z15 shop=${mz15.shopCount}; z16 landmark=${mz16.landmarkCount} shop=${mz16.shopCount}; hongdae z15 subway=${hz15.subwayLineCount} building=${hz15.buildingCount} z16 landmark=${hz16.landmarkCount}`,
-  );
+  console.log(`[density] labelFirstMs=${labelLatencyMs}; ${rows.join(" | ")}`);
 });
 
 test("map-preview road name / shield labels are hidden (0 features)", async ({

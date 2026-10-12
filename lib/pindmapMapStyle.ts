@@ -211,7 +211,7 @@ const KO_TEXT: unknown = [
 
 /**
  * Neighborhood anchor labels from OpenMapTiles `poi`.
- * Shops/cafes use shop_poi_* layers (z15+). Landmarks always stack above shops.
+ * Shops/cafes use shop_poi_* layers (z14+). Landmarks always stack above shops.
  * Color groups: culture | medical | transit.
  */
 const LANDMARK_FILTER: unknown = [
@@ -331,6 +331,32 @@ function poiSpriteIcon(): unknown {
     "bank_11",
     [
       "any",
+      ["==", ["get", "class"], "hotel"],
+      ["==", ["get", "class"], "lodging"],
+      ["==", ["get", "subclass"], "hotel"],
+    ],
+    "lodging_11",
+    [
+      "any",
+      ["==", ["get", "class"], "cinema"],
+      ["==", ["get", "subclass"], "cinema"],
+    ],
+    "cinema_11",
+    [
+      "any",
+      ["==", ["get", "class"], "theatre"],
+      ["==", ["get", "class"], "theater"],
+    ],
+    "cinema_11",
+    [
+      "any",
+      ["==", ["get", "class"], "mall"],
+      ["==", ["get", "subclass"], "department_store"],
+      ["==", ["get", "class"], "department_store"],
+    ],
+    "shop_11",
+    [
+      "any",
       ["all", ["==", ["get", "class"], "shop"], ["==", ["get", "subclass"], "convenience"]],
       ["all", ["==", ["get", "class"], "grocery"], ["==", ["get", "subclass"], "supermarket"]],
     ],
@@ -371,8 +397,18 @@ function poiSpriteIcon(): unknown {
 
 function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = landmarkGroupColor(theme);
-  // z13 major parks/universities/stadiums; z14+ schools·hospitals·markets; denser later
-  const rankMax = landmarkRankMaxExpr(6, 14, 28);
+  // Leave room for shops at z14–16 (totals ≤50); slightly denser anchors at z17
+  const rankMax: unknown = [
+    "step",
+    ["zoom"],
+    5,
+    14,
+    6,
+    15.5,
+    14,
+    17,
+    18,
+  ];
   const filter: unknown = [
     "all",
     LANDMARK_FILTER,
@@ -380,7 +416,7 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     ["has", "name"],
     ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], rankMax],
   ];
-  // Above shop sort-keys (≤700) so anchors win collisions
+  // Priority 2 — above shops (≤850), below stations (~1100−rank)
   const sortKey: unknown = ["-", 1000, ["to-number", ["coalesce", ["get", "rank"], 999]]];
 
   // Single symbol: icon + name together (no nameless dots).
@@ -394,8 +430,8 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     layout: {
       visibility: "visible",
       "icon-image": poiSpriteIcon(),
-      // *_11 sprites (~17px) → ~18–20px on screen
-      "icon-size": 1.15,
+      // cafe_11 is 34px@2x → 17 CSS px at size 1; ~18px ≈ 1.1
+      "icon-size": 1.1,
       "icon-optional": false,
       "text-field": KO_TEXT,
       "text-font": ["Noto Sans Bold"],
@@ -403,7 +439,19 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
       "text-variable-anchor": ["right", "left", "top", "bottom"],
       "text-radial-offset": 1.05,
       "text-max-width": 8,
-      "text-padding": 1.5,
+      "text-padding": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        13,
+        4,
+        14,
+        3,
+        16,
+        1.5,
+        17,
+        0.7,
+      ],
       "text-optional": false,
       "text-allow-overlap": false,
       "text-ignore-placement": false,
@@ -479,24 +527,19 @@ const SHOP_EXCLUDE: unknown = [
   ],
 ];
 
-/**
- * z16: food + convenience + supermarket + bank + pharmacy only.
- * Hairdresser / general retail start at z17. No rank hard-filter.
- */
-const SHOP_Z16: unknown = [
+/** Priority 3 — large commercial / culture venues (not landmark anchors). */
+const SHOP_BIG: unknown = [
   "any",
-  ["==", ["get", "class"], "cafe"],
-  ["==", ["get", "class"], "restaurant"],
-  ["==", ["get", "class"], "fast_food"],
-  ["==", ["get", "class"], "bakery"],
-  ["==", ["get", "class"], "bar"],
-  ["==", ["get", "class"], "bank"],
-  ["==", ["get", "class"], "pharmacy"],
-  [
-    "all",
-    ["==", ["get", "class"], "shop"],
-    ["==", ["get", "subclass"], "convenience"],
-  ],
+  ["==", ["get", "class"], "mall"],
+  ["==", ["get", "class"], "cinema"],
+  ["==", ["get", "class"], "theatre"],
+  ["==", ["get", "class"], "theater"],
+  ["==", ["get", "class"], "hotel"],
+  ["==", ["get", "class"], "lodging"],
+  ["==", ["get", "class"], "department_store"],
+  ["==", ["get", "subclass"], "department_store"],
+  ["==", ["get", "subclass"], "hotel"],
+  ["==", ["get", "subclass"], "cinema"],
   [
     "all",
     ["==", ["get", "class"], "grocery"],
@@ -504,10 +547,42 @@ const SHOP_Z16: unknown = [
   ],
 ];
 
-/** z17+: general retail / personal care (not already in z16). */
+/** Priority 4 — food & drink. */
+const SHOP_FOOD: unknown = [
+  "any",
+  ["==", ["get", "class"], "cafe"],
+  ["==", ["get", "class"], "restaurant"],
+  ["==", ["get", "class"], "fast_food"],
+  ["==", ["get", "class"], "bakery"],
+  ["==", ["get", "class"], "bar"],
+  ["==", ["get", "class"], "beer"],
+];
+
+/** Priority 5 — daily services (convenience excluded at z14–15). */
+const SHOP_DAILY_NO_CONV: unknown = [
+  "any",
+  ["==", ["get", "class"], "bank"],
+  ["==", ["get", "class"], "pharmacy"],
+];
+
+const SHOP_CONVENIENCE: unknown = [
+  "all",
+  ["==", ["get", "class"], "shop"],
+  ["==", ["get", "subclass"], "convenience"],
+];
+
+/** z16 bucket: food + daily + convenience + big (legacy name kept for remainder). */
+const SHOP_Z16: unknown = [
+  "any",
+  SHOP_BIG,
+  SHOP_FOOD,
+  SHOP_DAILY_NO_CONV,
+  SHOP_CONVENIENCE,
+];
+
+/** Priority 6 — general retail / personal care (z17+). */
 const SHOP_Z17_EXTRA: unknown = [
   "any",
-  ["==", ["get", "class"], "beer"],
   [
     "all",
     ["==", ["get", "class"], "shop"],
@@ -531,12 +606,19 @@ const SHOP_Z17_EXTRA: unknown = [
   ["==", ["get", "class"], "florist"],
   ["==", ["get", "class"], "books"],
   ["==", ["get", "class"], "library"],
+  ["==", ["get", "class"], "dentist"],
+  ["==", ["get", "class"], "doctors"],
+  ["==", ["get", "class"], "optician"],
+  ["==", ["get", "class"], "furniture"],
+  ["==", ["get", "class"], "gift"],
+  ["==", ["get", "class"], "jewelry"],
+  ["==", ["get", "class"], "shoes"],
+  ["==", ["get", "class"], "sports"],
+  ["==", ["get", "class"], "toys"],
 ];
 
 /**
- * z18 remainder: other named commercial / service POIs not in z16/z17 sets.
- * Must NOT reuse bare !SHOP_Z16 on class alone after a rank gate — that hid
- * high-rank restaurants forever. Rank is sort-only now, so !SHOP_Z16 is safe.
+ * z18 remainder: other named commercial / service POIs not in earlier sets.
  */
 const SHOP_Z18_REMAINDER: unknown = [
   "all",
@@ -546,7 +628,6 @@ const SHOP_Z18_REMAINDER: unknown = [
     "any",
     ["==", ["get", "class"], "shop"],
     ["==", ["get", "class"], "grocery"],
-    ["==", ["get", "class"], "mall"],
     ["==", ["get", "class"], "furniture"],
     ["==", ["get", "class"], "gift"],
     ["==", ["get", "class"], "jewelry"],
@@ -640,88 +721,128 @@ function shopPoiColor(theme: MapPreviewTheme): unknown {
 
 function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = shopPoiColor(theme);
-  // Priority (data-only): food > convenience/mart > bank/pharmacy > other,
-  // then better (lower) OMT rank within a bucket.
-  // Bases stay below landmark_label (1000−rank) so anchors win collisions.
+  // Higher sort-key wins placement. Priority: big(3) > food(4) > daily(5) > rest(6).
+  // Stay below landmarks (1000−rank) and stations (1100−rank).
   const sortKey: unknown = [
     "-",
     [
       "case",
-      [
-        "any",
-        ["==", ["get", "class"], "cafe"],
-        ["==", ["get", "class"], "restaurant"],
-        ["==", ["get", "class"], "fast_food"],
-        ["==", ["get", "class"], "bakery"],
-        ["==", ["get", "class"], "bar"],
-        ["==", ["get", "class"], "beer"],
-      ],
+      SHOP_BIG,
+      850,
+      SHOP_FOOD,
       700,
       [
         "any",
-        [
-          "all",
-          ["==", ["get", "class"], "shop"],
-          ["==", ["get", "subclass"], "convenience"],
-        ],
-        [
-          "all",
-          ["==", ["get", "class"], "grocery"],
-          ["==", ["get", "subclass"], "supermarket"],
-        ],
+        SHOP_DAILY_NO_CONV,
+        SHOP_CONVENIENCE,
       ],
-      600,
-      [
-        "any",
-        ["==", ["get", "class"], "bank"],
-        ["==", ["get", "class"], "pharmacy"],
-      ],
-      500,
+      550,
       400,
     ],
     ["/", ["to-number", ["coalesce", ["get", "rank"], 999]], 10],
   ];
 
-  // Overlapping bands (no maxzoom). Icon + name always paired (no nameless dots).
-  // z15 = famous/high-rank food shops; z16 = food set 30–60; z17–18 denser remainder.
+  // Overlapping bands. Convenience excluded until z16. Padding: far=large, near=small.
   const bands: Array<{
     idSuffix: string;
     minzoom: number;
+    maxzoom?: number;
     classFilter: unknown;
-    textSize: number;
-    textPadding: number;
+    textPadding: unknown;
   }> = [
+    {
+      idSuffix: "z14",
+      minzoom: 14,
+      maxzoom: 16,
+      // Big venues + better-ranked food (no convenience)
+      classFilter: [
+        "any",
+        [
+          "all",
+          SHOP_BIG,
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 40],
+        ],
+        [
+          "all",
+          SHOP_FOOD,
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 22],
+        ],
+      ],
+      textPadding: [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        14,
+        22,
+        15,
+        16,
+        16,
+        12,
+      ],
+    },
     {
       idSuffix: "z15",
       minzoom: 15,
+      maxzoom: 16.5,
       classFilter: [
-        "all",
-        SHOP_Z16,
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 45],
+        "any",
+        SHOP_BIG,
+        [
+          "all",
+          SHOP_FOOD,
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 55],
+        ],
+        SHOP_DAILY_NO_CONV,
       ],
-      textSize: 13,
-      textPadding: 20,
+      textPadding: [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        15,
+        14,
+        16,
+        10,
+      ],
     },
     {
       idSuffix: "z16",
       minzoom: 16,
       classFilter: SHOP_Z16,
-      textSize: 13,
-      textPadding: 14,
+      textPadding: [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        16,
+        16,
+        17,
+        2.4,
+        18,
+        1.1,
+      ],
     },
     {
       idSuffix: "z17",
       minzoom: 17,
-      classFilter: SHOP_Z17_EXTRA,
-      textSize: 13,
-      textPadding: 1.0,
+      classFilter: [
+        "all",
+        SHOP_Z17_EXTRA,
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 120],
+      ],
+      textPadding: [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        17,
+        0.7,
+        18,
+        0.4,
+      ],
     },
     {
       idSuffix: "z18",
       minzoom: 18,
       classFilter: SHOP_Z18_REMAINDER,
-      textSize: 13,
-      textPadding: 0.7,
+      textPadding: 0.6,
     },
   ];
 
@@ -732,7 +853,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       SHOP_EXCLUDE,
       band.classFilter,
     ];
-    layers.push({
+    const layerSpec: AnyLayer = {
       id: `shop_poi_label_${band.idSuffix}`,
       type: "symbol",
       source: "openmaptiles",
@@ -742,15 +863,26 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        // *_11 sprites (~17px) → ~18–20px on screen
-        "icon-size": 1.2,
+        // ~18px on screen from *_11 @2x (17 CSS px at size 1 → ×1.1)
+        "icon-size": 1.1,
+        "icon-padding": 1,
         "icon-optional": false,
         "text-field": SHOP_TEXT,
         "text-font": ["Noto Sans Regular"],
-        "text-size": band.textSize,
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          14,
+          13,
+          16,
+          12.5,
+          17,
+          11.5,
+        ],
         "text-variable-anchor": ["right", "left", "top", "bottom"],
-        "text-radial-offset": 1.0,
-        "text-max-width": 7,
+        "text-radial-offset": 0.9,
+        "text-max-width": 8,
         "text-padding": band.textPadding,
         "text-optional": false,
         "text-allow-overlap": false,
@@ -768,7 +900,11 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         "text-halo-blur": 0.15,
         "icon-opacity": 0.95,
       },
-    });
+    };
+    if (typeof band.maxzoom === "number") {
+      layerSpec.maxzoom = band.maxzoom;
+    }
+    layers.push(layerSpec);
   }
 }
 
@@ -788,12 +924,13 @@ function appendBusStopLayers(layers: AnyLayer[]): void {
     layout: {
       visibility: "visible",
       "icon-image": "bus_11",
-      "icon-size": 0.7,
+      "icon-size": 0.65,
       "icon-optional": false,
-      "icon-allow-overlap": false,
-      "icon-ignore-placement": false,
-      "icon-padding": 1.5,
-      "symbol-sort-key": 100,
+      // Decorative dots — do not crowd out place names
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+      "icon-padding": 0.5,
+      "symbol-sort-key": 50,
     },
     paint: {
       "icon-opacity": 0.85,
@@ -2157,8 +2294,10 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         layout["text-field"] = KO_TEXT;
         layout["text-font"] = ["Noto Sans Bold"];
         layout["text-optional"] = false;
-        layout["text-allow-overlap"] = false;
-        layout["text-padding"] = 1.5;
+        // Stations must stay visible among dense shop labels
+        layout["text-allow-overlap"] = true;
+        layout["text-ignore-placement"] = true;
+        layout["text-padding"] = 0.5;
         layout["symbol-sort-key"] = [
           "-",
           1100,
@@ -2378,13 +2517,13 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     source: "korea_major_labels",
     filter: ["==", ["get", "kind"], "landmark"],
     minzoom: 13,
-    maxzoom: 15,
+    maxzoom: 14.5,
     layout: {
       "text-field": ["get", "name"],
       "text-font": ["Noto Sans Bold"],
       "text-size": 14,
       "text-max-width": 8,
-      "text-padding": 2,
+      "text-padding": 3,
       "text-optional": true,
       visibility: "visible",
     },
@@ -2397,7 +2536,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
 
   // No transportation_name labels (road / bridge names) — place / water / station stay.
 
-  // Shop/facility names (z15+) below landmarks; adapter pins added later on top
+  // Shop/facility names (z14+) below landmarks; adapter pins added later on top
   appendShopPoiLayers(layers, theme);
   appendBusStopLayers(layers);
   // Neighborhood anchors — after shops so they paint above and keep placement priority

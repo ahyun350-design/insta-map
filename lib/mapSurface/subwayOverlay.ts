@@ -74,6 +74,7 @@ function beforeIdForSubway(map: MlMap): string | undefined {
   const order = [
     "subway_station_dot",
     "poi_transit",
+    "shop_poi_label_z14",
     "shop_poi_label_z15",
     "shop_poi_label_z16",
     "landmark_label",
@@ -341,9 +342,11 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
         "text-field": ["to-string", ["get", "ref"]],
         "text-font": ["Noto Sans Regular"],
         "text-size": 10,
-        "text-allow-overlap": false,
+        // Exit refs are tiny; don't crowd out shop/station names
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
         "text-optional": true,
-        "text-padding": 2,
+        "text-padding": 0.5,
         visibility: "visible",
       },
       paint: {
