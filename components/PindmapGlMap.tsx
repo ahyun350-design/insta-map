@@ -24,6 +24,7 @@ import {
   type MapPreviewThemeId,
   type PindmapMapThemeId,
 } from "@/lib/pindmapMapStyle";
+import { MAP_LOCAL_IDEOGRAPH_FONT_FAMILY } from "@/lib/mapSurface/mapBrand";
 
 export type PindmapGlPin = {
   id: string;
@@ -243,6 +244,8 @@ export default function PindmapGlMap({
           dragRotate: false,
           pitchWithRotate: false,
           touchPitch: false,
+          fadeDuration: 0,
+          localIdeographFontFamily: MAP_LOCAL_IDEOGRAPH_FONT_FAMILY,
         });
         mapRef.current = map;
         let loadFired = false;

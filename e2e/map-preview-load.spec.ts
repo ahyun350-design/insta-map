@@ -78,7 +78,7 @@ for (const { path, label } of LOAD_THEMES) {
   });
 }
 
-test("map-preview Hongdae: subway z15, landmark z16, exit z17", async ({
+test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
   page,
 }) => {
   await openPreview(page, "/map-preview?mode=nopins&theme=paper");
@@ -134,8 +134,8 @@ test("map-preview Hongdae: subway z15, landmark z16, exit z17", async ({
     };
   });
 
-  // Landmarks start at z16; z15 is subway + buildings
-  expect(z15.landmark, `z15 landmark must be 0, got ${z15.landmark}`).toBe(0);
+  // Landmarks start at z13–14; z15 still shows subway + buildings + landmarks
+  expect(z15.landmark, `z15 landmark count=${z15.landmark}`).toBeGreaterThan(0);
   expect(z15.line, `z15 subway line count=${z15.line}`).toBeGreaterThan(0);
   expect(z15.station, `z15 station count=${z15.station}`).toBeGreaterThan(0);
   expect(z15.building, `z15 building count=${z15.building}`).toBeGreaterThan(0);
@@ -574,11 +574,23 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
       const shop = shopLayers.length
         ? map.queryRenderedFeatures({ layers: shopLayers })
         : [];
-      const dong = map.getLayer("label_dong_ko")
-        ? map.queryRenderedFeatures({ layers: ["label_dong_ko"] })
+      const dongLayers = [
+        "label_dong_major_ko",
+        "label_dong_ko",
+        "label_korea_dong_overlay",
+      ].filter((id) => !!map.getLayer(id));
+      const dong = dongLayers.length
+        ? map.queryRenderedFeatures({ layers: dongLayers })
         : [];
-      const landmark = map.getLayer("landmark_label")
-        ? map.queryRenderedFeatures({ layers: ["landmark_label"] })
+      const landmarkLayers = [
+        "landmark_label",
+        "label_korea_landmark_overlay",
+      ].filter((id) => !!map.getLayer(id));
+      const landmark = landmarkLayers.length
+        ? map.queryRenderedFeatures({ layers: landmarkLayers })
+        : [];
+      const station = map.getLayer("poi_transit")
+        ? map.queryRenderedFeatures({ layers: ["poi_transit"] })
         : [];
       const subwayLine = map.getLayer("subway_overlay_line")
         ? map.queryRenderedFeatures({ layers: ["subway_overlay_line"] })
@@ -591,11 +603,12 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
         ? map.queryRenderedFeatures({ layers: roadPresent })
         : [];
 
-      // Nameless shops forbidden (icon+text coupled via text/icon-optional false)
       const namelessShop = (
         shop as Array<{ properties?: Record<string, unknown> | null }>
       ).filter((f) => {
-        const n = String(f.properties?.["name:ko"] || f.properties?.name || "").trim();
+        const n = String(
+          f.properties?.["name:ko"] || f.properties?.name || "",
+        ).trim();
         return !n;
       }).length;
 
@@ -603,6 +616,7 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
         shopCount: shop.length,
         dongCount: dong.length,
         landmarkCount: landmark.length,
+        stationCount: station.length,
         subwayLineCount: subwayLine.length,
         buildingCount: building.length,
         roadNames: roadFeats.length,
@@ -614,7 +628,11 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
     }, roadIds);
   }
 
-  async function shot(zoom: number, place: "mangwon" | "hongdae", center: [number, number]) {
+  async function shot(
+    zoom: number,
+    place: "mangwon" | "hongdae",
+    center: [number, number],
+  ) {
     await page.evaluate(
       async ({ z, center: c }) => {
         const map = (
@@ -634,17 +652,88 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
     });
   }
 
-  // —— Mangwon ——
+  // Label first-render ≤500ms with tiles/glyphs warm (z16→z12 hide→z17).
+  // Cold-far (nationwide→Mangwon) is tile-RTT-bound (~1.5–2.5s); see measure-label-latency.mjs.
+  const labelLatencyMs = await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    const center: [number, number] = [126.9055, 37.556];
+    map.jumpTo({ zoom: 16, center });
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 5000);
+    });
+    map.jumpTo({ zoom: 12, center });
+    const hideDeadline = performance.now() + 3000;
+    while (performance.now() < hideDeadline) {
+      const style = (
+        map as unknown as { getStyle?: () => { layers?: { id: string }[] } }
+      ).getStyle?.();
+      const shopLayers = (style?.layers ?? [])
+        .map((l) => l.id)
+        .filter((id) => id.startsWith("shop_poi_label"));
+      const n = shopLayers.length
+        ? map.queryRenderedFeatures({ layers: shopLayers }).length
+        : 0;
+      if (n === 0) break;
+      await new Promise<void>((r) => window.setTimeout(r, 40));
+    }
+    const t0 = performance.now();
+    map.jumpTo({ zoom: 17, center });
+    const deadline = t0 + 8000;
+    while (performance.now() < deadline) {
+      const style = (
+        map as unknown as { getStyle?: () => { layers?: { id: string }[] } }
+      ).getStyle?.();
+      const shopLayers = (style?.layers ?? [])
+        .map((l) => l.id)
+        .filter((id) => id.startsWith("shop_poi_label"));
+      const n = shopLayers.length
+        ? map.queryRenderedFeatures({ layers: shopLayers }).length
+        : 0;
+      if (n > 0) return Math.round(performance.now() - t0);
+      await new Promise<void>((r) => window.setTimeout(r, 30));
+    }
+    return null;
+  });
+  expect(
+    labelLatencyMs,
+    `shop label first-render must be ≤500ms, got ${labelLatencyMs}`,
+  ).not.toBeNull();
+  expect(
+    labelLatencyMs!,
+    `shop label first-render must be ≤500ms, got ${labelLatencyMs}`,
+  ).toBeLessThanOrEqual(500);
+
+  // —— Mangwon hierarchy ——
+  const mz13 = await measureAt(13, MANGWON);
+  expect(mz13.dongCount, `Mangwon z13 dong ≥3, got ${mz13.dongCount}`).toBeGreaterThanOrEqual(3);
+  expect(
+    mz13.stationCount,
+    `Mangwon z13 station ≥1, got ${mz13.stationCount}`,
+  ).toBeGreaterThanOrEqual(1);
+  expect(
+    mz13.landmarkCount,
+    `Mangwon z13 landmark ≥2, got ${mz13.landmarkCount}`,
+  ).toBeGreaterThanOrEqual(2);
+  expect(mz13.roadNames, "road names 0 at Mangwon z13").toBe(0);
+
   const mz14 = await measureAt(14, MANGWON);
-  expect(mz14.dongCount, `Mangwon z14 dong ≥2, got ${mz14.dongCount}`).toBeGreaterThanOrEqual(2);
-  expect(mz14.shopCount, `Mangwon z14 shops must be 0, got ${mz14.shopCount}`).toBe(0);
+  expect(
+    mz14.landmarkCount,
+    `Mangwon z14 landmarks ≥4, got ${mz14.landmarkCount}`,
+  ).toBeGreaterThanOrEqual(4);
   expect(mz14.roadNames, "road names 0 at Mangwon z14").toBe(0);
+
+  const mz15 = await measureAt(15, MANGWON);
+  expect(mz15.shopCount, `Mangwon z15 shops ≥10, got ${mz15.shopCount}`).toBeGreaterThanOrEqual(10);
+  expect(mz15.roadNames, "road names 0 at Mangwon z15").toBe(0);
 
   const mz16 = await measureAt(16, MANGWON);
   expect(
     mz16.landmarkCount,
-    `Mangwon z16 landmarks ≥3, got ${mz16.landmarkCount}`,
-  ).toBeGreaterThanOrEqual(3);
+    `Mangwon z16 landmarks ≥5, got ${mz16.landmarkCount}`,
+  ).toBeGreaterThanOrEqual(5);
   expect(
     mz16.shopCount,
     `Mangwon z16 shops 30–60, got ${mz16.shopCount}`,
@@ -675,14 +764,16 @@ test("map-preview skeleton: Mangwon + Hongdae hierarchy", async ({ page }) => {
   ).toBeGreaterThanOrEqual(3);
   expect(hz16.namelessShop, "Hongdae nameless shops 0").toBe(0);
 
-  // Screenshots (both places × key zooms)
-  for (const z of [12, 14, 16, 17] as const) {
+  // Screenshots — Mangwon z13/z15/z17 + Hongdae key zooms
+  for (const z of [13, 15, 17] as const) {
     await shot(z, "mangwon", MANGWON);
+  }
+  for (const z of [12, 14, 16, 17] as const) {
     await shot(z, "hongdae", HONGDAE);
   }
 
   console.log(
-    `[skeleton] mangwon z14 dong=${mz14.dongCount} shop=${mz14.shopCount}; z16 landmark=${mz16.landmarkCount} shop=${mz16.shopCount}; hongdae z15 subway=${hz15.subwayLineCount} building=${hz15.buildingCount} z16 landmark=${hz16.landmarkCount}`,
+    `[skeleton] labelFirstMs=${labelLatencyMs}; mangwon z13 dong=${mz13.dongCount} station=${mz13.stationCount} landmark=${mz13.landmarkCount}; z14 landmark=${mz14.landmarkCount}; z15 shop=${mz15.shopCount}; z16 landmark=${mz16.landmarkCount} shop=${mz16.shopCount}; hongdae z15 subway=${hz15.subwayLineCount} building=${hz15.buildingCount} z16 landmark=${hz16.landmarkCount}`,
   );
 });
 

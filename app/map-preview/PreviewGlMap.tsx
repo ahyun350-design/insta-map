@@ -39,6 +39,7 @@ import {
   attachSubwayOverlay,
   prefetchSubwayOverlay,
 } from "@/lib/mapSurface/subwayOverlay";
+import { MAP_LOCAL_IDEOGRAPH_FONT_FAMILY } from "@/lib/mapSurface/mapBrand";
 import {
   paintPreviewRouteDemo,
   type PreviewRouteMode,
@@ -435,10 +436,12 @@ export default function PreviewGlMap({
           touchPitch: false,
           pitch: 0,
           maxPitch: 0,
-          fadeDuration: modeRef.current === "lite" ? 0 : 300,
+          // Labels pop in faster; 300ms fade made the basemap feel empty after jumps.
+          fadeDuration: 0,
           antialias: modeRef.current !== "lite",
           renderWorldCopies: modeRef.current !== "lite",
           pixelRatio: dpr,
+          localIdeographFontFamily: MAP_LOCAL_IDEOGRAPH_FONT_FAMILY,
         });
         const createMs = Math.round(performance.now() - createT0);
         mapRef.current = map;

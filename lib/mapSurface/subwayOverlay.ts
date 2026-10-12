@@ -74,6 +74,7 @@ function beforeIdForSubway(map: MlMap): string | undefined {
   const order = [
     "subway_station_dot",
     "poi_transit",
+    "shop_poi_label_z15",
     "shop_poi_label_z16",
     "landmark_label",
     "label_korea_gu_overlay",
@@ -194,14 +195,14 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
       type: "line",
       source: SUBWAY_SOURCE,
       filter: ["==", ["get", "kind"], "line"],
-      minzoom: 12,
+      minzoom: 11,
       layout: {
         "line-cap": "round",
         "line-join": "round",
         visibility: "visible",
       },
       paint: {
-        // z12–13: quiet gray; z14+: official / ref-mapped colour
+        // z11–13: quiet gray thin; z14+: official / ref-mapped colour
         "line-color": [
           "step",
           ["zoom"],
@@ -213,6 +214,8 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
           "interpolate",
           ["linear"],
           ["zoom"],
+          11,
+          0.8,
           12,
           1.0,
           13,
@@ -227,7 +230,7 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
         "line-opacity": [
           "step",
           ["zoom"],
-          0.7,
+          0.65,
           14,
           0.95,
         ],

@@ -21,7 +21,7 @@ export default defineConfig({
   ],
   outputDir: "test-results",
   use: {
-    baseURL: "https://pindmap.com",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || "https://pindmap.com",
     ...devices["iPhone 13"],
     // Keep iPhone 13 viewport/UA; run on Chromium (WebKit optional via e2e:install)
     browserName: "chromium",

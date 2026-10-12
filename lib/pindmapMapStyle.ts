@@ -6,6 +6,7 @@
  */
 
 import { koreaGuLabelsGeoJson } from "@/lib/koreaGuLabels";
+import { koreaMajorLabelsGeoJson } from "@/lib/koreaMajorLabels";
 import { koreaPlaceLabelsGeoJson } from "@/lib/koreaPlaceLabels";
 
 /** Production-adopted themes */
@@ -210,7 +211,7 @@ const KO_TEXT: unknown = [
 
 /**
  * Neighborhood anchor labels from OpenMapTiles `poi`.
- * Shops/cafes use shop_poi_* layers (z16+). Landmarks always stack above shops.
+ * Shops/cafes use shop_poi_* layers (z15+). Landmarks always stack above shops.
  * Color groups: culture | medical | transit.
  */
 const LANDMARK_FILTER: unknown = [
@@ -243,18 +244,7 @@ const LANDMARK_FILTER: unknown = [
     ["==", ["get", "class"], "post"],
     ["==", ["get", "subclass"], "post_office"],
   ],
-  // 지하철·기차역
-  [
-    "all",
-    ["==", ["get", "class"], "railway"],
-    ["match", ["get", "subclass"], ["subway", "station"], true, false],
-  ],
-  // 버스터미널 (정류장 제외 — bus_stop은 별도 아이콘)
-  [
-    "all",
-    ["==", ["get", "class"], "bus"],
-    ["==", ["get", "subclass"], "bus_station"],
-  ],
+  // Stations stay on poi_transit (not landmark) so names don't double-collide
   ["==", ["get", "class"], "museum"],
   ["==", ["get", "class"], "stadium"],
   ["==", ["get", "class"], "attraction"],
@@ -381,8 +371,8 @@ function poiSpriteIcon(): unknown {
 
 function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = landmarkGroupColor(theme);
-  // z16+ anchors; rank room for schools/universities in dense cells
-  const rankMax = landmarkRankMaxExpr(4, 10, 24);
+  // z13 major parks/universities/stadiums; z14+ schools·hospitals·markets; denser later
+  const rankMax = landmarkRankMaxExpr(6, 14, 28);
   const filter: unknown = [
     "all",
     LANDMARK_FILTER,
@@ -399,26 +389,17 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     type: "symbol",
     source: "openmaptiles",
     "source-layer": "poi",
-    minzoom: 16,
+    minzoom: 13,
     filter,
     layout: {
       visibility: "visible",
       "icon-image": poiSpriteIcon(),
-      "icon-size": 0.9,
+      // *_11 sprites (~17px) → ~18–20px on screen
+      "icon-size": 1.15,
       "icon-optional": false,
       "text-field": KO_TEXT,
-      "text-font": ["Noto Sans Regular"],
-      "text-size": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        16,
-        12,
-        17,
-        12.5,
-        18,
-        13,
-      ],
+      "text-font": ["Noto Sans Bold"],
+      "text-size": 14,
       "text-variable-anchor": ["right", "left", "top", "bottom"],
       "text-radial-offset": 1.05,
       "text-max-width": 8,
@@ -433,8 +414,8 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     },
     paint: {
       "text-color": color,
-      "text-halo-color": theme.textHalo,
-      "text-halo-width": theme.id === "neon" ? 1.6 : 1.4,
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.5,
       "text-halo-blur": 0.2,
       "icon-opacity": 0.95,
     },
@@ -702,6 +683,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   ];
 
   // Overlapping bands (no maxzoom). Icon + name always paired (no nameless dots).
+  // z15 = famous/high-rank food shops; z16 = food set 30–60; z17–18 denser remainder.
   const bands: Array<{
     idSuffix: string;
     minzoom: number;
@@ -710,24 +692,35 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
     textPadding: number;
   }> = [
     {
+      idSuffix: "z15",
+      minzoom: 15,
+      classFilter: [
+        "all",
+        SHOP_Z16,
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 45],
+      ],
+      textSize: 13,
+      textPadding: 20,
+    },
+    {
       idSuffix: "z16",
       minzoom: 16,
       classFilter: SHOP_Z16,
-      textSize: 11,
+      textSize: 13,
       textPadding: 14,
     },
     {
       idSuffix: "z17",
       minzoom: 17,
       classFilter: SHOP_Z17_EXTRA,
-      textSize: 11.5,
+      textSize: 13,
       textPadding: 1.0,
     },
     {
       idSuffix: "z18",
       minzoom: 18,
       classFilter: SHOP_Z18_REMAINDER,
-      textSize: 12,
+      textSize: 13,
       textPadding: 0.7,
     },
   ];
@@ -749,7 +742,8 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 0.85,
+        // *_11 sprites (~17px) → ~18–20px on screen
+        "icon-size": 1.2,
         "icon-optional": false,
         "text-field": SHOP_TEXT,
         "text-font": ["Noto Sans Regular"],
@@ -770,7 +764,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         "text-color": color,
         "text-opacity": 0.92,
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": theme.id === "neon" ? 1.5 : 1.35,
+        "text-halo-width": 1.5,
         "text-halo-blur": 0.15,
         "icon-opacity": 0.95,
       },
@@ -1632,10 +1626,13 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
               11,
               8,
               13,
-              12,
-              12,
+              11,
+              15,
+              13,
+              16,
             ];
           } else {
+            // Rivers (한강 등) readable from z11–12
             layer.layout["text-size"] = [
               "interpolate",
               ["linear"],
@@ -1643,7 +1640,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
               5,
               10,
               10,
+              13,
               12,
+              15,
             ];
           }
         }
@@ -1775,9 +1774,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             ["linear"],
             ["zoom"],
             5,
-            13,
+            16,
             8,
-            15,
+            20,
           ];
           layer.layout["text-padding"] = 2;
           layer.layout["text-allow-overlap"] = true;
@@ -1825,9 +1824,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
                 ["linear"],
                 ["zoom"],
                 5.5,
-                10,
-                8,
                 12,
+                8,
+                16,
               ],
               "text-padding": 4,
               "text-max-width": 8,
@@ -1993,15 +1992,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           layout: {
             "text-field": KO_TEXT,
             "text-font": ["Noto Sans Regular"],
-            "text-size": 12.5,
+            "text-size": 18,
             "text-letter-spacing": 0.06,
             "text-max-width": 8,
             visibility: "visible",
           },
           paint: {
             "text-color": theme.id === "neon" ? "#A8B0E0" : "#4A5166",
-            "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.2,
+            "text-halo-color": "#FFFFFF",
+            "text-halo-width": 1.5,
           },
         });
         layers.push({
@@ -2015,17 +2014,55 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           layout: {
             "text-field": KO_TEXT,
             "text-font": ["Noto Sans Regular"],
-            "text-size": 12,
+            "text-size": 16,
             "text-max-width": 8,
             visibility: "visible",
           },
           paint: {
             "text-color": theme.id === "neon" ? "#9AA2D0" : "#4A5166",
-            "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.1,
+            "text-halo-color": "#FFFFFF",
+            "text-halo-width": 1.5,
           },
         });
-        // 동 이름: suburb/quarter/neighbourhood — z14–17, darker gray 14–16px
+        // 주요 동 — z13 (rank-limited); 전부는 label_dong_ko z14+
+        layers.push({
+          id: "label_dong_major_ko",
+          type: "symbol",
+          source: "openmaptiles",
+          "source-layer": "place",
+          filter: [
+            "all",
+            [
+              "match",
+              ["get", "class"],
+              ["suburb", "quarter", "neighbourhood"],
+              true,
+              false,
+            ],
+            ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 14],
+          ],
+          minzoom: 13,
+          maxzoom: 14,
+          layout: {
+            "text-field": KO_TEXT,
+            "text-font": ["Noto Sans Regular"],
+            "text-size": 16,
+            "text-max-width": 8,
+            "text-padding": 3,
+            "text-optional": true,
+            "symbol-sort-key": [
+              "to-number",
+              ["coalesce", ["get", "rank"], 999],
+            ],
+            visibility: "visible",
+          },
+          paint: {
+            "text-color": theme.id === "neon" ? "#A8B0D8" : "#3A4155",
+            "text-halo-color": "#FFFFFF",
+            "text-halo-width": 1.5,
+          },
+        });
+        // 동 이름 전부 — z14–17.5
         layers.push({
           id: "label_dong_ko",
           type: "symbol",
@@ -2043,26 +2080,20 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           layout: {
             "text-field": KO_TEXT,
             "text-font": ["Noto Sans Regular"],
-            "text-size": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              14,
-              14,
-              16,
-              15.5,
-              17,
-              16,
-            ],
+            "text-size": 16,
             "text-max-width": 8,
-            "text-padding": 2,
+            "text-padding": 1.2,
             "text-optional": true,
+            "symbol-sort-key": [
+              "to-number",
+              ["coalesce", ["get", "rank"], 999],
+            ],
             visibility: "visible",
           },
           paint: {
             "text-color": theme.id === "neon" ? "#A8B0D8" : "#3A4155",
-            "text-halo-color": theme.textHalo,
-            "text-halo-width": 1.35,
+            "text-halo-color": "#FFFFFF",
+            "text-halo-width": 1.5,
           },
         });
         continue;
@@ -2088,7 +2119,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-width", 1.3);
       }
       if (layer.id === "poi_transit") {
-        // Station names with overlay circles — z14+ (line colour from overlay).
+        // Station names — z13+ (line colour from overlay).
         layer.filter = [
           "all",
           [
@@ -2105,25 +2136,18 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           ],
           ["has", "name"],
         ];
-        layer.minzoom = 14;
+        layer.minzoom = 13;
         const layout = { ...(layer.layout || {}) };
         delete layout["icon-image"];
         delete layout["icon-size"];
         layout["text-anchor"] = "top";
         layout["text-offset"] = [0, 0.85];
-        layout["text-size"] = [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          14,
-          11,
-          16,
-          12,
-        ];
+        layout["text-size"] = 13;
         layout["text-field"] = KO_TEXT;
-        layout["text-font"] = ["Noto Sans Regular"];
-        layout["text-optional"] = true;
+        layout["text-font"] = ["Noto Sans Bold"];
+        layout["text-optional"] = false;
         layout["text-allow-overlap"] = false;
+        layout["text-padding"] = 1.5;
         layout["symbol-sort-key"] = [
           "-",
           1100,
@@ -2133,15 +2157,19 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         const quietStation =
           theme.id === "neon" ? "#A8B0C8" : theme.id === "white" ? "#5A606C" : "#3A4155";
         paintSet(layer, "text-color", quietStation);
-        paintSet(layer, "text-halo-color", theme.textHalo);
-        paintSet(layer, "text-halo-width", 1.35);
-      }
-      // 큰 공원·산
-      if (layer.id.includes("park_label") || layer.id === "label_park") {
-        layer.minzoom = 10;
-        paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : theme.id === "neon" ? "#7AB8A0" : "#4F7A4A");
-        paintSet(layer, "text-halo-color", theme.textHalo);
+        paintSet(layer, "text-halo-color", "#FFFFFF");
         paintSet(layer, "text-halo-width", 1.5);
+      }
+      // 큰 공원·산 — major names from z13 alongside landmark_label
+      if (layer.id.includes("park_label") || layer.id === "label_park") {
+        layer.minzoom = 13;
+        paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : theme.id === "neon" ? "#7AB8A0" : "#4F7A4A");
+        paintSet(layer, "text-halo-color", "#FFFFFF");
+        paintSet(layer, "text-halo-width", 1.5);
+        if (layer.layout) {
+          layer.layout["text-size"] = 14;
+          layer.layout["text-font"] = ["Noto Sans Bold"];
+        }
       }
       if (layer.id.includes("mountain") || layer.id.includes("peak")) {
         // Peaks from province zoom (Kakao shows major mountains earlier)
@@ -2219,6 +2247,10 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       type: "geojson",
       data: koreaGuLabelsGeoJson(),
     },
+    korea_major_labels: {
+      type: "geojson",
+      data: koreaMajorLabelsGeoJson(),
+    },
   };
   layers.push({
     id: "label_korea_place_si",
@@ -2235,9 +2267,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         ["linear"],
         ["zoom"],
         6,
-        10,
+        14,
         9,
-        12,
+        20,
       ],
       "text-padding": 3,
       "text-max-width": 8,
@@ -2247,8 +2279,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     },
     paint: {
       "text-color": theme.id === "neon" ? "#8A92B8" : "#6A6570",
-      "text-halo-color": theme.textHalo,
-      "text-halo-width": 1.15,
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.5,
     },
   });
   layers.push({
@@ -2261,7 +2293,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     layout: {
       "text-field": ["get", "name"],
       "text-font": ["Noto Sans Regular"],
-      "text-size": 11,
+      "text-size": 14,
       "text-padding": 4,
       "text-max-width": 8,
       "text-optional": true,
@@ -2283,21 +2315,66 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     layout: {
       "text-field": ["get", "name"],
       "text-font": ["Noto Sans Regular"],
-      "text-size": 12.5,
+      "text-size": 18,
       "text-letter-spacing": 0.08,
       "text-max-width": 8,
       visibility: "visible",
     },
     paint: {
       "text-color": theme.id === "neon" ? "#A8B0E0" : "#4A5166",
-      "text-halo-color": theme.textHalo,
-      "text-halo-width": 1.2,
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.5,
+    },
+  });
+  // OMT omits 동 / large POIs until z14 — bridge the z13 gap for Seoul hubs
+  layers.push({
+    id: "label_korea_dong_overlay",
+    type: "symbol",
+    source: "korea_major_labels",
+    filter: ["==", ["get", "kind"], "dong"],
+    minzoom: 13,
+    maxzoom: 14.5,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 16,
+      "text-max-width": 8,
+      "text-padding": 2,
+      "text-optional": true,
+      visibility: "visible",
+    },
+    paint: {
+      "text-color": theme.id === "neon" ? "#A8B0D8" : "#3A4155",
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.5,
+    },
+  });
+  layers.push({
+    id: "label_korea_landmark_overlay",
+    type: "symbol",
+    source: "korea_major_labels",
+    filter: ["==", ["get", "kind"], "landmark"],
+    minzoom: 13,
+    maxzoom: 15,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Bold"],
+      "text-size": 14,
+      "text-max-width": 8,
+      "text-padding": 2,
+      "text-optional": true,
+      visibility: "visible",
+    },
+    paint: {
+      "text-color": theme.id === "neon" ? "#A8B0E0" : "#5A6B8C",
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.5,
     },
   });
 
   // No transportation_name labels (road / bridge names) — place / water / station stay.
 
-  // Shop/facility names (z16+) below landmarks; adapter pins added later on top
+  // Shop/facility names (z15+) below landmarks; adapter pins added later on top
   appendShopPoiLayers(layers, theme);
   appendBusStopLayers(layers);
   // Neighborhood anchors — after shops so they paint above and keep placement priority

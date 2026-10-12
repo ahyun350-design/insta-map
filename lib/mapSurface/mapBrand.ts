@@ -17,3 +17,10 @@ export const MAP_NEON_CLUSTER_FILL = "#12183A";
 
 /** Directions chrome (admin MapLibre) — lime path / endpoint accent. */
 export const MAP_DIRECTIONS_LIME = "#D9F45B";
+
+/**
+ * MapLibre `localIdeographFontFamily` — CJK/Hangul via device fonts (TinySDF),
+ * avoiding Hangul glyph `.pbf` round-trips. Default library value is `sans-serif`.
+ */
+export const MAP_LOCAL_IDEOGRAPH_FONT_FAMILY =
+  "'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";

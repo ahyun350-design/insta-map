@@ -55,6 +55,7 @@ import { attachSubwayOverlay, prefetchSubwayOverlay } from "./subwayOverlay";
 import {
   MAP_BRAND_NAVY,
   MAP_DIRECTIONS_LIME,
+  MAP_LOCAL_IDEOGRAPH_FONT_FAMILY,
   MAP_NEON_ACCENT,
   MAP_NEON_CLUSTER_FILL,
   MAP_NEON_CORE,
@@ -359,6 +360,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       antialias: false,
       renderWorldCopies: false,
       pixelRatio: dpr,
+      localIdeographFontFamily: MAP_LOCAL_IDEOGRAPH_FONT_FAMILY,
     });
     this.map = map;
     this.timingCreateMs = Math.round(now() - createT0);
