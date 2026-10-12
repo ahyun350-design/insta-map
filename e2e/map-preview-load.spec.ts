@@ -78,8 +78,10 @@ for (const { path, label } of LOAD_THEMES) {
   });
 }
 
-test("map-preview Hongdae layers at z15 / exit at z16", async ({ page }) => {
-  await openPreview(page, "/map-preview");
+test("map-preview Hongdae: subway z15, landmark z16, exit z17", async ({
+  page,
+}) => {
+  await openPreview(page, "/map-preview?mode=nopins&theme=paper");
 
   await page.getByRole("button", { name: "홍대" }).click();
 
@@ -109,13 +111,10 @@ test("map-preview Hongdae layers at z15 / exit at z16", async ({ page }) => {
   await page.evaluate(async () => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
-    // Neighborhood landmarks start at z15
-    if (Math.abs(map.getZoom() - 15) > 0.2) {
-      map.jumpTo({ zoom: 15, center: [126.9236, 37.5563] });
-    }
+    map.jumpTo({ zoom: 15, center: [126.924, 37.5572] });
     await new Promise<void>((resolve) => {
       map.once("idle", () => resolve());
-      window.setTimeout(() => resolve(), 2500);
+      window.setTimeout(() => resolve(), 3000);
     });
   });
 
@@ -128,20 +127,23 @@ test("map-preview Hongdae layers at z15 / exit at z16", async ({ page }) => {
       station: map.queryRenderedFeatures({
         layers: ["subway_overlay_station", "subway_overlay_station_transfer"],
       }).length,
+      building: map.getLayer("building")
+        ? map.queryRenderedFeatures({ layers: ["building"] }).length
+        : 0,
       zoom: map.getZoom(),
     };
   });
 
-  expect(z15.landmark, `z15 landmark_label count=${z15.landmark}`).toBeGreaterThan(
-    0,
-  );
+  // Landmarks start at z16; z15 is subway + buildings
+  expect(z15.landmark, `z15 landmark must be 0, got ${z15.landmark}`).toBe(0);
   expect(z15.line, `z15 subway line count=${z15.line}`).toBeGreaterThan(0);
   expect(z15.station, `z15 station count=${z15.station}`).toBeGreaterThan(0);
+  expect(z15.building, `z15 building count=${z15.building}`).toBeGreaterThan(0);
 
   await page.evaluate(async () => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
-    map.jumpTo({ zoom: 16, center: [126.9236, 37.5563] });
+    map.jumpTo({ zoom: 16, center: [126.924, 37.5572] });
     await new Promise<void>((resolve) => {
       map.once("idle", () => resolve());
       window.setTimeout(() => resolve(), 3000);
@@ -152,6 +154,26 @@ test("map-preview Hongdae layers at z15 / exit at z16", async ({ page }) => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
     return {
+      landmark: map.queryRenderedFeatures({ layers: ["landmark_label"] }).length,
+      zoom: map.getZoom(),
+    };
+  });
+  expect(z16.landmark, `z16 landmark count=${z16.landmark}`).toBeGreaterThan(0);
+
+  await page.evaluate(async () => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    map.jumpTo({ zoom: 17, center: [126.924, 37.5572] });
+    await new Promise<void>((resolve) => {
+      map.once("idle", () => resolve());
+      window.setTimeout(() => resolve(), 3000);
+    });
+  });
+
+  const z17 = await page.evaluate(() => {
+    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
+      .__PINDMAP_PREVIEW_MAP__;
+    return {
       exit: map.queryRenderedFeatures({
         layers: ["subway_overlay_exit", "subway_overlay_exit_bg"],
       }).length,
@@ -159,7 +181,7 @@ test("map-preview Hongdae layers at z15 / exit at z16", async ({ page }) => {
     };
   });
 
-  expect(z16.exit, `z16 exit count=${z16.exit}`).toBeGreaterThan(0);
+  expect(z17.exit, `z17 exit count=${z17.exit}`).toBeGreaterThan(0);
 });
 
 test("map-preview pins: unclustered count + nationwide singles", async ({
