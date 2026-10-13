@@ -1,17 +1,27 @@
 /**
  * 관리자 서비스 상태 카드.
  * 집계는 public.admin_status() 단일 RPC. 45초 인메모리 캐시.
+ * Claude 장애 경고는 RPC 외 extract_jobs / user_events로 보강.
  */
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { classifyClaudeFailCode } from "@/app/api/extract/_claudeFailCode";
+import { extractFailCode } from "@/app/api/extract/_timing";
 import { reclaimStaleExtractJobs } from "@/app/api/extract/_reclaim";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  computePipelineWarn,
+  type PipelineWarn,
+} from "./_pipelineWarn";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ADMIN_USER_ID = "63772749-e01b-4396-a41c-c17a4d3acfe6";
 const CACHE_TTL_MS = 45_000;
+
+export type { PipelineWarn };
+export { computePipelineWarn };
 
 type AdminStatusBody = {
   today: { attempts: number; success: number; failed: number };
@@ -33,6 +43,8 @@ type AdminStatusBody = {
     poi: number;
     poiRate: number | null;
   };
+  /** Claude credit/auth in 30m, or ≥7/10 same fail_code */
+  pipelineWarn?: PipelineWarn;
   timings?: Record<string, number>;
   cached?: boolean;
 };
@@ -45,6 +57,73 @@ function asNumber(v: unknown, fallback = 0): number {
     return Number(v);
   }
   return fallback;
+}
+
+function codeFromFailureMessage(msg: string | null | undefined): string {
+  const claude = classifyClaudeFailCode(msg);
+  if (claude) return claude;
+  return extractFailCode(msg ?? "unknown");
+}
+
+async function loadPipelineWarn(
+  admin: ReturnType<typeof getSupabaseAdmin>,
+): Promise<PipelineWarn> {
+  const since30 = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const failCodesLast30m: string[] = [];
+  const failCodesLast10: string[] = [];
+
+  try {
+    const { data: recent30 } = await admin
+      .from("extract_jobs")
+      .select("error_message,updated_at")
+      .eq("status", "failed")
+      .gte("updated_at", since30)
+      .order("updated_at", { ascending: false })
+      .limit(50);
+    for (const row of recent30 ?? []) {
+      failCodesLast30m.push(codeFromFailureMessage(row.error_message as string | null));
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Prefer normalized fail_code from extract_timing when present
+  try {
+    const { data: timingRows } = await admin
+      .from("user_events")
+      .select("meta,created_at")
+      .eq("event", "extract_timing")
+      .gte("created_at", since30)
+      .order("created_at", { ascending: false })
+      .limit(80);
+    for (const row of timingRows ?? []) {
+      const meta = (row.meta && typeof row.meta === "object" ? row.meta : {}) as {
+        ok?: boolean;
+        fail_code?: string | null;
+      };
+      if (meta.ok === false && typeof meta.fail_code === "string" && meta.fail_code) {
+        failCodesLast30m.push(extractFailCode(meta.fail_code));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const { data: last10 } = await admin
+      .from("extract_jobs")
+      .select("error_message")
+      .eq("status", "failed")
+      .order("updated_at", { ascending: false })
+      .limit(10);
+    for (const row of last10 ?? []) {
+      failCodesLast10.push(codeFromFailureMessage(row.error_message as string | null));
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return computePipelineWarn({ failCodesLast30m, failCodesLast10 });
 }
 
 function normalizeRpcPayload(raw: unknown): AdminStatusBody {
@@ -189,11 +268,15 @@ export async function GET(req: Request) {
     }
 
     const body = normalizeRpcPayload(data);
-    cache = { at: Date.now(), body };
+    const tWarn = Date.now();
+    const pipelineWarn = await loadPipelineWarn(admin);
+    timings.pipeline_warn_ms = Date.now() - tWarn;
+    const withWarn: AdminStatusBody = { ...body, pipelineWarn };
+    cache = { at: Date.now(), body: withWarn };
     timings.total_ms = Date.now() - t0;
 
     return NextResponse.json(
-      { ...body, timings, cached: false },
+      { ...withWarn, timings, cached: false },
       {
         headers: {
           "Cache-Control": `private, max-age=${Math.floor(CACHE_TTL_MS / 1000)}`,

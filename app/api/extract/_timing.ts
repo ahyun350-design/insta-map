@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { classifyClaudeFailCode } from "./_claudeFailCode";
 import type { ExtractEntry } from "./_entry";
 
 export type ExtractTimingMeta = {
@@ -26,10 +27,20 @@ export type ExtractTimingMeta = {
 };
 
 
-/** Short fail code only — strip payload after `|`, cap length. */
+/**
+ * Short fail code only for user_events.meta.fail_code.
+ * Claude/Anthropic → claude_*; otherwise strip payload after `|`, cap length.
+ * Never store request_id / raw API JSON here.
+ */
 export function extractFailCode(message: string): string {
+  const claude = classifyClaudeFailCode(message);
+  if (claude) return claude;
   const head = String(message ?? "").split("|")[0].trim();
   if (!head) return "unknown";
+  // Avoid stuffing long Claude error bodies as the code
+  if (/^Claude API 오류/i.test(head) || /^Anthropic/i.test(head)) {
+    return "claude_other";
+  }
   return head.slice(0, 64);
 }
 

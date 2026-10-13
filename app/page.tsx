@@ -139,6 +139,12 @@ type AdminStatusPayload = {
     poi: number;
     poiRate: number | null;
   };
+  /** Claude credit/auth (30m) or ≥7/10 same fail_code */
+  pipelineWarn?: {
+    active: boolean;
+    code: string | null;
+    reason: string | null;
+  };
 };
 
 function formatAdminHoursAgo(iso: string | null): string {
@@ -14449,7 +14455,14 @@ function HomePageContent() {
     const alertStale = !!adminStatus && (!adminStatus.lastSuccessAt || lastMs >= 24 * 60 * 60 * 1000);
     const alertStuck = !!adminStatus && adminStatus.stuckJobs >= 1;
     const alertBootFail = !!bootFailReport && bootFailReport.count > 0;
-    const hasAlert = alertNoSuccess || alertRate || alertStale || alertStuck || alertBootFail;
+    const alertPipeline = !!adminStatus?.pipelineWarn?.active;
+    const hasAlert =
+      alertNoSuccess ||
+      alertRate ||
+      alertStale ||
+      alertStuck ||
+      alertBootFail ||
+      alertPipeline;
     if (!hasAlert || adminAlertAutoOpenedRef.current) return;
     adminAlertAutoOpenedRef.current = true;
     setAdminCardOpen(true);
@@ -18881,23 +18894,35 @@ function HomePageContent() {
                       !!adminStatus && (!adminStatus.lastSuccessAt || lastMs >= 24 * 60 * 60 * 1000);
                     const alertStuck = !!adminStatus && adminStatus.stuckJobs >= 1;
                     const alertBootFail = !!bootFailReport && bootFailReport.count > 0;
+                    const pipelineWarn = adminStatus?.pipelineWarn;
+                    const alertPipeline = !!pipelineWarn?.active;
                     const hasAlert =
-                      alertNoSuccess || alertRate || alertStale || alertStuck || alertBootFail;
+                      alertNoSuccess ||
+                      alertRate ||
+                      alertStale ||
+                      alertStuck ||
+                      alertBootFail ||
+                      alertPipeline;
                     const todaySummary = adminStatus
                       ? `${adminStatus.today.success}/${adminStatus.today.failed}`
                       : "–/–";
                     const bootMs =
                       lastBootTiming != null ? `${lastBootTiming.totalMs}ms` : "–";
+                    // Pipeline warn replaces "정상" at the top (red). Soft alerts stay "주의".
                     const summaryLabel = adminStatusLoading
                       ? "불러오는 중"
                       : !adminStatus
                         ? "상태 없음"
-                        : hasAlert
-                          ? "주의"
-                          : "정상";
-                    const summaryText = `${summaryLabel} · 오늘 ${todaySummary} · 부팅 ${bootMs}`;
-                    const dotColor = hasAlert ? "#c62828" : "#b0b3c0";
-                    const summaryColor = hasAlert ? "#c62828" : "#8f93a6";
+                        : alertPipeline
+                          ? `경고: ${pipelineWarn?.reason || pipelineWarn?.code || "파이프라인"}`
+                          : hasAlert
+                            ? "주의"
+                            : "정상";
+                    const summaryText = alertPipeline
+                      ? summaryLabel
+                      : `${summaryLabel} · 오늘 ${todaySummary} · 부팅 ${bootMs}`;
+                    const dotColor = alertPipeline || hasAlert ? "#c62828" : "#b0b3c0";
+                    const summaryColor = alertPipeline || hasAlert ? "#c62828" : "#8f93a6";
                     const row = (label: string, value: string, alert: boolean) => (
                       <p
                         key={label}
@@ -19009,6 +19034,15 @@ function HomePageContent() {
                               </p>
                               {adminStatus ? (
                                 <>
+                                  {alertPipeline
+                                    ? row(
+                                        "파이프라인",
+                                        pipelineWarn?.reason ||
+                                          pipelineWarn?.code ||
+                                          "경고",
+                                        true,
+                                      )
+                                    : null}
                                   {row(
                                     "오늘 추출",
                                     `성공 ${adminStatus.today.success} / 실패 ${adminStatus.today.failed}`,
