@@ -29,7 +29,10 @@ import {
   type PreviewRouteMode,
 } from "./routeDemo";
 import {
+  applyOfmPlanetTilesToMap,
+  breakSelfTilesToOfmSession,
   ensureSelfTilesProtocolRegistered,
+  isSelfTilesBroken,
   prefetchSelfGlyphs,
   prefetchSelfTilesZ14Around,
   setSessionSelfTilesOverride,
@@ -291,6 +294,26 @@ export default function MapPreviewClient() {
           const warmLat = Number.isFinite(latQ) ? latQ : 37.5565;
           const warmLng = Number.isFinite(lngQ) ? lngQ : 126.9019;
           await prefetchSelfTilesZ14Around(warmLat, warmLng);
+          // e2e hook — soft-fail to OFM without destroying MapLibre
+          (
+            window as unknown as {
+              __PINDMAP_SELF_TILES_TEST__?: {
+                breakToOfm: () => void;
+                isBroken: () => boolean;
+              };
+            }
+          ).__PINDMAP_SELF_TILES_TEST__ = {
+            breakToOfm: () => {
+              breakSelfTilesToOfmSession("expanded");
+              const map = (
+                window as unknown as {
+                  __PINDMAP_PREVIEW_MAP__?: { getSource: (id: string) => unknown };
+                }
+              ).__PINDMAP_PREVIEW_MAP__;
+              if (map) void applyOfmPlanetTilesToMap(map);
+            },
+            isBroken: () => isSelfTilesBroken(),
+          };
         } else if (sp.get("selfTiles") === "0") {
           setSessionSelfTilesOverride(false);
         } else {

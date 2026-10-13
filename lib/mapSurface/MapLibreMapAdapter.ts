@@ -54,6 +54,12 @@ import { msSinceWebviewStart } from "@/lib/bootTiming";
 import { claimMapGlSlot, releaseMapGlSlot } from "./mapGlRecovery";
 import { attachSubwayOverlay, prefetchSubwayOverlay } from "./subwayOverlay";
 import {
+  applyOfmPlanetTilesToMap,
+  breakSelfTilesToOfmSession,
+  isSelfTilesBroken,
+  readSelfTilesEnabled,
+} from "./selfTiles";
+import {
   MAP_BRAND_NAVY,
   MAP_DIRECTIONS_LIME,
   MAP_LOCAL_IDEOGRAPH_FONT_FAMILY,
@@ -111,7 +117,12 @@ const DISCOVER_MIN_ZOOM = 11;
 
 const EDGE_PX = 24;
 const HIT_PAD_PX = 14;
+/** Default: fail fast to Kakao when OFM/style never paints. */
 const FIRST_TILE_TIMEOUT_MS = 4000;
+/** Self-tiles: PMTiles header+directory+first Range often exceeds 4s on cellular/iOS. */
+const SELF_TILES_FIRST_TILE_TIMEOUT_MS = 14000;
+/** After self→OFM soft switch, one more grace before Kakao. */
+const OFM_AFTER_SELF_GRACE_MS = 8000;
 /** Clusters while zoom < 10; L9 → ML zoom 10 shows individual pins. */
 const CLUSTER_MAX_ZOOM = 9;
 const CLUSTER_RADIUS = 52;
@@ -415,15 +426,42 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       this.pushPinGeoJson();
     });
 
-    this.fallbackTimer = window.setTimeout(() => {
-      if (this.destroyed) return;
-      if (!this.styleReady || !this.firstTileSeen) {
+    const selfTilesOn = readSelfTilesEnabled();
+    const firstTileBudget = selfTilesOn
+      ? SELF_TILES_FIRST_TILE_TIMEOUT_MS
+      : FIRST_TILE_TIMEOUT_MS;
+    const armFallbackTimer = (ms: number, allowSelfOfmGrace: boolean) => {
+      if (this.fallbackTimer != null) {
+        window.clearTimeout(this.fallbackTimer);
+        this.fallbackTimer = null;
+      }
+      this.fallbackTimer = window.setTimeout(() => {
+        if (this.destroyed || this.fallbackReported) return;
+        if (this.styleReady && this.firstTileSeen) return;
+        // Self-tiles slow/fail once → OFM tiles, keep this MapLibre instance (no Kakao).
+        if (
+          allowSelfOfmGrace &&
+          readSelfTilesEnabled() &&
+          !isSelfTilesBroken()
+        ) {
+          breakSelfTilesToOfmSession(this.mode === "expanded" ? "expanded" : "compact");
+          void (async () => {
+            try {
+              if (this.map) await applyOfmPlanetTilesToMap(this.map);
+            } catch {
+              /* protocol OFM fallback still applies on next tile */
+            }
+          })();
+          armFallbackTimer(OFM_AFTER_SELF_GRACE_MS, false);
+          return;
+        }
         this.reportFallback(
           options,
           !this.styleReady ? "style_timeout" : "tile_timeout",
         );
-      }
-    }, FIRST_TILE_TIMEOUT_MS);
+      }, ms);
+    };
+    armFallbackTimer(firstTileBudget, selfTilesOn);
 
     map.on("error", (ev) => {
       if (this.styleReady || this.destroyed || this.fallbackReported) return;

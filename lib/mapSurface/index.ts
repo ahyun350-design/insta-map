@@ -50,6 +50,8 @@ export {
 export {
   SELF_TILES_STORAGE_KEY,
   SELF_GLYPHS_URL,
+  applyOfmPlanetTilesToMap,
+  breakSelfTilesToOfmSession,
   getKoreaPmtilesPublicUrl,
   getSharedPmtiles,
   isSelfTilesBroken,

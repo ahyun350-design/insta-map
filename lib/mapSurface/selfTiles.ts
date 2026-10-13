@@ -32,8 +32,41 @@ export const SELF_TILES_STORAGE_KEY = "pindmap_admin_self_tiles";
 /** Same-origin glyph template (Latin/symbol ranges; Hangul via localIdeograph). */
 export const SELF_GLYPHS_URL = "/map/glyphs/{fontstack}/{range}.pbf";
 
-const OFM_PLANET_TILE =
+/** TileJSON — versioned `tiles[]` template changes over time; never hardcode a stale path. */
+const OFM_PLANET_TILEJSON = "https://tiles.openfreemap.org/planet";
+/** Last-resort template if TileJSON is unreachable (often empty on current OFM CDN). */
+const OFM_PLANET_TILE_FALLBACK =
   "https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf";
+
+let ofmTileTemplate: string | null = null;
+let ofmTileTemplatePromise: Promise<string> | null = null;
+
+async function resolveOfmTileTemplate(): Promise<string> {
+  if (ofmTileTemplate) return ofmTileTemplate;
+  if (!ofmTileTemplatePromise) {
+    ofmTileTemplatePromise = (async () => {
+      try {
+        const res = await fetch(OFM_PLANET_TILEJSON, {
+          mode: "cors",
+          credentials: "omit",
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`ofm_tilejson_${res.status}`);
+        const tj = (await res.json()) as { tiles?: string[] };
+        const t = tj.tiles?.[0];
+        if (typeof t !== "string" || !t.includes("{z}")) {
+          throw new Error("ofm_tilejson_missing_tiles");
+        }
+        ofmTileTemplate = t;
+        return t;
+      } catch {
+        ofmTileTemplate = OFM_PLANET_TILE_FALLBACK;
+        return OFM_PLANET_TILE_FALLBACK;
+      }
+    })();
+  }
+  return ofmTileTemplatePromise;
+}
 
 /** South Korea extract maxzoom from Planetiler build. */
 export const KOREA_PMTILES_MAXZOOM = 14;
@@ -83,14 +116,24 @@ export function getKoreaPmtilesPublicUrl(): string {
   return `${base}/storage/v1/object/public/map-tiles/korea-latest.pmtiles`;
 }
 
-function trackSelfTilesErrorOnce(): void {
+function isAbortError(err: unknown): boolean {
+  if (err == null) return false;
+  if (typeof err === "object") {
+    const name = String((err as { name?: string }).name || "");
+    if (name === "AbortError") return true;
+  }
+  return /abort/i.test(String((err as { message?: string })?.message ?? err));
+}
+
+function trackSelfTilesErrorOnce(surface: "compact" | "expanded" = "expanded"): void {
   if (selfTilesErrorTracked) return;
   selfTilesErrorTracked = true;
-  // Dynamic import — avoid pulling supabase into validate:map-style / SSR graphs.
+  // Use track() directly — must not consume trackMapGlFallback session-once
+  // (Kakao fallback still needs to be attributable if OFM also fails).
   void import("@/lib/track")
     .then(({ track }) => {
       track("map_gl_fallback", {
-        surface: "expanded",
+        surface,
         reason: "self_tiles_error",
       });
     })
@@ -99,10 +142,33 @@ function trackSelfTilesErrorOnce(): void {
     });
 }
 
-function markBroken(): void {
+function markBroken(surface: "compact" | "expanded" = "expanded"): void {
   if (selfTilesBroken) return;
   selfTilesBroken = true;
-  trackSelfTilesErrorOnce();
+  trackSelfTilesErrorOnce(surface);
+}
+
+/**
+ * Session soft-fail: stop reading PMTiles; protocol serves OFM thereafter.
+ * Does not destroy MapLibre / does not switch to Kakao.
+ */
+export function breakSelfTilesToOfmSession(
+  surface: "compact" | "expanded" = "expanded",
+): void {
+  markBroken(surface);
+}
+
+/** Point a live MapLibre map's openmaptiles source at OFM planet (keep MapLibre). */
+export async function applyOfmPlanetTilesToMap(map: {
+  getSource: (id: string) => unknown;
+}): Promise<void> {
+  const template = await resolveOfmTileTemplate();
+  const src = map.getSource("openmaptiles") as {
+    setTiles?: (tiles: string[]) => void;
+  } | null;
+  if (src && typeof src.setTiles === "function") {
+    src.setTiles([template]);
+  }
 }
 
 async function fetchOfmTile(
@@ -111,7 +177,9 @@ async function fetchOfmTile(
   y: number,
   signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
-  const url = OFM_PLANET_TILE.replace("{z}", String(z))
+  const template = await resolveOfmTileTemplate();
+  const url = template
+    .replace("{z}", String(z))
     .replace("{x}", String(x))
     .replace("{y}", String(y));
   const res = await fetch(url, { signal, cache: "no-store" });
@@ -157,8 +225,12 @@ export function ensureSelfTilesProtocolRegistered(): void {
           if (tile?.data) {
             return { data: tile.data.slice(0) };
           }
-          // Missing in archive (outside Korea / empty) → OFM
-        } catch {
+          // Missing in archive (outside Korea / empty) → OFM (not a hard failure)
+        } catch (err) {
+          // Camera moves abort in-flight Range reads — must not kill self-tiles for the session.
+          if (isAbortError(err) || signal.aborted) {
+            throw err;
+          }
           markBroken();
         }
       }
@@ -288,5 +360,7 @@ export function resetSelfTilesForTests(): void {
   selfTilesErrorTracked = false;
   pmtiles = null;
   warmPromise = null;
+  ofmTileTemplate = null;
+  ofmTileTemplatePromise = null;
   sessionOverride = null;
 }

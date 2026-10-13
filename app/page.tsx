@@ -11359,6 +11359,11 @@ function HomePageContent() {
       onFallback: (reason) => {
         // Hard failures (timeout/error). webglcontextlost uses onContextLost.
         if (reason === "webglcontextlost") return;
+        // Self-tiles soft-fail is handled inside the adapter (OFM tiles, MapLibre kept).
+        if (reason === "self_tiles_error") {
+          console.warn("[PindMap:maplibre] compact self_tiles → OFM (keep MapLibre)");
+          return;
+        }
         console.warn("[PindMap:maplibre] compact fallback → kakao", reason);
         compactMapGlRecoveringRef.current = false;
         setSessionForceKakaoCompact(true);
@@ -12255,13 +12260,14 @@ function HomePageContent() {
         devLog("[PindMap:search] search blocked - reason: empty_query");
         return;
       }
-      if (!expandedMapRef.current) {
-        devLog("[PindMap:search] search blocked - reason: expanded_map_not_ready");
-        return;
-      }
       if (!window.kakao?.maps) {
         devLog("[PindMap:search] search blocked - reason: kakao_not_ready");
         return;
+      }
+      // Map instance optional for Places API — only needed to bias center / show pins.
+      // After a hard map teardown, still allow search results sheet (center falls back).
+      if (!expandedMapRef.current) {
+        devLog("[PindMap:search] map missing — search continues with fallback center");
       }
 
       mapSearchKeywordRef.current = trimmed;
@@ -13374,6 +13380,12 @@ function HomePageContent() {
             if (cancelled) return;
             // webglcontextlost handled by onContextLost (remount / defer).
             if (reason === "webglcontextlost") return;
+            // Self-tiles soft-fail: stay on MapLibre with OFM tiles (adapter already switched).
+            // Clearing expandedMapRef here is what broke search ("expanded_map_not_ready").
+            if (reason === "self_tiles_error") {
+              console.warn("[PindMap:maplibre] expanded self_tiles → OFM (keep MapLibre)");
+              return;
+            }
             console.warn("[PindMap:maplibre] expanded fallback", reason);
             expandedMapGlRecoveringRef.current = false;
             try {
