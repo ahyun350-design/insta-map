@@ -251,10 +251,17 @@ const LANDMARK_FILTER: unknown = [
     ["==", ["get", "class"], "hospital"],
     ["==", ["get", "subclass"], "hospital"],
   ],
-  // 공원·어린이공원
+  // 공원 (어린이공원·playground는 z15+ — z14 밀도 밴드 과밀 방지)
   ["==", ["get", "class"], "park"],
-  ["==", ["get", "class"], "playground"],
-  ["==", ["get", "subclass"], "playground"],
+  [
+    "all",
+    [">=", ["zoom"], 15],
+    [
+      "any",
+      ["==", ["get", "class"], "playground"],
+      ["==", ["get", "subclass"], "playground"],
+    ],
+  ],
   // 전통시장
   [
     "all",
@@ -316,22 +323,23 @@ function poiSpriteIcon(): unknown {
 function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = landmarkGroupColor(theme);
   // z11–13: major anchors; z14+ denser for shops/street
+  // z14 stays sparse (shop layer starts); denser ranks only from z15 street zoom.
   const rankMax: unknown = [
     "step",
     ["zoom"],
     6,
     12,
-    10,
+    8,
     13,
-    16,
+    12,
     14,
-    10,
+    4,
     15,
-    50,
+    40,
     16,
-    80,
+    70,
     17,
-    120,
+    100,
   ];
   const filter: unknown = [
     "all",
@@ -340,6 +348,12 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     ["has", "name"],
     notDuplicateKoreaLandmarkName(),
     ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], rankMax],
+    // Kindergartens flood z14 phone views; show from street zoom.
+    [
+      "any",
+      [">=", ["zoom"], 15],
+      ["!", ["==", ["get", "subclass"], "kindergarten"]],
+    ],
   ];
   // Above shops (≤850); below korea-landmark tiers (~1650+) and stations (~2000)
   const sortKey: unknown = ["-", 1500, ["to-number", ["coalesce", ["get", "rank"], 999]]];

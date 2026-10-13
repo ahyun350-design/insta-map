@@ -1,0 +1,153 @@
+# Build South Korea OpenMapTiles PMTiles and upload to Supabase Storage.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL                 — project URL, e.g. https://xxxx.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY    — service role key (Storage upload; never log)
+#   SUPABASE_MAP_TILES_BUCKET    — optional, default map-tiles
+#
+# Bucket must already exist and be public (see chat instructions).
+
+name: build-korea-tiles
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 1st of each month, 15:00 UTC ≈ 00:00 KST next day
+    - cron: "0 15 1 * *"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      # OpenMapTiles schema jar (matches OpenFreeMap / liberty source-layers)
+      PLANETILER_JAR_URL: "https://github.com/openmaptiles/planetiler-openmaptiles/releases/download/v3.16/planetiler-openmaptiles.jar"
+      GEOFABRIK_URL: "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf"
+      OUT_DIR: build/tiles
+
+    steps:
+      - name: Check required secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in Actions secrets."
+            exit 1
+          fi
+          echo "Secrets present (values not printed)."
+
+      - name: Resolve bucket name
+        env:
+          BUCKET_SECRET: ${{ secrets.SUPABASE_MAP_TILES_BUCKET }}
+        run: |
+          if [ -n "$BUCKET_SECRET" ]; then
+            echo "BUCKET=$BUCKET_SECRET" >> "$GITHUB_ENV"
+          else
+            echo "BUCKET=map-tiles" >> "$GITHUB_ENV"
+          fi
+
+      - name: Download Geofabrik South Korea PBF
+        run: |
+          mkdir -p "$OUT_DIR"
+          echo "Downloading Geofabrik south-korea-latest.osm.pbf"
+          curl -L --fail --retry 3 --retry-delay 10 -o "$OUT_DIR/south-korea-latest.osm.pbf" "$GEOFABRIK_URL"
+          ls -lh "$OUT_DIR/south-korea-latest.osm.pbf"
+
+      - name: Download Planetiler OpenMapTiles jar
+        run: |
+          curl -L --fail -o "$OUT_DIR/planetiler.jar" "$PLANETILER_JAR_URL"
+          ls -lh "$OUT_DIR/planetiler.jar"
+
+      - name: Build korea.pmtiles
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          # ko is in Planetiler defaults; set explicitly so name:ko is always emitted.
+          java -Xmx6g -jar "$OUT_DIR/planetiler.jar" \
+            --osm-path="$OUT_DIR/south-korea-latest.osm.pbf" \
+            --output="$OUT_DIR/korea.pmtiles" \
+            --languages=default,ko \
+            --download \
+            --force
+          END=$(date +%s)
+          ELAPSED=$((END - START))
+          BYTES=$(stat -c%s "$OUT_DIR/korea.pmtiles")
+          echo "BUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
+          echo "PMTILES_BYTES=$BYTES" >> "$GITHUB_ENV"
+          echo "Build finished in ${ELAPSED}s, size ${BYTES} bytes"
+          ls -lh "$OUT_DIR/korea.pmtiles"
+
+      - name: Upload to Supabase Storage
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION=$(date -u +%Y%m%d)
+          FILE="korea-${VERSION}.pmtiles"
+          SRC="$OUT_DIR/korea.pmtiles"
+          BASE="${SUPABASE_URL%/}/storage/v1/object"
+          BUCKET_NAME="${BUCKET}"
+
+          echo "Uploading versioned object to bucket (filename only logged)…"
+          curl -sS --fail \
+            -X POST \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/octet-stream" \
+            -H "x-upsert: true" \
+            --data-binary @"$SRC" \
+            "${BASE}/${BUCKET_NAME}/${FILE}"
+
+          curl -sS --fail \
+            -X POST \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/octet-stream" \
+            -H "x-upsert: true" \
+            --data-binary @"$SRC" \
+            "${BASE}/${BUCKET_NAME}/korea-latest.pmtiles"
+
+          python3 - <<PY
+          import json, os, datetime
+          path = os.environ["OUT_DIR"] + "/latest.json"
+          payload = {
+            "file": "${FILE}",
+            "bytes": int(os.environ["PMTILES_BYTES"]),
+            "built_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "build_seconds": int(os.environ["BUILD_SECONDS"]),
+            "schema": "openmaptiles",
+            "languages": "default,ko",
+          }
+          with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, separators=(",", ":"))
+          print("latest.json written (no secrets)")
+          PY
+
+          curl -sS --fail \
+            -X POST \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "x-upsert: true" \
+            --data-binary @"$OUT_DIR/latest.json" \
+            "${BASE}/${BUCKET_NAME}/latest.json"
+
+          echo "Upload complete: ${FILE} (${PMTILES_BYTES} bytes, ${BUILD_SECONDS}s)"
+          echo "Public URL pattern: ${SUPABASE_URL%/}/storage/v1/object/public/${BUCKET_NAME}/${FILE}"
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Korea PMTiles build"
+            echo "- Build seconds: ${BUILD_SECONDS:-n/a}"
+            echo "- Size bytes: ${PMTILES_BYTES:-n/a}"
+            if [ -n "${PMTILES_BYTES:-}" ]; then
+              echo "- Size MiB: $((PMTILES_BYTES / 1024 / 1024))"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
