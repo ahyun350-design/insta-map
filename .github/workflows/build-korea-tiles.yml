@@ -133,6 +133,7 @@ jobs:
 
       - name: Build korea.pmtiles
         if: ${{ env.UPLOAD_ONLY != 'true' }}
+        id: build
         run: |
           set -euo pipefail
           START=$(date +%s)
@@ -144,28 +145,33 @@ jobs:
             --download \
             --force
           END=$(date +%s)
-          ELAPSED=$((END - START))
-          BYTES=$(stat -c%s "$OUT_DIR/korea.pmtiles")
-          echo "BUILD_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
-          echo "PMTILES_BYTES=$BYTES" >> "$GITHUB_ENV"
-          echo "Build finished in ${ELAPSED}s, size ${BYTES} bytes"
+          # GITHUB_ENV applies to *later* steps only — export for this step's python too.
+          BUILD_SECONDS=$((END - START))
+          PMTILES_BYTES=$(stat -c%s "$OUT_DIR/korea.pmtiles")
+          export BUILD_SECONDS PMTILES_BYTES
+          {
+            echo "BUILD_SECONDS=${BUILD_SECONDS}"
+            echo "PMTILES_BYTES=${PMTILES_BYTES}"
+          } >> "$GITHUB_ENV"
+          echo "Build finished in ${BUILD_SECONDS}s, size ${PMTILES_BYTES} bytes"
           ls -lh "$OUT_DIR/korea.pmtiles"
           python3 - <<'PY'
           import json, os
+          out_dir = os.environ.get("OUT_DIR", "build/tiles")
           meta = {
-              "build_seconds": int(os.environ["BUILD_SECONDS"]),
-              "bytes": int(os.environ["PMTILES_BYTES"]),
+              "build_seconds": int(os.environ.get("BUILD_SECONDS") or "0"),
+              "bytes": int(os.environ.get("PMTILES_BYTES") or "0"),
               "schema": "openmaptiles",
               "languages": "default,ko",
           }
-          path = os.path.join(os.environ["OUT_DIR"], "build-meta.json")
+          path = os.path.join(out_dir, "build-meta.json")
           with open(path, "w", encoding="utf-8") as f:
               json.dump(meta, f, separators=(",", ":"))
           print("build-meta.json written")
           PY
 
       - name: Save korea.pmtiles artifact
-        if: ${{ env.UPLOAD_ONLY != 'true' }}
+        if: ${{ env.UPLOAD_ONLY != 'true' && success() }}
         uses: actions/upload-artifact@v4
         with:
           name: korea-pmtiles
@@ -192,43 +198,52 @@ jobs:
             echo "korea.pmtiles missing after artifact download"
             exit 1
           fi
-          BYTES=$(stat -c%s "$OUT_DIR/korea.pmtiles")
-          echo "PMTILES_BYTES=$BYTES" >> "$GITHUB_ENV"
+          PMTILES_BYTES=$(stat -c%s "$OUT_DIR/korea.pmtiles")
           if [ -f "$OUT_DIR/build-meta.json" ]; then
-            BS=$(python3 -c 'import json; print(json.load(open("build/tiles/build-meta.json")).get("build_seconds",0))')
-            echo "BUILD_SECONDS=$BS" >> "$GITHUB_ENV"
+            BUILD_SECONDS=$(python3 -c 'import json; print(json.load(open("build/tiles/build-meta.json")).get("build_seconds", 0) or 0)')
           else
-            echo "BUILD_SECONDS=0" >> "$GITHUB_ENV"
+            BUILD_SECONDS=0
           fi
+          export BUILD_SECONDS PMTILES_BYTES
+          {
+            echo "PMTILES_BYTES=${PMTILES_BYTES}"
+            echo "BUILD_SECONDS=${BUILD_SECONDS}"
+          } >> "$GITHUB_ENV"
           ls -lh "$OUT_DIR/korea.pmtiles"
 
       - name: Record file size in Summary (before upload)
         if: always()
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set +e
           {
             echo "## Korea PMTiles (pre-upload)"
             if [ -n "${PMTILES_BYTES:-}" ]; then
               echo "- Size bytes: ${PMTILES_BYTES}"
               echo "- Size MiB: $((PMTILES_BYTES / 1024 / 1024))"
-            elif [ -f "$OUT_DIR/korea.pmtiles" ]; then
-              B=$(stat -c%s "$OUT_DIR/korea.pmtiles")
+            elif [ -f "${OUT_DIR:-build/tiles}/korea.pmtiles" ]; then
+              B=$(stat -c%s "${OUT_DIR:-build/tiles}/korea.pmtiles")
               echo "- Size bytes: ${B}"
               echo "- Size MiB: $((B / 1024 / 1024))"
             else
               echo "- Size: n/a (file not present yet)"
             fi
             echo "- Build seconds: ${BUILD_SECONDS:-n/a}"
-            echo "- Mode: $([ "${UPLOAD_ONLY}" = "true" ] && echo upload_only || echo build_and_upload)"
-          } >> "$GITHUB_STEP_SUMMARY"
+            if [ "${UPLOAD_ONLY:-false}" = "true" ]; then
+              echo "- Mode: upload_only"
+            else
+              echo "- Mode: build_and_upload"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY" || true
 
       - name: Upload PMTiles via S3 multipart
+        # Default success() — Summary uses continue-on-error so it cannot skip this step.
         run: |
           set -euo pipefail
           # Do not enable shell xtrace — secrets must never appear in logs.
           VERSION=$(date -u +%Y%m%d)
           FILE="korea-${VERSION}.pmtiles"
-          SRC="$OUT_DIR/korea.pmtiles"
+          SRC="${OUT_DIR}/korea.pmtiles"
           export OBJECT_VERSIONED="$FILE"
           echo "OBJECT_VERSIONED=$FILE" >> "$GITHUB_ENV"
 
@@ -236,6 +251,15 @@ jobs:
             echo "Missing $SRC"
             exit 1
           fi
+
+          # Ensure sizes exist even if GITHUB_ENV was incomplete
+          if [ -z "${PMTILES_BYTES:-}" ]; then
+            PMTILES_BYTES=$(stat -c%s "$SRC")
+            export PMTILES_BYTES
+            echo "PMTILES_BYTES=${PMTILES_BYTES}" >> "$GITHUB_ENV"
+          fi
+          export BUILD_SECONDS="${BUILD_SECONDS:-0}"
+          export PMTILES_BYTES
 
           s3_cp() {
             local src="$1"
@@ -257,15 +281,20 @@ jobs:
 
             python3 - <<'PY'
           import json, os, datetime
-          path = os.path.join(os.environ["OUT_DIR"], "latest.json")
+          out_dir = os.environ.get("OUT_DIR", "build/tiles")
+          src = os.path.join(out_dir, "korea.pmtiles")
+          bytes_val = os.environ.get("PMTILES_BYTES") or "0"
+          if bytes_val in ("", "0") and os.path.isfile(src):
+              bytes_val = str(os.path.getsize(src))
           payload = {
-              "file": os.environ["OBJECT_VERSIONED"],
-              "bytes": int(os.environ["PMTILES_BYTES"]),
+              "file": os.environ.get("OBJECT_VERSIONED") or "korea-latest.pmtiles",
+              "bytes": int(bytes_val or "0"),
               "built_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "build_seconds": int(os.environ.get("BUILD_SECONDS") or "0"),
               "schema": "openmaptiles",
               "languages": "default,ko",
           }
+          path = os.path.join(out_dir, "latest.json")
           with open(path, "w", encoding="utf-8") as f:
               json.dump(payload, f, separators=(",", ":"))
           print("latest.json written (object key + sizes only)")
@@ -297,11 +326,18 @@ jobs:
 
       - name: Job summary (post-upload)
         if: always()
+        continue-on-error: true
         run: |
+          set +e
           {
             echo "## Korea PMTiles (post-upload)"
             echo "- Versioned object key: ${OBJECT_VERSIONED:-n/a}"
             echo "- Pointer keys: korea-latest.pmtiles, latest.json"
             echo "- Upload: AWS CLI S3 multipart 16MB×2 concurrent, adaptive retry (endpoint/keys not logged)"
             echo "- Artifact name: korea-pmtiles (retention 3 days; present on full builds only)"
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "- Size bytes: ${PMTILES_BYTES:-n/a}"
+            if [ -n "${PMTILES_BYTES:-}" ]; then
+              echo "- Size MiB: $((PMTILES_BYTES / 1024 / 1024))"
+            fi
+            echo "- Build seconds: ${BUILD_SECONDS:-n/a}"
+          } >> "$GITHUB_STEP_SUMMARY" || true
