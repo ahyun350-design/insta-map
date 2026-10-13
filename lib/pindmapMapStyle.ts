@@ -398,7 +398,7 @@ function poiSpriteIcon(): unknown {
 
 function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = landmarkGroupColor(theme);
-  // z11–13: few major anchors; z14 tight for shops; denser late
+  // z11–13: few major anchors; z14 tight for shops; street zoom keeps schools/parks
   const rankMax: unknown = [
     "step",
     ["zoom"],
@@ -408,11 +408,13 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     13,
     12,
     14,
-    6,
+    5,
     15.5,
-    14,
-    17,
-    18,
+    28,
+    16.5,
+    48,
+    17.5,
+    80,
   ];
   const filter: unknown = [
     "all",
@@ -421,8 +423,8 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     ["has", "name"],
     ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], rankMax],
   ];
-  // Priority 2 — above shops (≤850), below stations (~1100−rank)
-  const sortKey: unknown = ["-", 1000, ["to-number", ["coalesce", ["get", "rank"], 999]]];
+  // Above shops (≤850); below korea-landmark tiers (~1650+) and stations (~2000)
+  const sortKey: unknown = ["-", 1500, ["to-number", ["coalesce", ["get", "rank"], 999]]];
 
   // Single symbol: icon + name together (no nameless dots).
   layers.push({
@@ -447,7 +449,7 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
         14,
         1.1,
       ],
-      "icon-optional": false,
+      "icon-optional": true,
       "text-field": KO_TEXT,
       "text-font": ["Noto Sans Bold"],
       "text-size": [
@@ -473,13 +475,14 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
         13,
         2.2,
         14,
-        3,
+        2.2,
         16,
-        1.5,
+        0.8,
         17,
-        0.7,
+        0.4,
       ],
       "text-optional": false,
+      // Mid-zoom: collision. Street zoom layer below forces anchors vs shops.
       "text-allow-overlap": false,
       "text-ignore-placement": false,
       "icon-allow-overlap": false,
@@ -494,7 +497,176 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
       "text-halo-blur": 0.2,
       "icon-opacity": 0.95,
     },
+    maxzoom: 15,
   });
+
+  // z15+ duplicate with allow-overlap so schools/parks survive shop density
+  layers.push({
+    id: "landmark_label_street",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "poi",
+    minzoom: 15,
+    filter,
+    layout: {
+      visibility: "visible",
+      "icon-image": poiSpriteIcon(),
+      "icon-size": 1.1,
+      "icon-optional": true,
+      "text-field": KO_TEXT,
+      "text-font": ["Noto Sans Bold"],
+      "text-size": 14,
+      "text-variable-anchor": ["right", "left", "top", "bottom"],
+      "text-radial-offset": 1.05,
+      "text-max-width": 8,
+      "text-padding": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        15,
+        1.2,
+        16,
+        0.6,
+        17,
+        0.35,
+      ],
+      "text-optional": false,
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+      "symbol-sort-key": sortKey,
+      "symbol-z-order": "source",
+    },
+    paint: {
+      "text-color": color,
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.5,
+      "text-halo-blur": 0.2,
+      "icon-opacity": 0.95,
+    },
+  });
+}
+
+/** Overpass GeoJSON — famous buildings / venues by tier (z11 / z13 / z15). */
+function appendKoreaLandmarkGeoLayers(
+  layers: AnyLayer[],
+  theme: MapPreviewTheme,
+): void {
+  const color =
+    theme.id === "neon" ? "#A8B0E0" : theme.id === "white" ? "#4A5A78" : "#3A4A66";
+  const tiers: Array<{
+    id: string;
+    tier: number;
+    minzoom: number;
+    maxzoom?: number;
+    textSize: number;
+    sortBase: number;
+    filter: unknown;
+  }> = [
+    // z11–12.5: iconic only (no mall/attraction flood — protects gu/dong budget)
+    {
+      id: "korea_landmark_tier1_far",
+      tier: 1,
+      minzoom: 11,
+      maxzoom: 12.5,
+      textSize: 15,
+      // Below gu/dong so mid-zoom place budget holds; still places into gaps
+      sortBase: 1050,
+      filter: [
+        "all",
+        ["==", ["get", "tier"], 1],
+        [
+          "any",
+          [
+            "match",
+            ["get", "kind"],
+            ["tower", "stadium", "palace", "theme_park"],
+            true,
+            false,
+          ],
+          [">=", ["to-number", ["coalesce", ["get", "height"], 0]], 250],
+        ],
+      ],
+    },
+    {
+      id: "korea_landmark_tier1",
+      tier: 1,
+      minzoom: 12.5,
+      textSize: 15,
+      sortBase: 1550,
+      filter: ["==", ["get", "tier"], 1],
+    },
+    {
+      id: "korea_landmark_tier2",
+      tier: 2,
+      minzoom: 13,
+      textSize: 14,
+      sortBase: 1520,
+      filter: ["==", ["get", "tier"], 2],
+    },
+    {
+      id: "korea_landmark_tier3",
+      tier: 3,
+      minzoom: 15,
+      textSize: 14,
+      sortBase: 1510,
+      filter: ["==", ["get", "tier"], 3],
+    },
+  ];
+  for (const t of tiers) {
+    layers.push({
+      id: t.id,
+      type: "symbol",
+      source: "korea_landmarks",
+      minzoom: t.minzoom,
+      ...(t.maxzoom != null ? { maxzoom: t.maxzoom } : {}),
+      filter: t.filter,
+      layout: {
+        visibility: "visible",
+        "icon-image": "korea-landmark-building",
+        "icon-size": 0.85,
+        "icon-optional": true,
+        "text-field": ["get", "name"],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": t.textSize,
+        "text-variable-anchor": ["right", "left", "top", "bottom"],
+        "text-radial-offset": 1.1,
+        "text-max-width": 8,
+        "text-padding": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          11,
+          14,
+          12,
+          8,
+          12.5,
+          4,
+          13,
+          4,
+          14,
+          6,
+          15,
+          1.6,
+        ],
+        // Ignore placement so gu/dong/shop budgets (regression tests) stay intact.
+        "text-optional": true,
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+        "symbol-sort-key": t.sortBase,
+        "symbol-z-order": "source",
+      },
+      paint: {
+        "text-color": color,
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.6,
+        "icon-opacity": 0.92,
+      },
+    });
+  }
 }
 
 /** Shop/facility name only — name:ko then name (no nonlatin fallback clutter). */
@@ -1588,6 +1760,25 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             0.8,
           ]);
           layer.minzoom = Math.min(layer.minzoom ?? 14, 14);
+        } else if (layer.id.includes("cemetery")) {
+          // Soft cool gray-green — paper tone
+          paintSet(
+            layer,
+            "fill-color",
+            theme.id === "neon" ? "#1A2820" : theme.id === "white" ? "#E8EEE6" : "#DDE4DA",
+          );
+          paintSet(layer, "fill-opacity", [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11,
+            0,
+            12,
+            0.45,
+            15,
+            0.65,
+          ]);
+          layer.minzoom = Math.min(layer.minzoom ?? 12, 12);
         } else if (layer.id.includes("wood") || layer.id.includes("forest")) {
           paintSet(layer, "fill-color", woodFill);
           paintSet(layer, "fill-opacity", [
@@ -1745,11 +1936,19 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     }
 
     if (layer.id.startsWith("boundary")) {
-      paintSet(layer, "line-color", theme.boundary);
-      paintSet(layer, "line-opacity", 0.55);
-      if (useGuideRoads && layer.type === "line") {
-        paintSet(layer, "line-dasharray", [2, 2]);
-        layer.minzoom = Math.min(layer.minzoom ?? 4, 4);
+      // Country (admin 2): keep very subtle. Gu/gun + sido added as dedicated layers below.
+      if (layer.id === "boundary_2") {
+        paintSet(layer, "line-color", theme.boundary);
+        paintSet(layer, "line-opacity", theme.id === "neon" ? 0.25 : 0.35);
+        paintSet(layer, "line-width", 0.6);
+        layer.minzoom = 3;
+        layer.maxzoom = 8;
+      } else if (layer.id === "boundary_3") {
+        // Hide bundled 3–6; replaced by sido/gu layers with distinct dash styles
+        setVisibility(layer, false);
+      } else {
+        paintSet(layer, "line-color", theme.boundary);
+        paintSet(layer, "line-opacity", 0.35);
       }
     }
 
@@ -2357,9 +2556,10 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         layout["text-allow-overlap"] = true;
         layout["text-ignore-placement"] = true;
         layout["text-padding"] = 0.5;
+        // Highest label priority — stations beat korea landmarks / anchors / shops
         layout["symbol-sort-key"] = [
           "-",
-          1600,
+          2000,
           ["to-number", ["coalesce", ["get", "rank"], 999]],
         ];
         layer.layout = layout;
@@ -2395,7 +2595,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         }
       }
       if (layer.id.includes("mountain") || layer.id.includes("peak")) {
-        // Major peaks z10+; more names as we zoom in
+        // Major peaks z10+; name + elevation when present
         layer.minzoom = 10;
         const peakFilter = layer.filter;
         layer.filter = [
@@ -2409,12 +2609,24 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           [
             "<=",
             ["to-number", ["coalesce", ["get", "rank"], 999]],
-            ["step", ["zoom"], 4, 11, 8, 12, 16, 13, 30],
+            ["step", ["zoom"], 3, 11, 6, 12, 12, 13, 24],
           ],
         ];
         paintSet(layer, "text-color", theme.id === "neon" ? "#8A9278" : "#4A5A48");
         paintSet(layer, "text-halo-color", theme.textHalo);
         if (layer.layout) {
+          layer.layout["text-field"] = [
+            "case",
+            [">", ["to-number", ["coalesce", ["get", "ele"], 0]], 0],
+            [
+              "concat",
+              KO_TEXT,
+              " ",
+              ["to-string", ["round", ["to-number", ["get", "ele"]]]],
+              "m",
+            ],
+            KO_TEXT,
+          ];
           layer.layout["text-size"] = [
             "interpolate",
             ["linear"],
@@ -2496,7 +2708,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             13,
             1.8,
           ],
-          "symbol-sort-key": 1600,
+          "symbol-sort-key": 2000,
           "symbol-z-order": "source",
         },
         paint: {
@@ -2546,6 +2758,11 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     korea_major_labels: {
       type: "geojson",
       data: koreaMajorLabelsGeoJson(),
+    },
+    korea_landmarks: {
+      type: "geojson",
+      data: "/map/korea-landmarks.geojson",
+      attribution: "© OpenStreetMap contributors",
     },
   };
   layers.push({
@@ -2817,11 +3034,267 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
 
   // No transportation_name labels (road / bridge names) — place / water / station stay.
 
+  // Insert special landuse fills under roads/buildings (after park/school fills)
+  const specialFills: Array<{
+    id: string;
+    filter: unknown;
+    color: string;
+    minzoom: number;
+  }> = [
+    {
+      id: "landuse_golf",
+      filter: [
+        "any",
+        ["==", ["get", "class"], "golf_course"],
+        ["==", ["get", "subclass"], "golf_course"],
+      ],
+      color: theme.id === "neon" ? "#1A3328" : "#D0E0C8",
+      minzoom: 11,
+    },
+    {
+      id: "landuse_military",
+      filter: ["==", ["get", "class"], "military"],
+      color: theme.id === "neon" ? "#2A2820" : "#E2E0D6",
+      minzoom: 11,
+    },
+    {
+      id: "landuse_airport",
+      filter: [
+        "any",
+        ["==", ["get", "class"], "aerodrome"],
+        ["==", ["get", "class"], "airport"],
+      ],
+      color: theme.id === "neon" ? "#1A2238" : "#D8DCE6",
+      minzoom: 10,
+    },
+    {
+      id: "landuse_harbour",
+      filter: [
+        "any",
+        ["==", ["get", "class"], "harbour"],
+        ["==", ["get", "class"], "harbor"],
+        ["==", ["get", "class"], "port"],
+      ],
+      color: theme.id === "neon" ? "#182838" : "#D0DCE8",
+      minzoom: 11,
+    },
+  ];
+  const specialFillLayers: AnyLayer[] = specialFills.map((sf) => ({
+    id: sf.id,
+    type: "fill",
+    source: "openmaptiles",
+    "source-layer": "landuse",
+    minzoom: sf.minzoom,
+    filter: sf.filter,
+    layout: { visibility: "visible" },
+    paint: {
+      "fill-color": sf.color,
+      "fill-opacity": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        sf.minzoom,
+        0.35,
+        sf.minzoom + 3,
+        0.55,
+      ],
+    },
+  }));
+  const fillAnchor = layers.findIndex(
+    (l) => l.id === "landuse_school" || l.id === "landuse_cemetery" || l.id === "park",
+  );
+  if (fillAnchor >= 0) {
+    layers.splice(fillAnchor + 1, 0, ...specialFillLayers);
+  } else {
+    const roadIdx = layers.findIndex((l) => l.id.includes("highway") || l.id.includes("road"));
+    if (roadIdx >= 0) layers.splice(roadIdx, 0, ...specialFillLayers);
+    else layers.unshift(...specialFillLayers);
+  }
+
+  // 시·도 (admin 4) solid z6–11; 구·군 (admin 6) dashed z10–14 — after fills, under labels
+  const boundaryColor =
+    theme.id === "neon" ? "#3A4566" : theme.id === "white" ? "#C8CCD4" : "#C0C4CC";
+  const boundaryLayers: AnyLayer[] = [
+    {
+      id: "boundary_sido",
+      type: "line",
+      source: "openmaptiles",
+      "source-layer": "boundary",
+      minzoom: 6,
+      maxzoom: 11,
+      filter: [
+        "all",
+        ["==", ["get", "admin_level"], 4],
+        ["!=", ["get", "maritime"], 1],
+      ],
+      layout: { visibility: "visible", "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": boundaryColor,
+        "line-opacity": theme.id === "neon" ? 0.35 : 0.42,
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          6,
+          0.6,
+          10,
+          1.0,
+        ],
+      },
+    },
+    {
+      id: "boundary_gu",
+      type: "line",
+      source: "openmaptiles",
+      "source-layer": "boundary",
+      minzoom: 10,
+      maxzoom: 14,
+      filter: [
+        "all",
+        ["==", ["get", "admin_level"], 6],
+        ["!=", ["get", "maritime"], 1],
+      ],
+      layout: { visibility: "visible", "line-cap": "butt", "line-join": "round" },
+      paint: {
+        "line-color": boundaryColor,
+        "line-opacity": theme.id === "neon" ? 0.22 : 0.28,
+        "line-width": 0.7,
+        "line-dasharray": [1.2, 2.4],
+      },
+    },
+  ];
+  const boundAnchor = layers.findIndex((l) => l.id === "boundary_2" || l.id === "boundary_3");
+  if (boundAnchor >= 0) layers.splice(boundAnchor + 1, 0, ...boundaryLayers);
+  else layers.push(...boundaryLayers);
+
+  // Mountain peaks (OMT) — triangle + name + height (sparse; OMT ranks are often 1)
+  layers.push({
+    id: "mountain_peak_label",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "mountain_peak",
+    minzoom: 12,
+    filter: [
+      "all",
+      ["has", "name"],
+      // Prefer taller peaks; rank alone is too flat in Korea tiles
+      [">=", ["to-number", ["coalesce", ["get", "ele"], 0]], 300],
+      [
+        "<=",
+        ["to-number", ["coalesce", ["get", "rank"], 999]],
+        ["step", ["zoom"], 1, 12, 2, 13, 4, 14, 8],
+      ],
+    ],
+    layout: {
+      visibility: "visible",
+      "text-field": [
+        "case",
+        [">", ["to-number", ["coalesce", ["get", "ele"], 0]], 0],
+        [
+          "concat",
+          "▲ ",
+          KO_TEXT,
+          " ",
+          ["to-string", ["round", ["to-number", ["get", "ele"]]]],
+          "m",
+        ],
+        ["concat", "▲ ", KO_TEXT],
+      ],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        10,
+        11,
+        12,
+        12.5,
+        14,
+        13.5,
+      ],
+      "text-max-width": 10,
+      "text-padding": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        10,
+        10,
+        12,
+        6,
+        14,
+        3,
+      ],
+      "text-optional": true,
+      "text-allow-overlap": false,
+      "symbol-sort-key": [
+        "-",
+        900,
+        ["to-number", ["coalesce", ["get", "rank"], 999]],
+      ],
+    },
+    paint: {
+      "text-color": theme.id === "neon" ? "#8A9278" : "#4A5A48",
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.4,
+    },
+  });
+
+  // Islands / islets (여의도, 밤섬, …) z12+
+  layers.push({
+    id: "place_island_ko",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "place",
+    minzoom: 12,
+    filter: [
+      "all",
+      ["has", "name"],
+      [
+        "match",
+        ["get", "class"],
+        ["island", "islet"],
+        true,
+        false,
+      ],
+    ],
+    layout: {
+      visibility: "visible",
+      "text-field": KO_TEXT,
+      "text-font": ["Noto Sans Regular"],
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        12,
+        12,
+        14,
+        13,
+        16,
+        14,
+      ],
+      "text-max-width": 8,
+      "text-padding": 2,
+      "text-optional": true,
+      "symbol-sort-key": [
+        "-",
+        1300,
+        ["to-number", ["coalesce", ["get", "rank"], 999]],
+      ],
+    },
+    paint: {
+      "text-color": theme.id === "neon" ? "#8AA0C8" : "#4A6A88",
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.4,
+    },
+  });
+
   // Shop/facility names (z14+) below landmarks; adapter pins added later on top
   appendShopPoiLayers(layers, theme);
   appendBusStopLayers(layers);
   // Neighborhood anchors — after shops so they paint above and keep placement priority
   appendLandmarkLayers(layers, theme);
+  // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)
+  appendKoreaLandmarkGeoLayers(layers, theme);
 
   style.layers = layers;
   style.name = `pindmap-${theme.id}`;

@@ -446,7 +446,11 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         this.timingStyleMs = Math.round(styleLoadAt - createT0);
       }
       // Defer landmarks until first idle (not needed for L9 minimap first paint).
-      for (const id of ["landmark_dot", "landmark_label"] as const) {
+      for (const id of [
+        "landmark_dot",
+        "landmark_label",
+        "landmark_label_street",
+      ] as const) {
         try {
           if (map.getLayer(id)) {
             map.setLayoutProperty(id, "visibility", "none");
@@ -519,6 +523,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
             MAP_MYLOC_SIZE,
             this.imageDpr,
           );
+          const { ensureKoreaLandmarkIcon } = await import(
+            "@/lib/mapSurface/koreaLandmarkIcon"
+          );
+          await ensureKoreaLandmarkIcon(this.map);
           this.addLayers(this.map);
           this.bindClicks(this.map);
           window.setTimeout(() => {
@@ -542,7 +550,11 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.deferredDecorDone = true;
     const map = this.map;
     const theme = this.theme;
-    for (const id of ["landmark_dot", "landmark_label"] as const) {
+    for (const id of [
+      "landmark_dot",
+      "landmark_label",
+      "landmark_label_street",
+    ] as const) {
       try {
         if (map.getLayer(id)) {
           map.setLayoutProperty(id, "visibility", "visible");

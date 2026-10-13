@@ -543,6 +543,10 @@ export default function PreviewGlMap({
               if (modeRef.current === "default") {
                 await ensurePinImages(map, themeRef.current === "neon");
               }
+              const { ensureKoreaLandmarkIcon } = await import(
+                "@/lib/mapSurface/koreaLandmarkIcon"
+              );
+              await ensureKoreaLandmarkIcon(map);
               if (cancelled) return;
               const pinsT0 = performance.now();
               addPinLayers(

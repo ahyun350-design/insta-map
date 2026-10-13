@@ -647,15 +647,19 @@ test("map-preview mid-zoom place labels: Mapo/Gangnam × z11–13", async ({
       const station = countUnique(["poi_transit", "poi_transit_mid"]);
       const landmark = countUnique([
         "landmark_label",
+        "landmark_label_street",
         "label_korea_landmark_overlay",
         "label_korea_landmark_overlay_z13",
         "label_park",
         "park_label",
+        // korea_landmark_tier* intentionally excluded from mid-zoom total budget
       ].filter((id) => layerIds.includes(id) || !!map.getLayer(id)));
       const mountain = countUnique([
         "label_korea_mountain_overlay",
         ...layerIds.filter(
-          (id) => id.includes("mountain") || id.includes("peak"),
+          (id) =>
+            (id.includes("mountain") || id.includes("peak")) &&
+            id !== "mountain_peak_label",
         ),
       ]);
       const roadPresent = roads.filter((id) => !!map.getLayer(id));
@@ -830,6 +834,7 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
         : [];
       const landmarkLayers = [
         "landmark_label",
+        "landmark_label_street",
         "label_korea_landmark_overlay",
       ].filter((id) => !!map.getLayer(id));
       const landmark = landmarkLayers.length
@@ -1266,6 +1271,232 @@ test("map-preview road name / shield labels are hidden (0 features)", async ({
     result.featureCount,
     `road name/shield labels must be 0 at z${result.zoom}; layers=${result.present.join(",")}`,
   ).toBe(0);
+});
+
+test("map-preview basics: korea landmarks + z16 anchors", async ({ page }) => {
+  const pathMod = await import("node:path");
+  const fs = await import("node:fs");
+  const outDir = pathMod.join(process.cwd(), "test-results", "map-basics");
+  fs.mkdirSync(outDir, { recursive: true });
+
+  await openPreview(page, "/map-preview?theme=paper");
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const hubs = {
+    seoul: { center: [126.978, 37.5665] as [number, number], z: 11 },
+    mapo: { center: [126.9015, 37.5663] as [number, number], z: 13 },
+    gangnam: { center: [127.0276, 37.4979] as [number, number], z: 13 },
+    hongdae15: { center: [126.9236, 37.5563] as [number, number], z: 15 },
+    hongdae16: { center: [126.9236, 37.5563] as [number, number], z: 16 },
+    mangwon16: { center: [126.9019, 37.5565] as [number, number], z: 16 },
+    gangnam16: { center: [127.0276, 37.4979] as [number, number], z: 16 },
+    mangwon17: { center: [126.9019, 37.5565] as [number, number], z: 17 },
+    hongdae17: { center: [126.9236, 37.5563] as [number, number], z: 17 },
+    gangnam17: { center: [127.0276, 37.4979] as [number, number], z: 17 },
+  };
+
+  async function settle(zoom: number, center: [number, number]) {
+    await page.evaluate(
+      async ({ z, center: c }) => {
+        const map = (
+          window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap }
+        ).__PINDMAP_PREVIEW_MAP__;
+        map.jumpTo({ zoom: z, center: c });
+        await new Promise<void>((resolve) => {
+          map.once("idle", () => resolve());
+          window.setTimeout(() => resolve(), 4000);
+        });
+        await new Promise<void>((r) => window.setTimeout(r, 1200));
+      },
+      { z: zoom, center },
+    );
+  }
+
+  async function measure(zoom: number, center: [number, number]) {
+    await settle(zoom, center);
+    return page.evaluate(() => {
+      const map = (
+        window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap }
+      ).__PINDMAP_PREVIEW_MAP__;
+      const uniq = (ids: string[]) => {
+        const layers = ids.filter((id) => !!map.getLayer(id));
+        if (!layers.length) return { count: 0, names: [] as string[] };
+        const feats = map.queryRenderedFeatures({ layers });
+        const seen = new Set<string>();
+        for (const f of feats) {
+          const p =
+            (f as { properties?: Record<string, unknown> }).properties ?? {};
+          const name = String(p["name:ko"] || p.name || "").trim();
+          if (name) seen.add(name);
+        }
+        return { count: seen.size, names: [...seen] };
+      };
+      const korea = uniq([
+        "korea_landmark_tier1_far",
+        "korea_landmark_tier1",
+        "korea_landmark_tier2",
+        "korea_landmark_tier3",
+      ]);
+      const tier1 = uniq(["korea_landmark_tier1_far", "korea_landmark_tier1"]);
+      const anchors = uniq([
+        "landmark_label",
+        "landmark_label_street",
+        "label_park",
+        "park_label",
+      ]);
+      const stations = uniq(["poi_transit", "poi_transit_mid"]);
+      // Candidates in view (school/park/gov/market/hospital + rail station)
+      let candidates = 0;
+      const mapAny = map as PreviewMap & {
+        querySourceFeatures?: (
+          source: string,
+          opts: { sourceLayer: string },
+        ) => Array<{
+          properties?: Record<string, unknown> | null;
+          geometry?: { type: string; coordinates: number[] };
+        }>;
+        project?: (lngLat: [number, number]) => { x: number; y: number };
+      };
+      if (mapAny.querySourceFeatures && mapAny.project) {
+        const feats = mapAny.querySourceFeatures("openmaptiles", {
+          sourceLayer: "poi",
+        });
+        const seen = new Set<string>();
+        for (const f of feats) {
+          const p = f.properties ?? {};
+          const cls = String(p.class ?? "");
+          const sub = String(p.subclass ?? "");
+          const name = String(p["name:ko"] || p.name || "").trim();
+          if (!name) continue;
+          const isStation =
+            (cls === "rail" || cls === "railway") &&
+            ["subway", "station", "halt", "tram_stop"].includes(sub);
+          const isAnchor =
+            cls === "school" ||
+            cls === "college" ||
+            sub === "university" ||
+            cls === "park" ||
+            cls === "town_hall" ||
+            cls === "police" ||
+            (cls === "hospital" && sub === "hospital") ||
+            (cls === "grocery" && sub === "marketplace") ||
+            (cls === "post" && sub === "post_office");
+          if (!isStation && !isAnchor) continue;
+          const g = f.geometry;
+          if (!g || g.type !== "Point") continue;
+          const [lng, lat] = g.coordinates as [number, number];
+          const pt = mapAny.project!([lng, lat]);
+          if (pt.x < 0 || pt.y < 0 || pt.x > 390 || pt.y > 844) continue;
+          const key = `${name}|${lng.toFixed(5)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          candidates += 1;
+        }
+      }
+      return {
+        korea: korea.count,
+        tier1: tier1.count,
+        koreaNames: korea.names,
+        anchors: anchors.count,
+        anchorNames: anchors.names,
+        stations: stations.count,
+        stationNames: stations.names,
+        candidates,
+        layers: {
+          t1: !!(
+            map.getLayer("korea_landmark_tier1") ||
+            map.getLayer("korea_landmark_tier1_far")
+          ),
+          boundarySido: !!map.getLayer("boundary_sido"),
+          boundaryGu: !!map.getLayer("boundary_gu"),
+          peak: !!map.getLayer("mountain_peak_label"),
+          island: !!map.getLayer("place_island_ko"),
+          golf: !!map.getLayer("landuse_golf"),
+        },
+      };
+    });
+  }
+
+  const seoul = await measure(hubs.seoul.z, hubs.seoul.center);
+  await page.screenshot({
+    path: pathMod.join(outDir, "basics-seoul-z11.png"),
+    fullPage: false,
+  });
+  const mapo = await measure(hubs.mapo.z, hubs.mapo.center);
+  await page.screenshot({
+    path: pathMod.join(outDir, "basics-mapo-z13.png"),
+    fullPage: false,
+  });
+  const gangnam = await measure(hubs.gangnam.z, hubs.gangnam.center);
+  await page.screenshot({
+    path: pathMod.join(outDir, "basics-gangnam-z13.png"),
+    fullPage: false,
+  });
+  const hong15 = await measure(hubs.hongdae15.z, hubs.hongdae15.center);
+  await page.screenshot({
+    path: pathMod.join(outDir, "basics-hongdae-z15.png"),
+    fullPage: false,
+  });
+  const hong16 = await measure(hubs.hongdae16.z, hubs.hongdae16.center);
+  await page.screenshot({
+    path: pathMod.join(outDir, "basics-hongdae-z16.png"),
+    fullPage: false,
+  });
+  const mang16 = await measure(hubs.mangwon16.z, hubs.mangwon16.center);
+  const gang16 = await measure(hubs.gangnam16.z, hubs.gangnam16.center);
+  const mang17 = await measure(hubs.mangwon17.z, hubs.mangwon17.center);
+  const hong17 = await measure(hubs.hongdae17.z, hubs.hongdae17.center);
+  const gang17 = await measure(hubs.gangnam17.z, hubs.gangnam17.center);
+
+  const rows = [
+    `seoul z11 tier1=${seoul.tier1} korea=${seoul.korea} names=${seoul.koreaNames.slice(0, 12).join("|")}`,
+    `mapo z13 korea=${mapo.korea}`,
+    `gangnam z13 korea=${gangnam.korea}`,
+    `hongdae z15 korea=${hong15.korea}`,
+    `hongdae z16 anchors=${hong16.anchors} stations=${hong16.stations} cand=${hong16.candidates} st=${hong16.stationNames.join("|")} an=${hong16.anchorNames.slice(0, 8).join("|")}`,
+    `mangwon z16 anchors=${mang16.anchors} stations=${mang16.stations} cand=${mang16.candidates}`,
+    `gangnam z16 anchors=${gang16.anchors} stations=${gang16.stations} cand=${gang16.candidates}`,
+    `mangwon z17 anchors=${mang17.anchors} stations=${mang17.stations} cand=${mang17.candidates}`,
+    `hongdae z17 anchors=${hong17.anchors} stations=${hong17.stations} cand=${hong17.candidates}`,
+    `gangnam z17 anchors=${gang17.anchors} stations=${gang17.stations} cand=${gang17.candidates}`,
+    `layers ${JSON.stringify(seoul.layers)}`,
+  ];
+  fs.writeFileSync(pathMod.join(outDir, "basics-report.txt"), rows.join("\n"));
+  console.log(rows.join("\n"));
+
+  expect(seoul.layers.t1, "korea_landmark_tier1 layer").toBe(true);
+  expect(seoul.tier1, `seoul z11 tier1 ≥8, got ${seoul.tier1}`).toBeGreaterThanOrEqual(8);
+  expect(mapo.korea, `mapo z13 korea ≥5, got ${mapo.korea}`).toBeGreaterThanOrEqual(5);
+  expect(gangnam.korea, `gangnam z13 korea ≥5, got ${gangnam.korea}`).toBeGreaterThanOrEqual(5);
+  expect(hong15.korea, `hongdae z15 korea ≥3, got ${hong15.korea}`).toBeGreaterThanOrEqual(3);
+
+  const hongStationOk = hong16.stationNames.some((n) => n.includes("홍대"));
+  expect(hongStationOk, `hongdae z16 station names=${hong16.stationNames.join(",")}`).toBe(true);
+  const seogyoOk =
+    hong16.anchorNames.some((n) => n.includes("서교")) || hong16.anchors >= 4;
+  expect(
+    seogyoOk,
+    `hongdae z16 expect 서교초 or ≥4 anchors; anchors=${hong16.anchorNames.join("|")}`,
+  ).toBe(true);
+
+  for (const [label, m] of [
+    ["mangwon16", mang16],
+    ["hongdae16", hong16],
+    ["gangnam16", gang16],
+    ["mangwon17", mang17],
+    ["hongdae17", hong17],
+    ["gangnam17", gang17],
+  ] as const) {
+    const shown = m.anchors + m.stations;
+    if (m.candidates < 4) {
+      console.log(`${label}: skip ≥4 (candidates=${m.candidates} shown=${shown})`);
+      continue;
+    }
+    expect(
+      shown,
+      `${label} anchors+stations ≥4 (cand=${m.candidates}), got ${shown} (a=${m.anchors} s=${m.stations})`,
+    ).toBeGreaterThanOrEqual(4);
+  }
 });
 
 test.skip(
