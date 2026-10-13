@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import MapPreviewAccessGate from "@/components/MapPreviewAccessGate";
+import { isMapPreviewE2eTokenValid } from "@/lib/mapPreviewAccess";
 import MapPreviewClient from "./MapPreviewClient";
 
 export const metadata: Metadata = {
@@ -20,6 +22,19 @@ export const viewport: Viewport = {
   themeColor: "#1a2a7a",
 };
 
-export default function MapPreviewPage() {
-  return <MapPreviewClient />;
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function MapPreviewPage({ searchParams }: PageProps) {
+  const sp = (await searchParams) ?? {};
+  const raw = sp.e2e;
+  const e2eParam = Array.isArray(raw) ? raw[0] : raw;
+  const e2eGranted = isMapPreviewE2eTokenValid(e2eParam);
+
+  return (
+    <MapPreviewAccessGate e2eGranted={e2eGranted}>
+      <MapPreviewClient />
+    </MapPreviewAccessGate>
+  );
 }

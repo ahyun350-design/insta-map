@@ -9,11 +9,13 @@ import { formatCategoryWithSubcategory } from "@/lib/kakaoSubcategory";
 import { LIST_COLOR_PRESETS } from "@/lib/listColors";
 import { getAppStoreUrl, getTrackDomain } from "@/lib/pindmapLinks";
 import { parsePindmapMapThemeId } from "@/lib/pindmapMapStyle";
+import { readCompactMapLibreOverride } from "@/lib/mapSurface/compactMapLibreFlag";
+import { readExpandedMapLibreOverride } from "@/lib/mapSurface/expandedMapLibreFlag";
 import { trackMapGlFallback } from "@/lib/mapSurface/mapGlTelemetry";
 import { trackPublicListEvent } from "@/lib/track";
 import PindmapGlMap from "@/components/PindmapGlMap";
 
-/** MapLibre public-list load budget before Kakao fallback (?map=kakao path). */
+/** MapLibre public-list load budget before Kakao fallback. */
 const PUBLIC_LIST_GL_LOAD_TIMEOUT_MS = 8000;
 
 type Props = {
@@ -74,10 +76,26 @@ function loadKakaoMapsSdk(): Promise<NonNullable<(typeof window)["kakao"]>> {
   });
 }
 
+/**
+ * Default Kakao for public share pages.
+ * MapLibre only when ?map=gl, or admin force_maplibre localStorage override.
+ */
 function readMapEngine(): "gl" | "kakao" {
-  if (typeof window === "undefined") return "gl";
+  if (typeof window === "undefined") return "kakao";
   const map = new URLSearchParams(window.location.search).get("map");
-  return map === "kakao" ? "kakao" : "gl";
+  if (map === "gl") return "gl";
+  if (map === "kakao") return "kakao";
+  try {
+    if (
+      readCompactMapLibreOverride() === "force_maplibre" ||
+      readExpandedMapLibreOverride() === "force_maplibre"
+    ) {
+      return "gl";
+    }
+  } catch {
+    /* ignore */
+  }
+  return "kakao";
 }
 
 function readTheme() {
@@ -93,7 +111,7 @@ export function PublicListShareView({ list, places, isIOS }: Props) {
   const [mapStatus, setMapStatus] = useState<"loading" | "ready" | "error">(
     "loading",
   );
-  const [engine, setEngine] = useState<"gl" | "kakao">("gl");
+  const [engine, setEngine] = useState<"gl" | "kakao">("kakao");
   const [theme, setTheme] = useState<"paper" | "white">("paper");
   const [queryReady, setQueryReady] = useState(false);
   /** One-shot MapLibre → Kakao fallback (style_error | load_timeout). */

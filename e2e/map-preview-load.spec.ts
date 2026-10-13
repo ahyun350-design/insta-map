@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { withMapPreviewE2e } from "./helpers/mapPreviewE2e";
 
 type PreviewDiag = {
   loadMs: number | null;
@@ -42,7 +43,7 @@ async function waitPreviewReady(page: Page, timeoutMs = 10_000) {
 
 async function openPreview(page: Page, path: string) {
   const t0 = Date.now();
-  await page.goto(path, { waitUntil: "domcontentloaded" });
+  await page.goto(withMapPreviewE2e(path), { waitUntil: "domcontentloaded" });
   await waitPreviewReady(page, 10_000);
   const diag = await page.evaluate(
     () =>
@@ -395,7 +396,7 @@ test("map-preview public-list probe: style fail → Kakao engine", async ({
     });
   });
 
-  await page.goto("/map-preview?probe=public-list", {
+  await page.goto(withMapPreviewE2e("/map-preview?probe=public-list"), {
     waitUntil: "domcontentloaded",
   });
 
