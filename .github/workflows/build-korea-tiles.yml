@@ -1,11 +1,15 @@
-# Build South Korea OpenMapTiles PMTiles and upload to Supabase Storage.
+# Build South Korea OpenMapTiles PMTiles → Supabase Storage (S3 API, multipart).
 #
-# Secrets (Settings → Secrets and variables → Actions):
-#   SUPABASE_URL                 — project URL, e.g. https://xxxx.supabase.co
-#   SUPABASE_SERVICE_ROLE_KEY    — service role key (Storage upload; never log)
-#   SUPABASE_MAP_TILES_BUCKET    — optional, default map-tiles
+# Required Actions secrets (never log values):
+#   SUPABASE_S3_ENDPOINT          — Storage S3 endpoint URL
+#   SUPABASE_S3_REGION            — Storage S3 region
+#   SUPABASE_S3_ACCESS_KEY_ID     — S3 access key id
+#   SUPABASE_S3_SECRET_ACCESS_KEY — S3 secret access key
+# Optional:
+#   SUPABASE_MAP_TILES_BUCKET     — default map-tiles
 #
-# Bucket must already exist and be public (see chat instructions).
+# Do NOT use SUPABASE_SERVICE_ROLE_KEY here.
+# Bucket must be public; global + bucket file size limits must allow ~1–2 GiB.
 
 name: build-korea-tiles
 
@@ -23,22 +27,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      # OpenMapTiles schema jar (matches OpenFreeMap / liberty source-layers)
       PLANETILER_JAR_URL: "https://github.com/openmaptiles/planetiler-openmaptiles/releases/download/v3.16/planetiler-openmaptiles.jar"
       GEOFABRIK_URL: "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf"
       OUT_DIR: build/tiles
+      # Large PMTiles: force multipart (aws s3 cp uses multipart above threshold)
+      AWS_MAX_ATTEMPTS: "10"
+      AWS_RETRY_MODE: standard
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.SUPABASE_S3_REGION }}
+      SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
 
     steps:
-      - name: Check required secrets
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Check required secrets (presence only)
         run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in Actions secrets."
+          set -euo pipefail
+          missing=0
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION SUPABASE_S3_ENDPOINT; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required secret mapped to env: $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Add SUPABASE_S3_ENDPOINT, SUPABASE_S3_REGION, SUPABASE_S3_ACCESS_KEY_ID, SUPABASE_S3_SECRET_ACCESS_KEY."
             exit 1
           fi
-          echo "Secrets present (values not printed)."
+          echo "Required S3 secrets are set (values not printed)."
 
       - name: Resolve bucket name
         env:
@@ -49,9 +65,19 @@ jobs:
           else
             echo "BUCKET=map-tiles" >> "$GITHUB_ENV"
           fi
+          echo "Using configured bucket name (not printing secret overrides)."
+
+      - name: Configure AWS CLI multipart defaults
+        run: |
+          set -euo pipefail
+          aws configure set default.s3.multipart_threshold 64MB
+          aws configure set default.s3.multipart_chunksize 64MB
+          aws configure set default.s3.max_concurrent_requests 8
+          echo "AWS CLI multipart threshold 64MB, chunk 64MB."
 
       - name: Download Geofabrik South Korea PBF
         run: |
+          set -euo pipefail
           mkdir -p "$OUT_DIR"
           echo "Downloading Geofabrik south-korea-latest.osm.pbf"
           curl -L --fail --retry 3 --retry-delay 10 -o "$OUT_DIR/south-korea-latest.osm.pbf" "$GEOFABRIK_URL"
@@ -59,6 +85,7 @@ jobs:
 
       - name: Download Planetiler OpenMapTiles jar
         run: |
+          set -euo pipefail
           curl -L --fail -o "$OUT_DIR/planetiler.jar" "$PLANETILER_JAR_URL"
           ls -lh "$OUT_DIR/planetiler.jar"
 
@@ -81,64 +108,58 @@ jobs:
           echo "Build finished in ${ELAPSED}s, size ${BYTES} bytes"
           ls -lh "$OUT_DIR/korea.pmtiles"
 
-      - name: Upload to Supabase Storage
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Upload PMTiles via S3 multipart
         run: |
           set -euo pipefail
+          # Do not enable shell xtrace — secrets must never appear in logs.
           VERSION=$(date -u +%Y%m%d)
           FILE="korea-${VERSION}.pmtiles"
           SRC="$OUT_DIR/korea.pmtiles"
-          BASE="${SUPABASE_URL%/}/storage/v1/object"
-          BUCKET_NAME="${BUCKET}"
+          export OBJECT_VERSIONED="$FILE"
+          echo "OBJECT_VERSIONED=$FILE" >> "$GITHUB_ENV"
 
-          echo "Uploading versioned object to bucket (filename only logged)…"
-          curl -sS --fail \
-            -X POST \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
-            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-            -H "Content-Type: application/octet-stream" \
-            -H "x-upsert: true" \
-            --data-binary @"$SRC" \
-            "${BASE}/${BUCKET_NAME}/${FILE}"
+          echo "Uploading versioned object key only (multipart)…"
+          aws s3 cp "$SRC" "s3://${BUCKET}/${FILE}" \
+            --endpoint-url "$SUPABASE_S3_ENDPOINT" \
+            --content-type "application/vnd.pmtiles" \
+            --only-show-errors \
+            --cli-read-timeout 0 \
+            --cli-connect-timeout 60
 
-          curl -sS --fail \
-            -X POST \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
-            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-            -H "Content-Type: application/octet-stream" \
-            -H "x-upsert: true" \
-            --data-binary @"$SRC" \
-            "${BASE}/${BUCKET_NAME}/korea-latest.pmtiles"
+          echo "Uploading korea-latest.pmtiles…"
+          aws s3 cp "$SRC" "s3://${BUCKET}/korea-latest.pmtiles" \
+            --endpoint-url "$SUPABASE_S3_ENDPOINT" \
+            --content-type "application/vnd.pmtiles" \
+            --only-show-errors \
+            --cli-read-timeout 0 \
+            --cli-connect-timeout 60
 
-          python3 - <<PY
+          python3 - <<'PY'
           import json, os, datetime
-          path = os.environ["OUT_DIR"] + "/latest.json"
+          path = os.path.join(os.environ["OUT_DIR"], "latest.json")
           payload = {
-            "file": "${FILE}",
-            "bytes": int(os.environ["PMTILES_BYTES"]),
-            "built_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "build_seconds": int(os.environ["BUILD_SECONDS"]),
-            "schema": "openmaptiles",
-            "languages": "default,ko",
+              "file": os.environ["OBJECT_VERSIONED"],
+              "bytes": int(os.environ["PMTILES_BYTES"]),
+              "built_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "build_seconds": int(os.environ["BUILD_SECONDS"]),
+              "schema": "openmaptiles",
+              "languages": "default,ko",
           }
           with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, separators=(",", ":"))
-          print("latest.json written (no secrets)")
+              json.dump(payload, f, separators=(",", ":"))
+          print("latest.json written (object key + sizes only)")
           PY
 
-          curl -sS --fail \
-            -X POST \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
-            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-            -H "Content-Type: application/json" \
-            -H "x-upsert: true" \
-            --data-binary @"$OUT_DIR/latest.json" \
-            "${BASE}/${BUCKET_NAME}/latest.json"
+          echo "Uploading latest.json…"
+          aws s3 cp "$OUT_DIR/latest.json" "s3://${BUCKET}/latest.json" \
+            --endpoint-url "$SUPABASE_S3_ENDPOINT" \
+            --content-type "application/json" \
+            --only-show-errors \
+            --cli-read-timeout 0 \
+            --cli-connect-timeout 60
 
-          echo "Upload complete: ${FILE} (${PMTILES_BYTES} bytes, ${BUILD_SECONDS}s)"
-          echo "Public URL pattern: ${SUPABASE_URL%/}/storage/v1/object/public/${BUCKET_NAME}/${FILE}"
+          echo "Upload complete: object=${FILE} bytes=${PMTILES_BYTES} build_seconds=${BUILD_SECONDS}"
+          echo "Public HTTP path (host omitted): /storage/v1/object/public/${BUCKET}/${FILE}"
 
       - name: Job summary
         if: always()
@@ -150,4 +171,7 @@ jobs:
             if [ -n "${PMTILES_BYTES:-}" ]; then
               echo "- Size MiB: $((PMTILES_BYTES / 1024 / 1024))"
             fi
+            echo "- Versioned object key: ${OBJECT_VERSIONED:-n/a}"
+            echo "- Pointer keys: korea-latest.pmtiles, latest.json"
+            echo "- Upload: AWS CLI S3 multipart (endpoint/keys not logged)"
           } >> "$GITHUB_STEP_SUMMARY"
