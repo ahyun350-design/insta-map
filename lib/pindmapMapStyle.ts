@@ -1800,8 +1800,10 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       paintSet(layer, "text-halo-width", 1.5);
 
       if (layer.id.startsWith("water") && layer.type === "symbol") {
-        // Seas/ocean readable at nationwide zoom; lakes/rivers from z10.
-        layer.minzoom = 5;
+        // Ocean/sea names early; stream/line names later so they don't double place names
+        const isLineWater =
+          /waterway|line/i.test(layer.id) && !/point/i.test(layer.id);
+        layer.minzoom = isLineWater ? 14 : 5;
         paintSet(layer, "text-color", theme.id === "white" ? "#6A8FA8" : theme.id === "neon" ? "#8AA0D8" : "#4A8BB8");
         paintSet(layer, "text-opacity", [
           "interpolate",
@@ -1834,17 +1836,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
               16,
             ];
           } else {
-            // Rivers (한강 등) readable from z11–12
+            // Major rivers (한강) via point labels; line labels from z14
             layer.layout["text-size"] = [
               "interpolate",
               ["linear"],
               ["zoom"],
-              5,
-              10,
-              10,
-              13,
+              14,
               12,
-              15,
+              16,
+              14,
             ];
           }
         }
@@ -2374,11 +2374,12 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           [
             "match",
             ["get", "subclass"],
-            ["subway", "station", "halt", "tram_stop"],
+            ["subway", "station"],
             true,
             false,
           ],
           ["has", "name"],
+          notDuplicateKoreaLandmarkName(),
         ];
         layer.minzoom = 14;
         const layout = { ...(layer.layout || {}) };
@@ -2499,14 +2500,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         [
           "match",
           ["get", "subclass"],
-          ["subway", "station", "halt", "tram_stop"],
+          ["subway", "station"],
           true,
           false,
         ],
         ["has", "name"],
+        notDuplicateKoreaLandmarkName(),
       ];
       const quietStation =
-        theme.id === "neon" ? "#A8B0C8" : theme.id === "white" ? "#5A606C" : "#3A4155";
+        theme.id === "neon" ? "#A8B0C8" : theme.id === "white" ? "#5A606C" : "#444A54";
       // Mid-zoom names: collision-limited (OMT ranks are mostly 1 in Seoul)
       layers.splice(layers.length - 1, 0, {
         id: "poi_transit_mid",
@@ -2520,15 +2522,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           visibility: "visible",
           "text-field": KO_TEXT,
           "text-font": ["Noto Sans Regular"],
-          "text-size": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            11,
-            11,
-            13,
-            12,
-          ],
+          "text-size": 13.5,
           "text-anchor": "top",
           "text-offset": [0, 0.7],
           "text-optional": false,
@@ -2539,13 +2533,17 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             ["linear"],
             ["zoom"],
             11,
-            14,
+            16,
             12,
+            14,
             13,
-            13,
-            1.8,
+            8,
           ],
-          "symbol-sort-key": 2000,
+          "symbol-sort-key": [
+            "-",
+            2000,
+            ["to-number", ["coalesce", ["get", "rank"], 999]],
+          ],
           "symbol-z-order": "source",
         },
         paint: {

@@ -112,12 +112,27 @@ function main() {
 
   // Blocklist: display names + normalized variants for OMT match
   const names = new Set<string>();
-  for (const f of afterFeatures) {
-    const n = String(f.properties.name || "").trim();
-    if (!n) continue;
+  const addName = (n0: string) => {
+    const n = String(n0 || "").trim();
+    if (!n) return;
     names.add(n);
-    const stripped = n.replace(/\s*\([^)]*\)\s*/g, "").replace(/\s*（[^）]*）\s*/g, "").trim();
+    const stripped = n
+      .replace(/\s*\([^)]*\)\s*/g, "")
+      .replace(/\s*（[^）]*）\s*/g, "")
+      .trim();
     if (stripped) names.add(stripped);
+  };
+  for (const f of afterFeatures) addName(f.properties.name);
+
+  // Also hide OMT labels that duplicate korea_major_labels landmarks/mountains
+  try {
+    const majorPath = path.join(ROOT, "lib/koreaMajorLabels.ts");
+    const majorSrc = fs.readFileSync(majorPath, "utf8");
+    for (const m of majorSrc.matchAll(/name:\s*"([^"]+)"[^}]*kind:\s*"(landmark|mountain)"/g)) {
+      addName(m[1]!);
+    }
+  } catch {
+    /* ignore */
   }
   const list = [...names].sort((a, b) => a.localeCompare(b, "ko"));
   const body = `/**
