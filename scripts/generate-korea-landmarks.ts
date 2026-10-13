@@ -291,7 +291,58 @@ function dedupeKey(f: Feat): string {
 }
 
 function normalizeName(s: string): string {
-  return s.replace(/\s/g, "");
+  return s
+    .replace(/\s+/g, "")
+    .replace(/[()（）\[\]【】]/g, "")
+    .toLowerCase();
+}
+
+function namesSimilar(a: string, b: string): boolean {
+  const na = normalizeName(a);
+  const nb = normalizeName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.length < 3 || nb.length < 3) return false;
+  return na.includes(nb) || nb.includes(na);
+}
+
+function haversineM(
+  lng1: number,
+  lat1: number,
+  lng2: number,
+  lat2: number,
+): number {
+  const R = 6371000;
+  const toR = (d: number) => (d * Math.PI) / 180;
+  const dLat = toR(lat2 - lat1);
+  const dLng = toR(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toR(lat1)) * Math.cos(toR(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/** Same/similar name within radiusM → keep best (tier, wikidata, height). */
+function spatialNameDedupe(features: Feat[], radiusM = 500): Feat[] {
+  const score = (f: Feat) => {
+    let s = (4 - f.properties.tier) * 10000;
+    if (f.properties.wikidata) s += 1000;
+    s += f.properties.height ?? 0;
+    s += (f.properties.levels ?? 0) * 10;
+    return s;
+  };
+  const sorted = [...features].sort((a, b) => score(b) - score(a));
+  const kept: Feat[] = [];
+  for (const f of sorted) {
+    const [lng, lat] = f.geometry.coordinates;
+    const clash = kept.some((k) => {
+      if (!namesSimilar(f.properties.name, k.properties.name)) return false;
+      const [klng, klat] = k.geometry.coordinates;
+      return haversineM(lng, lat, klng, klat) <= radiusM;
+    });
+    if (!clash) kept.push(f);
+  }
+  return kept;
 }
 
 function capTier(
@@ -366,6 +417,15 @@ async function main() {
   }
 
   let features = [...byKey.values()];
+
+  // Spatial + name dedupe (same/similar name within 500m → one feature)
+  {
+    const beforeDedupe = features.length;
+    features = spatialNameDedupe(features, 500);
+    console.log(
+      `spatialNameDedupe: ${beforeDedupe} → ${features.length} (−${beforeDedupe - features.length})`,
+    );
+  }
 
   // Target bands: tier1 150–300, keep tier2/3 usable under 2MB
   features = capTier(features, 1, 280, (f) => {

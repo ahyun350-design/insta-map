@@ -81,9 +81,13 @@ async function ensurePinImages(map: MlMap) {
     MAP_PIN_HEIGHT,
     dpr,
   );
+  const { ensurePoiCategoryIcons } = await import(
+    "@/lib/mapSurface/poiCategoryIcons"
+  );
   const { ensureKoreaLandmarkIcon } = await import(
     "@/lib/mapSurface/koreaLandmarkIcon"
   );
+  await ensurePoiCategoryIcons(map);
   await ensureKoreaLandmarkIcon(map);
 }
 

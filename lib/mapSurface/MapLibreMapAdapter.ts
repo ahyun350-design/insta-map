@@ -523,9 +523,13 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
             MAP_MYLOC_SIZE,
             this.imageDpr,
           );
+          const { ensurePoiCategoryIcons } = await import(
+            "@/lib/mapSurface/poiCategoryIcons"
+          );
           const { ensureKoreaLandmarkIcon } = await import(
             "@/lib/mapSurface/koreaLandmarkIcon"
           );
+          await ensurePoiCategoryIcons(this.map);
           await ensureKoreaLandmarkIcon(this.map);
           this.addLayers(this.map);
           this.bindClicks(this.map);

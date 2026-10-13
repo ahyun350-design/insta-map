@@ -8,6 +8,16 @@
 import { koreaGuLabelsGeoJson } from "@/lib/koreaGuLabels";
 import { koreaMajorLabelsGeoJson } from "@/lib/koreaMajorLabels";
 import { koreaPlaceLabelsGeoJson } from "@/lib/koreaPlaceLabels";
+import { KOREA_LANDMARK_NAME_BLOCKLIST } from "@/lib/mapSurface/koreaLandmarkNameBlocklist";
+import {
+  GEOJSON_NAME_TEXT,
+  KO_TEXT,
+  SHOP_TEXT,
+} from "@/lib/mapSurface/mapLabelText";
+import {
+  poiCategoryIconImageExpr,
+  poiCategoryTextColorExpr,
+} from "@/lib/mapSurface/poiCategoryIcons";
 
 /** Production-adopted themes */
 export type PindmapMapThemeId = "paper" | "white";
@@ -202,13 +212,22 @@ const HIDE_LAYER_IDS = new Set([
   "label_city_capital",
 ]);
 
-/** Prefer Korean name fields from OpenMapTiles. */
-const KO_TEXT: unknown = [
-  "coalesce",
-  ["get", "name:ko"],
-  ["get", "name:nonlatin"],
-  ["get", "name"],
-];
+/**
+ * Hide OMT POI/place labels whose display name duplicates a korea-landmarks entry.
+ * (Spatial 500m join is not available in style filters — name match is the gate.)
+ */
+function notDuplicateKoreaLandmarkName(): unknown {
+  return [
+    "!",
+    [
+      "match",
+      ["to-string", ["coalesce", ["get", "name:ko"], ["get", "name"], ""]],
+      KOREA_LANDMARK_NAME_BLOCKLIST,
+      true,
+      false,
+    ],
+  ];
+}
 
 /**
  * Neighborhood anchor labels from OpenMapTiles `poi`.
@@ -279,121 +298,12 @@ function landmarkRankMaxExpr(z12Max: number, z14Max: number, z16Max: number): un
 }
 
 function landmarkGroupColor(theme: MapPreviewTheme): unknown {
-  const culture =
-    theme.id === "neon" ? "#A8B0E0" : theme.id === "white" ? "#5A6A88" : "#5A6B8C";
-  const medical =
-    theme.id === "neon" ? "#D4A0A8" : theme.id === "white" ? "#9A6A6A" : "#A66B6B";
-  const transit =
-    theme.id === "neon" ? "#7AB8A0" : theme.id === "white" ? "#4A7A68" : "#3A6B5A";
-  return [
-    "case",
-    [
-      "any",
-      ["all", ["==", ["get", "class"], "hospital"], ["==", ["get", "subclass"], "hospital"]],
-    ],
-    medical,
-    [
-      "any",
-      [
-        "all",
-        ["==", ["get", "class"], "railway"],
-        ["match", ["get", "subclass"], ["subway", "station"], true, false],
-      ],
-      ["all", ["==", ["get", "class"], "bus"], ["==", ["get", "subclass"], "bus_station"]],
-    ],
-    transit,
-    culture,
-  ];
+  return poiCategoryTextColorExpr(theme.id);
 }
 
-/** OpenFreeMap Liberty sprite ids (ofm_f384) — category icons already in style.sprite. */
+/** Custom addImage icons (pind-poi-*) — replaces Liberty *_11 sprites. */
 function poiSpriteIcon(): unknown {
-  return [
-    "case",
-    [
-      "any",
-      ["==", ["get", "class"], "cafe"],
-      ["all", ["==", ["get", "class"], "shop"], ["==", ["get", "subclass"], "coffee"]],
-    ],
-    "cafe_11",
-    ["==", ["get", "class"], "restaurant"],
-    "restaurant_11",
-    ["==", ["get", "class"], "fast_food"],
-    "fast_food_11",
-    ["==", ["get", "class"], "bakery"],
-    "bakery_11",
-    ["==", ["get", "class"], "bar"],
-    "bar_11",
-    ["==", ["get", "class"], "beer"],
-    "bar_11",
-    ["==", ["get", "class"], "pharmacy"],
-    "pharmacy_11",
-    ["==", ["get", "class"], "bank"],
-    "bank_11",
-    [
-      "any",
-      ["==", ["get", "class"], "hotel"],
-      ["==", ["get", "class"], "lodging"],
-      ["==", ["get", "subclass"], "hotel"],
-    ],
-    "lodging_11",
-    [
-      "any",
-      ["==", ["get", "class"], "cinema"],
-      ["==", ["get", "subclass"], "cinema"],
-    ],
-    "cinema_11",
-    [
-      "any",
-      ["==", ["get", "class"], "theatre"],
-      ["==", ["get", "class"], "theater"],
-    ],
-    "cinema_11",
-    [
-      "any",
-      ["==", ["get", "class"], "mall"],
-      ["==", ["get", "subclass"], "department_store"],
-      ["==", ["get", "class"], "department_store"],
-    ],
-    "shop_11",
-    [
-      "any",
-      ["all", ["==", ["get", "class"], "shop"], ["==", ["get", "subclass"], "convenience"]],
-      ["all", ["==", ["get", "class"], "grocery"], ["==", ["get", "subclass"], "supermarket"]],
-    ],
-    "shop_11",
-    ["==", ["get", "class"], "grocery"],
-    "grocery_11",
-    ["==", ["get", "class"], "shop"],
-    "shop_11",
-    ["==", ["get", "class"], "hospital"],
-    "hospital_11",
-    [
-      "any",
-      ["==", ["get", "class"], "school"],
-      ["==", ["get", "class"], "college"],
-    ],
-    "school_11",
-    ["==", ["get", "class"], "park"],
-    "park_11",
-    ["==", ["get", "class"], "police"],
-    "police_11",
-    ["==", ["get", "class"], "post"],
-    "post_11",
-    ["==", ["get", "class"], "town_hall"],
-    "town_hall_11",
-    [
-      "any",
-      ["==", ["get", "class"], "railway"],
-      ["==", ["get", "class"], "rail"],
-    ],
-    "railway_metro_11",
-    ["==", ["get", "class"], "bus"],
-    "bus_11",
-    ["==", ["get", "class"], "hairdresser"],
-    "shop_11",
-    "shop_11",
-  ];
+  return poiCategoryIconImageExpr();
 }
 
 function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
@@ -421,12 +331,13 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     LANDMARK_FILTER,
     NOT_AIRFIELD,
     ["has", "name"],
+    notDuplicateKoreaLandmarkName(),
     ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], rankMax],
   ];
   // Above shops (≤850); below korea-landmark tiers (~1650+) and stations (~2000)
   const sortKey: unknown = ["-", 1500, ["to-number", ["coalesce", ["get", "rank"], 999]]];
 
-  // Single symbol: icon + name together (no nameless dots).
+  // Single symbol: icon + name together (no nameless dots / icon-only).
   layers.push({
     id: "landmark_label",
     type: "symbol",
@@ -437,32 +348,12 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     layout: {
       visibility: "visible",
       "icon-image": poiSpriteIcon(),
-      // cafe_11 is 34px@2x → 17 CSS px at size 1; ~18px ≈ 1.1
-      "icon-size": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        11,
-        0.85,
-        13,
-        1.0,
-        14,
-        1.1,
-      ],
-      "icon-optional": true,
+      // 20px CSS circle @ size 1
+      "icon-size": 1,
+      "icon-optional": false,
       "text-field": KO_TEXT,
-      "text-font": ["Noto Sans Bold"],
-      "text-size": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        11,
-        12,
-        13,
-        13,
-        14,
-        14,
-      ],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 13,
       "text-variable-anchor": ["right", "left", "top", "bottom"],
       "text-radial-offset": 1.05,
       "text-max-width": 8,
@@ -471,18 +362,17 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
         ["linear"],
         ["zoom"],
         11,
-        6,
+        8,
         13,
-        2.2,
+        4,
         14,
-        2.2,
+        3,
         16,
-        0.8,
+        1.2,
         17,
-        0.4,
+        0.6,
       ],
       "text-optional": false,
-      // Mid-zoom: collision. Street zoom layer below forces anchors vs shops.
       "text-allow-overlap": false,
       "text-ignore-placement": false,
       "icon-allow-overlap": false,
@@ -494,13 +384,13 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
       "text-color": color,
       "text-halo-color": "#FFFFFF",
       "text-halo-width": 1.5,
-      "text-halo-blur": 0.2,
+      "text-halo-blur": 0,
       "icon-opacity": 0.95,
     },
     maxzoom: 15,
   });
 
-  // z15+ duplicate with allow-overlap so schools/parks survive shop density
+  // z15+ street zoom — collision still on (no allow-overlap)
   layers.push({
     id: "landmark_label_street",
     type: "symbol",
@@ -511,11 +401,11 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     layout: {
       visibility: "visible",
       "icon-image": poiSpriteIcon(),
-      "icon-size": 1.1,
-      "icon-optional": true,
+      "icon-size": 1,
+      "icon-optional": false,
       "text-field": KO_TEXT,
-      "text-font": ["Noto Sans Bold"],
-      "text-size": 14,
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 13,
       "text-variable-anchor": ["right", "left", "top", "bottom"],
       "text-radial-offset": 1.05,
       "text-max-width": 8,
@@ -524,17 +414,17 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
         ["linear"],
         ["zoom"],
         15,
-        1.2,
+        2,
         16,
-        0.6,
+        1.2,
         17,
-        0.35,
+        0.6,
       ],
       "text-optional": false,
-      "text-allow-overlap": true,
-      "text-ignore-placement": true,
-      "icon-allow-overlap": true,
-      "icon-ignore-placement": true,
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
+      "icon-allow-overlap": false,
+      "icon-ignore-placement": false,
       "symbol-sort-key": sortKey,
       "symbol-z-order": "source",
     },
@@ -542,7 +432,7 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
       "text-color": color,
       "text-halo-color": "#FFFFFF",
       "text-halo-width": 1.5,
-      "text-halo-blur": 0.2,
+      "text-halo-blur": 0,
       "icon-opacity": 0.95,
     },
   });
@@ -554,7 +444,7 @@ function appendKoreaLandmarkGeoLayers(
   theme: MapPreviewTheme,
 ): void {
   const color =
-    theme.id === "neon" ? "#A8B0E0" : theme.id === "white" ? "#4A5A78" : "#3A4A66";
+    theme.id === "neon" ? "#A8B0E0" : theme.id === "white" ? "#4A5A78" : "#2E2E36";
   const tiers: Array<{
     id: string;
     tier: number;
@@ -564,14 +454,13 @@ function appendKoreaLandmarkGeoLayers(
     sortBase: number;
     filter: unknown;
   }> = [
-    // z11–12.5: iconic only (no mall/attraction flood — protects gu/dong budget)
+    // z11–13: tier1 only — collision caps ~12 on screen
     {
       id: "korea_landmark_tier1_far",
       tier: 1,
       minzoom: 11,
       maxzoom: 12.5,
-      textSize: 15,
-      // Below gu/dong so mid-zoom place budget holds; still places into gaps
+      textSize: 14,
       sortBase: 1050,
       filter: [
         "all",
@@ -593,15 +482,16 @@ function appendKoreaLandmarkGeoLayers(
       id: "korea_landmark_tier1",
       tier: 1,
       minzoom: 12.5,
-      textSize: 15,
+      textSize: 14,
       sortBase: 1550,
       filter: ["==", ["get", "tier"], 1],
     },
+    // tier2 only from z14 — keeps z12–13 readable (tier1 + collision)
     {
       id: "korea_landmark_tier2",
       tier: 2,
-      minzoom: 13,
-      textSize: 14,
+      minzoom: 14,
+      textSize: 13,
       sortBase: 1520,
       filter: ["==", ["get", "tier"], 2],
     },
@@ -609,7 +499,7 @@ function appendKoreaLandmarkGeoLayers(
       id: "korea_landmark_tier3",
       tier: 3,
       minzoom: 15,
-      textSize: 14,
+      textSize: 13,
       sortBase: 1510,
       filter: ["==", ["get", "tier"], 3],
     },
@@ -625,10 +515,10 @@ function appendKoreaLandmarkGeoLayers(
       layout: {
         visibility: "visible",
         "icon-image": "korea-landmark-building",
-        "icon-size": 0.85,
-        "icon-optional": true,
-        "text-field": ["get", "name"],
-        "text-font": ["Noto Sans Bold"],
+        "icon-size": 1,
+        "icon-optional": false,
+        "text-field": GEOJSON_NAME_TEXT,
+        "text-font": ["Noto Sans Regular"],
         "text-size": t.textSize,
         "text-variable-anchor": ["right", "left", "top", "bottom"],
         "text-radial-offset": 1.1,
@@ -638,39 +528,36 @@ function appendKoreaLandmarkGeoLayers(
           ["linear"],
           ["zoom"],
           11,
-          14,
+          16,
           12,
-          8,
+          12,
           12.5,
-          4,
+          10,
           13,
-          4,
+          8,
           14,
           6,
           15,
-          1.6,
+          2.5,
         ],
-        // Ignore placement so gu/dong/shop budgets (regression tests) stay intact.
-        "text-optional": true,
-        "text-allow-overlap": true,
-        "text-ignore-placement": true,
-        "icon-allow-overlap": true,
-        "icon-ignore-placement": true,
+        "text-optional": false,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false,
         "symbol-sort-key": t.sortBase,
         "symbol-z-order": "source",
       },
       paint: {
         "text-color": color,
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.6,
+        "text-halo-width": 1.5,
+        "text-halo-blur": 0,
         "icon-opacity": 0.92,
       },
     });
   }
 }
-
-/** Shop/facility name only — name:ko then name (no nonlatin fallback clutter). */
-const SHOP_TEXT: unknown = ["coalesce", ["get", "name:ko"], ["get", "name"]];
 
 const HAS_SHOP_NAME: unknown = [
   ">",
@@ -874,48 +761,9 @@ const SHOP_Z18_REMAINDER: unknown = [
   ],
 ];
 
-/**
- * Four calm tint groups (not Kakao icons):
- * food | retail | daily (bank/pharmacy) | other
- */
+/** Category text colors — same family as icon fills (muted paper). */
 function shopPoiColor(theme: MapPreviewTheme): unknown {
-  const food =
-    theme.id === "neon" ? "#C4A090" : theme.id === "white" ? "#8A6A5A" : "#8B6B5C";
-  const retail =
-    theme.id === "neon" ? "#8AB8A0" : theme.id === "white" ? "#5A7A68" : "#5B7A6A";
-  const daily =
-    theme.id === "neon" ? "#9AA8D0" : theme.id === "white" ? "#5A6A88" : "#5A6B8C";
-  const other =
-    theme.id === "neon" ? "#A0A0B0" : theme.id === "white" ? "#6E6874" : "#7A7580";
-  return [
-    "case",
-    [
-      "any",
-      ["==", ["get", "class"], "cafe"],
-      ["==", ["get", "class"], "restaurant"],
-      ["==", ["get", "class"], "bar"],
-      ["==", ["get", "class"], "beer"],
-      ["==", ["get", "class"], "fast_food"],
-      ["==", ["get", "class"], "bakery"],
-      ["==", ["get", "class"], "ice_cream"],
-    ],
-    food,
-    [
-      "any",
-      ["==", ["get", "class"], "shop"],
-      ["==", ["get", "class"], "grocery"],
-      ["==", ["get", "class"], "clothes"],
-    ],
-    retail,
-    [
-      "any",
-      ["==", ["get", "class"], "bank"],
-      ["==", ["get", "class"], "post"],
-      ["==", ["get", "class"], "pharmacy"],
-    ],
-    daily,
-    other,
-  ];
+  return poiCategoryTextColorExpr(theme.id);
 }
 
 function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
@@ -1050,6 +898,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       "all",
       HAS_SHOP_NAME,
       SHOP_EXCLUDE,
+      notDuplicateKoreaLandmarkName(),
       band.classFilter,
     ];
     const layerSpec: AnyLayer = {
@@ -1062,23 +911,12 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        // ~18px on screen from *_11 @2x (17 CSS px at size 1 → ×1.1)
-        "icon-size": 1.1,
+        "icon-size": 1,
         "icon-padding": 1,
         "icon-optional": false,
         "text-field": SHOP_TEXT,
         "text-font": ["Noto Sans Regular"],
-        "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          14,
-          13,
-          16,
-          12.5,
-          17,
-          11.5,
-        ],
+        "text-size": 12.5,
         "text-variable-anchor": ["right", "left", "top", "bottom"],
         "text-radial-offset": 0.9,
         "text-max-width": 8,
@@ -1096,7 +934,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         "text-opacity": 0.92,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.5,
-        "text-halo-blur": 0.15,
+        "text-halo-blur": 0,
         "icon-opacity": 0.95,
       },
     };
@@ -1122,12 +960,11 @@ function appendBusStopLayers(layers: AnyLayer[]): void {
     ],
     layout: {
       visibility: "visible",
-      "icon-image": "bus_11",
-      "icon-size": 0.65,
+      "icon-image": "pind-poi-bus",
+      "icon-size": 0.75,
       "icon-optional": false,
-      // Decorative dots — do not crowd out place names
-      "icon-allow-overlap": true,
-      "icon-ignore-placement": true,
+      "icon-allow-overlap": false,
+      "icon-ignore-placement": false,
       "icon-padding": 0.5,
       "symbol-sort-key": 50,
     },
@@ -2133,7 +1970,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-width", 1.6);
         if (layer.layout) {
           layer.layout["text-field"] = SHORT_CITY_KO;
-          layer.layout["text-font"] = ["Noto Sans Bold"];
+          layer.layout["text-font"] = ["Noto Sans Regular"];
           layer.layout["text-size"] = [
             "interpolate",
             ["linear"],
@@ -2144,8 +1981,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             20,
           ];
           layer.layout["text-padding"] = 2;
-          layer.layout["text-allow-overlap"] = true;
-          layer.layout["text-ignore-placement"] = true;
+          layer.layout["text-allow-overlap"] = false;
+          layer.layout["text-ignore-placement"] = false;
           layer.layout["symbol-sort-key"] = [
             "match",
             ["coalesce", ["get", "name:ko"], ["get", "name"], ""],
@@ -2549,12 +2386,12 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         delete layout["icon-size"];
         layout["text-anchor"] = "top";
         layout["text-offset"] = [0, 0.85];
-        layout["text-size"] = 13;
+        layout["text-size"] = 13.5;
         layout["text-field"] = KO_TEXT;
-        layout["text-font"] = ["Noto Sans Bold"];
+        layout["text-font"] = ["Noto Sans Regular"];
         layout["text-optional"] = false;
-        layout["text-allow-overlap"] = true;
-        layout["text-ignore-placement"] = true;
+        layout["text-allow-overlap"] = false;
+        layout["text-ignore-placement"] = false;
         layout["text-padding"] = 0.5;
         // Highest label priority — stations beat korea landmarks / anchors / shops
         layout["symbol-sort-key"] = [
@@ -2564,7 +2401,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         ];
         layer.layout = layout;
         const quietStation =
-          theme.id === "neon" ? "#A8B0C8" : theme.id === "white" ? "#5A606C" : "#3A4155";
+          theme.id === "neon" ? "#A8B0C8" : theme.id === "white" ? "#5A606C" : "#444A54";
         paintSet(layer, "text-color", quietStation);
         paintSet(layer, "text-halo-color", "#FFFFFF");
         paintSet(layer, "text-halo-width", 1.5);
@@ -2585,7 +2422,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             14,
             14,
           ];
-          layer.layout["text-font"] = ["Noto Sans Bold"];
+          layer.layout["text-font"] = ["Noto Sans Regular"];
           layer.layout["text-padding"] = 3;
           layer.layout["symbol-sort-key"] = [
             "-",
@@ -2682,7 +2519,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         layout: {
           visibility: "visible",
           "text-field": KO_TEXT,
-          "text-font": ["Noto Sans Bold"],
+          "text-font": ["Noto Sans Regular"],
           "text-size": [
             "interpolate",
             ["linear"],
@@ -2829,18 +2666,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       "text-field": ["get", "name"],
       "text-font": ["Noto Sans Regular"],
       // z10–11 keep denser; z12+ reach ≥18px (Kakao-like)
-      "text-size": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        10,
-        14,
-        11.5,
-        16,
-        12.5,
-        18,
-      ],
-      "text-letter-spacing": 0.08,
+      "text-size": 17,
+      "text-letter-spacing": 0.05,
       "text-max-width": 8,
       "text-padding": 1.5,
       // Gu wins over dong / landmark / mountain when colliding
@@ -2848,7 +2675,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       visibility: "visible",
     },
     paint: {
-      "text-color": theme.id === "neon" ? "#A8B0E0" : "#4A5166",
+      "text-color": theme.id === "neon" ? "#A8B0E0" : "#8A8A92",
       "text-halo-color": "#FFFFFF",
       "text-halo-width": 1.5,
     },
@@ -2872,15 +2699,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     layout: {
       "text-field": ["get", "name"],
       "text-font": ["Noto Sans Regular"],
-      "text-size": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        11,
-        14,
-        13,
-        16,
-      ],
+      "text-size": 15,
       "text-max-width": 8,
       "text-padding": [
         "interpolate",
@@ -2902,7 +2721,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       visibility: "visible",
     },
     paint: {
-      "text-color": theme.id === "neon" ? "#A8B0D8" : "#3A4155",
+      "text-color": theme.id === "neon" ? "#A8B0D8" : "#8A8A92",
       "text-halo-color": "#FFFFFF",
       "text-halo-width": 1.5,
     },
@@ -2946,8 +2765,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       ],
       "text-optional": true,
       // Few peaks — always show when in view; do not crowd other labels out
-      "text-allow-overlap": true,
-      "text-ignore-placement": true,
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
       "symbol-sort-key": [
         "-",
         1750,
@@ -2978,7 +2797,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     maxzoom: 13,
     layout: {
       "text-field": ["get", "name"],
-      "text-font": ["Noto Sans Bold"],
+      "text-font": ["Noto Sans Regular"],
       "text-size": 12,
       "text-max-width": 8,
       "text-padding": 3.5,
@@ -3011,13 +2830,13 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     maxzoom: 14,
     layout: {
       "text-field": ["get", "name"],
-      "text-font": ["Noto Sans Bold"],
+      "text-font": ["Noto Sans Regular"],
       "text-size": 13,
       "text-max-width": 8,
       "text-padding": 1.0,
       "text-optional": true,
-      "text-allow-overlap": true,
-      "text-ignore-placement": true,
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
       "symbol-sort-key": [
         "-",
         1050,
@@ -3295,6 +3114,33 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   appendLandmarkLayers(layers, theme);
   // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)
   appendKoreaLandmarkGeoLayers(layers, theme);
+
+  // Final pass: place/POI labels never use Bold or allow-overlap
+  // (saved/search/my-location pins are added later by adapters, not here).
+  for (const layer of layers) {
+    if (layer.type !== "symbol") continue;
+    const id = layer.id;
+    if (/pin|myloc|search|route|cluster/i.test(id)) continue;
+    const prevFont = layer.layout?.["text-font"];
+    const keepItalic =
+      id.startsWith("water") &&
+      Array.isArray(prevFont) &&
+      String(prevFont[0] || "").includes("Italic");
+    const layout = { ...(layer.layout || {}) };
+    if (layout["text-field"] != null) {
+      layout["text-font"] = keepItalic
+        ? ["Noto Sans Italic"]
+        : ["Noto Sans Regular"];
+    }
+    layout["text-allow-overlap"] = false;
+    layout["text-ignore-placement"] = false;
+    layout["icon-allow-overlap"] = false;
+    layout["icon-ignore-placement"] = false;
+    if (typeof layout["text-halo-blur"] === "number" && layout["text-halo-blur"] > 0) {
+      layout["text-halo-blur"] = 0;
+    }
+    layer.layout = layout;
+  }
 
   style.layers = layers;
   style.name = `pindmap-${theme.id}`;
