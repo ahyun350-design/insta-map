@@ -121,8 +121,14 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
   const z15 = await page.evaluate(() => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
+    const landmarkLayers = [
+      "landmark_label",
+      "landmark_label_street",
+    ].filter((id) => !!map.getLayer(id));
     return {
-      landmark: map.queryRenderedFeatures({ layers: ["landmark_label"] }).length,
+      landmark: landmarkLayers.length
+        ? map.queryRenderedFeatures({ layers: landmarkLayers }).length
+        : 0,
       line: map.queryRenderedFeatures({ layers: ["subway_overlay_line"] }).length,
       station: map.queryRenderedFeatures({
         layers: ["subway_overlay_station", "subway_overlay_station_transfer"],
@@ -153,8 +159,14 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
   const z16 = await page.evaluate(() => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
+    const landmarkLayers = [
+      "landmark_label",
+      "landmark_label_street",
+    ].filter((id) => !!map.getLayer(id));
     return {
-      landmark: map.queryRenderedFeatures({ layers: ["landmark_label"] }).length,
+      landmark: landmarkLayers.length
+        ? map.queryRenderedFeatures({ layers: landmarkLayers }).length
+        : 0,
       zoom: map.getZoom(),
     };
   });
