@@ -10,17 +10,31 @@
 #
 # Do NOT use SUPABASE_SERVICE_ROLE_KEY here.
 # Bucket must be public; global + bucket file size limits must allow ~1–2 GiB.
+#
+# upload_only=true skips Planetiler and downloads korea-pmtiles artifact from
+# artifact_run_id (a prior successful build that uploaded the artifact).
 
 name: build-korea-tiles
 
 on:
   workflow_dispatch:
+    inputs:
+      upload_only:
+        description: "Skip build; download korea-pmtiles artifact and upload to Storage only"
+        type: boolean
+        default: false
+      artifact_run_id:
+        description: "Workflow run id that has the korea-pmtiles artifact (required when upload_only)"
+        type: string
+        required: false
+        default: ""
   schedule:
     # 1st of each month, 15:00 UTC ≈ 00:00 KST next day
     - cron: "0 15 1 * *"
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build-and-upload:
@@ -30,14 +44,14 @@ jobs:
       PLANETILER_JAR_URL: "https://github.com/openmaptiles/planetiler-openmaptiles/releases/download/v3.16/planetiler-openmaptiles.jar"
       GEOFABRIK_URL: "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf"
       OUT_DIR: build/tiles
-      # Large PMTiles: force multipart (aws s3 cp uses multipart above threshold)
       AWS_MAX_ATTEMPTS: "10"
-      AWS_RETRY_MODE: standard
+      AWS_RETRY_MODE: adaptive
       AWS_EC2_METADATA_DISABLED: "true"
       AWS_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: ${{ secrets.SUPABASE_S3_REGION }}
       SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
+      UPLOAD_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_only }}
 
     steps:
       - name: Check required secrets (presence only)
@@ -67,15 +81,29 @@ jobs:
           fi
           echo "Using configured bucket name (not printing secret overrides)."
 
+      - name: Validate upload_only inputs
+        if: ${{ env.UPLOAD_ONLY == 'true' }}
+        env:
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ARTIFACT_RUN_ID}" ]; then
+            echo "upload_only=true requires artifact_run_id (Actions run that has korea-pmtiles artifact)."
+            exit 1
+          fi
+          echo "upload_only mode: will download artifact from run id (id length=${#ARTIFACT_RUN_ID})."
+
       - name: Configure AWS CLI multipart defaults
         run: |
           set -euo pipefail
-          aws configure set default.s3.multipart_threshold 64MB
-          aws configure set default.s3.multipart_chunksize 64MB
-          aws configure set default.s3.max_concurrent_requests 8
-          echo "AWS CLI multipart threshold 64MB, chunk 64MB."
+          # Smaller parts + low concurrency reduce 524 timeouts on Storage
+          aws configure set default.s3.multipart_threshold 16MB
+          aws configure set default.s3.multipart_chunksize 16MB
+          aws configure set default.s3.max_concurrent_requests 2
+          echo "AWS CLI multipart threshold 16MB, chunk 16MB, concurrent 2, retry adaptive."
 
       - name: Download Geofabrik South Korea PBF
+        if: ${{ env.UPLOAD_ONLY != 'true' }}
         run: |
           set -euo pipefail
           mkdir -p "$OUT_DIR"
@@ -84,27 +112,31 @@ jobs:
           ls -lh "$OUT_DIR/south-korea-latest.osm.pbf"
 
       - name: Download Planetiler OpenMapTiles jar
+        if: ${{ env.UPLOAD_ONLY != 'true' }}
         run: |
           set -euo pipefail
+          mkdir -p "$OUT_DIR"
           curl -L --fail -o "$OUT_DIR/planetiler.jar" "$PLANETILER_JAR_URL"
           ls -lh "$OUT_DIR/planetiler.jar"
 
       # planetiler-openmaptiles v3.16 requires class file 65 → Java 21+
       - name: Set up Java 21
+        if: ${{ env.UPLOAD_ONLY != 'true' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Print Java version
+        if: ${{ env.UPLOAD_ONLY != 'true' }}
         run: java -version
 
       - name: Build korea.pmtiles
+        if: ${{ env.UPLOAD_ONLY != 'true' }}
         run: |
           set -euo pipefail
           START=$(date +%s)
           # GitHub-hosted runner ≈7GB RAM; leave headroom for OS + Planetiler off-heap.
-          # -Xmx6g is too tight; 4g is safe for south-korea extract.
           java -Xmx4g -jar "$OUT_DIR/planetiler.jar" \
             --osm-path="$OUT_DIR/south-korea-latest.osm.pbf" \
             --output="$OUT_DIR/korea.pmtiles" \
@@ -118,6 +150,77 @@ jobs:
           echo "PMTILES_BYTES=$BYTES" >> "$GITHUB_ENV"
           echo "Build finished in ${ELAPSED}s, size ${BYTES} bytes"
           ls -lh "$OUT_DIR/korea.pmtiles"
+          python3 - <<'PY'
+          import json, os
+          meta = {
+              "build_seconds": int(os.environ["BUILD_SECONDS"]),
+              "bytes": int(os.environ["PMTILES_BYTES"]),
+              "schema": "openmaptiles",
+              "languages": "default,ko",
+          }
+          path = os.path.join(os.environ["OUT_DIR"], "build-meta.json")
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(meta, f, separators=(",", ":"))
+          print("build-meta.json written")
+          PY
+
+      - name: Save korea.pmtiles artifact
+        if: ${{ env.UPLOAD_ONLY != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: korea-pmtiles
+          path: |
+            build/tiles/korea.pmtiles
+            build/tiles/build-meta.json
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Download korea.pmtiles artifact from prior run
+        if: ${{ env.UPLOAD_ONLY == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: korea-pmtiles
+          path: build/tiles
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.artifact_run_id }}
+
+      - name: Load sizes from artifact meta
+        if: ${{ env.UPLOAD_ONLY == 'true' }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$OUT_DIR/korea.pmtiles" ]; then
+            echo "korea.pmtiles missing after artifact download"
+            exit 1
+          fi
+          BYTES=$(stat -c%s "$OUT_DIR/korea.pmtiles")
+          echo "PMTILES_BYTES=$BYTES" >> "$GITHUB_ENV"
+          if [ -f "$OUT_DIR/build-meta.json" ]; then
+            BS=$(python3 -c 'import json; print(json.load(open("build/tiles/build-meta.json")).get("build_seconds",0))')
+            echo "BUILD_SECONDS=$BS" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_SECONDS=0" >> "$GITHUB_ENV"
+          fi
+          ls -lh "$OUT_DIR/korea.pmtiles"
+
+      - name: Record file size in Summary (before upload)
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Korea PMTiles (pre-upload)"
+            if [ -n "${PMTILES_BYTES:-}" ]; then
+              echo "- Size bytes: ${PMTILES_BYTES}"
+              echo "- Size MiB: $((PMTILES_BYTES / 1024 / 1024))"
+            elif [ -f "$OUT_DIR/korea.pmtiles" ]; then
+              B=$(stat -c%s "$OUT_DIR/korea.pmtiles")
+              echo "- Size bytes: ${B}"
+              echo "- Size MiB: $((B / 1024 / 1024))"
+            else
+              echo "- Size: n/a (file not present yet)"
+            fi
+            echo "- Build seconds: ${BUILD_SECONDS:-n/a}"
+            echo "- Mode: $([ "${UPLOAD_ONLY}" = "true" ] && echo upload_only || echo build_and_upload)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload PMTiles via S3 multipart
         run: |
@@ -129,30 +232,37 @@ jobs:
           export OBJECT_VERSIONED="$FILE"
           echo "OBJECT_VERSIONED=$FILE" >> "$GITHUB_ENV"
 
-          echo "Uploading versioned object key only (multipart)…"
-          aws s3 cp "$SRC" "s3://${BUCKET}/${FILE}" \
-            --endpoint-url "$SUPABASE_S3_ENDPOINT" \
-            --content-type "application/vnd.pmtiles" \
-            --only-show-errors \
-            --cli-read-timeout 0 \
-            --cli-connect-timeout 60
+          if [ ! -f "$SRC" ]; then
+            echo "Missing $SRC"
+            exit 1
+          fi
 
-          echo "Uploading korea-latest.pmtiles…"
-          aws s3 cp "$SRC" "s3://${BUCKET}/korea-latest.pmtiles" \
-            --endpoint-url "$SUPABASE_S3_ENDPOINT" \
-            --content-type "application/vnd.pmtiles" \
-            --only-show-errors \
-            --cli-read-timeout 0 \
-            --cli-connect-timeout 60
+          s3_cp() {
+            local src="$1"
+            local key="$2"
+            local ctype="$3"
+            aws s3 cp "$src" "s3://${BUCKET}/${key}" \
+              --endpoint-url "$SUPABASE_S3_ENDPOINT" \
+              --content-type "$ctype" \
+              --only-show-errors \
+              --cli-read-timeout 0 \
+              --cli-connect-timeout 60
+          }
 
-          python3 - <<'PY'
+          upload_all() {
+            echo "Uploading versioned object key only (multipart)…"
+            s3_cp "$SRC" "$FILE" "application/vnd.pmtiles"
+            echo "Uploading korea-latest.pmtiles…"
+            s3_cp "$SRC" "korea-latest.pmtiles" "application/vnd.pmtiles"
+
+            python3 - <<'PY'
           import json, os, datetime
           path = os.path.join(os.environ["OUT_DIR"], "latest.json")
           payload = {
               "file": os.environ["OBJECT_VERSIONED"],
               "bytes": int(os.environ["PMTILES_BYTES"]),
               "built_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-              "build_seconds": int(os.environ["BUILD_SECONDS"]),
+              "build_seconds": int(os.environ.get("BUILD_SECONDS") or "0"),
               "schema": "openmaptiles",
               "languages": "default,ko",
           }
@@ -161,28 +271,37 @@ jobs:
           print("latest.json written (object key + sizes only)")
           PY
 
-          echo "Uploading latest.json…"
-          aws s3 cp "$OUT_DIR/latest.json" "s3://${BUCKET}/latest.json" \
-            --endpoint-url "$SUPABASE_S3_ENDPOINT" \
-            --content-type "application/json" \
-            --only-show-errors \
-            --cli-read-timeout 0 \
-            --cli-connect-timeout 60
+            echo "Uploading latest.json…"
+            s3_cp "$OUT_DIR/latest.json" "latest.json" "application/json"
+          }
 
-          echo "Upload complete: object=${FILE} bytes=${PMTILES_BYTES} build_seconds=${BUILD_SECONDS}"
-          echo "Public HTTP path (host omitted): /storage/v1/object/public/${BUCKET}/${FILE}"
+          # Initial try + up to 2 retries (3 attempts total)
+          attempt=1
+          max_attempts=3
+          while [ "$attempt" -le "$max_attempts" ]; do
+            echo "Upload attempt ${attempt}/${max_attempts}…"
+            if upload_all; then
+              echo "Upload complete: object=${FILE} bytes=${PMTILES_BYTES} build_seconds=${BUILD_SECONDS:-0}"
+              echo "Public HTTP path (host omitted): /storage/v1/object/public/${BUCKET}/${FILE}"
+              exit 0
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "Upload failed after ${max_attempts} attempts."
+              exit 1
+            fi
+            sleep_s=$((attempt * 45))
+            echo "Upload attempt ${attempt} failed; waiting ${sleep_s}s before retry…"
+            sleep "$sleep_s"
+            attempt=$((attempt + 1))
+          done
 
-      - name: Job summary
+      - name: Job summary (post-upload)
         if: always()
         run: |
           {
-            echo "## Korea PMTiles build"
-            echo "- Build seconds: ${BUILD_SECONDS:-n/a}"
-            echo "- Size bytes: ${PMTILES_BYTES:-n/a}"
-            if [ -n "${PMTILES_BYTES:-}" ]; then
-              echo "- Size MiB: $((PMTILES_BYTES / 1024 / 1024))"
-            fi
+            echo "## Korea PMTiles (post-upload)"
             echo "- Versioned object key: ${OBJECT_VERSIONED:-n/a}"
             echo "- Pointer keys: korea-latest.pmtiles, latest.json"
-            echo "- Upload: AWS CLI S3 multipart (endpoint/keys not logged)"
+            echo "- Upload: AWS CLI S3 multipart 16MB×2 concurrent, adaptive retry (endpoint/keys not logged)"
+            echo "- Artifact name: korea-pmtiles (retention 3 days; present on full builds only)"
           } >> "$GITHUB_STEP_SUMMARY"
