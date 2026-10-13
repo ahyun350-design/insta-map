@@ -1,0 +1,20 @@
+{
+  "before": 432,
+  "after": 430,
+  "secondPassMerges": 2,
+  "midzoom": 25,
+  "shin": [
+    [
+      126.939632,
+      37.557467
+    ]
+  ],
+  "hong": 1,
+  "mergeM": 300,
+  "mergeMSecond": 750,
+  "features": 430,
+  "originalRaw": 592,
+  "afterFirst": 436,
+  "afterSecond": 430,
+  "removed": 162
+}

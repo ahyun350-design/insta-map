@@ -264,7 +264,12 @@ export function poiCategoryIconImageExpr(): unknown {
       ["==", ["get", "subclass"], "university"],
     ],
     poiIconImageId("school"),
-    ["==", ["get", "class"], "park"],
+    [
+      "any",
+      ["==", ["get", "class"], "park"],
+      ["==", ["get", "class"], "playground"],
+      ["==", ["get", "subclass"], "playground"],
+    ],
     poiIconImageId("park"),
     ["==", ["get", "class"], "police"],
     poiIconImageId("police"),
