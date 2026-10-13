@@ -9,7 +9,8 @@ export type MapGlFallbackReason =
   | "tile_timeout"
   | "webgl_unsupported"
   | "error"
-  | "webglcontextlost";
+  | "webglcontextlost"
+  | "self_tiles_error";
 
 const readyFired = new Set<MapGlSurface>();
 const fallbackFired = new Set<MapGlSurface>();

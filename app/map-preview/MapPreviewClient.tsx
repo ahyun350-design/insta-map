@@ -28,6 +28,7 @@ import {
   parsePreviewRouteTheme,
   type PreviewRouteMode,
 } from "./routeDemo";
+import { setSessionSelfTilesOverride } from "@/lib/mapSurface/selfTiles";
 import "./map-preview.css";
 
 type PreviewQuery = {
@@ -257,8 +258,17 @@ export default function MapPreviewClient() {
     setShowCompare(q.compare);
     setRouteDemo(q.route);
     setRouteTheme(q.routeTheme);
+    // e2e / QA: ?selfTiles=1 enables Korea PMTiles for this preview session only
+    // (no tile URL persisted — session override only).
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get("selfTiles") === "1") setSessionSelfTilesOverride(true);
+      else if (sp.get("selfTiles") === "0") setSessionSelfTilesOverride(false);
+      else setSessionSelfTilesOverride(null);
+    }
     writeQueryPatch({ theme: q.theme });
     setHydrated(true);
+    return () => setSessionSelfTilesOverride(null);
   }, []);
 
   const pins = useMemo(() => {

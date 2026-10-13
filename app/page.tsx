@@ -276,6 +276,8 @@ import {
   shouldUseExpandedMapLibre,
   writeCompactMapLibreOverride,
   writeExpandedMapLibreOverride,
+  readSelfTilesEnabled,
+  writeSelfTilesEnabled,
   readAdminMapLibreTheme,
   writeAdminMapLibreTheme,
   resolveMapLibreThemeId,
@@ -1623,6 +1625,7 @@ function HomePageContent() {
     const isAdmin = user?.id === ADMIN_USER_ID;
     setAdminCompactMapLibre(isAdmin ? readCompactMapLibreOverride() : "auto");
     setAdminExpandedMapLibre(isAdmin ? readExpandedMapLibreOverride() : "auto");
+    setAdminSelfTiles(isAdmin ? readSelfTilesEnabled() : false);
     setAdminMapLibreTheme(isAdmin ? readAdminMapLibreTheme() : "paper");
     setDirectionsRouteTheme(isAdmin ? readDirectionsRouteTheme() : "dark");
     setDiscoverChipEnabled(isAdmin ? readDiscoverChipEnabled() : false);
@@ -1631,6 +1634,7 @@ function HomePageContent() {
       setExpandedMapIsMapLibre(false);
       setDiscoverChipEnabled(false);
       setDiscoverLayerOn(false);
+      setAdminSelfTiles(false);
     }
   }, [user?.id]);
   type Notification = {
@@ -1817,6 +1821,8 @@ function HomePageContent() {
     useState<AdminMapLibreThemeId>("paper");
   const [adminExpandedMapLibre, setAdminExpandedMapLibre] =
     useState<AdminMapGlOverride>("auto");
+  /** Admin-only: Korea self-hosted PMTiles (flag only; not a tile URL). */
+  const [adminSelfTiles, setAdminSelfTiles] = useState(false);
   const [expandedMapIsMapLibre, setExpandedMapIsMapLibre] = useState(false);
   const [expandedMapRemountKey, setExpandedMapRemountKey] = useState(0);
   const expandedMapLibreFallbackToastedRef = useRef(false);
@@ -20049,6 +20055,29 @@ function HomePageContent() {
                   }}
                 >
                   전체화면 핀맵 지도(관리자) · {adminMapGlOverrideLabel(adminExpandedMapLibre)}
+                </button>
+              ) : null}
+              {user?.id === ADMIN_USER_ID ? (
+                <button
+                  type="button"
+                  className="settingItem"
+                  data-testid="admin-self-tiles-toggle"
+                  style={{ width: "100%", padding: "16px 20px", color: "#1a2a7a" }}
+                  onClick={() => {
+                    const next = !adminSelfTiles;
+                    writeSelfTilesEnabled(next);
+                    setAdminSelfTiles(next);
+                    setShowMypageSettingsSheet(false);
+                    tearDownCompactMapForRemount();
+                    setCompactMapRemountKey((k) => k + 1);
+                    setExpandedMapRemountKey((k) => k + 1);
+                    showToast(
+                      next ? "직접 제공 타일 · ON" : "직접 제공 타일 · OFF",
+                      "info",
+                    );
+                  }}
+                >
+                  직접 제공 타일(관리자) · {adminSelfTiles ? "ON" : "OFF"}
                 </button>
               ) : null}
               {user?.id === ADMIN_USER_ID ? (

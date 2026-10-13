@@ -23,6 +23,12 @@ import {
   poiCategoryIconImageExpr,
   poiCategoryTextColorExpr,
 } from "@/lib/mapSurface/poiCategoryIcons";
+import {
+  applySelfTilesSource,
+  ensureSelfTilesProtocolRegistered,
+  readSelfTilesEnabled,
+  warmSelfTilesOrBreak,
+} from "@/lib/mapSurface/selfTiles";
 
 /** Production-adopted themes */
 export type PindmapMapThemeId = "paper" | "white";
@@ -1486,6 +1492,13 @@ function detectRoadKind(id: string): RoadKind {
 export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<StyleJson> {
   const theme = MAP_PREVIEW_THEMES[themeId];
   const style = await fetchLibertyStyle();
+  // Admin self-tiles: rewrite openmaptiles source (glyphs/sprite stay on OFM).
+  // On hard PMTiles failure, leave OFM source (already tracked as self_tiles_error).
+  if (typeof window !== "undefined" && readSelfTilesEnabled()) {
+    ensureSelfTilesProtocolRegistered();
+    const ok = await warmSelfTilesOrBreak();
+    if (ok) applySelfTilesSource(style);
+  }
   const layers: AnyLayer[] = [];
 
   for (const raw of style.layers) {

@@ -265,7 +265,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       | "tile_timeout"
       | "webgl_unsupported"
       | "error"
-      | "webglcontextlost",
+      | "webglcontextlost"
+      | "self_tiles_error",
   ) {
     if (this.fallbackReported || this.destroyed) return;
     this.fallbackReported = true;

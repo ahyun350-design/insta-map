@@ -48,6 +48,14 @@ export {
   type MapGlSurface,
 } from "./mapGlTelemetry";
 export {
+  SELF_TILES_STORAGE_KEY,
+  getKoreaPmtilesPublicUrl,
+  isSelfTilesBroken,
+  readSelfTilesEnabled,
+  setSessionSelfTilesOverride,
+  writeSelfTilesEnabled,
+} from "./selfTiles";
+export {
   MAP_GL_REMOUNT_MAX,
   activeMapGlSlot,
   canAttemptMapGlRemount,
