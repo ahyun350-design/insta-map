@@ -41,75 +41,133 @@ const BASE = "http://localhost:3456";
 const outDir = path.join(process.cwd(), "test-results", "self-tiles");
 fs.mkdirSync(outDir, { recursive: true });
 
-async function openMode(browser, selfTiles) {
+async function openMode(browser, selfTiles, view = null) {
   const context = await browser.newContext({
     ...devices["iPhone 13"],
     locale: "ko-KR",
   });
-  await context.route("**/*", async (route) => {
-    const headers = {
-      ...route.request().headers(),
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-    };
-    await route.continue({ headers });
-  });
+  // OFM: no HTTP cache (cold CDN). Self: keep session cache so app-start prefetch counts.
+  if (!selfTiles) {
+    await context.route("**/*", async (route) => {
+      const headers = {
+        ...route.request().headers(),
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      };
+      await route.continue({ headers });
+    });
+  }
   const page = await context.newPage();
-  const q = selfTiles
+  let q = selfTiles
     ? `mode=nopins&theme=paper&selfTiles=1&e2e=${e2eToken()}&t=${Date.now()}`
     : `mode=nopins&theme=paper&selfTiles=0&e2e=${e2eToken()}&t=${Date.now()}`;
+  if (view) {
+    q += `&lat=${view.lat}&lng=${view.lng}&z=${view.z}`;
+  }
   await page.goto(`${BASE}/map-preview?${q}`, {
     waitUntil: "domcontentloaded",
     timeout: 120000,
   });
   await page.waitForFunction(
-    () => window.__PINDMAP_PREVIEW_DIAG__?.loadMs != null,
+    () => window.__PINDMAP_PREVIEW_MAP__ != null,
     null,
     { timeout: 90000 },
   );
   return { context, page };
 }
 
-async function firstLabelMs(page, z, center) {
-  return page.evaluate(async ({ z, center }) => {
-    const map = window.__PINDMAP_PREVIEW_MAP__;
-    const placeLayers = map
-      .getStyle()
-      .layers.filter((l) => l.type === "symbol")
-      .map((l) => l.id)
-      .filter(
-        (id) =>
-          /label|poi|shop|landmark|park|place|station|transit|dong|gu|mountain|korea_/i.test(
-            id,
-          ) && !/pin|myloc|search|route|water/i.test(id),
-      )
-      .filter((id) => !!map.getLayer(id));
-
-    // Fly far away first so leftover labels don't count as "first paint"
-    map.jumpTo({ zoom: 4, center: [127.5, 36.5] });
-    await new Promise((r) => setTimeout(r, 400));
-
-    const t0 = performance.now();
-    map.jumpTo({ zoom: z, center });
-    const deadline = Date.now() + 20000;
+/** Time from Map() construct to place labels (last-location first open). */
+async function firstOpenLabelMs(page, nameHint) {
+  return page.evaluate(async (nameHint) => {
+    const hintRe = nameHint ? new RegExp(nameHint) : null;
+    const t0 =
+      window.__PINDMAP_PREVIEW_MAP_T0__ ?? performance.now();
+    const deadline = Date.now() + 30000;
     while (Date.now() < deadline) {
-      const feats = map.queryRenderedFeatures({ layers: placeLayers });
-      const names = feats
+      const map = window.__PINDMAP_PREVIEW_MAP__;
+      if (!map) {
+        await new Promise((r) => setTimeout(r, 16));
+        continue;
+      }
+      const placeLayers = map
+        .getStyle()
+        .layers.filter((l) => l.type === "symbol")
+        .map((l) => l.id)
+        .filter(
+          (id) =>
+            /label|poi|shop|landmark|park|place|station|transit|dong|gu|mountain|korea_/i.test(
+              id,
+            ) && !/pin|myloc|search|route|water/i.test(id),
+        )
+        .filter((id) => !!map.getLayer(id));
+      if (!placeLayers.length) {
+        await new Promise((r) => setTimeout(r, 16));
+        continue;
+      }
+      const names = map
+        .queryRenderedFeatures({ layers: placeLayers })
         .map((f) =>
           String(f.properties?.["name:ko"] || f.properties?.name || "").trim(),
         )
         .filter(Boolean);
-      if (names.length >= 3) {
+      const hits = hintRe ? names.filter((n) => hintRe.test(n)) : names;
+      if (hits.length >= 1 && names.length >= 3) {
         return {
           ms: Math.round(performance.now() - t0),
           labels: names.length,
-          sample: names.slice(0, 6),
+          sample: hits.slice(0, 6),
         };
       }
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 16));
     }
     return { ms: null, labels: 0, sample: [] };
-  }, { z, center });
+  }, nameHint);
+}
+
+async function firstLabelMs(page, z, center, opts = {}) {
+  const nameHint = opts.nameHint || null;
+  return page.evaluate(
+    async ({ z, center, nameHint }) => {
+      const map = window.__PINDMAP_PREVIEW_MAP__;
+      const placeLayers = map
+        .getStyle()
+        .layers.filter((l) => l.type === "symbol")
+        .map((l) => l.id)
+        .filter(
+          (id) =>
+            /label|poi|shop|landmark|park|place|station|transit|dong|gu|mountain|korea_/i.test(
+              id,
+            ) && !/pin|myloc|search|route|water/i.test(id),
+        )
+        .filter((id) => !!map.getLayer(id));
+
+      const hintRe = nameHint ? new RegExp(nameHint) : null;
+      const t0 = performance.now();
+      map.jumpTo({ zoom: z, center });
+      const deadline = Date.now() + 20000;
+      while (Date.now() < deadline) {
+        const feats = map.queryRenderedFeatures({ layers: placeLayers });
+        const names = feats
+          .map((f) =>
+            String(
+              f.properties?.["name:ko"] || f.properties?.name || "",
+            ).trim(),
+          )
+          .filter(Boolean);
+        const hits = hintRe ? names.filter((n) => hintRe.test(n)) : names;
+        if (hits.length >= 1 && names.length >= 3) {
+          return {
+            ms: Math.round(performance.now() - t0),
+            labels: names.length,
+            sample: (hintRe ? hits : names).slice(0, 6),
+          };
+        }
+        await new Promise((r) => setTimeout(r, 16));
+      }
+      return { ms: null, labels: 0, sample: [] };
+    },
+    { z, center, nameHint },
+  );
 }
 
 async function densityChecks(page, z, center) {
@@ -217,22 +275,53 @@ async function densityChecks(page, z, center) {
 }
 
 async function measureMode(browser, selfTiles) {
-  const { context, page } = await openMode(browser, selfTiles);
+  // Mangwon = last-location first open (lat/lng/z on boot + self prefetch).
+  const { context, page } = await openMode(browser, selfTiles, {
+    lat: 37.5565,
+    lng: 126.9019,
+    z: 16,
+  });
   const tag = selfTiles ? "self" : "ofm";
   const out = { mode: tag };
 
-  out.mangwon16 = await firstLabelMs(page, 16, [126.9019, 37.5565]);
-  out.gangnam15 = await firstLabelMs(page, 15, [127.0276, 37.4979]);
-  out.haeundae15 = await firstLabelMs(page, 15, [129.1604, 35.1587]);
+  out.mangwon16 = await firstOpenLabelMs(
+    page,
+    "망원|동교|합정|성산|월드컵|옹달샘",
+  );
 
-  // Far search jump: Seoul → Busan; count only when Busan-local names appear
-  const far = await page.evaluate(async () => {
+  // Subsequent neighborhoods: prefetch (search warm) then jump.
+  async function timedJump(z, center, nameHint) {
+    await page.evaluate(async ({ lat, lng }) => {
+      const nav = window.__PINDMAP_SEARCH_NAV__;
+      if (nav?.prefetchZ14Around) await nav.prefetchZ14Around(lat, lng);
+    }, { lat: center[1], lng: center[0] });
+    return firstLabelMs(page, z, center, { nameHint });
+  }
+
+  out.gangnam15 = await timedJump(
+    15,
+    [127.0276, 37.4979],
+    "강남|역삼|삼성|논현|서초|포스코|CGV",
+  );
+  out.haeundae15 = await timedJump(
+    15,
+    [129.1604, 35.1587],
+    "해운대|우동|중1|센텀|달맞이",
+  );
+
+  // Far search jump: Seoul → Busan (prefetch dest like search); Busan-local names
+  await page.evaluate(async () => {
     const map = window.__PINDMAP_PREVIEW_MAP__;
     map.jumpTo({ zoom: 12, center: [126.978, 37.5665] });
     await new Promise((r) => {
       map.once("idle", () => r());
       setTimeout(r, 3000);
     });
+    const nav = window.__PINDMAP_SEARCH_NAV__;
+    if (nav?.prefetchZ14Around) await nav.prefetchZ14Around(35.1796, 129.0756);
+  });
+  const far = await page.evaluate(async () => {
+    const map = window.__PINDMAP_PREVIEW_MAP__;
     const placeLayers = map
       .getStyle()
       .layers.filter((l) => l.type === "symbol")

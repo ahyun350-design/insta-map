@@ -5,6 +5,13 @@
 
 import { fetchLibertyStyle } from "@/lib/pindmapMapStyle";
 import { prefetchZ14Around } from "./tilePrefetch";
+import {
+  prefetchSelfGlyphs,
+  prefetchSelfTilesZ14Around,
+  readSelfTilesEnabled,
+  warmSelfTilesOrBreak,
+  ensureSelfTilesProtocolRegistered,
+} from "./selfTiles";
 
 let prefetchStarted = false;
 
@@ -24,6 +31,20 @@ export function prefetchAdminMapGlAssets(opts?: {
   prefetchStarted = true;
   void (async () => {
     try {
+      const self = readSelfTilesEnabled();
+      if (self) {
+        ensureSelfTilesProtocolRegistered();
+        // Header + root directory before any map open.
+        await warmSelfTilesOrBreak();
+        prefetchSelfGlyphs();
+        const lat = opts?.lat;
+        const lng = opts?.lng;
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          void prefetchSelfTilesZ14Around(lat!, lng!);
+        }
+        return;
+      }
+
       const style = await fetchLibertyStyle();
       const sprite =
         typeof style.sprite === "string" ? style.sprite : null;

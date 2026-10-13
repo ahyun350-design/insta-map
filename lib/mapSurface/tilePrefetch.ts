@@ -113,6 +113,18 @@ export async function prefetchZ14Around(
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return { requested: 0, template: null };
   }
+  // Admin self-tiles: warm via shared PMTiles (not OFM HTTP).
+  try {
+    const { readSelfTilesEnabled, prefetchSelfTilesZ14Around } = await import(
+      "./selfTiles"
+    );
+    if (readSelfTilesEnabled()) {
+      const r = await prefetchSelfTilesZ14Around(lat, lng);
+      return { requested: r.requested, template: "pindself://{z}/{x}/{y}" };
+    }
+  } catch {
+    /* fall through to OFM */
+  }
   const template = await resolveTileTemplate();
   if (!template) return { requested: 0, template: null };
   const { x: cx, y: cy } = lngLatToTile(lng, lat, PREFETCH_ZOOM);

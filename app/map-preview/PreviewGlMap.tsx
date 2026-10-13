@@ -82,6 +82,8 @@ type Props = {
     center?: [number, number];
     token: number;
   } | null;
+  /** Initial camera (e.g. last-known location). Defaults to Korea overview. */
+  initialView?: { center: [number, number]; zoom: number } | null;
   /** Route style demo: walk | car | course (Seongsu fake path). */
   routeDemo?: PreviewRouteMode | null;
   /** Directions chrome compare: dark | paper (paint-only basemap). */
@@ -204,9 +206,11 @@ function fitToPins(
   pins: PreviewGlPin[],
   padding: number,
   singleZoom: number,
+  fallbackView?: { center: [number, number]; zoom: number } | null,
 ) {
   if (pins.length === 0) {
-    map.jumpTo({ center: [127.8, 36.2], zoom: 6.2 });
+    const v = fallbackView ?? { center: [127.8, 36.2] as [number, number], zoom: 6.2 };
+    map.jumpTo({ center: v.center, zoom: v.zoom });
     return;
   }
   if (pins.length === 1) {
@@ -349,6 +353,7 @@ export default function PreviewGlMap({
   fitPadding = 40,
   singleZoom = 11,
   zoomJump = null,
+  initialView = null,
   routeDemo = null,
   routeTheme = null,
   onReady,
@@ -361,6 +366,8 @@ export default function PreviewGlMap({
   const mapRef = useRef<MlMap | null>(null);
   const pinsRef = useRef(pins);
   pinsRef.current = pins;
+  const initialViewRef = useRef(initialView);
+  initialViewRef.current = initialView;
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const themeRef = useRef(theme);
@@ -429,11 +436,19 @@ export default function PreviewGlMap({
         // Static import — JS already in page bundle when this effect runs.
         const jsMs = 0;
         const createT0 = performance.now();
+        const bootView = initialViewRef.current ?? {
+          center: [127.8, 36.2] as [number, number],
+          zoom: 6.2,
+        };
+        const mapT0 = performance.now();
+        (
+          window as unknown as { __PINDMAP_PREVIEW_MAP_T0__?: number }
+        ).__PINDMAP_PREVIEW_MAP_T0__ = mapT0;
         const map = new maplibregl.Map({
           container: canvas,
           style: style as StyleSpecification,
-          center: [127.8, 36.2],
-          zoom: 6.2,
+          center: bootView.center,
+          zoom: bootView.zoom,
           attributionControl: false,
           interactive: true,
           dragRotate: false,
@@ -452,6 +467,21 @@ export default function PreviewGlMap({
         mapRef.current = map;
         // E2E / QA hook — map-preview route only
         window.__PINDMAP_PREVIEW_MAP__ = map;
+        // Register code icons ASAP (don't wait for `load`) so POI labels aren't blocked.
+        void (async () => {
+          try {
+            const { ensurePoiCategoryIcons } = await import(
+              "@/lib/mapSurface/poiCategoryIcons"
+            );
+            const { ensureKoreaLandmarkIcon } = await import(
+              "@/lib/mapSurface/koreaLandmarkIcon"
+            );
+            await ensurePoiCategoryIcons(map);
+            await ensureKoreaLandmarkIcon(map);
+          } catch {
+            /* load handler retries */
+          }
+        })();
         // e2e / QA: search-nav helpers (HTTP tile warm + fast camera)
         (
           window as unknown as {
@@ -563,7 +593,13 @@ export default function PreviewGlMap({
               publishPreviewDiag({
                 pinsMs: Math.round(performance.now() - pinsT0),
               });
-              fitToPins(map, pinsRef.current, fitPadding, singleZoom);
+              fitToPins(
+                map,
+                pinsRef.current,
+                fitPadding,
+                singleZoom,
+                initialViewRef.current,
+              );
               if (routeDemoRef.current) {
                 await paintPreviewRouteDemo(
                   map,

@@ -24,11 +24,13 @@ import {
   poiCategoryTextColorExpr,
 } from "@/lib/mapSurface/poiCategoryIcons";
 import {
+  applySelfHostedStyleAssets,
   applySelfTilesSource,
   ensureSelfTilesProtocolRegistered,
   readSelfTilesEnabled,
   warmSelfTilesOrBreak,
 } from "@/lib/mapSurface/selfTiles";
+import bundledLibertyStyle from "@/lib/mapSurface/data/liberty-style.json";
 
 /** Production-adopted themes */
 export type PindmapMapThemeId = "paper" | "white";
@@ -198,6 +200,7 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
   },
 };
 
+/** Fallback only if bundled snapshot is missing (should never run in prod). */
 const LIBERTY_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 
 const HIDE_LAYER_IDS = new Set([
@@ -981,23 +984,39 @@ type StyleJson = {
 };
 
 let cachedLiberty: StyleJson | null = null;
+let libertyLoadPromise: Promise<StyleJson> | null = null;
 
 /** Drop in-memory liberty cache after a style/load failure so the next attempt refetches. */
 export function invalidateLibertyStyleCache(): void {
   cachedLiberty = null;
+  libertyLoadPromise = null;
 }
 
+/**
+ * Liberty base style — bundled JSON (no network). Race-safe single load.
+ * Network fetch is a last-resort fallback only.
+ */
 export async function fetchLibertyStyle(): Promise<StyleJson> {
   if (cachedLiberty) {
     return structuredClone(cachedLiberty);
   }
-  const res = await fetch(LIBERTY_STYLE_URL);
-  if (!res.ok) {
-    throw new Error(`OpenFreeMap style fetch failed: ${res.status}`);
+  if (!libertyLoadPromise) {
+    libertyLoadPromise = (async () => {
+      const bundled = bundledLibertyStyle as StyleJson;
+      if (bundled?.version === 8 && Array.isArray(bundled.layers)) {
+        cachedLiberty = bundled;
+        return structuredClone(bundled);
+      }
+      const res = await fetch(LIBERTY_STYLE_URL);
+      if (!res.ok) {
+        throw new Error(`OpenFreeMap style fetch failed: ${res.status}`);
+      }
+      const json = (await res.json()) as StyleJson;
+      cachedLiberty = json;
+      return structuredClone(json);
+    })();
   }
-  const json = (await res.json()) as StyleJson;
-  cachedLiberty = json;
-  return structuredClone(json);
+  return libertyLoadPromise.then((j) => structuredClone(j));
 }
 
 function setVisibility(layer: AnyLayer, visible: boolean) {
@@ -1492,12 +1511,15 @@ function detectRoadKind(id: string): RoadKind {
 export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<StyleJson> {
   const theme = MAP_PREVIEW_THEMES[themeId];
   const style = await fetchLibertyStyle();
-  // Admin self-tiles: rewrite openmaptiles source (glyphs/sprite stay on OFM).
-  // On hard PMTiles failure, leave OFM source (already tracked as self_tiles_error).
+  // Admin self-tiles: PMTiles source + same-origin glyphs; no OFM sprite.
+  // On hard PMTiles failure, leave OFM tiles (already tracked as self_tiles_error).
   if (typeof window !== "undefined" && readSelfTilesEnabled()) {
     ensureSelfTilesProtocolRegistered();
     const ok = await warmSelfTilesOrBreak();
-    if (ok) applySelfTilesSource(style);
+    if (ok) {
+      applySelfTilesSource(style);
+      applySelfHostedStyleAssets(style);
+    }
   }
   const layers: AnyLayer[] = [];
 
@@ -1984,7 +2006,10 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             0,
             10,
           ];
-          layer.layout["icon-size"] = 0.45;
+          // Drop OFM circle_11_* sprite — text-only place labels (no sprite dependency).
+          delete layer.layout["icon-image"];
+          delete layer.layout["icon-size"];
+          delete layer.layout["icon-offset"];
         }
         if (isCity) {
           // Other cities first (lower paint priority); metro pushed last
@@ -2185,6 +2210,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             "to-number",
             ["coalesce", ["get", "rank"], 999],
           ];
+          delete layer.layout["icon-image"];
+          delete layer.layout["icon-size"];
+          delete layer.layout["icon-offset"];
         }
         setVisibility(layer, true);
         layers.push(layer);

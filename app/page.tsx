@@ -5096,7 +5096,7 @@ function HomePageContent() {
   /** Admin MapLibre: warm style/glyphs/sprite + local z14 tiles (HTTP cache only). */
   useEffect(() => {
     if (!user || user.id !== ADMIN_USER_ID) return;
-    if (!shouldUseCompactMapLibre(true, user.id)) return;
+    if (!shouldUseCompactMapLibre(true, user.id) && !adminSelfTiles) return;
     const loc = myLocationLatLngRef.current;
     const boot = mapViewBootstrapRef.current;
     const lat = loc?.lat ?? boot?.lat;
@@ -5106,7 +5106,7 @@ function HomePageContent() {
         ? { lat: lat!, lng: lng! }
         : undefined,
     );
-  }, [user, adminCompactMapLibre]);
+  }, [user, adminCompactMapLibre, adminSelfTiles]);
 
   /** Admin MapLibre: show last-frame snapshot (or paper fill) instead of loading copy. */
   useEffect(() => {

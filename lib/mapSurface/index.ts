@@ -49,10 +49,15 @@ export {
 } from "./mapGlTelemetry";
 export {
   SELF_TILES_STORAGE_KEY,
+  SELF_GLYPHS_URL,
   getKoreaPmtilesPublicUrl,
+  getSharedPmtiles,
   isSelfTilesBroken,
+  prefetchSelfGlyphs,
+  prefetchSelfTilesZ14Around,
   readSelfTilesEnabled,
   setSessionSelfTilesOverride,
+  warmSelfTilesOrBreak,
   writeSelfTilesEnabled,
 } from "./selfTiles";
 export {

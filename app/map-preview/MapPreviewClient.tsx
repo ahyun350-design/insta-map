@@ -28,7 +28,13 @@ import {
   parsePreviewRouteTheme,
   type PreviewRouteMode,
 } from "./routeDemo";
-import { setSessionSelfTilesOverride } from "@/lib/mapSurface/selfTiles";
+import {
+  ensureSelfTilesProtocolRegistered,
+  prefetchSelfGlyphs,
+  prefetchSelfTilesZ14Around,
+  setSessionSelfTilesOverride,
+  warmSelfTilesOrBreak,
+} from "@/lib/mapSurface/selfTiles";
 import "./map-preview.css";
 
 type PreviewQuery = {
@@ -217,6 +223,10 @@ export default function MapPreviewClient() {
   const [showFps, setShowFps] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [compareInfo, setCompareInfo] = useState<{ zoom: number; km: number; level: number } | null>(null);
+  const [initialView, setInitialView] = useState<{
+    center: [number, number];
+    zoom: number;
+  } | null>(null);
   const [mode, setMode] = useState<PreviewPerfMode>("default");
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -260,15 +270,41 @@ export default function MapPreviewClient() {
     setRouteTheme(q.routeTheme);
     // e2e / QA: ?selfTiles=1 enables Korea PMTiles for this preview session only
     // (no tile URL persisted — session override only).
-    if (typeof window !== "undefined") {
-      const sp = new URLSearchParams(window.location.search);
-      if (sp.get("selfTiles") === "1") setSessionSelfTilesOverride(true);
-      else if (sp.get("selfTiles") === "0") setSessionSelfTilesOverride(false);
-      else setSessionSelfTilesOverride(null);
-    }
-    writeQueryPatch({ theme: q.theme });
-    setHydrated(true);
-    return () => setSessionSelfTilesOverride(null);
+    let cancelled = false;
+    void (async () => {
+      if (typeof window !== "undefined") {
+        const sp = new URLSearchParams(window.location.search);
+        const latQ = parseFloat(sp.get("lat") || "");
+        const lngQ = parseFloat(sp.get("lng") || "");
+        const zQ = parseFloat(sp.get("z") || "");
+        if (Number.isFinite(latQ) && Number.isFinite(lngQ)) {
+          setInitialView({
+            center: [lngQ, latQ],
+            zoom: Number.isFinite(zQ) ? zQ : 14,
+          });
+        }
+        if (sp.get("selfTiles") === "1") {
+          setSessionSelfTilesOverride(true);
+          ensureSelfTilesProtocolRegistered();
+          await warmSelfTilesOrBreak();
+          prefetchSelfGlyphs();
+          const warmLat = Number.isFinite(latQ) ? latQ : 37.5565;
+          const warmLng = Number.isFinite(lngQ) ? lngQ : 126.9019;
+          await prefetchSelfTilesZ14Around(warmLat, warmLng);
+        } else if (sp.get("selfTiles") === "0") {
+          setSessionSelfTilesOverride(false);
+        } else {
+          setSessionSelfTilesOverride(null);
+        }
+      }
+      if (cancelled) return;
+      writeQueryPatch({ theme: q.theme });
+      setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+      setSessionSelfTilesOverride(null);
+    };
   }, []);
 
   const pins = useMemo(() => {
@@ -442,7 +478,7 @@ export default function MapPreviewClient() {
       <div className="map-preview-map">
         {hydrated ? (
           <PreviewGlMap
-            key={`gl-${mode}-${theme}-${cluster ? 1 : 0}-${effectivePinCount}-${routeDemo ?? "noroute"}-${routeTheme ?? "nort"}`}
+            key={`gl-${mode}-${theme}-${cluster ? 1 : 0}-${effectivePinCount}-${routeDemo ?? "noroute"}-${routeTheme ?? "nort"}-${initialView ? `${initialView.center[0]}-${initialView.zoom}` : "ovr"}`}
             theme={theme}
             mode={mode}
             pins={pins}
@@ -450,6 +486,7 @@ export default function MapPreviewClient() {
             fitPadding={effectivePinCount > 0 ? 28 : 48}
             cluster={cluster}
             zoomJump={zoomJump}
+            initialView={initialView}
             routeDemo={routeDemo}
             routeTheme={routeTheme}
             onReady={() => setStatus("ready")}

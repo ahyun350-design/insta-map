@@ -366,6 +366,18 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     });
     this.map = map;
     this.timingCreateMs = Math.round(now() - createT0);
+    // Register POI/landmark images immediately so symbol layers aren't gated on `load`.
+    void (async () => {
+      try {
+        const { ensurePoiCategoryIcons } = await import("./poiCategoryIcons");
+        const { ensureKoreaLandmarkIcon } = await import("./koreaLandmarkIcon");
+        if (this.destroyed || this.map !== map) return;
+        await ensurePoiCategoryIcons(map);
+        await ensureKoreaLandmarkIcon(map);
+      } catch {
+        /* load handler retries */
+      }
+    })();
     map.touchZoomRotate.disableRotation();
     this.installEdgeGestureGuard(map);
     this.installAttribution(options.container);
