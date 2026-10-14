@@ -289,6 +289,7 @@ import {
   writeDiscoverChipEnabled,
   canAttemptMapGlRemount,
   consumeMapGlRemountAttempt,
+  liveMapGlContextCount,
   trackMapGlFallback,
   trackMapGlRecovered,
   prefetchAdminMapGlAssets,
@@ -2302,6 +2303,8 @@ function HomePageContent() {
   savedPlacesRef.current = savedPlaces;
   const hiddenIdsRef = useRef<Set<string>>(hiddenIds);
   hiddenIdsRef.current = hiddenIds;
+  const showCourseRouteRef = useRef(showCourseRoute);
+  showCourseRouteRef.current = showCourseRoute;
   const activeTabRef = useRef<TabId>(activeTab);
   activeTabRef.current = activeTab;
   const selectedCompanionTagRef = useRef(selectedCompanionTag);
@@ -2755,16 +2758,38 @@ function HomePageContent() {
     setShowMapResearchButton(false);
   }, [clearSearchResultPins]);
 
+  /** Bottom padding so a lat/lng sits in the visible band above the place card. */
+  const measureExpandedPlaceCardPaddingBottom = useCallback((): number => {
+    if (typeof document === "undefined") return 280;
+    const el =
+      document.querySelector<HTMLElement>('[data-testid="expanded-place-detail-sheet"]') ||
+      document.querySelector<HTMLElement>(".placeDetailSheetEmbedded") ||
+      document.querySelector<HTMLElement>(".placeDetailSheet");
+    const h = el?.getBoundingClientRect().height ?? 0;
+    if (h > 80) return Math.round(h + 24);
+    return 280;
+  }, []);
+
   /** 확장 지도 카메라: 근거리 easeTo 300ms / 원거리 jumpTo+200ms (flyTo 금지) */
-  const applyExpandedMapCameraLatLng = (lat: number, lng: number, level: number = 3) => {
+  const applyExpandedMapCameraLatLng = (
+    lat: number,
+    lng: number,
+    level: number = 3,
+    opts?: { paddingBottom?: number },
+  ) => {
     try {
       const map = expandedMapRef.current;
       if (!map) return;
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      const padBottom =
+        opts?.paddingBottom ??
+        (selectedPlaceRef.current ? measureExpandedPlaceCardPaddingBottom() : 0);
       if (isExpandedMapLibre(map)) {
         const gl = getExpandedMapLibreAdapter(map);
         if (gl && typeof gl.goToSearchResult === "function") {
-          gl.goToSearchResult(lat, lng, level);
+          gl.goToSearchResult(lat, lng, level, {
+            paddingBottom: padBottom > 0 ? padBottom : undefined,
+          });
           return;
         }
         map.panTo({ getLat: () => lat, getLng: () => lng });
@@ -2779,6 +2804,18 @@ function HomePageContent() {
         map.setCenter(latlng);
       }
       map.setLevel(level);
+      // Kakao: approximate card clearance via setBounds around a tiny span.
+      if (padBottom > 0 && typeof map.setBounds === "function") {
+        try {
+          const bounds = new window.kakao.maps.LatLngBounds();
+          const d = 0.00035;
+          bounds.extend(new window.kakao.maps.LatLng(lat - d, lng - d));
+          bounds.extend(new window.kakao.maps.LatLng(lat + d, lng + d));
+          map.setBounds(bounds, 72, 36, padBottom, 36);
+        } catch {
+          /* noop */
+        }
+      }
     } catch {
       /* noop */
     }
@@ -12219,12 +12256,30 @@ function HomePageContent() {
     void _ignoredSavedId;
     void _ignoredFeed;
     void _ignoredRef;
+    // Close results sheet so the place card + pin are not covered.
+    setIsMapSearchSheetOpen(false);
     setSelectedPlace({
       ...kakaoPlace,
       _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, expandedRef),
       _placeRef: expandedRef,
     });
-  }, []);
+    const py = parseFloat(String(place.y ?? ""));
+    const px = parseFloat(String(place.x ?? ""));
+    if (!Number.isFinite(py) || !Number.isFinite(px)) return;
+    const cat = inferCategoryFromKakaoCategoryName(place.category_name);
+    showFocusPlaceMarker(py, px, cat);
+    // Card paints after setState — measure padding then center pin in the band above it.
+    const applyPaddedCamera = () => {
+      const pad = measureExpandedPlaceCardPaddingBottom();
+      applyExpandedMapCameraLatLng(py, px, 3, { paddingBottom: pad });
+    };
+    scheduleExpandedMapCamera(applyPaddedCamera);
+    window.setTimeout(applyPaddedCamera, 140);
+  }, [showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom]);
+  const openExpandedSearchPlaceCardRef = useRef(openExpandedSearchPlaceCard);
+  openExpandedSearchPlaceCardRef.current = openExpandedSearchPlaceCard;
+  const toSelectedFromSavedPlaceRef = useRef(toSelectedFromSavedPlace);
+  toSelectedFromSavedPlaceRef.current = toSelectedFromSavedPlace;
 
   const handleFullscreenNativePlaceDetail = useCallback(async (markerId: string) => {
     // Pin tap no longer opens React PlaceDetailSheet — native bottom sheet handles place UI.
@@ -13237,7 +13292,7 @@ function HomePageContent() {
           },
           onSearchPinClick: (pinId) => {
             const place = searchPinPlaceByIdRef.current.get(pinId);
-            if (place) openExpandedSearchPlaceCard(place, "maplibre-search-pin");
+            if (place) openExpandedSearchPlaceCardRef.current(place, "maplibre-search-pin");
           },
           onDiscoverPinClick: (poiId) => {
             void openDiscoverPlaceSheetRef.current(poiId);
@@ -13275,11 +13330,61 @@ function HomePageContent() {
             }
             addMyLocation(expandedMapRef.current, "expanded");
             setExpandedMapPinsTick((n) => n + 1);
-            if (showCourseRoute) {
+            if (showCourseRouteRef.current) {
               window.setTimeout(() => void drawCourseRoute(), 200);
             }
             try {
               expandedMapRef.current.relayout?.();
+            } catch {
+              /* noop */
+            }
+            // E2E / QA: remount + WebGL context counters (expanded MapLibre only)
+            try {
+              const w = window as unknown as {
+                __PINDMAP_EXPANDED_GL__?: {
+                  createCount: number;
+                  destroyCount: number;
+                  fallbackCount: number;
+                  liveContextCount: () => number;
+                  projectFocusPin: () => { x: number; y: number; lat: number; lng: number } | null;
+                  getPlaceCardRect: () => {
+                    top: number;
+                    bottom: number;
+                    height: number;
+                    width: number;
+                  } | null;
+                };
+              };
+              const prev = w.__PINDMAP_EXPANDED_GL__;
+              w.__PINDMAP_EXPANDED_GL__ = {
+                createCount: (prev?.createCount ?? 0) + 1,
+                destroyCount: prev?.destroyCount ?? 0,
+                fallbackCount: prev?.fallbackCount ?? 0,
+                liveContextCount: () => liveMapGlContextCount(),
+                projectFocusPin: () => {
+                  const focus = focusPlaceCoordsRef.current;
+                  const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+                  if (!focus || !gl) return null;
+                  const p = gl.project(focus.lat, focus.lng);
+                  if (!p) return null;
+                  return { x: p.x, y: p.y, lat: focus.lat, lng: focus.lng };
+                },
+                getPlaceCardRect: () => {
+                  const el =
+                    document.querySelector<HTMLElement>(
+                      '[data-testid="expanded-place-detail-sheet"]',
+                    ) ||
+                    document.querySelector<HTMLElement>(".placeDetailSheetEmbedded");
+                  if (!el) return null;
+                  const r = el.getBoundingClientRect();
+                  return {
+                    top: r.top,
+                    bottom: r.bottom,
+                    height: r.height,
+                    width: r.width,
+                  };
+                },
+              };
             } catch {
               /* noop */
             }
@@ -13317,10 +13422,21 @@ function HomePageContent() {
             );
             trackMapGlFallback("expanded", "webglcontextlost");
             deferredExpandedForceKakaoRef.current = true;
+            try {
+              const dbg = (
+                window as unknown as {
+                  __PINDMAP_EXPANDED_GL__?: { fallbackCount: number };
+                }
+              ).__PINDMAP_EXPANDED_GL__;
+              if (dbg) dbg.fallbackCount = (dbg.fallbackCount ?? 0) + 1;
+            } catch {
+              /* noop */
+            }
             if (!expandedMapLibreFallbackToastedRef.current) {
               expandedMapLibreFallbackToastedRef.current = true;
               showToast("지도를 불러오지 못해 기본 지도로 전환했어요", "info");
             }
+            // Keep selectedPlace / focus coords — only tear down the GL map.
             try {
               getExpandedMapLibreAdapter(expandedMapRef.current)?.destroy();
             } catch {
@@ -13483,6 +13599,16 @@ function HomePageContent() {
           } catch {
             /* noop */
           }
+          try {
+            const dbg = (
+              window as unknown as {
+                __PINDMAP_EXPANDED_GL__?: { destroyCount: number };
+              }
+            ).__PINDMAP_EXPANDED_GL__;
+            if (dbg) dbg.destroyCount = (dbg.destroyCount ?? 0) + 1;
+          } catch {
+            /* noop */
+          }
         }
         expandedMapRef.current = null;
         setExpandedMapIsMapLibre(false);
@@ -13544,7 +13670,7 @@ function HomePageContent() {
           devLog("[PindMap:expandedMap] geo tap no marker within px threshold", source, { lat, lng, nearCount: candidates.length });
           return false;
         }
-        openExpandedSearchPlaceCard(picked, source);
+        openExpandedSearchPlaceCardRef.current(picked, source);
         return true;
       };
 
@@ -13600,9 +13726,9 @@ function HomePageContent() {
           map,
           latTap,
           lngTap,
-          savedPlaces,
+          savedPlacesRef.current,
           savedPlaceCoordsRef.current,
-          hiddenIds,
+          hiddenIdsRef.current,
           56,
         );
         if (!pickedSaved) return;
@@ -13621,11 +13747,13 @@ function HomePageContent() {
         const c = savedPlaceCoordsRef.current[pickedSaved.id];
         if (!c) return;
         const relatedPosts = getRelatedPostsForPlaceSheet(
-          feedPosts,
+          feedPostsRef.current,
           placeRefFromPlace(pickedSaved, c.lat, c.lng),
         );
         devLog("[PindMap:expandedMap] saved-pin touch assist", pickedSaved.name);
-        setSelectedPlace(toSelectedFromSavedPlace(pickedSaved, relatedPosts, c.lat, c.lng));
+        setSelectedPlace(
+          toSelectedFromSavedPlaceRef.current(pickedSaved, relatedPosts, c.lat, c.lng),
+        );
       };
 
       mapContainerEl.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -13696,7 +13824,16 @@ function HomePageContent() {
       mapSearchResultPinsRef.current = [];
       myLocationMarkerRef.current.expanded = null;
     };
-  }, [mapExpanded, showCourseRoute, kakaoStatus, openExpandedSearchPlaceCard, feedPosts, savedPlaces, hiddenIds, toSelectedFromSavedPlace, adminExpandedMapLibre, expandedMapRemountKey, user?.id]);
+    // CRITICAL: do NOT list feedPosts/savedPlaces/hiddenIds/showCourseRoute/
+    // openExpandedSearchPlaceCard/toSelectedFromSavedPlace here — cleanup destroys
+    // MapLibre (WebGL churn → iOS contextlost). Handlers use *Ref.current.
+  }, [
+    mapExpanded,
+    kakaoStatus,
+    adminExpandedMapLibre,
+    expandedMapRemountKey,
+    user?.id,
+  ]);
 
   useEffect(() => {
     if (!mapExpanded || !expandedMapRef.current || !geocoderRef.current) return;
@@ -13775,6 +13912,57 @@ function HomePageContent() {
       }
     }
   }, [mapExpanded]);
+
+  /** Re-pad camera when the place card height changes so the pin stays above it. */
+  useEffect(() => {
+    if (!mapExpanded || !selectedPlace) return;
+    const lat = parseFloat(String(selectedPlace.y ?? ""));
+    const lng = parseFloat(String(selectedPlace.x ?? ""));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    let ro: ResizeObserver | null = null;
+    let timer: number | null = null;
+    const apply = () => {
+      const pad = measureExpandedPlaceCardPaddingBottom();
+      applyExpandedMapCameraLatLng(lat, lng, 3, { paddingBottom: pad });
+    };
+    timer = window.setTimeout(() => {
+      const el =
+        document.querySelector<HTMLElement>(
+          '[data-testid="expanded-place-detail-sheet"]',
+        ) ||
+        document.querySelector<HTMLElement>(".placeDetailSheetEmbedded");
+      if (!el) {
+        apply();
+        return;
+      }
+      apply();
+      if (typeof ResizeObserver === "undefined") return;
+      let lastH = el.getBoundingClientRect().height;
+      ro = new ResizeObserver(() => {
+        const h = el.getBoundingClientRect().height;
+        if (Math.abs(h - lastH) < 8) return;
+        lastH = h;
+        apply();
+      });
+      ro.observe(el);
+    }, 80);
+    return () => {
+      if (timer != null) window.clearTimeout(timer);
+      ro?.disconnect();
+    };
+  }, [
+    mapExpanded,
+    selectedPlace?.y,
+    selectedPlace?.x,
+    selectedPlace?.place_name,
+    measureExpandedPlaceCardPaddingBottom,
+  ]);
+
+  /** Course route toggle must not remount MapLibre — redraw on the live instance. */
+  useEffect(() => {
+    if (!mapExpanded || !expandedMapIsMapLibre) return;
+    if (showCourseRoute) void drawCourseRoute();
+  }, [showCourseRoute, mapExpanded, expandedMapIsMapLibre]);
 
   /** V-7-1: 확장 지도 Native 슬롯 mount / unmount */
   useEffect(() => {
@@ -18223,13 +18411,12 @@ function HomePageContent() {
                           userLocation={myLocationLatLngRef.current}
                           keyboardHeight={keyboardHeight}
                           onSelect={(place) => {
-                            // Pin + card first (do not wait for tiles); then camera
+                            // Focus pin + card + padded camera (see openExpandedSearchPlaceCard)
                             openExpandedSearchPlaceCard(place, "sheet-list-tap");
                             const py = parseFloat(String(place.y ?? ""));
                             const px = parseFloat(String(place.x ?? ""));
                             if (Number.isFinite(py) && Number.isFinite(px)) {
                               void prefetchZ14Around(py, px);
-                              applyExpandedMapCameraLatLng(py, px, 3);
                             }
                           }}
                           onClose={() => setIsMapSearchSheetOpen(false)}

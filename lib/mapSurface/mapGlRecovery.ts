@@ -34,6 +34,8 @@ type ActiveGl = {
 };
 
 let activeGl: ActiveGl | null = null;
+/** Live MapLibre adapters that still own a GL context (create…destroy). */
+let liveGlContextCount = 0;
 
 export function claimMapGlSlot(
   surface: MapGlSurface | "preview",
@@ -57,4 +59,17 @@ export function releaseMapGlSlot(surface: MapGlSurface | "preview"): void {
 
 export function activeMapGlSlot(): (MapGlSurface | "preview") | null {
   return activeGl?.surface ?? null;
+}
+
+export function noteMapGlContextCreated(): void {
+  liveGlContextCount += 1;
+}
+
+export function noteMapGlContextDestroyed(): void {
+  liveGlContextCount = Math.max(0, liveGlContextCount - 1);
+}
+
+/** How many MapLibre maps still hold a WebGL context (app shell + preview). */
+export function liveMapGlContextCount(): number {
+  return liveGlContextCount;
 }

@@ -88,7 +88,12 @@ export type CompactMapSurface = {
    * Search-result camera: ≤1km → easeTo 300ms; farther → jumpTo + 200ms zoom settle.
    * No long flyTo.
    */
-  goToSearchResult: (lat: number, lng: number, kakaoLevel?: number) => void;
+  goToSearchResult: (
+    lat: number,
+    lng: number,
+    kakaoLevel?: number,
+    opts?: { paddingBottom?: number; paddingTop?: number },
+  ) => void;
   /** Admin minimap last-frame JPEG data URL (null if canvas unavailable). */
   captureSnapshotDataUrl: (quality?: number) => Promise<string | null>;
   destroy: () => void;

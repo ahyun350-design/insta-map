@@ -235,6 +235,7 @@ export function PlaceDetailSheet({
   return (
     <div
       className={layout === "overlay" ? "placeDetailSheet placeDetailSheetOverlay" : "placeDetailSheet placeDetailSheetEmbedded"}
+      data-testid={layout === "embedded" ? "expanded-place-detail-sheet" : "place-detail-sheet"}
       role="dialog"
       aria-label="장소 정보"
       onClick={(e) => {

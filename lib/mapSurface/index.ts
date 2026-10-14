@@ -68,7 +68,10 @@ export {
   canAttemptMapGlRemount,
   claimMapGlSlot,
   consumeMapGlRemountAttempt,
+  liveMapGlContextCount,
   mapGlRemountAttemptsUsed,
+  noteMapGlContextCreated,
+  noteMapGlContextDestroyed,
   releaseMapGlSlot,
 } from "./mapGlRecovery";
 export {

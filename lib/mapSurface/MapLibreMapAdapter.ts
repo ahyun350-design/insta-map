@@ -51,7 +51,12 @@ import {
   trackMapGlTiming,
 } from "./mapGlTelemetry";
 import { msSinceWebviewStart } from "@/lib/bootTiming";
-import { claimMapGlSlot, releaseMapGlSlot } from "./mapGlRecovery";
+import {
+  claimMapGlSlot,
+  noteMapGlContextCreated,
+  noteMapGlContextDestroyed,
+  releaseMapGlSlot,
+} from "./mapGlRecovery";
 import { attachSubwayOverlay, prefetchSubwayOverlay } from "./subwayOverlay";
 import {
   applyOfmPlanetTilesToMap,
@@ -123,6 +128,8 @@ const FIRST_TILE_TIMEOUT_MS = 4000;
 const SELF_TILES_FIRST_TILE_TIMEOUT_MS = 14000;
 /** After self→OFM soft switch, one more grace before Kakao. */
 const OFM_AFTER_SELF_GRACE_MS = 8000;
+/** Wait for webglcontextrestored before remount/Kakao (iOS often restores). */
+const CONTEXT_RESTORE_WAIT_MS = 2800;
 /** Clusters while zoom < 10; L9 → ML zoom 10 shows individual pins. */
 const CLUSTER_MAX_ZOOM = 9;
 const CLUSTER_RADIUS = 52;
@@ -215,6 +222,9 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private containerEl: HTMLElement | null = null;
   private isSurfaceVisibleFn: (() => boolean) | null = null;
   private onContextLostCb: ((info: { hidden: boolean }) => void) | null = null;
+  private contextRestoreTimer: number | null = null;
+  private contextRestoredHandler: ((ev: Event) => void) | null = null;
+  private notedGlContext = false;
   private onPinClick: ((id: string) => void) | null = null;
   private onSearchPinClick: ((id: string) => void) | null = null;
   private onCourseStopClick: ((id: string) => void) | null = null;
@@ -377,6 +387,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     });
     this.map = map;
     this.timingCreateMs = Math.round(now() - createT0);
+    if (!this.notedGlContext) {
+      this.notedGlContext = true;
+      noteMapGlContextCreated();
+    }
     // Register POI/landmark images immediately so symbol layers aren't gated on `load`.
     void (async () => {
       try {
@@ -393,6 +407,24 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.installEdgeGestureGuard(map);
     this.installAttribution(options.container);
     const canvas = map.getCanvas();
+    const clearRestoreWait = () => {
+      if (this.contextRestoreTimer != null) {
+        window.clearTimeout(this.contextRestoreTimer);
+        this.contextRestoreTimer = null;
+      }
+      if (this.contextRestoredHandler) {
+        try {
+          canvas.removeEventListener(
+            "webglcontextrestored",
+            this.contextRestoredHandler,
+            false,
+          );
+        } catch {
+          /* noop */
+        }
+        this.contextRestoredHandler = null;
+      }
+    };
     const onContextLost = (ev: Event) => {
       ev.preventDefault();
       if (this.intentionalDestroy || this.destroyed) return;
@@ -402,15 +434,46 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         this.onContextLostCb?.({ hidden: true });
         return;
       }
-      if (this.onContextLostCb) {
-        this.onContextLostCb({ hidden: false });
-        return;
-      }
-      this.reportFallback(options, "webglcontextlost");
+      // Prefer GPU restore over immediate remount/Kakao (iOS WebKit often restores).
+      clearRestoreWait();
+      let restored = false;
+      const onRestored = () => {
+        restored = true;
+        clearRestoreWait();
+        try {
+          this.map?.triggerRepaint();
+        } catch {
+          /* noop */
+        }
+      };
+      this.contextRestoredHandler = onRestored;
+      canvas.addEventListener("webglcontextrestored", onRestored, false);
+      this.contextRestoreTimer = window.setTimeout(() => {
+        this.contextRestoreTimer = null;
+        if (this.contextRestoredHandler) {
+          try {
+            canvas.removeEventListener(
+              "webglcontextrestored",
+              this.contextRestoredHandler,
+              false,
+            );
+          } catch {
+            /* noop */
+          }
+          this.contextRestoredHandler = null;
+        }
+        if (restored || this.destroyed || this.intentionalDestroy) return;
+        if (this.onContextLostCb) {
+          this.onContextLostCb({ hidden: false });
+          return;
+        }
+        this.reportFallback(options, "webglcontextlost");
+      }, CONTEXT_RESTORE_WAIT_MS);
     };
     this.contextLostHandler = onContextLost;
     canvas.addEventListener("webglcontextlost", onContextLost, false);
     this.touchCleanups.push(() => {
+      clearRestoreWait();
       canvas.removeEventListener("webglcontextlost", onContextLost, false);
       if (this.contextLostHandler === onContextLost) this.contextLostHandler = null;
     });
@@ -1917,21 +1980,37 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   /**
    * ≤1km: easeTo 300ms. Farther: jumpTo then 200ms zoom settle. No flyTo.
+   * `paddingBottom` keeps the pin in the visible band above a bottom place card.
    */
-  goToSearchResult(lat: number, lng: number, kakaoLevel: number = 3) {
+  goToSearchResult(
+    lat: number,
+    lng: number,
+    kakaoLevel: number = 3,
+    opts?: { paddingBottom?: number; paddingTop?: number },
+  ) {
     const map = this.map;
     if (!map) return;
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const zoom = kakaoLevelToMapLibreZoom(kakaoLevel);
+    const padBottom = Math.max(0, Math.round(opts?.paddingBottom ?? 0));
+    const padTop = Math.max(48, Math.round(opts?.paddingTop ?? 96));
+    const padding =
+      padBottom > 0
+        ? { top: padTop, right: 36, bottom: padBottom, left: 36 }
+        : undefined;
     const c = map.getCenter();
     const dist = haversineMeters(c.lat, c.lng, lat, lng);
     if (dist <= 1000) {
-      map.easeTo({ center: [lng, lat], zoom, duration: 300 });
+      map.easeTo({ center: [lng, lat], zoom, duration: 300, padding });
       return;
     }
     // Instant relocate, then short zoom settle (feels fast; no long fly)
-    map.jumpTo({ center: [lng, lat], zoom: Math.max(1, zoom - 1) });
-    map.easeTo({ center: [lng, lat], zoom, duration: 200 });
+    map.jumpTo({
+      center: [lng, lat],
+      zoom: Math.max(1, zoom - 1),
+      padding,
+    });
+    map.easeTo({ center: [lng, lat], zoom, duration: 200, padding });
   }
 
   easeToView(
@@ -2110,8 +2189,24 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       window.clearTimeout(this.fallbackTimer);
       this.fallbackTimer = null;
     }
+    if (this.contextRestoreTimer != null) {
+      window.clearTimeout(this.contextRestoreTimer);
+      this.contextRestoreTimer = null;
+    }
     // Detach contextlost listener before map.remove() so intentional loss is ignored.
     const canvas = this.map?.getCanvas?.();
+    if (canvas && this.contextRestoredHandler) {
+      try {
+        canvas.removeEventListener(
+          "webglcontextrestored",
+          this.contextRestoredHandler,
+          false,
+        );
+      } catch {
+        /* noop */
+      }
+      this.contextRestoredHandler = null;
+    }
     if (canvas && this.contextLostHandler) {
       try {
         canvas.removeEventListener("webglcontextlost", this.contextLostHandler, false);
@@ -2127,6 +2222,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       this.map?.remove();
     } catch {
       /* noop */
+    }
+    if (this.notedGlContext) {
+      this.notedGlContext = false;
+      noteMapGlContextDestroyed();
     }
     this.map = null;
     this.containerEl = null;

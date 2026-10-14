@@ -34,6 +34,8 @@ import {
 import MapLibreCornerAttribution from "@/components/MapLibreCornerAttribution";
 import {
   claimMapGlSlot,
+  noteMapGlContextCreated,
+  noteMapGlContextDestroyed,
   releaseMapGlSlot,
 } from "@/lib/mapSurface/mapGlRecovery";
 import {
@@ -426,10 +428,13 @@ export default function PreviewGlMap({
             : 1;
 
         claimMapGlSlot("preview", () => {
-          try {
-            mapRef.current?.remove();
-          } catch {
-            /* noop */
+          if (mapRef.current) {
+            try {
+              mapRef.current.remove();
+            } catch {
+              /* noop */
+            }
+            noteMapGlContextDestroyed();
           }
           mapRef.current = null;
         });
@@ -465,6 +470,7 @@ export default function PreviewGlMap({
         });
         const createMs = Math.round(performance.now() - createT0);
         mapRef.current = map;
+        noteMapGlContextCreated();
         // E2E / QA hook — map-preview route only
         window.__PINDMAP_PREVIEW_MAP__ = map;
         // Register code icons ASAP (don't wait for `load`) so POI labels aren't blocked.
@@ -697,7 +703,14 @@ export default function PreviewGlMap({
       if (window.__PINDMAP_PREVIEW_MAP__ === mapRef.current) {
         window.__PINDMAP_PREVIEW_MAP__ = null;
       }
-      mapRef.current?.remove();
+      if (mapRef.current) {
+        try {
+          mapRef.current.remove();
+        } catch {
+          /* noop */
+        }
+        noteMapGlContextDestroyed();
+      }
       mapRef.current = null;
     };
     // Remount when mode/theme/cluster changes (perf A/B isolation)
