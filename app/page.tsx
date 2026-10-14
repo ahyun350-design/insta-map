@@ -274,6 +274,7 @@ import {
   setSessionForceKakaoExpanded,
   shouldUseCompactMapLibre,
   shouldUseExpandedMapLibre,
+  isE2eForceExpandedMapLibre,
   writeCompactMapLibreOverride,
   writeExpandedMapLibreOverride,
   readSelfTilesEnabled,
@@ -12280,6 +12281,38 @@ function HomePageContent() {
   openExpandedSearchPlaceCardRef.current = openExpandedSearchPlaceCard;
   const toSelectedFromSavedPlaceRef = useRef(toSelectedFromSavedPlace);
   toSelectedFromSavedPlaceRef.current = toSelectedFromSavedPlace;
+
+  /** Playwright-only: inject Kakao-shaped search hits when Places is unavailable (localhost). */
+  useEffect(() => {
+    if (!isE2eForceExpandedMapLibre()) return;
+    (
+      window as unknown as {
+        __PINDMAP_E2E_SEARCH__?: {
+          inject: (places: unknown[]) => void;
+        };
+      }
+    ).__PINDMAP_E2E_SEARCH__ = {
+      inject: (places: unknown[]) => {
+        const list = Array.isArray(places) ? places : [];
+        clearSearchResultPins();
+        addSearchResultPins(list, (place) =>
+          openExpandedSearchPlaceCardRef.current(place, "e2e-inject"),
+        );
+        setMapSearchResults(list as MapSearchPlaceResult[]);
+        setMapSearchLabel("e2e");
+        setIsMapSearchSheetOpen(true);
+      },
+    };
+    return () => {
+      try {
+        delete (
+          window as unknown as { __PINDMAP_E2E_SEARCH__?: unknown }
+        ).__PINDMAP_E2E_SEARCH__;
+      } catch {
+        /* noop */
+      }
+    };
+  }, [addSearchResultPins, clearSearchResultPins]);
 
   const handleFullscreenNativePlaceDetail = useCallback(async (markerId: string) => {
     // Pin tap no longer opens React PlaceDetailSheet — native bottom sheet handles place UI.

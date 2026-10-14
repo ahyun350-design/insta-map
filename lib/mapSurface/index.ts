@@ -32,6 +32,7 @@ export {
 } from "./compactMapLibreFlag";
 export {
   EXPANDED_MAPLIBRE_STORAGE_KEY,
+  isE2eForceExpandedMapLibre,
   isSessionForceKakaoExpanded,
   readExpandedMapLibreFlag,
   readExpandedMapLibreOverride,

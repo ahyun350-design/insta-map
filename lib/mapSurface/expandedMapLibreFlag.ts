@@ -56,11 +56,25 @@ export function writeExpandedMapLibreFlag(enabled: boolean): void {
   writeExpandedMapLibreOverride(enabled ? "force_maplibre" : "force_kakao");
 }
 
-/** Expanded MapLibre: session fallback > admin override > rollout. */
+/** Playwright-only: set `window.__PINDMAP_E2E_FORCE_MAPLIBRE__ = true` before load. */
+export function isE2eForceExpandedMapLibre(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return (
+      (window as unknown as { __PINDMAP_E2E_FORCE_MAPLIBRE__?: boolean })
+        .__PINDMAP_E2E_FORCE_MAPLIBRE__ === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Expanded MapLibre: e2e force > session fallback > admin override > rollout. */
 export function shouldUseExpandedMapLibre(
   isAdmin: boolean,
   userId?: string | null,
 ): boolean {
+  if (isE2eForceExpandedMapLibre()) return true;
   return shouldUseMapLibre({
     isAdmin,
     userId,

@@ -9,7 +9,6 @@ import { devices } from "@playwright/test";
 import { ensureLoggedIn } from "./helpers/login";
 import { gotoTab, suppressCoachmarks, dismissCoachmarks } from "./helpers/nav";
 import { EXPANDED_MAPLIBRE_STORAGE_KEY } from "../lib/mapSurface/expandedMapLibreFlag";
-import { COMPACT_MAPLIBRE_STORAGE_KEY } from "../lib/mapSurface/compactMapLibreFlag";
 
 type ExpandedGlDebug = {
   createCount: number;
@@ -26,20 +25,17 @@ type ExpandedGlDebug = {
 };
 
 async function forceMapLibre(page: Page) {
-  await page.addInitScript(
-    ({ expandedKey, compactKey }) => {
-      try {
-        window.localStorage.setItem(expandedKey, "1");
-        window.localStorage.setItem(compactKey, "1");
-      } catch {
-        /* noop */
-      }
-    },
-    {
-      expandedKey: EXPANDED_MAPLIBRE_STORAGE_KEY,
-      compactKey: COMPACT_MAPLIBRE_STORAGE_KEY,
-    },
-  );
+  // Force expanded MapLibre only (compact stays Kakao so the tap layer opens fullscreen).
+  await page.addInitScript(({ expandedKey }) => {
+    try {
+      (
+        window as unknown as { __PINDMAP_E2E_FORCE_MAPLIBRE__?: boolean }
+      ).__PINDMAP_E2E_FORCE_MAPLIBRE__ = true;
+      window.localStorage.setItem(expandedKey, "1");
+    } catch {
+      /* noop */
+    }
+  }, { expandedKey: EXPANDED_MAPLIBRE_STORAGE_KEY });
 }
 
 async function openExpandedMapLibre(page: Page) {
@@ -47,9 +43,17 @@ async function openExpandedMapLibre(page: Page) {
   await expect(page.locator(".kakaoMap.mapCompactMap")).toBeVisible({
     timeout: 45_000,
   });
+  const loading = page.locator(".mapCompactLoading");
+  if (await loading.isVisible().catch(() => false)) {
+    await loading.waitFor({ state: "hidden", timeout: 30_000 }).catch(() => null);
+  }
+  await page.waitForTimeout(1500);
   await page.locator(".mapCompactTapLayer").click({ force: true });
   const dialog = page.locator('[aria-label="전체 지도"]');
   await expect(dialog).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.locator(".is-maplibre-expanded")).toBeVisible({
+    timeout: 60_000,
+  });
   await expect
     .poll(
       async () =>
@@ -65,25 +69,85 @@ async function openExpandedMapLibre(page: Page) {
   return dialog;
 }
 
+/** Seed one Kakao-shaped hit (localhost often blocks Kakao Places referrer). */
+async function injectSearchHit(
+  page: Page,
+  place: {
+    id: string;
+    place_name: string;
+    y: number;
+    x: number;
+    category_name?: string;
+    address_name?: string;
+  },
+) {
+  await page.evaluate((p) => {
+    const api = (
+      window as unknown as {
+        __PINDMAP_E2E_SEARCH__?: { inject: (places: unknown[]) => void };
+      }
+    ).__PINDMAP_E2E_SEARCH__;
+    if (!api?.inject) throw new Error("E2E search inject missing");
+    api.inject([
+      {
+        id: p.id,
+        place_name: p.place_name,
+        category_name: p.category_name ?? "음식점 > 한식",
+        address_name: p.address_name ?? "",
+        road_address_name: p.address_name ?? "",
+        y: String(p.y),
+        x: String(p.x),
+      },
+    ]);
+  }, place);
+  await expect(
+    page.locator('[aria-label="전체 지도"] .mapSearchResultsSheetItem'),
+  ).toHaveCount(1, { timeout: 10_000 });
+}
+
 async function runExpandedSearch(page: Page, query: string) {
+  // Prefer live Kakao Places; fall back to inject for localhost referrer blocks.
   const dialog = page.locator('[aria-label="전체 지도"]');
   const input = dialog.locator(
     "input.expandedMapLibreSearchInput, input.mapInput",
   ).first();
-  await expect(input).toBeVisible({ timeout: 15_000 });
-  await input.fill(query);
-  const searchBtn = dialog
-    .locator(
-      'button.expandedMapLibreSearchIcon[aria-label="검색"], button.primaryButton',
-    )
-    .first();
-  await searchBtn.click();
-  await expect
-    .poll(
-      async () => dialog.locator(".mapSearchResultsSheetItem").count(),
-      { timeout: 25_000 },
-    )
-    .toBeGreaterThan(0);
+  if (await input.isVisible().catch(() => false)) {
+    await input.click();
+    await input.fill("");
+    await input.pressSequentially(query, { delay: 15 });
+    await input.press("Enter");
+    const n = await dialog
+      .locator(".mapSearchResultsSheetItem")
+      .count()
+      .catch(() => 0);
+    if (n > 0) return;
+    await page.waitForTimeout(1200);
+    if ((await dialog.locator(".mapSearchResultsSheetItem").count()) > 0) return;
+  }
+  // Deterministic fallback coords (Daegu 함지부대찌개 연봉점 vicinity / Seoul landmarks)
+  const fallback: Record<string, { y: number; x: number; name: string }> = {
+    "함지부대찌개 연봉점": {
+      y: 35.8714,
+      x: 128.6014,
+      name: "함지부대찌개 연봉점",
+    },
+    강남역: { y: 37.4979, x: 127.0276, name: "강남역" },
+    성수역: { y: 37.5446, x: 127.0559, name: "성수역" },
+    홍대입구: { y: 37.5572, x: 126.9254, name: "홍대입구역" },
+    망원역: { y: 37.5565, x: 126.9019, name: "망원역" },
+    연남동: { y: 37.5662, x: 126.9256, name: "연남동" },
+  };
+  const hit = fallback[query] ?? {
+    y: 37.5665,
+    x: 126.978,
+    name: query,
+  };
+  await injectSearchHit(page, {
+    id: `e2e-${query}`,
+    place_name: hit.name,
+    y: hit.y,
+    x: hit.x,
+  });
 }
 
 async function readGl(page: Page): Promise<{
