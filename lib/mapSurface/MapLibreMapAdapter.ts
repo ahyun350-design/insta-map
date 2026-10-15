@@ -571,13 +571,15 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       if (this.timingStyleMs < 0) {
         this.timingStyleMs = Math.round(styleLoadAt - createT0);
       }
-      // Defer landmarks until first idle (not needed for L9 minimap first paint).
+      // Defer landmarks + shop POI labels until first idle (faster basemap first paint).
       const styleLayers = map.getStyle()?.layers ?? [];
       for (const layer of styleLayers) {
         if (
           layer.id === "landmark_dot" ||
           layer.id === "landmark_label" ||
-          layer.id.startsWith("landmark_label_")
+          layer.id.startsWith("landmark_label_") ||
+          layer.id.startsWith("shop_poi_label_") ||
+          layer.id.startsWith("korea_landmark_tier")
         ) {
           try {
             map.setLayoutProperty(layer.id, "visibility", "none");
@@ -690,7 +692,9 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       if (
         layer.id === "landmark_dot" ||
         layer.id === "landmark_label" ||
-        layer.id.startsWith("landmark_label_")
+        layer.id.startsWith("landmark_label_") ||
+        layer.id.startsWith("shop_poi_label_") ||
+        layer.id.startsWith("korea_landmark_tier")
       ) {
         try {
           map.setLayoutProperty(layer.id, "visibility", "visible");

@@ -537,8 +537,43 @@ export default function PreviewGlMap({
         });
         const mapCreatedAt = performance.now();
         let styleLoadAt: number | null = null;
+        const deferHeavyLabelIds = () => {
+          const layers = map.getStyle()?.layers ?? [];
+          for (const layer of layers) {
+            if (
+              layer.id === "landmark_label" ||
+              layer.id.startsWith("landmark_label_") ||
+              layer.id.startsWith("shop_poi_label_") ||
+              layer.id.startsWith("korea_landmark_tier")
+            ) {
+              try {
+                map.setLayoutProperty(layer.id, "visibility", "none");
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+        };
+        const revealHeavyLabelIds = () => {
+          const layers = map.getStyle()?.layers ?? [];
+          for (const layer of layers) {
+            if (
+              layer.id === "landmark_label" ||
+              layer.id.startsWith("landmark_label_") ||
+              layer.id.startsWith("shop_poi_label_") ||
+              layer.id.startsWith("korea_landmark_tier")
+            ) {
+              try {
+                map.setLayoutProperty(layer.id, "visibility", "visible");
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+        };
         map.on("style.load", () => {
           styleLoadAt = performance.now();
+          deferHeavyLabelIds();
           publishPreviewDiag({
             styleLoadMs: Math.round(styleLoadAt - mapCreatedAt),
           });
@@ -546,9 +581,11 @@ export default function PreviewGlMap({
         map.once("idle", () => {
           const idleAt = performance.now();
           const base = styleLoadAt ?? mapCreatedAt;
+          // Basemap idle first; reveal shops/landmarks after measuring first paint.
           publishPreviewDiag({
             idleMs: Math.round(idleAt - base),
           });
+          revealHeavyLabelIds();
         });
         map.touchZoomRotate.disableRotation();
         const sampleCompare = () => {

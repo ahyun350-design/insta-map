@@ -135,21 +135,27 @@ export function setSessionSelfTilesOverride(enabled: boolean | null): void {
   sessionOverride = enabled;
 }
 
+/**
+ * Admin default: ON when unset. Explicit "0" turns off (toggle sticky).
+ * Preview/e2e can still override via setSessionSelfTilesOverride.
+ */
 export function readSelfTilesEnabled(): boolean {
   if (sessionOverride != null) return sessionOverride;
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") return true;
   try {
-    return window.localStorage.getItem(SELF_TILES_STORAGE_KEY) === "1";
+    const v = window.localStorage.getItem(SELF_TILES_STORAGE_KEY);
+    if (v === null) return true;
+    return v === "1";
   } catch {
-    return false;
+    return true;
   }
 }
 
 export function writeSelfTilesEnabled(enabled: boolean): void {
   if (typeof window === "undefined") return;
   try {
-    if (enabled) window.localStorage.setItem(SELF_TILES_STORAGE_KEY, "1");
-    else window.localStorage.removeItem(SELF_TILES_STORAGE_KEY);
+    // Always persist so OFF ("0") sticks across reloads.
+    window.localStorage.setItem(SELF_TILES_STORAGE_KEY, enabled ? "1" : "0");
   } catch {
     /* ignore quota */
   }
@@ -382,13 +388,25 @@ export async function prefetchSelfTilesZ14Around(
     const { x: cx, y: cy } = lngLatToTile(lng, lat, PREFETCH_ZOOM);
     const max = 2 ** PREFETCH_ZOOM - 1;
     const jobs: Promise<unknown>[] = [];
-    // 5×5 around center (covers phone viewport at z15–16 overzoom better than 3×3).
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dy = -2; dy <= 2; dy++) {
+    // 7×7 around center — mangwon z16 first paint was cold outside the old 5×5.
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dy = -3; dy <= 3; dy++) {
         const x = cx + dx;
         const y = cy + dy;
         if (x < 0 || y < 0 || x > max || y > max) continue;
         jobs.push(p.getZxy(PREFETCH_ZOOM, x, y).catch(() => null));
+      }
+    }
+    // Also warm one zoom coarser (z13) for faster overzoom parent tiles.
+    const z13 = 13;
+    const { x: cx13, y: cy13 } = lngLatToTile(lng, lat, z13);
+    const max13 = 2 ** z13 - 1;
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -2; dy <= 2; dy++) {
+        const x = cx13 + dx;
+        const y = cy13 + dy;
+        if (x < 0 || y < 0 || x > max13 || y > max13) continue;
+        jobs.push(p.getZxy(z13, x, y).catch(() => null));
       }
     }
     await Promise.all(jobs);

@@ -21,6 +21,16 @@ export const MAP_DIRECTIONS_LIME = "#D9F45B";
 /**
  * MapLibre `localIdeographFontFamily` — CJK/Hangul via device fonts (TinySDF),
  * avoiding Hangul glyph `.pbf` round-trips. Default library value is `sans-serif`.
+ *
+ * Pretendard (OFL) decision (2026-10): do **not** put Pretendard here for Hangul.
+ * Serving Hangul glyph PBFs or waiting on a full Pretendard webfont before first
+ * paint adds hundreds of ms on cold load; device SDF is already Kakao-like and free.
+ * Latin/digit labels keep Noto Sans Regular from same-origin `/map/glyphs` (or OFM).
+ * If we ever brand Latin-only UI chrome, load a Pretendard Latin subset in CSS —
+ * not in the MapLibre ideograph path.
  */
 export const MAP_LOCAL_IDEOGRAPH_FONT_FAMILY =
-  "'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif";
+  "'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif";
+
+/** Decision flag for reports / future toggles — Hangul stays on device fonts. */
+export const MAP_USE_PRETENDARD_FOR_HANGUL = false;
