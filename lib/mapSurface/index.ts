@@ -53,6 +53,7 @@ export {
   SELF_GLYPHS_URL,
   applyOfmPlanetTilesToMap,
   breakSelfTilesToOfmSession,
+  getKoreaPmtilesHeaderBounds,
   getKoreaPmtilesPublicUrl,
   getSharedPmtiles,
   isSelfTilesBroken,
@@ -62,7 +63,9 @@ export {
   setSessionSelfTilesOverride,
   warmSelfTilesOrBreak,
   writeSelfTilesEnabled,
+  type KoreaPmtilesHeaderBounds,
 } from "./selfTiles";
+export { attachEmptyBasemapWatchdog } from "./emptyBasemapWatchdog";
 export {
   MAP_GL_REMOUNT_MAX,
   activeMapGlSlot,

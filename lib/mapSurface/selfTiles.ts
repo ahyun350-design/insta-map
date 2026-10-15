@@ -34,38 +34,86 @@ export const SELF_GLYPHS_URL = "/map/glyphs/{fontstack}/{range}.pbf";
 
 /** TileJSON — versioned `tiles[]` template changes over time; never hardcode a stale path. */
 const OFM_PLANET_TILEJSON = "https://tiles.openfreemap.org/planet";
-/** Last-resort template if TileJSON is unreachable (often empty on current OFM CDN). */
-const OFM_PLANET_TILE_FALLBACK =
-  "https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf";
+/**
+ * Bare `/planet/{z}/{x}/{y}.pbf` returns HTTP 200 with **0 bytes** on current OFM CDN.
+ * Never cache it as the live template — grey/blank maps after soft-fail.
+ */
+const OFM_TILEJSON_RETRIES = 3;
+const OFM_TILEJSON_RETRY_MS = 400;
 
 let ofmTileTemplate: string | null = null;
 let ofmTileTemplatePromise: Promise<string> | null = null;
+
+/** Transient PMTiles Range errors before session soft-fail (aborts never count). */
+const SELF_TILE_HARD_FAIL_THRESHOLD = 3;
+let selfTileHardFailCount = 0;
+
+async function fetchOfmTileJsonTemplateOnce(): Promise<string> {
+  const res = await fetch(OFM_PLANET_TILEJSON, {
+    mode: "cors",
+    credentials: "omit",
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`ofm_tilejson_${res.status}`);
+  const tj = (await res.json()) as { tiles?: string[] };
+  const t = tj.tiles?.[0];
+  if (typeof t !== "string" || !t.includes("{z}")) {
+    throw new Error("ofm_tilejson_missing_tiles");
+  }
+  // Reject bare `/planet/{z}/…` (200 + 0 bytes on current OFM CDN).
+  if (/openfreemap\.org\/planet\/\{z\}\//.test(t)) {
+    throw new Error("ofm_tilejson_unversioned_empty_path");
+  }
+  return t;
+}
 
 async function resolveOfmTileTemplate(): Promise<string> {
   if (ofmTileTemplate) return ofmTileTemplate;
   if (!ofmTileTemplatePromise) {
     ofmTileTemplatePromise = (async () => {
-      try {
-        const res = await fetch(OFM_PLANET_TILEJSON, {
-          mode: "cors",
-          credentials: "omit",
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(`ofm_tilejson_${res.status}`);
-        const tj = (await res.json()) as { tiles?: string[] };
-        const t = tj.tiles?.[0];
-        if (typeof t !== "string" || !t.includes("{z}")) {
-          throw new Error("ofm_tilejson_missing_tiles");
+      let lastErr: unknown;
+      for (let i = 0; i < OFM_TILEJSON_RETRIES; i++) {
+        try {
+          const t = await fetchOfmTileJsonTemplateOnce();
+          ofmTileTemplate = t;
+          return t;
+        } catch (err) {
+          lastErr = err;
+          await new Promise((r) => setTimeout(r, OFM_TILEJSON_RETRY_MS * (i + 1)));
         }
-        ofmTileTemplate = t;
-        return t;
-      } catch {
-        ofmTileTemplate = OFM_PLANET_TILE_FALLBACK;
-        return OFM_PLANET_TILE_FALLBACK;
       }
+      ofmTileTemplatePromise = null;
+      throw lastErr instanceof Error
+        ? lastErr
+        : new Error("ofm_tilejson_unreachable");
     })();
   }
   return ofmTileTemplatePromise;
+}
+
+/** Force re-resolve TileJSON (e.g. after empty tile response). */
+function invalidateOfmTileTemplate(): void {
+  ofmTileTemplate = null;
+  ofmTileTemplatePromise = null;
+}
+
+/**
+ * Live Korea PMTiles header bounds (null until warm). Compared empirically to
+ * Geofabrik SK extract — Gangwon is inside (~38.65N maxLat).
+ */
+export type KoreaPmtilesHeaderBounds = {
+  minLon: number;
+  minLat: number;
+  maxLon: number;
+  maxLat: number;
+  minZoom: number;
+  maxZoom: number;
+};
+
+let cachedHeaderBounds: KoreaPmtilesHeaderBounds | null = null;
+
+export function getKoreaPmtilesHeaderBounds(): KoreaPmtilesHeaderBounds | null {
+  return cachedHeaderBounds;
 }
 
 /** South Korea extract maxzoom from Planetiler build. */
@@ -177,14 +225,20 @@ async function fetchOfmTile(
   y: number,
   signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
-  const template = await resolveOfmTileTemplate();
-  const url = template
-    .replace("{z}", String(z))
-    .replace("{x}", String(x))
-    .replace("{y}", String(y));
-  const res = await fetch(url, { signal, cache: "no-store" });
-  if (!res.ok) throw new Error(`ofm_tile_${res.status}`);
-  return res.arrayBuffer();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const template = await resolveOfmTileTemplate();
+    const url = template
+      .replace("{z}", String(z))
+      .replace("{x}", String(x))
+      .replace("{y}", String(y));
+    const res = await fetch(url, { signal, cache: "no-store" });
+    if (!res.ok) throw new Error(`ofm_tile_${res.status}`);
+    const buf = await res.arrayBuffer();
+    // Hardcoded/unversioned OFM path returns 200 with 0 bytes → blank grey map.
+    if (buf.byteLength > 0) return buf;
+    invalidateOfmTileTemplate();
+  }
+  throw new Error("ofm_tile_empty");
 }
 
 function getOrCreatePmtiles(): PMTiles {
@@ -222,7 +276,8 @@ export function ensureSelfTilesProtocolRegistered(): void {
       if (!selfTilesBroken) {
         try {
           const tile = await getOrCreatePmtiles().getZxy(z, x, y, signal);
-          if (tile?.data) {
+          if (tile?.data && tile.data.byteLength > 0) {
+            selfTileHardFailCount = 0;
             return { data: tile.data.slice(0) };
           }
           // Missing in archive (outside Korea / empty) → OFM (not a hard failure)
@@ -231,7 +286,11 @@ export function ensureSelfTilesProtocolRegistered(): void {
           if (isAbortError(err) || signal.aborted) {
             throw err;
           }
-          markBroken();
+          selfTileHardFailCount += 1;
+          if (selfTileHardFailCount >= SELF_TILE_HARD_FAIL_THRESHOLD) {
+            markBroken();
+          }
+          // Transient: still try OFM for this tile without ending the session yet.
         }
       }
 
@@ -285,7 +344,15 @@ export async function warmSelfTilesOrBreak(): Promise<boolean> {
   warmPromise = (async () => {
     try {
       const p = getOrCreatePmtiles();
-      await p.getHeader();
+      const header = await p.getHeader();
+      cachedHeaderBounds = {
+        minLon: header.minLon,
+        minLat: header.minLat,
+        maxLon: header.maxLon,
+        maxLat: header.maxLat,
+        minZoom: header.minZoom,
+        maxZoom: header.maxZoom,
+      };
       // Load root directory into PMTiles cache (tile may be empty outside Korea).
       await p.getZxy(0, 0, 0);
       return true;
@@ -358,9 +425,11 @@ export function isSelfTilesBroken(): boolean {
 export function resetSelfTilesForTests(): void {
   selfTilesBroken = false;
   selfTilesErrorTracked = false;
+  selfTileHardFailCount = 0;
   pmtiles = null;
   warmPromise = null;
   ofmTileTemplate = null;
   ofmTileTemplatePromise = null;
+  cachedHeaderBounds = null;
   sessionOverride = null;
 }

@@ -47,6 +47,12 @@ import {
   haversineMeters,
   prefetchZ14Around,
 } from "@/lib/mapSurface/tilePrefetch";
+import { attachEmptyBasemapWatchdog } from "@/lib/mapSurface/emptyBasemapWatchdog";
+import {
+  isSelfTilesBroken,
+  prefetchSelfTilesZ14Around,
+  readSelfTilesEnabled,
+} from "@/lib/mapSurface/selfTiles";
 import {
   paintPreviewRouteDemo,
   type PreviewRouteMode,
@@ -413,6 +419,7 @@ export default function PreviewGlMap({
     bootAtRef.current = performance.now();
     const perfOrigin = performance.now();
     prefetchSubwayOverlay();
+    let disposeEmptyWatchFn: (() => void) | null = null;
 
     (async () => {
       try {
@@ -557,8 +564,19 @@ export default function PreviewGlMap({
             level: mapLibreZoomToKakaoLevel(zoom),
           });
         };
-        map.on("moveend", sampleCompare);
+        let lastSelfPrefetchKey = "";
+        const onMoveEndPrefetch = () => {
+          sampleCompare();
+          if (!readSelfTilesEnabled() || isSelfTilesBroken()) return;
+          const c = map.getCenter();
+          const key = `${c.lat.toFixed(2)},${c.lng.toFixed(2)}`;
+          if (key === lastSelfPrefetchKey) return;
+          lastSelfPrefetchKey = key;
+          void prefetchSelfTilesZ14Around(c.lat, c.lng);
+        };
+        map.on("moveend", onMoveEndPrefetch);
         map.on("zoomend", sampleCompare);
+        disposeEmptyWatchFn = attachEmptyBasemapWatchdog(map, "expanded");
 
         map.on("error", (ev) => {
           const msg = String(ev.error?.message ?? "");
@@ -699,6 +717,8 @@ export default function PreviewGlMap({
     return () => {
       cancelled = true;
       handlersBound.current = false;
+      disposeEmptyWatchFn?.();
+      disposeEmptyWatchFn = null;
       releaseMapGlSlot("preview");
       if (window.__PINDMAP_PREVIEW_MAP__ === mapRef.current) {
         window.__PINDMAP_PREVIEW_MAP__ = null;

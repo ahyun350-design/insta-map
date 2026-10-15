@@ -62,8 +62,10 @@ import {
   applyOfmPlanetTilesToMap,
   breakSelfTilesToOfmSession,
   isSelfTilesBroken,
+  prefetchSelfTilesZ14Around,
   readSelfTilesEnabled,
 } from "./selfTiles";
+import { attachEmptyBasemapWatchdog } from "./emptyBasemapWatchdog";
 import {
   MAP_BRAND_NAVY,
   MAP_DIRECTIONS_LIME,
@@ -248,6 +250,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private timingSnapshotUsed: 0 | 1 = 0;
   private firstIdleNotified = false;
   private deferredDecorDone = false;
+  private emptyBasemapWatchDispose: (() => void) | null = null;
+  private lastSelfPrefetchKey = "";
   private fallbackReported = false;
   private courseSelectedOrder: number | null = null;
   /** Admin directions chrome (paint basemap + hide clutter pins). */
@@ -487,6 +491,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       });
       this.refreshPhotoPins();
       this.pushPinGeoJson();
+      // Prefetch PMTiles around the new view (Seoul-only boot prefetch left Gangwon cold).
+      if (readSelfTilesEnabled() && !isSelfTilesBroken()) {
+        const key = `${c.lat.toFixed(2)},${c.lng.toFixed(2)}`;
+        if (key !== this.lastSelfPrefetchKey) {
+          this.lastSelfPrefetchKey = key;
+          void prefetchSelfTilesZ14Around(c.lat, c.lng);
+        }
+      }
     });
 
     const selfTilesOn = readSelfTilesEnabled();
@@ -647,9 +659,13 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
           await ensureKoreaLandmarkIcon(this.map);
           this.addLayers(this.map);
           this.bindClicks(this.map);
-          window.setTimeout(() => {
-            if (!this.firstTileSeen) this.firstTileSeen = true;
-          }, 800);
+          // Do NOT fake firstTileSeen — that defeated self→OFM soft-fail on blank maps.
+          if (!this.emptyBasemapWatchDispose) {
+            this.emptyBasemapWatchDispose = attachEmptyBasemapWatchdog(
+              this.map,
+              this.mode === "expanded" ? "expanded" : "compact",
+            );
+          }
           const ms =
             (typeof performance !== "undefined" ? performance.now() : Date.now()) -
             this.mountStartedAt;
@@ -2179,6 +2195,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     // Mark intentional teardown BEFORE remove — MapLibre calls WEBGL_lose_context on remove.
     this.intentionalDestroy = true;
     this.destroyed = true;
+    if (this.emptyBasemapWatchDispose) {
+      this.emptyBasemapWatchDispose();
+      this.emptyBasemapWatchDispose = null;
+    }
     this.clearDistanceLabel();
     if (this.map) clearDirectionsBasemap(this.map);
     this.directionsChromeActive = false;
