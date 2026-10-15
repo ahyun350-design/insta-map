@@ -64,6 +64,15 @@ function loadKakaoMapsSdk(): Promise<NonNullable<(typeof window)["kakao"]>> {
   });
 }
 
+function readForceStyleFail(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return new URLSearchParams(window.location.search).get("forceStyleFail") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export default function PublicListGlProbe() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [engine, setEngine] = useState<"gl" | "kakao">("gl");
@@ -72,6 +81,7 @@ export default function PublicListGlProbe() {
   );
   const [mapError, setMapError] = useState(false);
   const glFallbackOnceRef = useRef(false);
+  const forceStyleFail = useMemo(() => readForceStyleFail(), []);
 
   const pins = useMemo(
     () =>
@@ -97,14 +107,21 @@ export default function PublicListGlProbe() {
     [],
   );
 
+  // Bundled liberty no longer hits openfreemap style URL — e2e uses forceStyleFail=1.
+  useEffect(() => {
+    if (!forceStyleFail || engine !== "gl") return;
+    fallbackGlToKakao("style_error");
+  }, [forceStyleFail, engine, fallbackGlToKakao]);
+
   useEffect(() => {
     if (engine !== "gl" || pins.length === 0) return;
     if (mapStatus === "ready" || mapError) return;
+    if (forceStyleFail) return;
     const t = window.setTimeout(() => {
       fallbackGlToKakao("load_timeout");
     }, PUBLIC_LIST_GL_LOAD_TIMEOUT_MS);
     return () => window.clearTimeout(t);
-  }, [engine, pins.length, mapStatus, mapError, fallbackGlToKakao]);
+  }, [engine, pins.length, mapStatus, mapError, fallbackGlToKakao, forceStyleFail]);
 
   useEffect(() => {
     if (engine !== "kakao") return;

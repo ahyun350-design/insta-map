@@ -388,17 +388,12 @@ test("map-preview dense pins: 20 all render at z11/z13/z15", async ({
 test("map-preview public-list probe: style fail → Kakao engine", async ({
   page,
 }) => {
-  await page.route("**/tiles.openfreemap.org/styles/liberty**", async (route) => {
-    await route.fulfill({
-      status: 500,
-      contentType: "text/plain",
-      body: "e2e_style_fail",
-    });
-  });
-
-  await page.goto(withMapPreviewE2e("/map-preview?probe=public-list"), {
-    waitUntil: "domcontentloaded",
-  });
+  // Bundled liberty no longer fetches openfreemap style JSON — forceStyleFail
+  // exercises the same style_error → Kakao path (tile soft-fail stays on MapLibre).
+  await page.goto(
+    withMapPreviewE2e("/map-preview?probe=public-list&forceStyleFail=1"),
+    { waitUntil: "domcontentloaded" },
+  );
 
   const probe = page.getByTestId("public-list-gl-probe");
   await expect(probe).toBeVisible({ timeout: 15_000 });

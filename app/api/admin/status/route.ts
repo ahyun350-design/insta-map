@@ -11,6 +11,8 @@ import { reclaimStaleExtractJobs } from "@/app/api/extract/_reclaim";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   computePipelineWarn,
+  topFailCodes,
+  type FailCodeTopEntry,
   type PipelineWarn,
 } from "./_pipelineWarn";
 
@@ -43,8 +45,10 @@ type AdminStatusBody = {
     poi: number;
     poiRate: number | null;
   };
-  /** Claude credit/auth in 30m, or ≥7/10 same fail_code */
+  /** Claude credit/auth in 30m, or ≥7/10 same *system* fail_code */
   pipelineWarn?: PipelineWarn;
+  /** Recent failure reason top-3 (content + system), for admin panel line */
+  recentFailTop3?: FailCodeTopEntry[];
   timings?: Record<string, number>;
   cached?: boolean;
 };
@@ -67,7 +71,7 @@ function codeFromFailureMessage(msg: string | null | undefined): string {
 
 async function loadPipelineWarn(
   admin: ReturnType<typeof getSupabaseAdmin>,
-): Promise<PipelineWarn> {
+): Promise<{ pipelineWarn: PipelineWarn; recentFailTop3: FailCodeTopEntry[] }> {
   const since30 = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   const failCodesLast30m: string[] = [];
   const failCodesLast10: string[] = [];
@@ -123,7 +127,14 @@ async function loadPipelineWarn(
     /* ignore */
   }
 
-  return computePipelineWarn({ failCodesLast30m, failCodesLast10 });
+  return {
+    pipelineWarn: computePipelineWarn({ failCodesLast30m, failCodesLast10 }),
+    // Prefer last-10 window for the panel line; fall back to 30m pool.
+    recentFailTop3: topFailCodes(
+      failCodesLast10.length > 0 ? failCodesLast10 : failCodesLast30m,
+      3,
+    ),
+  };
 }
 
 function normalizeRpcPayload(raw: unknown): AdminStatusBody {
@@ -269,9 +280,9 @@ export async function GET(req: Request) {
 
     const body = normalizeRpcPayload(data);
     const tWarn = Date.now();
-    const pipelineWarn = await loadPipelineWarn(admin);
+    const { pipelineWarn, recentFailTop3 } = await loadPipelineWarn(admin);
     timings.pipeline_warn_ms = Date.now() - tWarn;
-    const withWarn: AdminStatusBody = { ...body, pipelineWarn };
+    const withWarn: AdminStatusBody = { ...body, pipelineWarn, recentFailTop3 };
     cache = { at: Date.now(), body: withWarn };
     timings.total_ms = Date.now() - t0;
 

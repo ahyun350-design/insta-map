@@ -104,7 +104,14 @@ export function getReport(): BootTimingReport {
     if (t == null) continue;
     rel[name] = Math.round(t - start);
   }
-  const present = BOOT_MARK_ORDER.filter((n) => marks[n] != null);
+  // Actual fire order — parallel auth/cache can invert BOOT_MARK_ORDER.
+  const present = (Object.keys(marks) as BootMarkName[])
+    .filter((n) => marks[n] != null)
+    .sort((a, b) => {
+      const dt = (marks[a] ?? 0) - (marks[b] ?? 0);
+      if (dt !== 0) return dt;
+      return BOOT_MARK_ORDER.indexOf(a) - BOOT_MARK_ORDER.indexOf(b);
+    });
   const segments: BootTimingSegment[] = [];
   for (let i = 1; i < present.length; i++) {
     const from = present[i - 1]!;
@@ -112,7 +119,7 @@ export function getReport(): BootTimingReport {
     segments.push({
       from,
       to,
-      ms: Math.round((marks[to] ?? 0) - (marks[from] ?? 0)),
+      ms: Math.max(0, Math.round((marks[to] ?? 0) - (marks[from] ?? 0))),
     });
   }
   const last = present[present.length - 1];

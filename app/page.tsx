@@ -139,12 +139,13 @@ type AdminStatusPayload = {
     poi: number;
     poiRate: number | null;
   };
-  /** Claude credit/auth (30m) or ≥7/10 same fail_code */
+  /** Claude credit/auth (30m) or ≥7/10 same *system* fail_code */
   pipelineWarn?: {
     active: boolean;
     code: string | null;
     reason: string | null;
   };
+  recentFailTop3?: Array<{ code: string; count: number }>;
 };
 
 function formatAdminHoursAgo(iso: string | null): string {
@@ -19330,7 +19331,21 @@ function HomePageContent() {
                                   >
                                     <p
                                       style={{
-                                        margin: "0 0 6px",
+                                        margin: "0 0 4px",
+                                        fontSize: 12,
+                                        color: "#8f93a6",
+                                      }}
+                                    >
+                                      최근 실패 사유 상위:{" "}
+                                      {(adminStatus.recentFailTop3 ?? []).length === 0
+                                        ? "없음"
+                                        : (adminStatus.recentFailTop3 ?? [])
+                                            .map((e) => `${e.code}(${e.count})`)
+                                            .join(" · ")}
+                                    </p>
+                                    <p
+                                      style={{
+                                        margin: "8px 0 6px",
                                         fontSize: 12,
                                         fontWeight: 600,
                                         color: "#8f93a6",
@@ -19396,7 +19411,14 @@ function HomePageContent() {
                                       구간 기록 없음
                                     </p>
                                   ) : (
-                                    lastBootTiming.segments.map((seg) => (
+                                    lastBootTiming.segments.map((seg) => {
+                                      const atMs =
+                                        lastBootTiming.marks?.[
+                                          seg.to as keyof typeof lastBootTiming.marks
+                                        ];
+                                      const cum =
+                                        typeof atMs === "number" ? ` · Σ${atMs}ms` : "";
+                                      return (
                                       <p
                                         key={`${seg.from}-${seg.to}`}
                                         style={{
@@ -19405,9 +19427,10 @@ function HomePageContent() {
                                           color: "#8f93a6",
                                         }}
                                       >
-                                        {seg.from} → {seg.to}: {seg.ms}ms
+                                        {seg.from} → {seg.to}: +{seg.ms}ms{cum}
                                       </p>
-                                    ))
+                                      );
+                                    })
                                   )}
                                 </div>
                               )}
