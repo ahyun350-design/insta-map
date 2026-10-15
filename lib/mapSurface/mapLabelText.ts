@@ -17,32 +17,24 @@ export const SHOP_TEXT_RAW: unknown = [
 ];
 
 /**
- * Strip trailing parenthetical (e.g. "NH금융타워(타워2)") when the name is long.
- * Uses MapLibre index-of / slice (supported in 4.7).
+ * Strip parenthetical bilingual / branch suffixes: "이름 (English)", "타워(타워2)".
+ * Always strip when a paren is present (not only for long names).
  */
-export function stripLongParenName(rawExpr: unknown): unknown {
+export function stripParenName(rawExpr: unknown): unknown {
   return [
     "let",
     "raw",
     ["to-string", ["coalesce", rawExpr, ""]],
     [
       "case",
-      [
-        "all",
-        [">", ["length", ["var", "raw"]], 10],
-        [">=", ["index-of", "(", ["var", "raw"]], 0],
-      ],
+      [">=", ["index-of", "(", ["var", "raw"]], 0],
       [
         "slice",
         ["var", "raw"],
         0,
         ["index-of", "(", ["var", "raw"]],
       ],
-      [
-        "all",
-        [">", ["length", ["var", "raw"]], 10],
-        [">=", ["index-of", "（", ["var", "raw"]], 0],
-      ],
+      [">=", ["index-of", "（", ["var", "raw"]], 0],
       [
         "slice",
         ["var", "raw"],
@@ -54,9 +46,32 @@ export function stripLongParenName(rawExpr: unknown): unknown {
   ];
 }
 
-export const KO_TEXT: unknown = stripLongParenName(KO_TEXT_RAW);
-export const SHOP_TEXT: unknown = stripLongParenName(SHOP_TEXT_RAW);
-export const GEOJSON_NAME_TEXT: unknown = stripLongParenName(["get", "name"]);
+/** @deprecated alias — use stripParenName */
+export function stripLongParenName(rawExpr: unknown): unknown {
+  return stripParenName(rawExpr);
+}
+
+/**
+ * Truncate very long labels (often Latin-only shop names) for 2-line wrap + ellipsis.
+ * Korean short names pass through; MapLibre text-max-width handles soft wrap.
+ */
+export function truncateLongLabel(rawExpr: unknown, maxLen = 20): unknown {
+  return [
+    "let",
+    "s",
+    ["to-string", ["coalesce", rawExpr, ""]],
+    [
+      "case",
+      [">", ["length", ["var", "s"]], maxLen],
+      ["concat", ["slice", ["var", "s"], 0, maxLen - 1], "…"],
+      ["var", "s"],
+    ],
+  ];
+}
+
+export const KO_TEXT: unknown = stripParenName(KO_TEXT_RAW);
+export const SHOP_TEXT: unknown = truncateLongLabel(stripParenName(SHOP_TEXT_RAW), 20);
+export const GEOJSON_NAME_TEXT: unknown = stripParenName(["get", "name"]);
 
 /**
  * Dong / neighbourhood labels: ensure a 동/가/리 suffix so they don't share
@@ -97,15 +112,15 @@ export const PLACE_TEXT_PADDING: unknown = [
   ["linear"],
   ["zoom"],
   11,
-  2,
+  2.5,
   13,
   2,
   14,
-  1.5,
+  1.8,
   15,
-  1.5,
+  1.6,
   16,
-  1,
+  1.2,
 ];
 
 export const PLACE_VARIABLE_ANCHOR = ["right", "left", "top", "bottom"] as const;

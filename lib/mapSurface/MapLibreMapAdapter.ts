@@ -572,17 +572,18 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         this.timingStyleMs = Math.round(styleLoadAt - createT0);
       }
       // Defer landmarks until first idle (not needed for L9 minimap first paint).
-      for (const id of [
-        "landmark_dot",
-        "landmark_label",
-        "landmark_label_street",
-      ] as const) {
-        try {
-          if (map.getLayer(id)) {
-            map.setLayoutProperty(id, "visibility", "none");
+      const styleLayers = map.getStyle()?.layers ?? [];
+      for (const layer of styleLayers) {
+        if (
+          layer.id === "landmark_dot" ||
+          layer.id === "landmark_label" ||
+          layer.id.startsWith("landmark_label_")
+        ) {
+          try {
+            map.setLayoutProperty(layer.id, "visibility", "none");
+          } catch {
+            /* ignore */
           }
-        } catch {
-          /* ignore */
         }
       }
     });
@@ -684,17 +685,18 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     this.deferredDecorDone = true;
     const map = this.map;
     const theme = this.theme;
-    for (const id of [
-      "landmark_dot",
-      "landmark_label",
-      "landmark_label_street",
-    ] as const) {
-      try {
-        if (map.getLayer(id)) {
-          map.setLayoutProperty(id, "visibility", "visible");
+    const styleLayers = map.getStyle()?.layers ?? [];
+    for (const layer of styleLayers) {
+      if (
+        layer.id === "landmark_dot" ||
+        layer.id === "landmark_label" ||
+        layer.id.startsWith("landmark_label_")
+      ) {
+        try {
+          map.setLayoutProperty(layer.id, "visibility", "visible");
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
       }
     }
     void attachSubwayOverlay(map, theme).catch(() => {});

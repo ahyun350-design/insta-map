@@ -4,6 +4,8 @@
  * Lower `priority` = more important (used as symbol-sort-key).
  */
 
+import { dedupeNamedPointsByInclusion } from "@/lib/mapSurface/labelNameDedup";
+
 export type KoreaMajorLabel = {
   name: string;
   lng: number;
@@ -176,9 +178,17 @@ export const KOREA_MAJOR_LABELS: readonly KoreaMajorLabel[] = [
 ];
 
 export function koreaMajorLabelsGeoJson() {
+  // Inclusion + 300m → keep longer name (e.g. 공덕동 over 공덕 near same point).
+  const deduped = dedupeNamedPointsByInclusion(
+    KOREA_MAJOR_LABELS.map((g) => ({
+      ...g,
+      priority: g.priority ?? 50,
+    })),
+    300,
+  );
   return {
     type: "FeatureCollection" as const,
-    features: KOREA_MAJOR_LABELS.map((g) => ({
+    features: deduped.map((g) => ({
       type: "Feature" as const,
       properties: {
         name: g.name,

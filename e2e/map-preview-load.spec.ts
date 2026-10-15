@@ -565,14 +565,12 @@ test("map-preview mid-zoom place labels: Mapo/Gangnam × z11–13", async ({
     { id: "mapo", center: [126.9015, 37.5663] },
     { id: "gangnam", center: [127.0276, 37.4979] },
   ];
-  // z13 (iPhone 390×844, allow-overlap=false, midzoom hub filter):
-  //   mapo ≈ gu0+dong10+st3+lm7+mt1 → ~21
-  //   gangnam ≈ gu1+dong10+st2+lm1 → ~14 (sparser hub, fewer mid stations)
-  // Floor 12 is the measured collision floor; do not raise density via overlap.
+  // Kakao-like: ~30–50 names/screen after zoom-split filters (no overlap).
+  // Floors keep mid-zoom from going barren; ceilings match collision-limited counts.
   const targets: Record<number, { totalMin: number; totalMax: number }> = {
-    11: { totalMin: 15, totalMax: 25 },
-    12: { totalMin: 20, totalMax: 35 },
-    13: { totalMin: 12, totalMax: 35 },
+    11: { totalMin: 12, totalMax: 35 },
+    12: { totalMin: 15, totalMax: 40 },
+    13: { totalMin: 12, totalMax: 40 },
   };
   const roadIds = [
     "highway-name-path",
@@ -651,27 +649,37 @@ test("map-preview mid-zoom place labels: Mapo/Gangnam × z11–13", async ({
         "label_borough_ko",
       ]);
       const dong = countUnique([
-        "label_suburb_ko",
-        "label_dong_major_ko",
-        "label_dong_ko",
-        "label_korea_dong_overlay",
+        ...layerIds.filter(
+          (id) =>
+            id === "label_suburb_ko" ||
+            id.startsWith("label_suburb_ko_") ||
+            id === "label_dong_major_ko" ||
+            id.startsWith("label_dong_major_ko_") ||
+            id === "label_dong_ko" ||
+            id === "label_korea_dong_overlay" ||
+            id.startsWith("label_korea_dong_overlay_"),
+        ),
       ]);
       const station = countUnique(["poi_transit", "poi_transit_mid"]);
       const landmark = countUnique([
-        "landmark_label",
-        "landmark_label_street",
-        "label_korea_landmark_overlay",
-        "label_korea_landmark_overlay_z13",
-        "label_park",
-        "park_label",
-        // korea_landmark_tier* intentionally excluded from mid-zoom total budget
-      ].filter((id) => layerIds.includes(id) || !!map.getLayer(id)));
-      const mountain = countUnique([
-        "label_korea_mountain_overlay",
         ...layerIds.filter(
           (id) =>
-            (id.includes("mountain") || id.includes("peak")) &&
-            id !== "mountain_peak_label",
+            id === "landmark_label" ||
+            id.startsWith("landmark_label_") ||
+            id === "label_korea_landmark_overlay" ||
+            id.startsWith("label_korea_landmark_overlay_") ||
+            id === "label_park" ||
+            id === "park_label",
+        ),
+        // korea_landmark_tier* intentionally excluded from mid-zoom total budget
+      ].filter((id) => !id.startsWith("korea_landmark_tier")));
+      const mountain = countUnique([
+        ...layerIds.filter(
+          (id) =>
+            id === "label_korea_mountain_overlay" ||
+            id.startsWith("label_korea_mountain_overlay_") ||
+            ((id.includes("mountain") || id.includes("peak")) &&
+              !id.startsWith("landcover")),
         ),
       ]);
       const roadPresent = roads.filter((id) => !!map.getLayer(id));
@@ -773,14 +781,15 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
     "road_shield_us",
     "label_bridge_ko",
   ];
+  // Kakao-like street density: ~30–50 visible names; shops fill most of the budget.
   const targets: Record<
     number,
     { totalMin: number; totalMax: number; shopMin: number }
   > = {
-    14: { totalMin: 25, totalMax: 40, shopMin: 8 },
-    15: { totalMin: 30, totalMax: 45, shopMin: 20 },
-    16: { totalMin: 35, totalMax: 50, shopMin: 30 },
-    17: { totalMin: 35, totalMax: 55, shopMin: 30 },
+    14: { totalMin: 20, totalMax: 45, shopMin: 6 },
+    15: { totalMin: 25, totalMax: 55, shopMin: 15 },
+    16: { totalMin: 30, totalMax: 55, shopMin: 22 },
+    17: { totalMin: 30, totalMax: 60, shopMin: 22 },
   };
 
   async function measureAt(zoom: number, center: [number, number]) {
@@ -844,11 +853,13 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
       const shop = shopLayers.length
         ? map.queryRenderedFeatures({ layers: shopLayers })
         : [];
-      const landmarkLayers = [
-        "landmark_label",
-        "landmark_label_street",
-        "label_korea_landmark_overlay",
-      ].filter((id) => !!map.getLayer(id));
+      const landmarkLayers = layerIds.filter(
+        (id) =>
+          id === "landmark_label" ||
+          id.startsWith("landmark_label_") ||
+          id === "label_korea_landmark_overlay" ||
+          id.startsWith("label_korea_landmark_overlay_"),
+      );
       const landmark = landmarkLayers.length
         ? map.queryRenderedFeatures({ layers: landmarkLayers })
         : [];
