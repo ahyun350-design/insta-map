@@ -11,14 +11,20 @@
 # Do NOT use SUPABASE_SERVICE_ROLE_KEY here.
 # Bucket must be public; global + bucket file size limits must allow ~1–2 GiB.
 #
-# upload_only=true skips Planetiler and downloads korea-pmtiles artifact from
-# artifact_run_id (a prior successful build that uploaded the artifact).
+# Modes (workflow_dispatch):
+#   default              — full Planetiler + places-extra + upload
+#   only_places_extra    — PBF + places-extra only (skip Planetiler / korea.pmtiles upload)
+#   upload_only          — download korea-pmtiles artifact and upload (needs artifact_run_id)
 
 name: build-korea-tiles
 
 on:
   workflow_dispatch:
     inputs:
+      only_places_extra:
+        description: "Build+upload korea-places-extra.pmtiles only (skip Planetiler / korea.pmtiles)"
+        type: boolean
+        default: false
       upload_only:
         description: "Skip build; download korea-pmtiles artifact and upload to Storage only"
         type: boolean
@@ -43,7 +49,8 @@ jobs:
     env:
       PLANETILER_JAR_URL: "https://github.com/openmaptiles/planetiler-openmaptiles/releases/download/v3.16/planetiler-openmaptiles.jar"
       GEOFABRIK_URL: "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf"
-      OUT_DIR: build/tiles
+      # Absolute under workspace (set after checkout via GITHUB_ENV too)
+      OUT_DIR: ${{ github.workspace }}/build/tiles
       AWS_MAX_ATTEMPTS: "10"
       AWS_RETRY_MODE: adaptive
       AWS_EC2_METADATA_DISABLED: "true"
@@ -52,8 +59,12 @@ jobs:
       AWS_DEFAULT_REGION: ${{ secrets.SUPABASE_S3_REGION }}
       SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
       UPLOAD_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_only }}
+      ONLY_PLACES_EXTRA: ${{ github.event_name == 'workflow_dispatch' && inputs.only_places_extra }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Check required secrets (presence only)
         run: |
           set -euo pipefail
@@ -69,6 +80,8 @@ jobs:
             exit 1
           fi
           echo "Required S3 secrets are set (values not printed)."
+          echo "OUT_DIR=$OUT_DIR"
+          echo "workspace=${{ github.workspace }}"
 
       - name: Resolve bucket name
         env:
@@ -81,17 +94,27 @@ jobs:
           fi
           echo "Using configured bucket name (not printing secret overrides)."
 
-      - name: Validate upload_only inputs
-        if: ${{ env.UPLOAD_ONLY == 'true' }}
+      - name: Validate dispatch inputs
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
         run: |
           set -euo pipefail
-          if [ -z "${ARTIFACT_RUN_ID}" ]; then
+          if [ "${UPLOAD_ONLY}" = "true" ] && [ "${ONLY_PLACES_EXTRA}" = "true" ]; then
+            echo "upload_only and only_places_extra are mutually exclusive."
+            exit 1
+          fi
+          if [ "${UPLOAD_ONLY}" = "true" ] && [ -z "${ARTIFACT_RUN_ID}" ]; then
             echo "upload_only=true requires artifact_run_id (Actions run that has korea-pmtiles artifact)."
             exit 1
           fi
-          echo "upload_only mode: will download artifact from run id (id length=${#ARTIFACT_RUN_ID})."
+          if [ "${UPLOAD_ONLY}" = "true" ]; then
+            echo "Mode: upload_only (artifact id length=${#ARTIFACT_RUN_ID})."
+          elif [ "${ONLY_PLACES_EXTRA}" = "true" ]; then
+            echo "Mode: only_places_extra (skip Planetiler / korea.pmtiles upload)."
+          else
+            echo "Mode: full build_and_upload."
+          fi
 
       - name: Configure AWS CLI multipart defaults
         run: |
@@ -131,8 +154,19 @@ jobs:
         id: places_extra
         run: |
           set -euo pipefail
-          chmod +x scripts/build-korea-places-extra.sh
-          scripts/build-korea-places-extra.sh "$OUT_DIR/south-korea-latest.osm.pbf"
+          SCRIPT="${{ github.workspace }}/scripts/build-korea-places-extra.sh"
+          LANDMARKS="${{ github.workspace }}/public/map/korea-landmarks.geojson"
+          if [ ! -f "$SCRIPT" ]; then
+            echo "Missing $SCRIPT (checkout required)."
+            ls -la "${{ github.workspace }}/scripts" || true
+            exit 1
+          fi
+          if [ ! -f "$LANDMARKS" ]; then
+            echo "Missing landmarks GeoJSON: $LANDMARKS"
+            exit 1
+          fi
+          chmod +x "$SCRIPT"
+          OUT_DIR="$OUT_DIR" LANDMARKS="$LANDMARKS" "$SCRIPT" "$OUT_DIR/south-korea-latest.osm.pbf"
           PLACES_BYTES=$(stat -c%s "$OUT_DIR/korea-places-extra.pmtiles")
           echo "PLACES_BYTES=${PLACES_BYTES}" >> "$GITHUB_ENV"
           echo "places-extra size ${PLACES_BYTES} bytes"
@@ -142,7 +176,7 @@ jobs:
           fi
 
       - name: Download Planetiler OpenMapTiles jar
-        if: ${{ env.UPLOAD_ONLY != 'true' }}
+        if: ${{ env.UPLOAD_ONLY != 'true' && env.ONLY_PLACES_EXTRA != 'true' }}
         run: |
           set -euo pipefail
           mkdir -p "$OUT_DIR"
@@ -151,18 +185,18 @@ jobs:
 
       # planetiler-openmaptiles v3.16 requires class file 65 → Java 21+
       - name: Set up Java 21
-        if: ${{ env.UPLOAD_ONLY != 'true' }}
+        if: ${{ env.UPLOAD_ONLY != 'true' && env.ONLY_PLACES_EXTRA != 'true' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Print Java version
-        if: ${{ env.UPLOAD_ONLY != 'true' }}
+        if: ${{ env.UPLOAD_ONLY != 'true' && env.ONLY_PLACES_EXTRA != 'true' }}
         run: java -version
 
       - name: Build korea.pmtiles
-        if: ${{ env.UPLOAD_ONLY != 'true' }}
+        if: ${{ env.UPLOAD_ONLY != 'true' && env.ONLY_PLACES_EXTRA != 'true' }}
         id: build
         run: |
           set -euo pipefail
@@ -200,25 +234,36 @@ jobs:
           print("build-meta.json written")
           PY
 
-      - name: Save korea.pmtiles artifact
-        if: ${{ env.UPLOAD_ONLY != 'true' && success() }}
+      - name: Save korea.pmtiles artifact (full build)
+        if: ${{ env.UPLOAD_ONLY != 'true' && env.ONLY_PLACES_EXTRA != 'true' && success() }}
         uses: actions/upload-artifact@v4
         with:
           name: korea-pmtiles
           path: |
-            build/tiles/korea.pmtiles
-            build/tiles/build-meta.json
-            build/tiles/korea-places-extra.pmtiles
-            build/tiles/places-extra-summary.json
+            ${{ github.workspace }}/build/tiles/korea.pmtiles
+            ${{ github.workspace }}/build/tiles/build-meta.json
+            ${{ github.workspace }}/build/tiles/korea-places-extra.pmtiles
+            ${{ github.workspace }}/build/tiles/places-extra-summary.json
           retention-days: 3
           if-no-files-found: error
 
-      - name: Download korea.pmtiles artifact from prior run
+      - name: Save places-extra artifact (only_places_extra)
+        if: ${{ env.ONLY_PLACES_EXTRA == 'true' && success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: korea-places-extra
+          path: |
+            ${{ github.workspace }}/build/tiles/korea-places-extra.pmtiles
+            ${{ github.workspace }}/build/tiles/places-extra-summary.json
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Download korea-pmtiles artifact from prior run
         if: ${{ env.UPLOAD_ONLY == 'true' }}
         uses: actions/download-artifact@v4
         with:
           name: korea-pmtiles
-          path: build/tiles
+          path: ${{ github.workspace }}/build/tiles
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.artifact_run_id }}
 
@@ -232,16 +277,21 @@ jobs:
           fi
           PMTILES_BYTES=$(stat -c%s "$OUT_DIR/korea.pmtiles")
           if [ -f "$OUT_DIR/build-meta.json" ]; then
-            BUILD_SECONDS=$(python3 -c 'import json; print(json.load(open("build/tiles/build-meta.json")).get("build_seconds", 0) or 0)')
+            BUILD_SECONDS=$(python3 -c 'import json; print(json.load(open("'"$OUT_DIR"'/build-meta.json")).get("build_seconds", 0) or 0)')
           else
             BUILD_SECONDS=0
+          fi
+          if [ -f "$OUT_DIR/korea-places-extra.pmtiles" ]; then
+            PLACES_BYTES=$(stat -c%s "$OUT_DIR/korea-places-extra.pmtiles")
+            echo "PLACES_BYTES=${PLACES_BYTES}" >> "$GITHUB_ENV"
           fi
           export BUILD_SECONDS PMTILES_BYTES
           {
             echo "PMTILES_BYTES=${PMTILES_BYTES}"
             echo "BUILD_SECONDS=${BUILD_SECONDS}"
           } >> "$GITHUB_ENV"
-          ls -lh "$OUT_DIR/korea.pmtiles"
+          ls -lh "$OUT_DIR/korea.pmtiles" || true
+          ls -lh "$OUT_DIR/korea-places-extra.pmtiles" || true
 
       - name: Record file size in Summary (before upload)
         if: always()
@@ -253,16 +303,19 @@ jobs:
             if [ -n "${PMTILES_BYTES:-}" ]; then
               echo "- Size bytes: ${PMTILES_BYTES}"
               echo "- Size MiB: $((PMTILES_BYTES / 1024 / 1024))"
-            elif [ -f "${OUT_DIR:-build/tiles}/korea.pmtiles" ]; then
-              B=$(stat -c%s "${OUT_DIR:-build/tiles}/korea.pmtiles")
+            elif [ -f "${OUT_DIR}/korea.pmtiles" ]; then
+              B=$(stat -c%s "${OUT_DIR}/korea.pmtiles")
               echo "- Size bytes: ${B}"
               echo "- Size MiB: $((B / 1024 / 1024))"
             else
-              echo "- Size: n/a (file not present yet)"
+              echo "- Size: n/a (korea.pmtiles not present)"
             fi
+            echo "- places-extra bytes: ${PLACES_BYTES:-n/a}"
             echo "- Build seconds: ${BUILD_SECONDS:-n/a}"
             if [ "${UPLOAD_ONLY:-false}" = "true" ]; then
               echo "- Mode: upload_only"
+            elif [ "${ONLY_PLACES_EXTRA:-false}" = "true" ]; then
+              echo "- Mode: only_places_extra"
             else
               echo "- Mode: build_and_upload"
             fi
@@ -276,22 +329,9 @@ jobs:
           VERSION=$(date -u +%Y%m%d)
           FILE="korea-${VERSION}.pmtiles"
           SRC="${OUT_DIR}/korea.pmtiles"
+          PLACES_SRC="${OUT_DIR}/korea-places-extra.pmtiles"
           export OBJECT_VERSIONED="$FILE"
           echo "OBJECT_VERSIONED=$FILE" >> "$GITHUB_ENV"
-
-          if [ ! -f "$SRC" ]; then
-            echo "Missing $SRC"
-            exit 1
-          fi
-
-          # Ensure sizes exist even if GITHUB_ENV was incomplete
-          if [ -z "${PMTILES_BYTES:-}" ]; then
-            PMTILES_BYTES=$(stat -c%s "$SRC")
-            export PMTILES_BYTES
-            echo "PMTILES_BYTES=${PMTILES_BYTES}" >> "$GITHUB_ENV"
-          fi
-          export BUILD_SECONDS="${BUILD_SECONDS:-0}"
-          export PMTILES_BYTES
 
           s3_cp() {
             local src="$1"
@@ -305,13 +345,90 @@ jobs:
               --cli-connect-timeout 60
           }
 
+          if [ "${ONLY_PLACES_EXTRA}" = "true" ]; then
+            if [ ! -f "$PLACES_SRC" ]; then
+              echo "Missing $PLACES_SRC"
+              exit 1
+            fi
+            if [ -z "${PLACES_BYTES:-}" ]; then
+              PLACES_BYTES=$(stat -c%s "$PLACES_SRC")
+              export PLACES_BYTES
+              echo "PLACES_BYTES=${PLACES_BYTES}" >> "$GITHUB_ENV"
+            fi
+
+            upload_places_only() {
+              echo "Uploading korea-places-extra.pmtiles only…"
+              s3_cp "$PLACES_SRC" "korea-places-extra.pmtiles" "application/vnd.pmtiles"
+
+              # Merge into existing latest.json (do not wipe korea pointer).
+              aws s3 cp "s3://${BUCKET}/latest.json" "$OUT_DIR/latest.json.prev" \
+                --endpoint-url "$SUPABASE_S3_ENDPOINT" \
+                --only-show-errors || true
+              PLACES_BYTES="$PLACES_BYTES" OUT_DIR="$OUT_DIR" python3 - <<'PY'
+          import json, os, datetime
+          out_dir = os.environ["OUT_DIR"]
+          places = int(os.environ.get("PLACES_BYTES") or "0")
+          prev_path = os.path.join(out_dir, "latest.json.prev")
+          payload = {}
+          if os.path.isfile(prev_path):
+              try:
+                  with open(prev_path, encoding="utf-8") as f:
+                      payload = json.load(f)
+              except Exception:
+                  payload = {}
+          if not isinstance(payload, dict):
+              payload = {}
+          payload["places_extra_file"] = "korea-places-extra.pmtiles"
+          payload["places_extra_bytes"] = places
+          payload["places_extra_built_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+          path = os.path.join(out_dir, "latest.json")
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(payload, f, separators=(",", ":"))
+          print("latest.json merged (places_extra fields)")
+          PY
+              echo "Uploading latest.json…"
+              s3_cp "$OUT_DIR/latest.json" "latest.json" "application/json"
+            }
+
+            attempt=1
+            max_attempts=3
+            while [ "$attempt" -le "$max_attempts" ]; do
+              echo "Upload attempt ${attempt}/${max_attempts} (places-extra only)…"
+              if upload_places_only; then
+                echo "Upload complete: korea-places-extra.pmtiles bytes=${PLACES_BYTES}"
+                exit 0
+              fi
+              if [ "$attempt" -eq "$max_attempts" ]; then
+                echo "Upload failed after ${max_attempts} attempts."
+                exit 1
+              fi
+              sleep_s=$((attempt * 45))
+              echo "Upload attempt ${attempt} failed; waiting ${sleep_s}s before retry…"
+              sleep "$sleep_s"
+              attempt=$((attempt + 1))
+            done
+          fi
+
+          # Full / upload_only path: require korea.pmtiles
+          if [ ! -f "$SRC" ]; then
+            echo "Missing $SRC"
+            exit 1
+          fi
+
+          if [ -z "${PMTILES_BYTES:-}" ]; then
+            PMTILES_BYTES=$(stat -c%s "$SRC")
+            export PMTILES_BYTES
+            echo "PMTILES_BYTES=${PMTILES_BYTES}" >> "$GITHUB_ENV"
+          fi
+          export BUILD_SECONDS="${BUILD_SECONDS:-0}"
+          export PMTILES_BYTES
+
           upload_all() {
             echo "Uploading versioned object key only (multipart)…"
             s3_cp "$SRC" "$FILE" "application/vnd.pmtiles"
             echo "Uploading korea-latest.pmtiles…"
             s3_cp "$SRC" "korea-latest.pmtiles" "application/vnd.pmtiles"
 
-            PLACES_SRC="${OUT_DIR}/korea-places-extra.pmtiles"
             if [ -f "$PLACES_SRC" ]; then
               echo "Uploading korea-places-extra.pmtiles…"
               s3_cp "$PLACES_SRC" "korea-places-extra.pmtiles" "application/vnd.pmtiles"
@@ -321,7 +438,7 @@ jobs:
                 echo "PLACES_BYTES=${PLACES_BYTES}" >> "$GITHUB_ENV"
               fi
             else
-              echo "korea-places-extra.pmtiles absent (upload_only without artifact) — skip."
+              echo "korea-places-extra.pmtiles absent — skip places upload."
             fi
 
             python3 - <<'PY'
@@ -385,7 +502,7 @@ jobs:
             echo "- Versioned object key: ${OBJECT_VERSIONED:-n/a}"
             echo "- Pointer keys: korea-latest.pmtiles, korea-places-extra.pmtiles, latest.json"
             echo "- Upload: AWS CLI S3 multipart 16MB×2 concurrent, adaptive retry (endpoint/keys not logged)"
-            echo "- Artifact name: korea-pmtiles (retention 3 days; present on full builds only)"
+            echo "- Artifact: korea-pmtiles (full) or korea-places-extra (only_places_extra); retention 3 days"
             echo "- Size bytes: ${PMTILES_BYTES:-n/a}"
             if [ -n "${PMTILES_BYTES:-}" ]; then
               echo "- Size MiB: $((PMTILES_BYTES / 1024 / 1024))"
@@ -395,4 +512,6 @@ jobs:
               echo "- places-extra MiB: $((PLACES_BYTES / 1024 / 1024))"
             fi
             echo "- Build seconds: ${BUILD_SECONDS:-n/a}"
+            echo "- ONLY_PLACES_EXTRA: ${ONLY_PLACES_EXTRA:-false}"
+            echo "- UPLOAD_ONLY: ${UPLOAD_ONLY:-false}"
           } >> "$GITHUB_STEP_SUMMARY" || true
