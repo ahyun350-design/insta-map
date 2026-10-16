@@ -99,16 +99,16 @@ export async function GET(
   }
   const range = `${begin}-${end}`;
 
+  // OFM first: Vercel serverless→Supabase Storage currently throws (sb:Error);
+  // OFM hosts the same Noto Sans packs. Supabase pack remains the owned mirror.
+  const fromOfm = await tryFetch(ofmGlyphUrl(fontstack, range));
+  if (fromOfm.buf) return okGlyphResponse(fromOfm.buf, "ofm");
+
   const sbUrl = supabaseGlyphUrl(fontstack, range);
-  let sbDiag = sbUrl ? "sb:miss" : "sb:noenv";
   if (sbUrl) {
     const fromSb = await tryFetch(sbUrl);
     if (fromSb.buf) return okGlyphResponse(fromSb.buf, "supabase");
-    sbDiag = `sb:${fromSb.status}`;
   }
 
-  const fromOfm = await tryFetch(ofmGlyphUrl(fontstack, range));
-  if (fromOfm.buf) return okGlyphResponse(fromOfm.buf, "ofm-fallback", sbDiag);
-
-  return emptyGlyphResponse(sbDiag);
+  return emptyGlyphResponse("miss");
 }

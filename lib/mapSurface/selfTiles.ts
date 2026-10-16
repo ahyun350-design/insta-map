@@ -29,7 +29,11 @@ function lngLatToTile(
 /** Boolean flag only — not a tile URL or tile payload. */
 export const SELF_TILES_STORAGE_KEY = "pindmap_admin_self_tiles";
 
-/** Same-origin glyph template (Latin/symbol ranges; Hangul via localIdeograph). */
+/**
+ * Same-origin glyph template. Route proxies full packs (Supabase preferred,
+ * OFM fallback — Vercel→Supabase fetch currently errors, OFM is identical Noto).
+ * Never 404 (empty PBF). Hangul via localIdeographFontFamily.
+ */
 export const SELF_GLYPHS_URL = "/map/glyphs/{fontstack}/{range}.pbf";
 
 /** TileJSON — versioned `tiles[]` template changes over time; never hardcode a stale path. */
@@ -352,8 +356,8 @@ export function applySelfTilesSource(style: {
 /**
  * Self-tiles style assets.
  *
- * - Glyphs → same-origin `/map/glyphs/{fontstack}/{range}.pbf` (full packs on
- *   Supabase map-tiles/glyphs; route never 404s — empty PBF on miss).
+ * - Glyphs → same-origin `/map/glyphs/{fontstack}/{range}.pbf` (full coverage
+ *   via route; empty PBF on miss so glyph 404 cannot blank the map).
  * - Sprite stays Liberty/OFM: fill patterns (`wetland_bg_11`, …) must resolve.
  * Hangul still uses localIdeographFontFamily (device fonts).
  * Does not persist paths anywhere.
