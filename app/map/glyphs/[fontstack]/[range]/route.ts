@@ -9,7 +9,7 @@
  * Static files under public/map/glyphs/ still win when present.
  */
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const STACKS = new Set([

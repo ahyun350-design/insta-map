@@ -140,18 +140,19 @@ export function setSessionSelfTilesOverride(enabled: boolean | null): void {
 }
 
 /**
- * Admin default: OFF when unset until full same-origin glyphs are verified.
- * Explicit "1" turns on (toggle sticky). Preview/e2e can override via session.
+ * Admin default: ON when unset. Explicit "0" turns off (toggle sticky).
+ * Preview/e2e can still override via setSessionSelfTilesOverride.
+ * Non-admin UI never drives the live map from this flag.
  */
 export function readSelfTilesEnabled(): boolean {
   if (sessionOverride != null) return sessionOverride;
   if (typeof window === "undefined") return false;
   try {
     const v = window.localStorage.getItem(SELF_TILES_STORAGE_KEY);
-    if (v === null) return false;
+    if (v === null) return true;
     return v === "1";
   } catch {
-    return false;
+    return true;
   }
 }
 
