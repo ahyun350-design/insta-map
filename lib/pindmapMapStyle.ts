@@ -48,6 +48,11 @@ import {
   readSelfTilesEnabled,
   warmSelfTilesOrBreak,
 } from "@/lib/mapSurface/selfTiles";
+import {
+  ensureKoreaPlacesExtraSource,
+  KOREA_PLACES_EXTRA_SOURCE,
+  warmKoreaPlacesExtra,
+} from "@/lib/mapSurface/koreaPlacesExtra";
 import bundledLibertyStyle from "@/lib/mapSurface/data/liberty-style.json";
 
 /** Production-adopted themes */
@@ -1535,6 +1540,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     if (ok) {
       applySelfTilesSource(style);
       applySelfHostedStyleAssets(style);
+      // Apt / named-building overlay (separate PMTiles); empty if not uploaded yet.
+      ensureKoreaPlacesExtraSource(style);
+      void warmKoreaPlacesExtra();
     }
   }
   const layers: AnyLayer[] = [];
@@ -3283,6 +3291,73 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       "text-halo-width": 1.4,
     },
   });
+
+  // Apt complexes / named buildings — BEFORE shops & landmarks so those win collision.
+  // Lower priority (higher sort-key) than shop (≤850) and landmark overlays.
+  if (style.sources?.[KOREA_PLACES_EXTRA_SOURCE]) {
+    const aptColor = theme.id === "neon" ? "#8A8A8A" : "#8A8A8A";
+    layers.push({
+      id: "apt_complex_label",
+      type: "symbol",
+      source: KOREA_PLACES_EXTRA_SOURCE,
+      "source-layer": "apt_complex",
+      minzoom: 14,
+      layout: {
+        "text-field": GEOJSON_NAME_TEXT,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 13,
+        "text-max-width": 8,
+        "text-padding": PLACE_TEXT_PADDING,
+        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        "text-optional": true,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        // Higher than shops (≤850) → yields placement to shops/landmarks
+        "symbol-sort-key": [
+          "+",
+          2800,
+          ["to-number", ["coalesce", ["get", "rank"], 50]],
+        ],
+        visibility: "visible",
+      },
+      paint: {
+        "text-color": aptColor,
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.4,
+        "text-opacity": 0.88,
+      },
+    });
+    layers.push({
+      id: "named_building_label",
+      type: "symbol",
+      source: KOREA_PLACES_EXTRA_SOURCE,
+      "source-layer": "named_building",
+      minzoom: 16,
+      layout: {
+        "text-field": GEOJSON_NAME_TEXT,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 12,
+        "text-max-width": 7,
+        "text-padding": PLACE_TEXT_PADDING,
+        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        "text-optional": true,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-sort-key": [
+          "+",
+          2900,
+          ["to-number", ["coalesce", ["get", "rank"], 50]],
+        ],
+        visibility: "visible",
+      },
+      paint: {
+        "text-color": theme.id === "neon" ? "#9A9A9A" : "#7A7A7A",
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.3,
+        "text-opacity": 0.85,
+      },
+    });
+  }
 
   // Shop/facility names (z14+) below landmarks; adapter pins added later on top
   appendShopPoiLayers(layers, theme);

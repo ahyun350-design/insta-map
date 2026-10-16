@@ -111,6 +111,36 @@ jobs:
           curl -L --fail --retry 3 --retry-delay 10 -o "$OUT_DIR/south-korea-latest.osm.pbf" "$GEOFABRIK_URL"
           ls -lh "$OUT_DIR/south-korea-latest.osm.pbf"
 
+      - name: Install osmium + tippecanoe (places-extra)
+        if: ${{ env.UPLOAD_ONLY != 'true' }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool build-essential libsqlite3-dev zlib1g-dev
+          TIPPE_VER=2.53.0
+          curl -L --fail -o /tmp/tippecanoe.tgz \
+            "https://github.com/felt/tippecanoe/archive/refs/tags/${TIPPE_VER}.tar.gz"
+          tar -xzf /tmp/tippecanoe.tgz -C /tmp
+          make -C "/tmp/tippecanoe-${TIPPE_VER}" -j"$(nproc)"
+          sudo make -C "/tmp/tippecanoe-${TIPPE_VER}" install
+          osmium --version | head -1
+          tippecanoe -v
+
+      - name: Build korea-places-extra.pmtiles
+        if: ${{ env.UPLOAD_ONLY != 'true' }}
+        id: places_extra
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build-korea-places-extra.sh
+          scripts/build-korea-places-extra.sh "$OUT_DIR/south-korea-latest.osm.pbf"
+          PLACES_BYTES=$(stat -c%s "$OUT_DIR/korea-places-extra.pmtiles")
+          echo "PLACES_BYTES=${PLACES_BYTES}" >> "$GITHUB_ENV"
+          echo "places-extra size ${PLACES_BYTES} bytes"
+          ls -lh "$OUT_DIR/korea-places-extra.pmtiles"
+          if [ -f "$OUT_DIR/places-extra-summary.json" ]; then
+            cat "$OUT_DIR/places-extra-summary.json"
+          fi
+
       - name: Download Planetiler OpenMapTiles jar
         if: ${{ env.UPLOAD_ONLY != 'true' }}
         run: |
@@ -178,6 +208,8 @@ jobs:
           path: |
             build/tiles/korea.pmtiles
             build/tiles/build-meta.json
+            build/tiles/korea-places-extra.pmtiles
+            build/tiles/places-extra-summary.json
           retention-days: 3
           if-no-files-found: error
 
@@ -279,6 +311,19 @@ jobs:
             echo "Uploading korea-latest.pmtiles…"
             s3_cp "$SRC" "korea-latest.pmtiles" "application/vnd.pmtiles"
 
+            PLACES_SRC="${OUT_DIR}/korea-places-extra.pmtiles"
+            if [ -f "$PLACES_SRC" ]; then
+              echo "Uploading korea-places-extra.pmtiles…"
+              s3_cp "$PLACES_SRC" "korea-places-extra.pmtiles" "application/vnd.pmtiles"
+              if [ -z "${PLACES_BYTES:-}" ]; then
+                PLACES_BYTES=$(stat -c%s "$PLACES_SRC")
+                export PLACES_BYTES
+                echo "PLACES_BYTES=${PLACES_BYTES}" >> "$GITHUB_ENV"
+              fi
+            else
+              echo "korea-places-extra.pmtiles absent (upload_only without artifact) — skip."
+            fi
+
             python3 - <<'PY'
           import json, os, datetime
           out_dir = os.environ.get("OUT_DIR", "build/tiles")
@@ -286,9 +331,15 @@ jobs:
           bytes_val = os.environ.get("PMTILES_BYTES") or "0"
           if bytes_val in ("", "0") and os.path.isfile(src):
               bytes_val = str(os.path.getsize(src))
+          places = os.environ.get("PLACES_BYTES") or "0"
+          places_src = os.path.join(out_dir, "korea-places-extra.pmtiles")
+          if (places in ("", "0")) and os.path.isfile(places_src):
+              places = str(os.path.getsize(places_src))
           payload = {
               "file": os.environ.get("OBJECT_VERSIONED") or "korea-latest.pmtiles",
               "bytes": int(bytes_val or "0"),
+              "places_extra_file": "korea-places-extra.pmtiles",
+              "places_extra_bytes": int(places or "0"),
               "built_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "build_seconds": int(os.environ.get("BUILD_SECONDS") or "0"),
               "schema": "openmaptiles",
@@ -332,12 +383,16 @@ jobs:
           {
             echo "## Korea PMTiles (post-upload)"
             echo "- Versioned object key: ${OBJECT_VERSIONED:-n/a}"
-            echo "- Pointer keys: korea-latest.pmtiles, latest.json"
+            echo "- Pointer keys: korea-latest.pmtiles, korea-places-extra.pmtiles, latest.json"
             echo "- Upload: AWS CLI S3 multipart 16MB×2 concurrent, adaptive retry (endpoint/keys not logged)"
             echo "- Artifact name: korea-pmtiles (retention 3 days; present on full builds only)"
             echo "- Size bytes: ${PMTILES_BYTES:-n/a}"
             if [ -n "${PMTILES_BYTES:-}" ]; then
               echo "- Size MiB: $((PMTILES_BYTES / 1024 / 1024))"
+            fi
+            echo "- places-extra bytes: ${PLACES_BYTES:-n/a}"
+            if [ -n "${PLACES_BYTES:-}" ]; then
+              echo "- places-extra MiB: $((PLACES_BYTES / 1024 / 1024))"
             fi
             echo "- Build seconds: ${BUILD_SECONDS:-n/a}"
           } >> "$GITHUB_STEP_SUMMARY" || true
