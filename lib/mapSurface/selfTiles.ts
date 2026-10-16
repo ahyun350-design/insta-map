@@ -288,7 +288,9 @@ export function ensureSelfTilesProtocolRegistered(): void {
           const tile = await getOrCreatePmtiles().getZxy(z, x, y, signal);
           if (tile?.data && tile.data.byteLength > 0) {
             selfTileHardFailCount = 0;
-            return { data: tile.data.slice(0) };
+            // Detached Uint8Array — matches pmtiles.Protocol; avoids shared-buffer
+            // reuse and matches what MapLibre's worker transfer path expects.
+            return { data: copyTileBytes(tile.data) };
           }
           // Missing in archive (outside Korea / empty) → OFM (not a hard failure)
         } catch (err) {
@@ -305,9 +307,17 @@ export function ensureSelfTilesProtocolRegistered(): void {
       }
 
       const data = await fetchOfmTile(z, x, y, signal);
-      return { data };
+      return { data: copyTileBytes(data) };
     },
   );
+}
+
+/** Fresh Uint8Array so callers never share PMTiles' reusable memory. */
+function copyTileBytes(src: ArrayBuffer | ArrayBufferView): Uint8Array {
+  if (src instanceof ArrayBuffer) {
+    return new Uint8Array(src.slice(0));
+  }
+  return new Uint8Array(src.buffer.slice(src.byteOffset, src.byteOffset + src.byteLength));
 }
 
 /** Point openmaptiles vector source at self protocol. */
@@ -339,17 +349,24 @@ export function applySelfTilesSource(style: {
 }
 
 /**
- * Self-tiles: same-origin glyphs for Latin. Keep Liberty/OFM sprite —
- * fill patterns (`wetland_bg_11`, `pedestrian_polygon`, …) still come from sprite;
- * deleting it left tiles "loaded" with zero buckets (blank map). POI icons stay addImage.
+ * Self-tiles style assets.
+ *
+ * Keep Liberty/OFM **glyphs** and **sprite**:
+ * - Sprite: fill patterns (`wetland_bg_11`, `pedestrian_polygon`, …) must resolve
+ *   or MapLibre leaves tiles loaded with zero buckets.
+ * - Glyphs: our `/map/glyphs` set is incomplete (e.g. 8192–8447 punctuation).
+ *   A glyph 404 surfaces as AJAXError status 404; VectorTileSource treats any
+ *   404 as an empty tile → deps set, buckets 0, blank basemap. Hangul still
+ *   uses localIdeographFontFamily; Latin/punct come from OFM until we ship a
+ *   full glyph pack.
+ *
  * Does not persist paths anywhere.
  */
-export function applySelfHostedStyleAssets(style: {
+export function applySelfHostedStyleAssets(_style: {
   glyphs?: string;
   sprite?: string;
 }): void {
-  style.glyphs = SELF_GLYPHS_URL;
-  // Do NOT delete style.sprite — pattern deps must resolve for MapLibre to paint.
+  // Intentionally no-op: keep OFM glyphs + sprite from Liberty.
 }
 
 /**
