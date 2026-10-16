@@ -98,7 +98,7 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
             zoom: map.getZoom(),
             hasLine: !!map.getLayer("subway_overlay_line"),
             hasStation: !!map.getLayer("subway_overlay_station"),
-            hasLandmark: (map.getStyle()?.layers ?? []).some(
+            hasLandmark: (map.getStyle?.()?.layers ?? []).some(
               (l: { id: string }) =>
                 l.id === "landmark_label" || l.id.startsWith("landmark_label_"),
             ),
@@ -125,7 +125,7 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
   const z15 = await page.evaluate(() => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
-    const landmarkLayers = (map.getStyle()?.layers ?? [])
+    const landmarkLayers = (map.getStyle?.()?.layers ?? [])
       .map((l: { id: string }) => l.id)
       .filter(
         (id: string) =>
@@ -166,7 +166,7 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
   const z16 = await page.evaluate(() => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
-    const landmarkLayers = (map.getStyle()?.layers ?? [])
+    const landmarkLayers = (map.getStyle?.()?.layers ?? [])
       .map((l: { id: string }) => l.id)
       .filter(
         (id: string) =>
@@ -1370,7 +1370,7 @@ test("map-preview basics: korea landmarks + z16 anchors", async ({ page }) => {
         "korea_landmark_tier3",
       ]);
       const tier1 = uniq(["korea_landmark_tier1_far", "korea_landmark_tier1"]);
-      const styleIds = (map.getStyle()?.layers ?? []).map(
+      const styleIds = (map.getStyle?.()?.layers ?? []).map(
         (l: { id: string }) => l.id,
       );
       const anchors = uniq([
