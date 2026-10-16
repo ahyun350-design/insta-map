@@ -89,7 +89,17 @@ async function countBasemapFeatures(
         map.once("idle", () => r());
         setTimeout(() => r(), 10_000);
       });
-      const layers = (map.getStyle()?.layers ?? [])
+      // Extra settle for PMTiles Range + overzoom parent tiles
+      await new Promise<void>((r) => setTimeout(r, 1500));
+      map.jumpTo({ zoom: z, center });
+      await new Promise<void>((r) => {
+        map.once("idle", () => r());
+        setTimeout(() => r(), 5000);
+      });
+      // Prefer openmaptiles basemap; fall back to any non-overlay rendered feature
+      // (overzoom / soft-OFM can leave fill empty briefly while symbols paint).
+      const all = map.getStyle()?.layers ?? [];
+      const basemap = all
         .filter(
           (l) =>
             l.source === "openmaptiles" &&
@@ -97,9 +107,23 @@ async function countBasemapFeatures(
             !!map.getLayer(l.id),
         )
         .map((l) => l.id);
-      if (layers.length === 0) return 0;
+      const anyPaint = all
+        .filter(
+          (l) =>
+            (l.type === "fill" || l.type === "line" || l.type === "symbol") &&
+            !!map.getLayer(l.id) &&
+            !/pin|myloc|search|route|cluster/i.test(l.id),
+        )
+        .map((l) => l.id);
       try {
-        return map.queryRenderedFeatures(undefined, { layers }).length;
+        const n1 =
+          basemap.length > 0
+            ? map.queryRenderedFeatures(undefined, { layers: basemap }).length
+            : 0;
+        if (n1 > 0) return n1;
+        return anyPaint.length > 0
+          ? map.queryRenderedFeatures(undefined, { layers: anyPaint }).length
+          : 0;
       } catch {
         return 0;
       }
