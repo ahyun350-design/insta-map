@@ -10,7 +10,7 @@
  */
 
 export const runtime = "edge";
-export const dynamic = "force-dynamic";
+// Response Cache-Control (immutable) is what stops repeat OFM fetches in the browser.
 
 const STACKS = new Set([
   "Noto Sans Regular",
@@ -36,7 +36,8 @@ function emptyGlyphResponse(diag?: string): Response {
     status: 200,
     headers: {
       "Content-Type": "application/x-protobuf",
-      "Cache-Control": "public, max-age=86400",
+      // Empty ranges are stable — long cache so Railway does not re-hit OFM.
+      "Cache-Control": "public, max-age=31536000, immutable",
       "X-Pindmap-Glyph": "empty",
       ...(diag ? { "X-Pindmap-Glyph-Diag": diag } : {}),
     },
@@ -99,16 +100,15 @@ export async function GET(
   }
   const range = `${begin}-${end}`;
 
-  // OFM first: Vercel serverless→Supabase Storage currently throws (sb:Error);
-  // OFM hosts the same Noto Sans packs. Supabase pack remains the owned mirror.
-  const fromOfm = await tryFetch(ofmGlyphUrl(fontstack, range));
-  if (fromOfm.buf) return okGlyphResponse(fromOfm.buf, "ofm");
-
+  // Prefer owned Supabase pack; fall back to OFM (identical Noto ranges).
   const sbUrl = supabaseGlyphUrl(fontstack, range);
   if (sbUrl) {
     const fromSb = await tryFetch(sbUrl);
     if (fromSb.buf) return okGlyphResponse(fromSb.buf, "supabase");
   }
+
+  const fromOfm = await tryFetch(ofmGlyphUrl(fontstack, range));
+  if (fromOfm.buf) return okGlyphResponse(fromOfm.buf, "ofm");
 
   return emptyGlyphResponse("miss");
 }
