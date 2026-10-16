@@ -55,14 +55,15 @@ function okGlyphResponse(buf: ArrayBuffer, source: string): Response {
 
 async function tryFetch(url: string): Promise<ArrayBuffer | null> {
   try {
+    // no-store: Next/undici force-cache has been observed to miss Supabase
+    // Storage objects from this route; we still set long Cache-Control on the response.
     const res = await fetch(url, {
-      // Glyphs are immutable content-addressed ranges.
-      cache: "force-cache",
+      cache: "no-store",
       headers: { Accept: "application/x-protobuf,*/*" },
+      redirect: "follow",
     });
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();
-    // Treat 0-byte upstream as miss (should not happen for real packs).
     if (buf.byteLength === 0) return null;
     return buf;
   } catch {
