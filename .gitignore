@@ -36,6 +36,9 @@ scripts/localdata/raw_closed_check/
 .xcode-derived/
 .worktrees/
 
+# Full MapLibre glyph packs (~100MB) — synced to Supabase map-tiles/glyphs
+.glyph-cache/
+
 # Xcode / SPM / TS build noise
 **/xcuserdata/
 plugins/**/.swiftpm/

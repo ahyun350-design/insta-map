@@ -140,8 +140,8 @@ export function setSessionSelfTilesOverride(enabled: boolean | null): void {
 }
 
 /**
- * Admin default: OFF when unset. Explicit "1" turns on (toggle sticky).
- * Preview/e2e can still override via setSessionSelfTilesOverride.
+ * Admin default: OFF when unset until full same-origin glyphs are verified.
+ * Explicit "1" turns on (toggle sticky). Preview/e2e can override via session.
  */
 export function readSelfTilesEnabled(): boolean {
   if (sessionOverride != null) return sessionOverride;
@@ -351,22 +351,18 @@ export function applySelfTilesSource(style: {
 /**
  * Self-tiles style assets.
  *
- * Keep Liberty/OFM **glyphs** and **sprite**:
- * - Sprite: fill patterns (`wetland_bg_11`, `pedestrian_polygon`, …) must resolve
- *   or MapLibre leaves tiles loaded with zero buckets.
- * - Glyphs: our `/map/glyphs` set is incomplete (e.g. 8192–8447 punctuation).
- *   A glyph 404 surfaces as AJAXError status 404; VectorTileSource treats any
- *   404 as an empty tile → deps set, buckets 0, blank basemap. Hangul still
- *   uses localIdeographFontFamily; Latin/punct come from OFM until we ship a
- *   full glyph pack.
- *
+ * - Glyphs → same-origin `/map/glyphs/{fontstack}/{range}.pbf` (full packs on
+ *   Supabase map-tiles/glyphs; route never 404s — empty PBF on miss).
+ * - Sprite stays Liberty/OFM: fill patterns (`wetland_bg_11`, …) must resolve.
+ * Hangul still uses localIdeographFontFamily (device fonts).
  * Does not persist paths anywhere.
  */
-export function applySelfHostedStyleAssets(_style: {
+export function applySelfHostedStyleAssets(style: {
   glyphs?: string;
   sprite?: string;
 }): void {
-  // Intentionally no-op: keep OFM glyphs + sprite from Liberty.
+  style.glyphs = SELF_GLYPHS_URL;
+  // Do NOT delete style.sprite — pattern deps must resolve for MapLibre to paint.
 }
 
 /**

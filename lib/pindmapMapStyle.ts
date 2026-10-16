@@ -1526,8 +1526,8 @@ function detectRoadKind(id: string): RoadKind {
 export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<StyleJson> {
   const theme = MAP_PREVIEW_THEMES[themeId];
   const style = await fetchLibertyStyle();
-  // Admin self-tiles: PMTiles vector source only; keep OFM glyphs+sprite
-  // (incomplete same-origin glyphs 404 → MapLibre treats tile as empty).
+  // Admin self-tiles: PMTiles vector source + same-origin glyphs (full pack /
+  // empty-PBF safety net). Keep OFM sprite for fill patterns.
   // On hard PMTiles failure, leave OFM tiles (already tracked as self_tiles_error).
   if (typeof window !== "undefined" && readSelfTilesEnabled()) {
     ensureSelfTilesProtocolRegistered();
