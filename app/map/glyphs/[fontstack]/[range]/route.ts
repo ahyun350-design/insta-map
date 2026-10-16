@@ -31,29 +31,33 @@ function ofmGlyphUrl(fontstack: string, range: string): string {
   return `https://tiles.openfreemap.org/fonts/${encodeURIComponent(fontstack)}/${range}.pbf`;
 }
 
-function emptyGlyphResponse(): Response {
+function emptyGlyphResponse(diag?: string): Response {
   return new Response(EMPTY_PBF, {
     status: 200,
     headers: {
       "Content-Type": "application/x-protobuf",
       "Cache-Control": "public, max-age=86400",
       "X-Pindmap-Glyph": "empty",
+      ...(diag ? { "X-Pindmap-Glyph-Diag": diag } : {}),
     },
   });
 }
 
-function okGlyphResponse(buf: ArrayBuffer, source: string): Response {
+function okGlyphResponse(buf: ArrayBuffer, source: string, diag?: string): Response {
   return new Response(buf, {
     status: 200,
     headers: {
       "Content-Type": "application/x-protobuf",
       "Cache-Control": "public, max-age=31536000, immutable",
       "X-Pindmap-Glyph": source,
+      ...(diag ? { "X-Pindmap-Glyph-Diag": diag } : {}),
     },
   });
 }
 
-async function tryFetch(url: string): Promise<ArrayBuffer | null> {
+async function tryFetch(
+  url: string,
+): Promise<{ buf: ArrayBuffer; status: number } | { buf: null; status: number | string }> {
   try {
     // no-store: Next/undici force-cache has been observed to miss Supabase
     // Storage objects from this route; we still set long Cache-Control on the response.
@@ -62,12 +66,12 @@ async function tryFetch(url: string): Promise<ArrayBuffer | null> {
       headers: { Accept: "application/x-protobuf,*/*" },
       redirect: "follow",
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { buf: null, status: res.status };
     const buf = await res.arrayBuffer();
-    if (buf.byteLength === 0) return null;
-    return buf;
-  } catch {
-    return null;
+    if (buf.byteLength === 0) return { buf: null, status: "empty" };
+    return { buf, status: res.status };
+  } catch (err) {
+    return { buf: null, status: err instanceof Error ? err.name : "err" };
   }
 }
 
@@ -96,13 +100,15 @@ export async function GET(
   const range = `${begin}-${end}`;
 
   const sbUrl = supabaseGlyphUrl(fontstack, range);
+  let sbDiag = sbUrl ? "sb:miss" : "sb:noenv";
   if (sbUrl) {
     const fromSb = await tryFetch(sbUrl);
-    if (fromSb) return okGlyphResponse(fromSb, "supabase");
+    if (fromSb.buf) return okGlyphResponse(fromSb.buf, "supabase");
+    sbDiag = `sb:${fromSb.status}`;
   }
 
   const fromOfm = await tryFetch(ofmGlyphUrl(fontstack, range));
-  if (fromOfm) return okGlyphResponse(fromOfm, "ofm-fallback");
+  if (fromOfm.buf) return okGlyphResponse(fromOfm.buf, "ofm-fallback", sbDiag);
 
-  return emptyGlyphResponse();
+  return emptyGlyphResponse(sbDiag);
 }
