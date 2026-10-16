@@ -12,7 +12,9 @@ import {
 } from "./selfTiles";
 
 const POLL_MS = 1000;
-const EMPTY_STREAK_REQUIRED = 3;
+/** Ignore emptiness while PMTiles Range + first paint settle. */
+const WARMUP_MS = 8000;
+const EMPTY_STREAK_REQUIRED = 4;
 
 /** Overlay / app GeoJSON sources — not basemap. */
 const NON_BASEMAP_SOURCE_RE =
@@ -67,9 +69,14 @@ export function attachEmptyBasemapWatchdog(
   let emptyStreak = 0;
   let fired = false;
   let stopped = false;
+  const startedAt = Date.now();
 
   const tick = () => {
     if (stopped || fired) return;
+    if (Date.now() - startedAt < WARMUP_MS) {
+      emptyStreak = 0;
+      return;
+    }
     if (typeof map.isStyleLoaded === "function" && !map.isStyleLoaded()) {
       emptyStreak = 0;
       return;

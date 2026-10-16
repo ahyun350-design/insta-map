@@ -116,7 +116,11 @@ export function getKoreaPmtilesHeaderBounds(): KoreaPmtilesHeaderBounds | null {
   return cachedHeaderBounds;
 }
 
-/** South Korea extract maxzoom from Planetiler build. */
+/**
+ * South Korea extract maxzoom from Planetiler build.
+ * Must match PMTiles header maxZoom (live archive = 14) so MapLibre overzooms
+ * z15+ from z14 parents instead of requesting missing z15 leaf tiles.
+ */
 export const KOREA_PMTILES_MAXZOOM = 14;
 
 const PROTOCOL_NAME = "pindself";
@@ -136,18 +140,18 @@ export function setSessionSelfTilesOverride(enabled: boolean | null): void {
 }
 
 /**
- * Admin default: ON when unset. Explicit "0" turns off (toggle sticky).
+ * Admin default: OFF when unset. Explicit "1" turns on (toggle sticky).
  * Preview/e2e can still override via setSessionSelfTilesOverride.
  */
 export function readSelfTilesEnabled(): boolean {
   if (sessionOverride != null) return sessionOverride;
-  if (typeof window === "undefined") return true;
+  if (typeof window === "undefined") return false;
   try {
     const v = window.localStorage.getItem(SELF_TILES_STORAGE_KEY);
-    if (v === null) return true;
+    if (v === null) return false;
     return v === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -319,17 +323,25 @@ export function applySelfTilesSource(style: {
     typeof prev.attribution === "string"
       ? prev.attribution
       : "© OpenStreetMap contributors";
+  const headerMax =
+    cachedHeaderBounds?.maxZoom != null &&
+    Number.isFinite(cachedHeaderBounds.maxZoom)
+      ? cachedHeaderBounds.maxZoom
+      : KOREA_PMTILES_MAXZOOM;
   sources.openmaptiles = {
     type: "vector",
     tiles: [`${PROTOCOL_NAME}://{z}/{x}/{y}`],
-    minzoom: 0,
-    maxzoom: KOREA_PMTILES_MAXZOOM,
+    minzoom: cachedHeaderBounds?.minZoom ?? 0,
+    // Cap at archive max so MapLibre overzooms rather than requesting missing leaves.
+    maxzoom: Math.min(headerMax, KOREA_PMTILES_MAXZOOM),
     attribution,
   };
 }
 
 /**
- * Self-tiles only: same-origin glyphs; drop OFM sprite (icons are addImage / unused).
+ * Self-tiles: same-origin glyphs for Latin. Keep Liberty/OFM sprite —
+ * fill patterns (`wetland_bg_11`, `pedestrian_polygon`, …) still come from sprite;
+ * deleting it left tiles "loaded" with zero buckets (blank map). POI icons stay addImage.
  * Does not persist paths anywhere.
  */
 export function applySelfHostedStyleAssets(style: {
@@ -337,7 +349,7 @@ export function applySelfHostedStyleAssets(style: {
   sprite?: string;
 }): void {
   style.glyphs = SELF_GLYPHS_URL;
-  delete style.sprite;
+  // Do NOT delete style.sprite — pattern deps must resolve for MapLibre to paint.
 }
 
 /**
