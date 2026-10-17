@@ -61,6 +61,7 @@ import {
 import {
   ensureKoreaTourSource,
   KOREA_TOUR_SOURCE,
+  warmKoreaTour,
 } from "@/lib/mapSurface/koreaTour";
 import bundledLibertyStyle from "@/lib/mapSurface/data/liberty-style.json";
 
@@ -1060,6 +1061,7 @@ function appendKoreaTourLayers(
       id: `tour_poi_label_${band.idSuffix}`,
       type: "symbol",
       source: KOREA_TOUR_SOURCE,
+      "source-layer": "tour",
       minzoom: band.minzoom,
       ...(band.maxzoom != null ? { maxzoom: band.maxzoom } : {}),
       filter,
@@ -1840,6 +1842,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       ensureKoreaSanggaSource(style);
       void warmKoreaSangga();
       ensureKoreaTourSource(style);
+      void warmKoreaTour();
     }
   }
   const layers: AnyLayer[] = [];
