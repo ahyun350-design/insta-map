@@ -24,6 +24,7 @@ scripts/localdata/.venv/
 scripts/localdata/out/
 scripts/localdata/raw_b/
 scripts/localdata/.db_url
+scripts/localdata/.tourapi_key
 
 # LOCALDATA C-group raw CSVs (large)
 scripts/localdata/raw_c/
