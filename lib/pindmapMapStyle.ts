@@ -3337,8 +3337,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       source: KOREA_PLACES_EXTRA_SOURCE,
       "source-layer": "apt_complex",
       minzoom: 14,
-      // Footprint under 2000m² → yield to shops (size_class is advisory)
-      filter: ["<", ["to-number", ["coalesce", ["get", "area_m2"], 0]], 2000],
+      // Tiny footprints → before shops (yield). OSM apt wings are often <150m².
+      filter: ["<", ["to-number", ["coalesce", ["get", "area_m2"], 0]], 150],
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
@@ -3349,10 +3349,10 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         "text-optional": true,
         "text-allow-overlap": false,
         "text-ignore-placement": false,
-        // Below shops (≤850): ~300–450
+        // MapLibre: lower sort-key places first. Keep above 850 so shops win.
         "symbol-sort-key": [
-          "-",
-          450,
+          "+",
+          900,
           ["to-number", ["coalesce", ["get", "rank"], 50]],
         ],
         visibility: "visible",
@@ -3413,8 +3413,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       source: KOREA_PLACES_EXTRA_SOURCE,
       "source-layer": "apt_complex",
       minzoom: 14,
-      // Footprint ≥2000m²
-      filter: [">=", ["to-number", ["coalesce", ["get", "area_m2"], 0]], 2000],
+      // Footprint ≥150m² (typical OSM apt/villa wing)
+      filter: [">=", ["to-number", ["coalesce", ["get", "area_m2"], 0]], 150],
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
@@ -3425,11 +3425,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         "text-optional": false,
         "text-allow-overlap": false,
         "text-ignore-placement": false,
-        // Above shops (≤850); below priority landmarks (~1500) / stations (~2000)
+        // Lower sort-key than shops (400–850) → places first; larger area wins
         "symbol-sort-key": [
           "-",
-          1100,
-          ["to-number", ["coalesce", ["get", "rank"], 20]],
+          350,
+          [
+            "min",
+            200,
+            ["/", ["to-number", ["coalesce", ["get", "area_m2"], 0]], 20],
+          ],
         ],
         visibility: "visible",
       },

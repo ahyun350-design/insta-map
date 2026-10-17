@@ -38,8 +38,11 @@ const APT_KW =
 const DONG_SUFFIX = /(?:\s*(?:제\s*)?[0-9０-９]{1,4}\s*동|\s*[A-Za-z]\s*동)\s*$/u;
 const DEDUP_M = 300;
 const COMPLEX_CLUSTER_M = 180;
-/** Absolute footprint (m²) — neighborhood-scale complexes beat shops in style. */
-const LARGE_AREA_M2 = 2000;
+/**
+ * Absolute footprint (m²). OSM apt wings are often 100–400m²; 150+ beats shops.
+ * Tiny sheds/shed-like footprints stay small and yield to cafes.
+ */
+const LARGE_AREA_M2 = 150;
 
 function nameOf(p) {
   if (!p) return null;
