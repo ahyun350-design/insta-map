@@ -48,9 +48,11 @@ const HUBS = [
   { id: "mangwon", label: "망원", lat: 37.556, lng: 126.9055 },
   { id: "hongdae", label: "홍대", lat: 37.5572, lng: 126.924 },
   { id: "gangnam", label: "강남", lat: 37.4979, lng: 127.0276 },
-  { id: "haeundae", label: "해운대", lat: 35.1587, lng: 129.1604 },
+  // 해운대해수욕장 앞 상업지
+  { id: "haeundae", label: "해운대", lat: 35.1586, lng: 129.1603 },
   { id: "jeonju", label: "전주한옥마을", lat: 35.815, lng: 127.153 },
-  { id: "gangneung", label: "강릉", lat: 37.752, lng: 128.876 },
+  // 강릉 교동/중앙시장 (구 좌표 37.752/128.876는 번화가 밖 — CSV 300m≈2)
+  { id: "gangneung", label: "강릉", lat: 37.7555, lng: 128.8965 },
 ];
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -105,6 +107,8 @@ async function countShops(page) {
         /* */
       }
     }
+    const dedupe =
+      window.__PINDMAP_SANGGA_DEDUPE__ || null;
     return {
       omt,
       sangga,
@@ -112,12 +116,25 @@ async function countShops(page) {
       totalLabels: all,
       hasSangga: Boolean(style.sources?.korea_sangga),
       overlapTrue,
+      dedupe,
       samplesSangga: sanggaIds.length
         ? [
             ...new Set(
               map
                 .queryRenderedFeatures({ layers: sanggaIds })
                 .map((f) => String(f.properties?.name || "").trim())
+                .filter(Boolean),
+            ),
+          ].slice(0, 8)
+        : [],
+      samplesOmt: omtIds.length
+        ? [
+            ...new Set(
+              map
+                .queryRenderedFeatures({ layers: omtIds })
+                .map((f) =>
+                  String(f.properties?.["name:ko"] || f.properties?.name || "").trim(),
+                )
                 .filter(Boolean),
             ),
           ].slice(0, 8)

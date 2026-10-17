@@ -42,10 +42,9 @@ EXCLUDE_DAE = frozenset(
 # 수리·개인 중 지도에 쓸 중분류만
 REPAIR_INCLUDE_JUNG = frozenset({"이용·미용", "세탁", "욕탕·신체관리"})
 
-# 소매 중 제외(부품·연료·담배·중고차 등)
+# 소매 중 제외(부품·가정용연료·담배·중고차 등). 주유·LPG·충전은 map_category에서 별도 포함.
 RETAIL_EXCLUDE_JUNG = frozenset(
     {
-        "연료 소매",
         "자동차 부품 소매",
         "모터사이클 소매",
         "담배 소매",
@@ -118,6 +117,13 @@ def map_category(
         return ("restaurant", None, 20)
 
     if dae == "소매":
+        if jung == "연료 소매":
+            # 주유소 / LPG·가스 충전소 / 전기차 충전 (가정용 연료 등은 제외)
+            if "주유" in so:
+                return ("fuel", None, 45)
+            if "충전" in so or "LPG" in so.upper() or "전기" in so:
+                return ("fuel", None, 48)
+            return None
         if jung in RETAIL_EXCLUDE_JUNG:
             return None
         if jung == "종합 소매":
@@ -276,11 +282,11 @@ def main() -> int:
         "--attribution=소상공인시장진흥공단",
         "--minimum-zoom=14",
         "--maximum-zoom=16",
-        "--drop-densest-as-needed",
-        "--extend-zooms-if-still-dropping",
-        # Lower rank = more important; keep those when dropping densest
+        # No per-tile byte/feature caps → no densest drop at z16 (or below).
+        # order-by=rank still controls within-tile feature order for clients.
+        "--no-feature-limit",
+        "--no-tile-size-limit",
         "--order-by=rank",
-        "-P",
         "-l",
         "sangga",
         str(SEQ_PATH),

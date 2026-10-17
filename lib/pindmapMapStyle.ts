@@ -695,6 +695,7 @@ const SHOP_DAILY_NO_CONV: unknown = [
   "any",
   ["==", ["get", "class"], "bank"],
   ["==", ["get", "class"], "pharmacy"],
+  ["==", ["get", "class"], "fuel"],
 ];
 
 const SHOP_CONVENIENCE: unknown = [
@@ -836,7 +837,7 @@ function shopSortKeyExpr(): unknown {
 
 function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = shopPoiColor(theme);
-  // Stay below landmarks / stations / large apt. Sangga layers paint after these.
+  // Stay below landmarks / stations / large apt. Painted after sangga so OMT-only wins.
   const sortKey: unknown = shopSortKeyExpr();
 
   // Overlapping bands. Convenience excluded until z16. Padding: far=large, near=small.
@@ -998,7 +999,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
 
 /**
  * 상가(상권)정보 shop labels — same class/subclass/icon language as OMT shops.
- * Painted after OMT shop_poi so they win collision; OMT dups hidden via feature-state.
+ * Painted before OMT shop_poi; OMT-only wins collision; dups hidden via setFilter.
  */
 function appendSanggaShopLayers(
   layers: AnyLayer[],
@@ -3545,10 +3546,11 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     });
   }
 
+  // 상가정보 first, then OMT shops: OMT-only wins collision; dups hidden via setFilter
+  // (sangga preferred when name+50m match). Density still capped by padding/overlap=0.
+  appendSanggaShopLayers(layers, theme, style);
   // Shop/facility names (z14+) below landmarks; adapter pins added later on top
   appendShopPoiLayers(layers, theme);
-  // 상가정보 — after OMT shops so labels win; OMT dups filtered via feature-state
-  appendSanggaShopLayers(layers, theme, style);
   appendBusStopLayers(layers);
 
   // Parks / culture / post — after shops, before large apt (large apt may displace these)
