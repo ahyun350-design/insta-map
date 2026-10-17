@@ -1041,9 +1041,10 @@ function appendKoreaTourLayers(
     {
       idSuffix: "z15",
       minzoom: 15,
-      rankMax: 45,
+      // Keep street-zoom shop/sangga density; Tour shopping stays out.
+      rankMax: 28,
       textSize: 12.5,
-      excludeShop: false,
+      excludeShop: true,
     },
   ];
   for (const band of bands) {
