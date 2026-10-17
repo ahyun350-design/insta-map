@@ -39,6 +39,9 @@ scripts/localdata/raw_closed_check/
 # Full MapLibre glyph packs (~100MB) — synced to Supabase map-tiles/glyphs
 .glyph-cache/
 
+# Local / CI tile build intermediates (PBF, pmtiles, geojsonseq)
+/build/tiles/
+
 # Xcode / SPM / TS build noise
 **/xcuserdata/
 plugins/**/.swiftpm/

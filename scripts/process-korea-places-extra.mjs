@@ -1,15 +1,22 @@
 /**
- * Turn osmium GeoJSON (named residential / apartments / buildings) into
- * tippecanoe-ready FeatureCollections: apt_complex + named_building.
+ * Stream osmium GeoJSONSeq (one Feature per line) into tippecanoe-ready
+ * GeoJSONSeq layers: apt_complex + named_building.
+ *
+ * Keeps only clustering aggregates in memory — never loads the full export.
  *
  * Usage:
- *   node scripts/process-korea-places-extra.mjs \
- *     --in build/tiles/places-raw.geojson \
+ *   osmium export … -f geojsonseq | node --max-old-space-size=4096 \
+ *     scripts/process-korea-places-extra.mjs \
+ *     --in - \
  *     --landmarks public/map/korea-landmarks.geojson \
  *     --out-dir build/tiles/places-extra
+ *
+ *   # or from a .geojsonseq file:
+ *   node … --in raw.geojsonseq --out-dir …
  */
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline";
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(name);
@@ -21,7 +28,7 @@ const IN = arg("--in");
 const OUT_DIR = arg("--out-dir", "build/tiles/places-extra");
 const LANDMARKS = arg("--landmarks", "public/map/korea-landmarks.geojson");
 if (!IN) {
-  console.error("Missing --in geojson");
+  console.error("Missing --in geojsonseq (file path or - for stdin)");
   process.exit(1);
 }
 
@@ -122,181 +129,261 @@ function loadLandmarks(p) {
   }
 }
 
-const landmarks = loadLandmarks(LANDMARKS);
-const raw = JSON.parse(fs.readFileSync(IN, "utf8"));
-const features = raw.features || [];
+function openInput(inPath) {
+  if (inPath === "-") return process.stdin;
+  return fs.createReadStream(inPath, { encoding: "utf8" });
+}
 
-/** @type {{name:string, base:string, c:number[], area:number, levels:number, kind:string}[]} */
-const candidates = [];
-
-for (const f of features) {
-  const p = f.properties || {};
-  const name = nameOf(p);
-  if (!name) continue;
-  if (BARE_DONG.test(name)) continue; // "101동" alone — no complex label
-  const c = centroid(f.geometry);
-  if (!c) continue;
-  const area = geomAreaM2(f.geometry);
-  const levels = Number(p["building:levels"] || p.levels || 0) || 0;
-  const landuseRes = p.landuse === "residential";
-  const bApt = p.building === "apartments" || p.building === "residential";
-  const bAny = !!p.building && p.building !== "no";
-  const base = stripDong(name);
-  if (landuseRes) {
-    candidates.push({
-      name: base || name,
-      base: base || name,
-      c,
-      area: Math.max(area, 500),
-      levels,
-      kind: "complex",
-    });
-  } else if (bApt || (bAny && APT_KW.test(name))) {
-    candidates.push({
-      name,
-      base: base || name,
-      c,
-      area: Math.max(area, 50),
-      levels,
-      kind: bApt || APT_KW.test(name) ? "complex_or_apt" : "building",
-    });
-  } else if (bAny) {
-    candidates.push({
-      name,
-      base: name,
-      c,
-      area: Math.max(area, 20),
-      levels,
-      kind: "building",
-    });
+/** @param {string} line */
+function parseFeatureLine(line) {
+  // osmium -f geojsonseq uses RFC 8142: RS (0x1E) + JSON + LF
+  let t = line.trim();
+  if (!t) return null;
+  if (t.charCodeAt(0) === 0x1e) t = t.slice(1).trim();
+  if (!t || t[0] !== "{") return null;
+  try {
+    const obj = JSON.parse(t);
+    if (obj.type === "Feature") return obj;
+    // Rare: FeatureCollection line — ignore (we expect seq)
+    return null;
+  } catch {
+    return null;
   }
 }
 
-// Cluster complex-like features by stripped base name within COMPLEX_CLUSTER_M
-const complexPool = candidates.filter(
-  (x) => x.kind === "complex" || x.kind === "complex_or_apt",
-);
-complexPool.sort((a, b) => b.area - a.area);
+/**
+ * @param {import('node:stream').Readable} stream
+ * @returns {Promise<{name:string, base:string, c:number[], area:number, levels:number, kind:string}[]>}
+ */
+async function collectCandidates(stream) {
+  /** @type {{name:string, base:string, c:number[], area:number, levels:number, kind:string}[]} */
+  const candidates = [];
+  let inputFeatures = 0;
+  let lines = 0;
 
-/** @type {typeof candidates} */
-const complexes = [];
-const used = new Array(complexPool.length).fill(false);
-for (let i = 0; i < complexPool.length; i++) {
-  if (used[i]) continue;
-  const seed = complexPool[i];
-  const group = [seed];
-  used[i] = true;
-  for (let j = i + 1; j < complexPool.length; j++) {
-    if (used[j]) continue;
-    const o = complexPool[j];
-    if (o.base !== seed.base) continue;
-    if (haversineM(seed.c, o.c) > COMPLEX_CLUSTER_M) continue;
-    used[j] = true;
-    group.push(o);
-  }
-  const area = group.reduce((s, g) => s + g.area, 0);
-  const levels = Math.max(...group.map((g) => g.levels));
-  // Representative name: stripped base (e.g. 메세나폴리스)
-  complexes.push({
-    name: seed.base,
-    base: seed.base,
-    c: seed.c,
-    area,
-    levels,
-    kind: "complex",
-  });
-}
-
-function nearLandmark(name, c) {
-  for (const lm of landmarks) {
-    if (lm.name !== name) continue;
-    if (haversineM(lm.c, c) <= DEDUP_M) return true;
-  }
-  return false;
-}
-
-const aptFeatures = [];
-for (const x of complexes) {
-  if (nearLandmark(x.name, x.c)) continue;
-  if (x.name.length < 2) continue;
-  // Rank: larger area → higher priority (1 best)
-  const rank = Math.max(1, Math.min(99, Math.round(1000000 / Math.max(x.area, 1))));
-  aptFeatures.push({
-    type: "Feature",
-    properties: {
-      name: x.name,
-      area_m2: Math.round(x.area),
-      levels: x.levels,
-      rank,
-      kind: "apt_complex",
-    },
-    geometry: { type: "Point", coordinates: x.c },
-  });
-}
-aptFeatures.sort(
-  (a, b) => (b.properties.area_m2 || 0) - (a.properties.area_m2 || 0),
-);
-// Reassign rank by area percentile (1 = largest)
-aptFeatures.forEach((f, i) => {
-  f.properties.rank = Math.min(99, 1 + Math.floor((i / Math.max(1, aptFeatures.length)) * 80));
-});
-
-// Named buildings: non-complex pool, prefer large area / levels; skip if near complex or landmark
-const buildingPool = candidates.filter((x) => x.kind === "building");
-const namedBuilding = [];
-for (const x of buildingPool) {
-  if (BARE_DONG.test(x.name)) continue;
-  if (nearLandmark(x.name, x.c)) continue;
-  let nearComplex = false;
-  for (const cx of complexes) {
-    if (haversineM(cx.c, x.c) < 80 && (cx.base === x.base || x.name.includes(cx.base))) {
-      nearComplex = true;
-      break;
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  for await (const line of rl) {
+    lines++;
+    const f = parseFeatureLine(line);
+    if (!f) continue;
+    inputFeatures++;
+    const p = f.properties || {};
+    const name = nameOf(p);
+    if (!name) continue;
+    if (BARE_DONG.test(name)) continue;
+    const c = centroid(f.geometry);
+    if (!c) continue;
+    const area = geomAreaM2(f.geometry);
+    const levels = Number(p["building:levels"] || p.levels || 0) || 0;
+    const landuseRes = p.landuse === "residential";
+    const bApt = p.building === "apartments" || p.building === "residential";
+    const bAny = !!p.building && p.building !== "no";
+    const base = stripDong(name);
+    if (landuseRes) {
+      candidates.push({
+        name: base || name,
+        base: base || name,
+        c,
+        area: Math.max(area, 500),
+        levels,
+        kind: "complex",
+      });
+    } else if (bApt || (bAny && APT_KW.test(name))) {
+      candidates.push({
+        name,
+        base: base || name,
+        c,
+        area: Math.max(area, 50),
+        levels,
+        kind: bApt || APT_KW.test(name) ? "complex_or_apt" : "building",
+      });
+    } else if (bAny) {
+      candidates.push({
+        name,
+        base: name,
+        c,
+        area: Math.max(area, 20),
+        levels,
+        kind: "building",
+      });
+    }
+    if (lines % 500000 === 0) {
+      console.error(
+        `… scanned ${lines} lines, features=${inputFeatures}, candidates=${candidates.length}`,
+      );
     }
   }
-  if (nearComplex) continue;
-  // Keep substantial buildings only
-  if (x.area < 400 && x.levels < 5) continue;
-  namedBuilding.push({
-    type: "Feature",
-    properties: {
-      name: x.name,
-      area_m2: Math.round(x.area),
-      levels: x.levels,
-      rank: Math.max(1, Math.min(99, Math.round(50000 / Math.max(x.area, 1)))),
-      kind: "named_building",
-    },
-    geometry: { type: "Point", coordinates: x.c },
-  });
-}
-namedBuilding.sort(
-  (a, b) =>
-    (b.properties.levels || 0) * 1000 +
-    (b.properties.area_m2 || 0) -
-    ((a.properties.levels || 0) * 1000 + (a.properties.area_m2 || 0)),
-);
-namedBuilding.forEach((f, i) => {
-  f.properties.rank = Math.min(99, 1 + Math.floor((i / Math.max(1, namedBuilding.length)) * 80));
-});
 
-fs.mkdirSync(OUT_DIR, { recursive: true });
-const aptPath = path.join(OUT_DIR, "apt_complex.geojson");
-const bldPath = path.join(OUT_DIR, "named_building.geojson");
-fs.writeFileSync(
-  aptPath,
-  JSON.stringify({ type: "FeatureCollection", features: aptFeatures }),
-);
-fs.writeFileSync(
-  bldPath,
-  JSON.stringify({ type: "FeatureCollection", features: namedBuilding }),
-);
-const summary = {
-  input_features: features.length,
-  apt_complex: aptFeatures.length,
-  named_building: namedBuilding.length,
-  landmarks_ref: landmarks.length,
-  samples_apt: aptFeatures.slice(0, 12).map((f) => f.properties.name),
-  samples_bld: namedBuilding.slice(0, 12).map((f) => f.properties.name),
-};
-fs.writeFileSync(path.join(OUT_DIR, "summary.json"), JSON.stringify(summary, null, 2));
-console.log(JSON.stringify(summary, null, 2));
+  return { candidates, inputFeatures, lines };
+}
+
+function writeGeoJSONSeq(filePath, features) {
+  const fd = fs.openSync(filePath, "w");
+  try {
+    for (const f of features) {
+      fs.writeSync(fd, JSON.stringify(f) + "\n");
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+async function main() {
+  const landmarks = loadLandmarks(LANDMARKS);
+  const t0 = Date.now();
+  console.error(`Reading GeoJSONSeq from ${IN === "-" ? "stdin" : IN}…`);
+  const { candidates, inputFeatures, lines } = await collectCandidates(
+    openInput(IN),
+  );
+  console.error(
+    `Scan done in ${((Date.now() - t0) / 1000).toFixed(1)}s: lines=${lines} features=${inputFeatures} candidates=${candidates.length}`,
+  );
+
+  // Cluster complex-like features by stripped base name within COMPLEX_CLUSTER_M.
+  // Bucket by base first so clustering is O(sum n_base²) not O(N²) nationwide.
+  const complexPool = candidates.filter(
+    (x) => x.kind === "complex" || x.kind === "complex_or_apt",
+  );
+  /** @type {Map<string, typeof candidates>} */
+  const byBase = new Map();
+  for (const x of complexPool) {
+    const list = byBase.get(x.base);
+    if (list) list.push(x);
+    else byBase.set(x.base, [x]);
+  }
+
+  /** @type {typeof candidates} */
+  const complexes = [];
+  for (const [, pool] of byBase) {
+    pool.sort((a, b) => b.area - a.area);
+    const used = new Array(pool.length).fill(false);
+    for (let i = 0; i < pool.length; i++) {
+      if (used[i]) continue;
+      const seed = pool[i];
+      const group = [seed];
+      used[i] = true;
+      for (let j = i + 1; j < pool.length; j++) {
+        if (used[j]) continue;
+        const o = pool[j];
+        if (haversineM(seed.c, o.c) > COMPLEX_CLUSTER_M) continue;
+        used[j] = true;
+        group.push(o);
+      }
+      const area = group.reduce((s, g) => s + g.area, 0);
+      const levels = Math.max(...group.map((g) => g.levels));
+      complexes.push({
+        name: seed.base,
+        base: seed.base,
+        c: seed.c,
+        area,
+        levels,
+        kind: "complex",
+      });
+    }
+  }
+
+  function nearLandmark(name, c) {
+    for (const lm of landmarks) {
+      if (lm.name !== name) continue;
+      if (haversineM(lm.c, c) <= DEDUP_M) return true;
+    }
+    return false;
+  }
+
+  const aptFeatures = [];
+  for (const x of complexes) {
+    if (nearLandmark(x.name, x.c)) continue;
+    if (x.name.length < 2) continue;
+    const rank = Math.max(
+      1,
+      Math.min(99, Math.round(1000000 / Math.max(x.area, 1))),
+    );
+    aptFeatures.push({
+      type: "Feature",
+      properties: {
+        name: x.name,
+        area_m2: Math.round(x.area),
+        levels: x.levels,
+        rank,
+        kind: "apt_complex",
+      },
+      geometry: { type: "Point", coordinates: x.c },
+    });
+  }
+  aptFeatures.sort(
+    (a, b) => (b.properties.area_m2 || 0) - (a.properties.area_m2 || 0),
+  );
+  aptFeatures.forEach((f, i) => {
+    f.properties.rank = Math.min(
+      99,
+      1 + Math.floor((i / Math.max(1, aptFeatures.length)) * 80),
+    );
+  });
+
+  const buildingPool = candidates.filter((x) => x.kind === "building");
+  const namedBuilding = [];
+  for (const x of buildingPool) {
+    if (BARE_DONG.test(x.name)) continue;
+    if (nearLandmark(x.name, x.c)) continue;
+    let nearComplex = false;
+    for (const cx of complexes) {
+      if (
+        haversineM(cx.c, x.c) < 80 &&
+        (cx.base === x.base || x.name.includes(cx.base))
+      ) {
+        nearComplex = true;
+        break;
+      }
+    }
+    if (nearComplex) continue;
+    if (x.area < 400 && x.levels < 5) continue;
+    namedBuilding.push({
+      type: "Feature",
+      properties: {
+        name: x.name,
+        area_m2: Math.round(x.area),
+        levels: x.levels,
+        rank: Math.max(1, Math.min(99, Math.round(50000 / Math.max(x.area, 1)))),
+        kind: "named_building",
+      },
+      geometry: { type: "Point", coordinates: x.c },
+    });
+  }
+  namedBuilding.sort(
+    (a, b) =>
+      (b.properties.levels || 0) * 1000 +
+      (b.properties.area_m2 || 0) -
+      ((a.properties.levels || 0) * 1000 + (a.properties.area_m2 || 0)),
+  );
+  namedBuilding.forEach((f, i) => {
+    f.properties.rank = Math.min(
+      99,
+      1 + Math.floor((i / Math.max(1, namedBuilding.length)) * 80),
+    );
+  });
+
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+  const aptPath = path.join(OUT_DIR, "apt_complex.geojsonseq");
+  const bldPath = path.join(OUT_DIR, "named_building.geojsonseq");
+  writeGeoJSONSeq(aptPath, aptFeatures);
+  writeGeoJSONSeq(bldPath, namedBuilding);
+
+  const summary = {
+    input_features: inputFeatures,
+    input_lines: lines,
+    candidates: candidates.length,
+    apt_complex: aptFeatures.length,
+    named_building: namedBuilding.length,
+    landmarks_ref: landmarks.length,
+    elapsed_ms: Date.now() - t0,
+    samples_apt: aptFeatures.slice(0, 12).map((f) => f.properties.name),
+    samples_bld: namedBuilding.slice(0, 12).map((f) => f.properties.name),
+  };
+  fs.writeFileSync(path.join(OUT_DIR, "summary.json"), JSON.stringify(summary, null, 2));
+  console.log(JSON.stringify(summary, null, 2));
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
