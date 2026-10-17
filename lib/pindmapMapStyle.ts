@@ -3292,30 +3292,43 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     },
   });
 
-  // Apt complexes / named buildings — BEFORE shops & landmarks so those win collision.
-  // Lower priority (higher sort-key) than shop (≤850) and landmark overlays.
+  // Places-extra: small apts + named buildings BEFORE shops (yield to shops).
+  // Large apts are inserted AFTER shops (see below) so they beat cafes/shops
+  // but still lose to landmark tier1 / stations (later layers).
+  // MapLibre: later symbol layers win cross-layer collision; within that,
+  // higher symbol-sort-key wins (same convention as shop_poi ≤850).
   if (style.sources?.[KOREA_PLACES_EXTRA_SOURCE]) {
     const aptColor = theme.id === "neon" ? "#8A8A8A" : "#8A8A8A";
     layers.push({
-      id: "apt_complex_label",
+      id: "apt_complex_label_small",
       type: "symbol",
       source: KOREA_PLACES_EXTRA_SOURCE,
       "source-layer": "apt_complex",
       minzoom: 14,
+      filter: [
+        "any",
+        ["==", ["get", "size_class"], "small"],
+        // Pre-rebuild tiles: treat mid/low rank as small
+        [
+          "all",
+          ["!", ["has", "size_class"]],
+          [">", ["to-number", ["coalesce", ["get", "rank"], 99]], 24],
+        ],
+      ],
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
-        "text-size": 13,
+        "text-size": 12.5,
         "text-max-width": 8,
         "text-padding": PLACE_TEXT_PADDING,
         "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
         "text-optional": true,
         "text-allow-overlap": false,
         "text-ignore-placement": false,
-        // Higher than shops (≤850) → yields placement to shops/landmarks
+        // Below shops (≤850): ~300–450
         "symbol-sort-key": [
-          "+",
-          2800,
+          "-",
+          450,
           ["to-number", ["coalesce", ["get", "rank"], 50]],
         ],
         visibility: "visible",
@@ -3323,8 +3336,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       paint: {
         "text-color": aptColor,
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-opacity": 0.88,
+        "text-halo-width": 1.3,
+        "text-opacity": 0.82,
       },
     });
     layers.push({
@@ -3344,8 +3357,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         "text-allow-overlap": false,
         "text-ignore-placement": false,
         "symbol-sort-key": [
-          "+",
-          2900,
+          "-",
+          380,
           ["to-number", ["coalesce", ["get", "rank"], 50]],
         ],
         visibility: "visible",
@@ -3362,6 +3375,54 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   // Shop/facility names (z14+) below landmarks; adapter pins added later on top
   appendShopPoiLayers(layers, theme);
   appendBusStopLayers(layers);
+
+  // Large apartment complexes — after shops so they win placement over cafes,
+  // before landmark/korea/station layers (those stay top priority).
+  if (style.sources?.[KOREA_PLACES_EXTRA_SOURCE]) {
+    const aptColor = theme.id === "neon" ? "#8A8A8A" : "#8A8A8A";
+    layers.push({
+      id: "apt_complex_label",
+      type: "symbol",
+      source: KOREA_PLACES_EXTRA_SOURCE,
+      "source-layer": "apt_complex",
+      minzoom: 14,
+      filter: [
+        "any",
+        ["==", ["get", "size_class"], "large"],
+        // Pre-rebuild tiles: top ranks by area ≈ large
+        [
+          "all",
+          ["!", ["has", "size_class"]],
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 99]], 24],
+        ],
+      ],
+      layout: {
+        "text-field": GEOJSON_NAME_TEXT,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 13,
+        "text-max-width": 8,
+        "text-padding": PLACE_TEXT_PADDING,
+        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        "text-optional": false,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        // Above shops (≤850), below landmarks (~1510+) / stations (~2000)
+        "symbol-sort-key": [
+          "-",
+          1000,
+          ["to-number", ["coalesce", ["get", "rank"], 20]],
+        ],
+        visibility: "visible",
+      },
+      paint: {
+        "text-color": aptColor,
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.4,
+        "text-opacity": 0.9,
+      },
+    });
+  }
+
   // Neighborhood anchors — after shops so they paint above and keep placement priority
   appendLandmarkLayers(layers, theme);
   // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)

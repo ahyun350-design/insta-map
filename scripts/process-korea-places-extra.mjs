@@ -34,10 +34,13 @@ if (!IN) {
 
 const APT_KW =
   /아파트|빌라|타워|오피스텔|푸르지오|래미안|자이|아이파크|e편한세상|힐스테이트|롯데캐슬|더샵|센트레빌|주공|맨션|단지|파크|캐슬|위브|휴먼시아/;
-const BARE_DONG = /^[0-9０-９]{1,4}\s*동\s*$/u;
-const DONG_SUFFIX = /\s*[0-9０-９]{1,4}\s*동\s*$/u;
+/** Trailing unit markers: "101동", "A동", "제1동" */
+const DONG_SUFFIX = /(?:\s*(?:제\s*)?[0-9０-９]{1,4}\s*동|\s*[A-Za-z]\s*동)\s*$/u;
 const DEDUP_M = 300;
 const COMPLEX_CLUSTER_M = 180;
+/** Top ~30% by area rank, or absolute area — beats shop labels in style. */
+const LARGE_RANK_MAX = 24;
+const LARGE_AREA_M2 = 8000;
 
 function nameOf(p) {
   if (!p) return null;
@@ -47,6 +50,23 @@ function nameOf(p) {
 
 function stripDong(n) {
   return n.replace(DONG_SUFFIX, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Drop labels that are only a unit / dong number:
+ * "101", "102동", "제1동", "A동", "제 A동"
+ */
+function isBareUnitName(name) {
+  const n = String(name || "").replace(/\s+/g, " ").trim();
+  if (!n) return true;
+  if (/^[0-9０-９]{1,5}$/u.test(n)) return true;
+  if (/^(?:제\s*)?[0-9０-９]{1,4}\s*동$/u.test(n)) return true;
+  if (/^(?:제\s*)?[A-Za-z]\s*동$/u.test(n)) return true;
+  const stripped = stripDong(n);
+  if (!stripped) return true;
+  if (/^[0-9０-９]{1,5}$/u.test(stripped)) return true;
+  if (/^[A-Za-z]$/u.test(stripped)) return true;
+  return false;
 }
 
 /** Approximate polygon area in m² (equirectangular). */
@@ -160,6 +180,7 @@ async function collectCandidates(stream) {
   const candidates = [];
   let inputFeatures = 0;
   let lines = 0;
+  let excludedUnitNames = 0;
 
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   for await (const line of rl) {
@@ -170,7 +191,10 @@ async function collectCandidates(stream) {
     const p = f.properties || {};
     const name = nameOf(p);
     if (!name) continue;
-    if (BARE_DONG.test(name)) continue;
+    if (isBareUnitName(name)) {
+      excludedUnitNames++;
+      continue;
+    }
     const c = centroid(f.geometry);
     if (!c) continue;
     const area = geomAreaM2(f.geometry);
@@ -179,10 +203,14 @@ async function collectCandidates(stream) {
     const bApt = p.building === "apartments" || p.building === "residential";
     const bAny = !!p.building && p.building !== "no";
     const base = stripDong(name);
+    if (!base || isBareUnitName(base)) {
+      excludedUnitNames++;
+      continue;
+    }
     if (landuseRes) {
       candidates.push({
-        name: base || name,
-        base: base || name,
+        name: base,
+        base,
         c,
         area: Math.max(area, 500),
         levels,
@@ -190,8 +218,8 @@ async function collectCandidates(stream) {
       });
     } else if (bApt || (bAny && APT_KW.test(name))) {
       candidates.push({
-        name,
-        base: base || name,
+        name: base,
+        base,
         c,
         area: Math.max(area, 50),
         levels,
@@ -199,8 +227,8 @@ async function collectCandidates(stream) {
       });
     } else if (bAny) {
       candidates.push({
-        name,
-        base: name,
+        name: base,
+        base,
         c,
         area: Math.max(area, 20),
         levels,
@@ -209,12 +237,12 @@ async function collectCandidates(stream) {
     }
     if (lines % 500000 === 0) {
       console.error(
-        `… scanned ${lines} lines, features=${inputFeatures}, candidates=${candidates.length}`,
+        `… scanned ${lines} lines, features=${inputFeatures}, candidates=${candidates.length}, excluded_unit=${excludedUnitNames}`,
       );
     }
   }
 
-  return { candidates, inputFeatures, lines };
+  return { candidates, inputFeatures, lines, excludedUnitNames };
 }
 
 function writeGeoJSONSeq(filePath, features) {
@@ -232,11 +260,10 @@ async function main() {
   const landmarks = loadLandmarks(LANDMARKS);
   const t0 = Date.now();
   console.error(`Reading GeoJSONSeq from ${IN === "-" ? "stdin" : IN}…`);
-  const { candidates, inputFeatures, lines } = await collectCandidates(
-    openInput(IN),
-  );
+  const { candidates, inputFeatures, lines, excludedUnitNames } =
+    await collectCandidates(openInput(IN));
   console.error(
-    `Scan done in ${((Date.now() - t0) / 1000).toFixed(1)}s: lines=${lines} features=${inputFeatures} candidates=${candidates.length}`,
+    `Scan done in ${((Date.now() - t0) / 1000).toFixed(1)}s: lines=${lines} features=${inputFeatures} candidates=${candidates.length} excluded_unit=${excludedUnitNames}`,
   );
 
   // Cluster complex-like features by stripped base name within COMPLEX_CLUSTER_M.
@@ -291,9 +318,13 @@ async function main() {
   }
 
   const aptFeatures = [];
+  let excludedAptUnit = 0;
   for (const x of complexes) {
     if (nearLandmark(x.name, x.c)) continue;
-    if (x.name.length < 2) continue;
+    if (x.name.length < 2 || isBareUnitName(x.name)) {
+      excludedAptUnit++;
+      continue;
+    }
     const rank = Math.max(
       1,
       Math.min(99, Math.round(1000000 / Math.max(x.area, 1))),
@@ -306,6 +337,7 @@ async function main() {
         levels: x.levels,
         rank,
         kind: "apt_complex",
+        size_class: "small",
       },
       geometry: { type: "Point", coordinates: x.c },
     });
@@ -313,17 +345,27 @@ async function main() {
   aptFeatures.sort(
     (a, b) => (b.properties.area_m2 || 0) - (a.properties.area_m2 || 0),
   );
+  let aptLarge = 0;
   aptFeatures.forEach((f, i) => {
     f.properties.rank = Math.min(
       99,
       1 + Math.floor((i / Math.max(1, aptFeatures.length)) * 80),
     );
+    const large =
+      f.properties.rank <= LARGE_RANK_MAX ||
+      f.properties.area_m2 >= LARGE_AREA_M2;
+    f.properties.size_class = large ? "large" : "small";
+    if (large) aptLarge++;
   });
 
   const buildingPool = candidates.filter((x) => x.kind === "building");
   const namedBuilding = [];
+  let excludedBldUnit = 0;
   for (const x of buildingPool) {
-    if (BARE_DONG.test(x.name)) continue;
+    if (isBareUnitName(x.name)) {
+      excludedBldUnit++;
+      continue;
+    }
     if (nearLandmark(x.name, x.c)) continue;
     let nearComplex = false;
     for (const cx of complexes) {
@@ -368,12 +410,17 @@ async function main() {
   writeGeoJSONSeq(aptPath, aptFeatures);
   writeGeoJSONSeq(bldPath, namedBuilding);
 
+  const excluded_unit_names =
+    excludedUnitNames + excludedAptUnit + excludedBldUnit;
   const summary = {
     input_features: inputFeatures,
     input_lines: lines,
     candidates: candidates.length,
     apt_complex: aptFeatures.length,
+    apt_complex_large: aptLarge,
+    apt_complex_small: aptFeatures.length - aptLarge,
     named_building: namedBuilding.length,
+    excluded_unit_names,
     landmarks_ref: landmarks.length,
     elapsed_ms: Date.now() - t0,
     samples_apt: aptFeatures.slice(0, 12).map((f) => f.properties.name),
