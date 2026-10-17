@@ -1019,23 +1019,49 @@ function appendKoreaTourLayers(
     maxzoom?: number;
     rankMax: number;
     textSize: number;
+    /** Exclude TourAPI shopping until street zoom so city density stays intact. */
+    excludeShop: boolean;
   }> = [
-    { idSuffix: "z12", minzoom: 12, maxzoom: 13, rankMax: 18, textSize: 13 },
-    { idSuffix: "z13", minzoom: 13, maxzoom: 15, rankMax: 28, textSize: 13 },
-    { idSuffix: "z15", minzoom: 15, rankMax: 45, textSize: 12.5 },
+    {
+      idSuffix: "z12",
+      minzoom: 12,
+      maxzoom: 13,
+      rankMax: 16,
+      textSize: 13,
+      excludeShop: true,
+    },
+    {
+      idSuffix: "z13",
+      minzoom: 13,
+      maxzoom: 15,
+      rankMax: 24,
+      textSize: 13,
+      excludeShop: true,
+    },
+    {
+      idSuffix: "z15",
+      minzoom: 15,
+      rankMax: 45,
+      textSize: 12.5,
+      excludeShop: false,
+    },
   ];
   for (const band of bands) {
+    const filter: unknown[] = [
+      "all",
+      [">", ["length", ["to-string", ["coalesce", ["get", "name"], ""]]], 0],
+      ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], band.rankMax],
+    ];
+    if (band.excludeShop) {
+      filter.push(["!", ["==", ["get", "class"], "shop"]]);
+    }
     layers.push({
       id: `tour_poi_label_${band.idSuffix}`,
       type: "symbol",
       source: KOREA_TOUR_SOURCE,
       minzoom: band.minzoom,
       ...(band.maxzoom != null ? { maxzoom: band.maxzoom } : {}),
-      filter: [
-        "all",
-        [">", ["length", ["to-string", ["coalesce", ["get", "name"], ""]]], 0],
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], band.rankMax],
-      ],
+      filter,
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
@@ -3687,12 +3713,13 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     });
   }
 
+  // TourAPI: after apt, before landmarks (later layers win → landmarks > tour > apt)
+  appendKoreaTourLayers(layers, theme, style);
+
   // School / civic / hospital — above large apt
   appendLandmarkLayers(layers, theme, { kind: "priority" });
   // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)
   appendKoreaLandmarkGeoLayers(layers, theme);
-  // TourAPI 명소 — after landmarks, before stations (역 wins via station reorder)
-  appendKoreaTourLayers(layers, theme, style);
 
   // Stations must paint after shops/anchors/korea so high sort-key actually wins
   // cross-layer collision (later layers beat earlier ones in MapLibre).
