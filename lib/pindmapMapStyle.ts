@@ -268,11 +268,31 @@ function notDuplicateKoreaLandmarkName(): unknown {
 
 /**
  * Neighborhood anchor labels from OpenMapTiles `poi`.
- * Shops/cafes use shop_poi_* layers (z14+). Landmarks always stack above shops.
- * Color groups: culture | medical | transit.
+ * Shops/cafes use shop_poi_* layers (z14+).
+ * Split so large apt complexes can sit above parks/museums but below
+ * school / civic / hospital (and korea tier1 / stations).
  */
-/** Core landmarks — no zoom in filter (MapLibre ignores ["zoom"] in filters). */
-const LANDMARK_FILTER_CORE: unknown = [
+/** Parks / culture / post — may yield to large apt labels. */
+const LANDMARK_FILTER_SECONDARY: unknown = [
+  "any",
+  ["==", ["get", "class"], "park"],
+  [
+    "all",
+    ["==", ["get", "class"], "grocery"],
+    ["==", ["get", "subclass"], "marketplace"],
+  ],
+  [
+    "all",
+    ["==", ["get", "class"], "post"],
+    ["==", ["get", "subclass"], "post_office"],
+  ],
+  ["==", ["get", "class"], "museum"],
+  ["==", ["get", "class"], "stadium"],
+  ["==", ["get", "class"], "attraction"],
+];
+
+/** School / civic / hospital — always above large apt. */
+const LANDMARK_FILTER_PRIORITY: unknown = [
   "any",
   ["==", ["get", "class"], "school"],
   ["==", ["get", "class"], "college"],
@@ -282,22 +302,15 @@ const LANDMARK_FILTER_CORE: unknown = [
     ["==", ["get", "class"], "hospital"],
     ["==", ["get", "subclass"], "hospital"],
   ],
-  ["==", ["get", "class"], "park"],
-  [
-    "all",
-    ["==", ["get", "class"], "grocery"],
-    ["==", ["get", "subclass"], "marketplace"],
-  ],
   ["==", ["get", "class"], "town_hall"],
   ["==", ["get", "class"], "police"],
-  [
-    "all",
-    ["==", ["get", "class"], "post"],
-    ["==", ["get", "subclass"], "post_office"],
-  ],
-  ["==", ["get", "class"], "museum"],
-  ["==", ["get", "class"], "stadium"],
-  ["==", ["get", "class"], "attraction"],
+];
+
+/** @deprecated alias — full set for any remaining CORE references */
+const LANDMARK_FILTER_CORE: unknown = [
+  "any",
+  LANDMARK_FILTER_PRIORITY,
+  LANDMARK_FILTER_SECONDARY,
 ];
 
 /** Playgrounds only from street zoom — separate layer with minzoom:15. */
@@ -335,10 +348,27 @@ function poiSpriteIcon(): unknown {
   return poiCategoryIconImageExpr();
 }
 
-function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
+function appendLandmarkLayers(
+  layers: AnyLayer[],
+  theme: MapPreviewTheme,
+  opts?: {
+    /** Default: secondary (park/culture). Use "priority" for school/civic. */
+    kind?: "secondary" | "priority";
+  },
+): void {
+  const kind = opts?.kind ?? "secondary";
   const color = landmarkGroupColor(theme);
   // Above shops (≤850); below korea-landmark tiers (~1650+) and stations (~2000)
   const sortKey: unknown = ["-", 1500, ["to-number", ["coalesce", ["get", "rank"], 999]]];
+  const classFilter =
+    kind === "priority" ? LANDMARK_FILTER_PRIORITY : LANDMARK_FILTER_SECONDARY;
+  const id =
+    kind === "priority"
+      ? (base: string) =>
+          base === "landmark_label_playground"
+            ? base
+            : base.replace("landmark_label", "landmark_priority")
+      : (base: string) => base;
 
   // Zoom-split rank caps — ["zoom"] inside filter is NOT re-evaluated by MapLibre.
   const bands: Array<{
@@ -350,69 +380,71 @@ function appendLandmarkLayers(layers: AnyLayer[], theme: MapPreviewTheme): void 
     excludeKindergarten: boolean;
   }> = [
     {
-      id: "landmark_label",
+      id: id("landmark_label"),
       minzoom: 11,
       maxzoom: 12,
       rankMax: 6,
-      classFilter: LANDMARK_FILTER_CORE,
+      classFilter,
       excludeKindergarten: true,
     },
     {
-      id: "landmark_label_z12",
+      id: id("landmark_label_z12"),
       minzoom: 12,
       maxzoom: 13,
       rankMax: 8,
-      classFilter: LANDMARK_FILTER_CORE,
+      classFilter,
       excludeKindergarten: true,
     },
     {
-      id: "landmark_label_z13",
+      id: id("landmark_label_z13"),
       minzoom: 13,
       maxzoom: 14,
       rankMax: 12,
-      classFilter: LANDMARK_FILTER_CORE,
+      classFilter,
       excludeKindergarten: true,
     },
     {
-      id: "landmark_label_z14",
+      id: id("landmark_label_z14"),
       minzoom: 14,
       maxzoom: 15,
       rankMax: 4,
-      classFilter: LANDMARK_FILTER_CORE,
+      classFilter,
       excludeKindergarten: true,
     },
     {
-      // Keep legacy id for e2e / deferred-decoration hooks
-      id: "landmark_label_street",
+      // Keep legacy id for e2e / deferred-decoration hooks (secondary / parks)
+      id: id("landmark_label_street"),
       minzoom: 15,
       maxzoom: 16,
       rankMax: 40,
-      classFilter: LANDMARK_FILTER_CORE,
+      classFilter,
       excludeKindergarten: false,
     },
     {
-      id: "landmark_label_z16",
+      id: id("landmark_label_z16"),
       minzoom: 16,
       maxzoom: 17,
       rankMax: 70,
-      classFilter: LANDMARK_FILTER_CORE,
+      classFilter,
       excludeKindergarten: false,
     },
     {
-      id: "landmark_label_z17",
+      id: id("landmark_label_z17"),
       minzoom: 17,
       rankMax: 100,
-      classFilter: LANDMARK_FILTER_CORE,
+      classFilter,
       excludeKindergarten: false,
     },
-    {
+  ];
+  if (kind === "secondary") {
+    bands.push({
       id: "landmark_label_playground",
       minzoom: 15,
       rankMax: 40,
       classFilter: LANDMARK_FILTER_PLAYGROUND,
       excludeKindergarten: true,
-    },
-  ];
+    });
+  }
 
   for (const band of bands) {
     const filter: unknown = [
@@ -3368,8 +3400,11 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   appendShopPoiLayers(layers, theme);
   appendBusStopLayers(layers);
 
-  // Large apartment complexes — after shops so they win placement over cafes,
-  // before landmark/korea/station layers (those stay top priority).
+  // Parks / culture / post — after shops, before large apt (large apt may displace these)
+  appendLandmarkLayers(layers, theme, { kind: "secondary" });
+
+  // Large apartment complexes — after shops + secondary landmarks so they keep
+  // Kakao-like presence; school/civic/korea-tier1/stations still come later.
   if (style.sources?.[KOREA_PLACES_EXTRA_SOURCE]) {
     const aptColor = theme.id === "neon" ? "#8A8A8A" : "#8A8A8A";
     layers.push({
@@ -3378,7 +3413,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       source: KOREA_PLACES_EXTRA_SOURCE,
       "source-layer": "apt_complex",
       minzoom: 14,
-      // Footprint ≥2000m² → after shops, before landmarks/stations
+      // Footprint ≥2000m²
       filter: [">=", ["to-number", ["coalesce", ["get", "area_m2"], 0]], 2000],
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
@@ -3390,10 +3425,10 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         "text-optional": false,
         "text-allow-overlap": false,
         "text-ignore-placement": false,
-        // Above shops (≤850), below landmarks (~1510+) / stations (~2000)
+        // Above shops (≤850); below priority landmarks (~1500) / stations (~2000)
         "symbol-sort-key": [
           "-",
-          1000,
+          1100,
           ["to-number", ["coalesce", ["get", "rank"], 20]],
         ],
         visibility: "visible",
@@ -3407,8 +3442,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     });
   }
 
-  // Neighborhood anchors — after shops so they paint above and keep placement priority
-  appendLandmarkLayers(layers, theme);
+  // School / civic / hospital — above large apt
+  appendLandmarkLayers(layers, theme, { kind: "priority" });
   // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)
   appendKoreaLandmarkGeoLayers(layers, theme);
 
