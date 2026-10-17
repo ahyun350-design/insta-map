@@ -88,6 +88,7 @@ import {
 import type { DirectionsRouteThemeId } from "./directionsRouteTheme";
 import { installMapLibreCornerAttribution } from "./mapAttribution";
 import { installSanggaShopDedupe } from "./sanggaShopDedupe";
+import { installTourSanggaDedupe } from "./tourSanggaDedupe";
 import {
   composeMapCanvasToJpeg,
   snapshotBackgroundCss,
@@ -574,6 +575,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       }
       if (readSelfTilesEnabled() && !isSelfTilesBroken()) {
         this.touchCleanups.push(installSanggaShopDedupe(map));
+        this.touchCleanups.push(installTourSanggaDedupe(map));
       }
       // Defer landmarks + shop POI labels until first idle (faster basemap first paint).
       const styleLayers = map.getStyle()?.layers ?? [];
@@ -584,6 +586,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
           layer.id.startsWith("landmark_label_") ||
           layer.id.startsWith("shop_poi_label_") ||
           layer.id.startsWith("sangga_shop_label_") ||
+          layer.id.startsWith("tour_poi_label_") ||
           layer.id.startsWith("korea_landmark_tier")
         ) {
           try {
@@ -700,6 +703,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         layer.id.startsWith("landmark_label_") ||
         layer.id.startsWith("shop_poi_label_") ||
         layer.id.startsWith("sangga_shop_label_") ||
+        layer.id.startsWith("tour_poi_label_") ||
         layer.id.startsWith("korea_landmark_tier")
       ) {
         try {

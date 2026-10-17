@@ -58,6 +58,10 @@ import {
   KOREA_SANGGA_SOURCE,
   warmKoreaSangga,
 } from "@/lib/mapSurface/koreaSangga";
+import {
+  ensureKoreaTourSource,
+  KOREA_TOUR_SOURCE,
+} from "@/lib/mapSurface/koreaTour";
 import bundledLibertyStyle from "@/lib/mapSurface/data/liberty-style.json";
 
 /** Production-adopted themes */
@@ -998,6 +1002,89 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
 }
 
 /**
+ * TourAPI 명소 (admin self-tiles). Priority: below korea landmarks / stations,
+ * above large apt + shops. z12+ for high-rank; denser ranks from z13.
+ */
+function appendKoreaTourLayers(
+  layers: AnyLayer[],
+  theme: MapPreviewTheme,
+  style: { sources?: Record<string, unknown> },
+): void {
+  if (!style.sources?.[KOREA_TOUR_SOURCE]) return;
+  const color =
+    theme.id === "neon" ? "#A8B0E0" : theme.id === "white" ? "#4A5A78" : "#2E2E36";
+  const bands: Array<{
+    idSuffix: string;
+    minzoom: number;
+    maxzoom?: number;
+    rankMax: number;
+    textSize: number;
+  }> = [
+    { idSuffix: "z12", minzoom: 12, maxzoom: 13, rankMax: 18, textSize: 13 },
+    { idSuffix: "z13", minzoom: 13, maxzoom: 15, rankMax: 28, textSize: 13 },
+    { idSuffix: "z15", minzoom: 15, rankMax: 45, textSize: 12.5 },
+  ];
+  for (const band of bands) {
+    layers.push({
+      id: `tour_poi_label_${band.idSuffix}`,
+      type: "symbol",
+      source: KOREA_TOUR_SOURCE,
+      minzoom: band.minzoom,
+      ...(band.maxzoom != null ? { maxzoom: band.maxzoom } : {}),
+      filter: [
+        "all",
+        [">", ["length", ["to-string", ["coalesce", ["get", "name"], ""]]], 0],
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], band.rankMax],
+      ],
+      layout: {
+        visibility: "visible",
+        "icon-image": poiSpriteIcon(),
+        "icon-size": 1,
+        "icon-padding": 1,
+        "icon-optional": false,
+        "text-field": GEOJSON_NAME_TEXT,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": band.textSize,
+        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
+        "text-max-width": 7,
+        "text-padding": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          12,
+          14,
+          15,
+          10,
+          16,
+          8,
+        ],
+        "text-optional": false,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false,
+        // Lower rank → lower sort-key → placed first
+        "symbol-sort-key": [
+          "+",
+          220,
+          ["to-number", ["coalesce", ["get", "rank"], 40]],
+        ],
+        "symbol-z-order": "source",
+      },
+      paint: {
+        "text-color": color,
+        "text-opacity": 0.92,
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0,
+        "icon-opacity": 0.95,
+      },
+    });
+  }
+}
+
+/**
  * 상가(상권)정보 shop labels — same class/subclass/icon language as OMT shops.
  * Painted before OMT shop_poi; OMT-only wins collision; dups hidden via setFilter.
  */
@@ -1725,6 +1812,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       void warmKoreaPlacesExtra();
       ensureKoreaSanggaSource(style);
       void warmKoreaSangga();
+      ensureKoreaTourSource(style);
     }
   }
   const layers: AnyLayer[] = [];
@@ -3603,6 +3691,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   appendLandmarkLayers(layers, theme, { kind: "priority" });
   // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)
   appendKoreaLandmarkGeoLayers(layers, theme);
+  // TourAPI 명소 — after landmarks, before stations (역 wins via station reorder)
+  appendKoreaTourLayers(layers, theme, style);
 
   // Stations must paint after shops/anchors/korea so high sort-key actually wins
   // cross-layer collision (later layers beat earlier ones in MapLibre).
