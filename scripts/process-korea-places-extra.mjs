@@ -38,9 +38,8 @@ const APT_KW =
 const DONG_SUFFIX = /(?:\s*(?:제\s*)?[0-9０-９]{1,4}\s*동|\s*[A-Za-z]\s*동)\s*$/u;
 const DEDUP_M = 300;
 const COMPLEX_CLUSTER_M = 180;
-/** Top ~30% by area rank, or absolute area — beats shop labels in style. */
-const LARGE_RANK_MAX = 24;
-const LARGE_AREA_M2 = 8000;
+/** Absolute footprint (m²) — neighborhood-scale complexes beat shops in style. */
+const LARGE_AREA_M2 = 2000;
 
 function nameOf(p) {
   if (!p) return null;
@@ -351,9 +350,7 @@ async function main() {
       99,
       1 + Math.floor((i / Math.max(1, aptFeatures.length)) * 80),
     );
-    const large =
-      f.properties.rank <= LARGE_RANK_MAX ||
-      f.properties.area_m2 >= LARGE_AREA_M2;
+    const large = f.properties.area_m2 >= LARGE_AREA_M2;
     f.properties.size_class = large ? "large" : "small";
     if (large) aptLarge++;
   });

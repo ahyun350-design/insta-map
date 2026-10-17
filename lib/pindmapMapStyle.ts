@@ -3305,16 +3305,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       source: KOREA_PLACES_EXTRA_SOURCE,
       "source-layer": "apt_complex",
       minzoom: 14,
-      filter: [
-        "any",
-        ["==", ["get", "size_class"], "small"],
-        // Pre-rebuild tiles: treat mid/low rank as small
-        [
-          "all",
-          ["!", ["has", "size_class"]],
-          [">", ["to-number", ["coalesce", ["get", "rank"], 99]], 24],
-        ],
-      ],
+      // Footprint under 2000m² → yield to shops (size_class is advisory)
+      filter: ["<", ["to-number", ["coalesce", ["get", "area_m2"], 0]], 2000],
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
@@ -3386,16 +3378,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       source: KOREA_PLACES_EXTRA_SOURCE,
       "source-layer": "apt_complex",
       minzoom: 14,
-      filter: [
-        "any",
-        ["==", ["get", "size_class"], "large"],
-        // Pre-rebuild tiles: top ranks by area ≈ large
-        [
-          "all",
-          ["!", ["has", "size_class"]],
-          ["<=", ["to-number", ["coalesce", ["get", "rank"], 99]], 24],
-        ],
-      ],
+      // Footprint ≥2000m² → after shops, before landmarks/stations
+      filter: [">=", ["to-number", ["coalesce", ["get", "area_m2"], 0]], 2000],
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
