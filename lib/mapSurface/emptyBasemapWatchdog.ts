@@ -18,7 +18,7 @@ const EMPTY_STREAK_REQUIRED = 4;
 
 /** Overlay / app GeoJSON sources — not basemap. */
 const NON_BASEMAP_SOURCE_RE =
-  /compact-|korea_|pindmap_|subway|landmark|gu_label|dong|station_label|major_label|places_extra|apt_complex|named_building/i;
+  /compact-|korea_|pindmap_|subway|landmark|gu_label|dong|station_label|major_label|places_extra|apt_complex|named_building|sangga/i;
 
 type WatchMap = {
   getStyle: () => {

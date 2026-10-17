@@ -350,6 +350,8 @@ export function applySelfTilesSource(style: {
     // Cap at archive max so MapLibre overzooms rather than requesting missing leaves.
     maxzoom: Math.min(headerMax, KOREA_PMTILES_MAXZOOM),
     attribution,
+    // Needed for sangga↔OMT shop dedupe via feature-state
+    promoteId: "id",
   };
 }
 

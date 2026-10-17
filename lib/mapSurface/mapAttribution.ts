@@ -12,6 +12,10 @@ export const MAP_ATTRIB_OSM_COPYRIGHT_URL =
 export const MAP_CORNER_ATTRIBUTION =
   "© OpenMapTiles © OpenStreetMap contributors";
 
+/** Self-tiles admin credit including 상가(상권)정보. */
+export const MAP_CORNER_ATTRIBUTION_SELF =
+  "© OpenMapTiles © OpenStreetMap · 소상공인시장진흥공단";
+
 export type InstallMapLibreAttributionOptions = {
   className: string;
   /**
@@ -19,6 +23,8 @@ export type InstallMapLibreAttributionOptions = {
    * Web: omit — names become official links (new tab).
    */
   onClick?: () => void;
+  /** When true (admin self-tiles), include 소상공인시장진흥공단 in the credit. */
+  includeSangga?: boolean;
 };
 
 /** Imperative corner credit for MapLibreMapAdapter. Returns cleanup. */
@@ -36,7 +42,9 @@ export function installMapLibreCornerAttribution(
     btn.className = options.className;
     btn.setAttribute("data-testid", "maplibre-corner-attribution");
     btn.setAttribute("aria-label", "데이터 출처");
-    btn.textContent = MAP_CORNER_ATTRIBUTION;
+    btn.textContent = options.includeSangga
+      ? MAP_CORNER_ATTRIBUTION_SELF
+      : MAP_CORNER_ATTRIBUTION;
     const onClick = (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -68,7 +76,11 @@ export function installMapLibreCornerAttribution(
   osm.rel = "noopener noreferrer";
   osm.textContent = "OpenStreetMap contributors";
 
-  el.append("© ", omt, " © ", osm);
+  if (options.includeSangga) {
+    el.append("© ", omt, " © ", osm, " · 소상공인시장진흥공단");
+  } else {
+    el.append("© ", omt, " © ", osm);
+  }
   el.addEventListener("click", stopMap);
   el.addEventListener("pointerdown", stopMap);
   container.appendChild(el);

@@ -53,6 +53,11 @@ import {
   KOREA_PLACES_EXTRA_SOURCE,
   warmKoreaPlacesExtra,
 } from "@/lib/mapSurface/koreaPlacesExtra";
+import {
+  ensureKoreaSanggaSource,
+  KOREA_SANGGA_SOURCE,
+  warmKoreaSangga,
+} from "@/lib/mapSurface/koreaSangga";
 import bundledLibertyStyle from "@/lib/mapSurface/data/liberty-style.json";
 
 /** Production-adopted themes */
@@ -807,11 +812,9 @@ function shopPoiColor(theme: MapPreviewTheme): unknown {
   return poiCategoryTextColorExpr(theme.id);
 }
 
-function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
-  const color = shopPoiColor(theme);
-  // Higher sort-key wins placement. Priority: big(3) > food(4) > daily(5) > rest(6).
-  // Stay below landmarks (1000−rank) and stations (1100−rank).
-  const sortKey: unknown = [
+/** Same priority ladder as OMT shops; MapLibre lower sort-key places first in practice with layer order. */
+function shopSortKeyExpr(): unknown {
+  return [
     "-",
     [
       "case",
@@ -829,6 +832,12 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
     ],
     ["/", ["to-number", ["coalesce", ["get", "rank"], 999]], 10],
   ];
+}
+
+function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
+  const color = shopPoiColor(theme);
+  // Stay below landmarks / stations / large apt. Sangga layers paint after these.
+  const sortKey: unknown = shopSortKeyExpr();
 
   // Overlapping bands. Convenience excluded until z16. Padding: far=large, near=small.
   const bands: Array<{
@@ -961,6 +970,144 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
         // ~2 lines; long Latin shops truncated in SHOP_TEXT
+        "text-max-width": 6,
+        "text-padding": band.textPadding,
+        "text-optional": false,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false,
+        "symbol-sort-key": sortKey,
+        "symbol-z-order": "source",
+      },
+      paint: {
+        "text-color": color,
+        "text-opacity": 0.92,
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.5,
+        "text-halo-blur": 0,
+        "icon-opacity": 0.95,
+      },
+    };
+    if (typeof band.maxzoom === "number") {
+      layerSpec.maxzoom = band.maxzoom;
+    }
+    layers.push(layerSpec);
+  }
+}
+
+/**
+ * 상가(상권)정보 shop labels — same class/subclass/icon language as OMT shops.
+ * Painted after OMT shop_poi so they win collision; OMT dups hidden via feature-state.
+ */
+function appendSanggaShopLayers(
+  layers: AnyLayer[],
+  theme: MapPreviewTheme,
+  style: { sources?: Record<string, unknown> },
+): void {
+  if (!style.sources?.[KOREA_SANGGA_SOURCE]) return;
+  const color = shopPoiColor(theme);
+  const sortKey: unknown = shopSortKeyExpr();
+  const hasName: unknown = [
+    ">",
+    ["length", ["to-string", ["coalesce", ["get", "name"], ""]]],
+    0,
+  ];
+  const bands: Array<{
+    idSuffix: string;
+    minzoom: number;
+    maxzoom?: number;
+    classFilter: unknown;
+    textPadding: unknown;
+  }> = [
+    {
+      idSuffix: "z14",
+      minzoom: 14,
+      maxzoom: 16,
+      classFilter: [
+        "any",
+        [
+          "all",
+          SHOP_BIG,
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 40],
+        ],
+        [
+          "all",
+          SHOP_FOOD,
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 30],
+        ],
+      ],
+      textPadding: [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        14,
+        16,
+        15,
+        12,
+        16,
+        9,
+      ],
+    },
+    {
+      idSuffix: "z15",
+      minzoom: 15,
+      maxzoom: 16.5,
+      classFilter: [
+        "any",
+        SHOP_BIG,
+        [
+          "all",
+          SHOP_FOOD,
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 55],
+        ],
+        SHOP_DAILY_NO_CONV,
+      ],
+      textPadding: [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        15,
+        12,
+        16,
+        9,
+      ],
+    },
+    {
+      idSuffix: "z16",
+      minzoom: 16,
+      classFilter: SHOP_Z16,
+      textPadding: [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        16,
+        14,
+        17,
+        2.4,
+      ],
+    },
+  ];
+
+  for (const band of bands) {
+    const layerSpec: AnyLayer = {
+      id: `sangga_shop_label_${band.idSuffix}`,
+      type: "symbol",
+      source: KOREA_SANGGA_SOURCE,
+      "source-layer": "sangga",
+      minzoom: band.minzoom,
+      filter: ["all", hasName, band.classFilter],
+      layout: {
+        visibility: "visible",
+        "icon-image": poiSpriteIcon(),
+        "icon-size": 1,
+        "icon-padding": 1,
+        "icon-optional": false,
+        "text-field": GEOJSON_NAME_TEXT,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 12.5,
+        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
         "text-max-width": 6,
         "text-padding": band.textPadding,
         "text-optional": false,
@@ -1575,6 +1722,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       // Apt / named-building overlay (separate PMTiles); empty if not uploaded yet.
       ensureKoreaPlacesExtraSource(style);
       void warmKoreaPlacesExtra();
+      ensureKoreaSanggaSource(style);
+      void warmKoreaSangga();
     }
   }
   const layers: AnyLayer[] = [];
@@ -3398,6 +3547,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
 
   // Shop/facility names (z14+) below landmarks; adapter pins added later on top
   appendShopPoiLayers(layers, theme);
+  // 상가정보 — after OMT shops so labels win; OMT dups filtered via feature-state
+  appendSanggaShopLayers(layers, theme, style);
   appendBusStopLayers(layers);
 
   // Parks / culture / post — after shops, before large apt (large apt may displace these)
