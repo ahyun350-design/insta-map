@@ -867,8 +867,10 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
         map as unknown as { getStyle?: () => { layers?: { id: string }[] } }
       ).getStyle?.();
       const layerIds = (style?.layers ?? []).map((l) => l.id);
-      const shopLayers = layerIds.filter((id) =>
-        id.startsWith("shop_poi_label"),
+      const shopLayers = layerIds.filter(
+        (id) =>
+          id.startsWith("shop_poi_label") ||
+          id.startsWith("sangga_shop_label_"),
       );
       const shop = shopLayers.length
         ? map.queryRenderedFeatures({ layers: shopLayers })
@@ -1082,7 +1084,11 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
       ).getStyle?.();
       const shopLayers = (style?.layers ?? [])
         .map((l) => l.id)
-        .filter((id) => id.startsWith("shop_poi_label"));
+        .filter(
+          (id) =>
+            id.startsWith("shop_poi_label") ||
+            id.startsWith("sangga_shop_label_"),
+        );
       const n = shopLayers.length
         ? map.queryRenderedFeatures({ layers: shopLayers }).length
         : 0;
@@ -1098,7 +1104,11 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
       ).getStyle?.();
       const shopLayers = (style?.layers ?? [])
         .map((l) => l.id)
-        .filter((id) => id.startsWith("shop_poi_label"));
+        .filter(
+          (id) =>
+            id.startsWith("shop_poi_label") ||
+            id.startsWith("sangga_shop_label_"),
+        );
       const n = shopLayers.length
         ? map.queryRenderedFeatures({ layers: shopLayers }).length
         : 0;
@@ -1213,7 +1223,11 @@ test("map-preview search-nav: far/near camera + shop labels", async ({
           ).getStyle?.();
           const shopLayers = (style?.layers ?? [])
             .map((l) => l.id)
-            .filter((sid) => sid.startsWith("shop_poi_label"));
+            .filter(
+              (sid) =>
+                sid.startsWith("shop_poi_label") ||
+                sid.startsWith("sangga_shop_label_"),
+            );
           const n = shopLayers.length
             ? map.queryRenderedFeatures({ layers: shopLayers }).length
             : 0;
