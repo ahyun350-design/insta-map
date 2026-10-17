@@ -100,7 +100,10 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
             hasStation: !!map.getLayer("subway_overlay_station"),
             hasLandmark: (map.getStyle?.()?.layers ?? []).some(
               (l: { id: string }) =>
-                l.id === "landmark_label" || l.id.startsWith("landmark_label_"),
+                l.id === "landmark_label" ||
+                l.id.startsWith("landmark_label_") ||
+                l.id === "landmark_priority" ||
+                l.id.startsWith("landmark_priority_"),
             ),
           };
         }),
@@ -129,7 +132,10 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
       .map((l: { id: string }) => l.id)
       .filter(
         (id: string) =>
-          (id === "landmark_label" || id.startsWith("landmark_label_")) &&
+          (id === "landmark_label" ||
+            id.startsWith("landmark_label_") ||
+            id === "landmark_priority" ||
+            id.startsWith("landmark_priority_")) &&
           !!map.getLayer(id),
       );
     return {
@@ -170,7 +176,10 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
       .map((l: { id: string }) => l.id)
       .filter(
         (id: string) =>
-          (id === "landmark_label" || id.startsWith("landmark_label_")) &&
+          (id === "landmark_label" ||
+            id.startsWith("landmark_label_") ||
+            id === "landmark_priority" ||
+            id.startsWith("landmark_priority_")) &&
           !!map.getLayer(id),
       );
     return {
@@ -675,6 +684,8 @@ test("map-preview mid-zoom place labels: Mapo/Gangnam × z11–13", async ({
           (id) =>
             id === "landmark_label" ||
             id.startsWith("landmark_label_") ||
+            id === "landmark_priority" ||
+            id.startsWith("landmark_priority_") ||
             id === "label_korea_landmark_overlay" ||
             id.startsWith("label_korea_landmark_overlay_") ||
             id === "label_park" ||
@@ -790,15 +801,15 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
     "road_shield_us",
     "label_bridge_ko",
   ];
-  // Kakao-like street density: ~30–50 visible names; shops fill most of the budget.
+  // Kakao-like street density; apt complexes share the budget with shops.
   const targets: Record<
     number,
     { totalMin: number; totalMax: number; shopMin: number }
   > = {
-    14: { totalMin: 20, totalMax: 45, shopMin: 6 },
-    15: { totalMin: 25, totalMax: 55, shopMin: 15 },
-    16: { totalMin: 30, totalMax: 55, shopMin: 22 },
-    17: { totalMin: 30, totalMax: 60, shopMin: 22 },
+    14: { totalMin: 20, totalMax: 75, shopMin: 6 },
+    15: { totalMin: 25, totalMax: 80, shopMin: 12 },
+    16: { totalMin: 28, totalMax: 75, shopMin: 18 },
+    17: { totalMin: 30, totalMax: 80, shopMin: 18 },
   };
 
   async function measureAt(zoom: number, center: [number, number]) {
@@ -866,11 +877,22 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
         (id) =>
           id === "landmark_label" ||
           id.startsWith("landmark_label_") ||
+          id === "landmark_priority" ||
+          id.startsWith("landmark_priority_") ||
           id === "label_korea_landmark_overlay" ||
           id.startsWith("label_korea_landmark_overlay_"),
       );
       const landmark = landmarkLayers.length
         ? map.queryRenderedFeatures({ layers: landmarkLayers })
+        : [];
+      const aptLayers = layerIds.filter(
+        (id) =>
+          id === "apt_complex_label" ||
+          id === "apt_complex_label_small" ||
+          id === "named_building_label",
+      );
+      const apt = aptLayers.length
+        ? map.queryRenderedFeatures({ layers: aptLayers })
         : [];
       const station = map.getLayer("poi_transit")
         ? map.queryRenderedFeatures({ layers: ["poi_transit"] })
@@ -940,7 +962,8 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
         shopCount: shop.length,
         landmarkCount: landmark.length,
         stationCount: station.length,
-        total: shop.length + landmark.length + station.length,
+        aptCount: apt.length,
+        total: shop.length + landmark.length + station.length + apt.length,
         roadNames: roadFeats.length,
         namelessShop,
         shopCandidates,
@@ -995,11 +1018,11 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
       ).toBeGreaterThanOrEqual(t.shopMin);
       expect(
         m.total,
-        `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (shop=${m.shopCount} lm=${m.landmarkCount} st=${m.stationCount})`,
+        `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (shop=${m.shopCount} lm=${m.landmarkCount} st=${m.stationCount} apt=${m.aptCount})`,
       ).toBeGreaterThanOrEqual(t.totalMin);
       expect(
         m.total,
-        `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (shop=${m.shopCount} lm=${m.landmarkCount} st=${m.stationCount})`,
+        `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (shop=${m.shopCount} lm=${m.landmarkCount} st=${m.stationCount} apt=${m.aptCount})`,
       ).toBeLessThanOrEqual(t.totalMax);
       if (z === 17 && m.shopCandidates > 0) {
         const coverage =
@@ -1376,7 +1399,10 @@ test("map-preview basics: korea landmarks + z16 anchors", async ({ page }) => {
       const anchors = uniq([
         ...styleIds.filter(
           (id: string) =>
-            id === "landmark_label" || id.startsWith("landmark_label_"),
+            id === "landmark_label" ||
+            id.startsWith("landmark_label_") ||
+            id === "landmark_priority" ||
+            id.startsWith("landmark_priority_"),
         ),
         "label_park",
         "park_label",
