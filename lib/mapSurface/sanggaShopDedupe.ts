@@ -106,28 +106,54 @@ export function reconcileSanggaOmtShopDedupe(map: MaplibreMap): void {
   ensureBaseFilters(map, oLayers);
 
   let omtFeats: ReturnType<MaplibreMap["queryRenderedFeatures"]> = [];
-  let srcFeats: ReturnType<MaplibreMap["querySourceFeatures"]> = [];
   try {
     omtFeats = map.queryRenderedFeatures({ layers: oLayers });
-    srcFeats = map.querySourceFeatures(KOREA_SANGGA_SOURCE, {
-      sourceLayer: "sangga",
-    });
   } catch {
     return;
   }
 
+  // Prefer source features (all loaded points); fall back to rendered sangga labels.
   const sangga: Pt[] = [];
-  for (const f of srcFeats) {
+  let srcFeats: ReturnType<MaplibreMap["querySourceFeatures"]> = [];
+  try {
+    srcFeats = map.querySourceFeatures(KOREA_SANGGA_SOURCE, {
+      sourceLayer: "sangga",
+    });
+  } catch {
+    srcFeats = [];
+  }
+  const pushFeat = (f: {
+    properties?: Record<string, unknown> | null;
+    geometry?: GeoJSON.Geometry | null;
+  }) => {
     const name = normalizeShopName(
       String(f.properties?.["name:ko"] || f.properties?.name || ""),
     );
-    if (!name || name.length < 2) continue;
+    if (!name || name.length < 2) return;
     const g = f.geometry;
-    if (!g || g.type !== "Point") continue;
+    if (!g || g.type !== "Point") return;
     const c = g.coordinates as [number, number];
-    if (!Number.isFinite(c[0]) || !Number.isFinite(c[1])) continue;
-    if (!inViewport(map, c)) continue;
+    if (!Number.isFinite(c[0]) || !Number.isFinite(c[1])) return;
+    if (!inViewport(map, c)) return;
     sangga.push({ name, c });
+  };
+  for (const f of srcFeats) pushFeat(f);
+  if (!sangga.length) {
+    const sLayers = (map.getStyle()?.layers ?? [])
+      .map((l) => l.id)
+      .filter(
+        (id) =>
+          id.startsWith("sangga_shop_label_") && Boolean(map.getLayer(id)),
+      );
+    if (sLayers.length) {
+      try {
+        for (const f of map.queryRenderedFeatures({ layers: sLayers })) {
+          pushFeat(f);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   const byName = new Map<string, Pt[]>();
