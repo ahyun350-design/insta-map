@@ -248,6 +248,10 @@ import {
   type PlacePostsListData,
 } from "@/components/PlacePostsListScreen";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
+import {
+  buildKakaoKeywordSearchOpts,
+  rankKakaoPlaceSearchResults,
+} from "@/lib/mapSearchRank";
 import { MapResearchAreaButton } from "@/components/MapResearchAreaButton";
 import { Coachmark } from "@/components/Coachmark";
 import { nextCoachToShow, setCoachSeen, COACHMARK_DEFS } from "@/lib/coachmarks";
@@ -2907,12 +2911,12 @@ function HomePageContent() {
       }
 
       const ps = new window.kakao.maps.services.Places();
-      const bias = new window.kakao.maps.LatLng(biasLat, biasLng);
-      const SortBy = window.kakao.maps.services.SortBy;
-      const keywordOpts: Record<string, unknown> = { location: bias };
-      if (SortBy?.DISTANCE != null) {
-        keywordOpts.sort = SortBy.DISTANCE;
-      }
+      const keywordOpts = buildKakaoKeywordSearchOpts(
+        window.kakao.maps,
+        trimmed,
+        { lat: biasLat, lng: biasLng },
+        window.kakao.maps.LatLng,
+      );
 
       await new Promise<void>((resolve) => {
         ps.keywordSearch(trimmed, (data: any[], st: string) => {
@@ -2932,7 +2936,8 @@ function HomePageContent() {
               }
 
               searchPinPlaceByIdRef.current.clear();
-              const markers = data.slice(0, 15).flatMap((place, index) => {
+              const ranked = rankKakaoPlaceSearchResults(trimmed, data);
+              const markers = ranked.slice(0, 15).flatMap((place, index) => {
                 const lat = Number(place.y);
                 const lng = Number(place.x);
                 if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
@@ -12246,6 +12251,13 @@ function HomePageContent() {
       return;
     }
     expandedSearchOpenDedupeRef.current = { t: now, key };
+    // Blur before camera — iOS WKWebView + open keyboard can swallow the first tap
+    // or stall WebGL camera updates until the keyboard finishes dismissing.
+    try {
+      expandedMapSearchInputRef.current?.blur();
+    } catch {
+      /* noop */
+    }
     devLog("[PindMap:expandedMap] open place card", source, place.place_name, { y: place.y, x: place.x });
     const expandedRef = placeRefFromKakaoPlace(place);
     // Kakao 검색 결과는 places 행이 아님 — _savedPlaceId가 섞여 있으면 제거
@@ -12427,27 +12439,30 @@ function HomePageContent() {
           pendingSearchCenterSyncRef.current = false;
           return;
         }
-        devLog("[PindMap:expandedMap] keywordSearch ok count=", data?.length ?? 0);
+        const ranked = rankKakaoPlaceSearchResults(trimmed, data ?? []);
+        devLog("[PindMap:expandedMap] keywordSearch ok count=", ranked.length, {
+          top: ranked.slice(0, 3).map((p) => p.place_name),
+        });
         clearSearchResultPins();
-        addSearchResultPins(data, (place) => openExpandedSearchPlaceCard(place, "marker-keyword-click"));
-        setMapSearchResults(data);
+        addSearchResultPins(ranked, (place) => openExpandedSearchPlaceCard(place, "marker-keyword-click"));
+        setMapSearchResults(ranked);
         setMapSearchLabel(trimmed);
         setIsMapSearchSheetOpen(true);
         // Warm z14 tiles for top hits (HTTP cache only; no extra Kakao search calls)
-        prefetchTilesForSearchResults(data, 3);
-        fitExpandedMapToKeywordResults(data);
+        prefetchTilesForSearchResults(ranked, 3);
+        fitExpandedMapToKeywordResults(ranked);
         setSearchQuery("");
       };
 
       const runKeywordSearchAtMapCenter = () => {
         const center = getExpandedMapSearchCenter();
         // Kakao Places requires a real LatLng instance (MapLibre shim center is duck-typed only).
-        const bias = new window.kakao.maps.LatLng(center.getLat(), center.getLng());
-        const SortBy = window.kakao.maps.services.SortBy;
-        const keywordOpts: Record<string, unknown> = { location: bias };
-        if (SortBy?.DISTANCE != null) {
-          keywordOpts.sort = SortBy.DISTANCE;
-        }
+        const keywordOpts = buildKakaoKeywordSearchOpts(
+          window.kakao.maps,
+          trimmed,
+          { lat: center.getLat(), lng: center.getLng() },
+          window.kakao.maps.LatLng,
+        );
         ps.keywordSearch(trimmed, applyKeywordSearchResults, keywordOpts);
       };
 

@@ -59,6 +59,17 @@ export function MapSearchResultsSheet({
   const [expanded, setExpanded] = useState(false);
   const [dragDelta, setDragDelta] = useState(0);
   const dragStartRef = useRef<{ y: number; wasExpanded: boolean } | null>(null);
+  const lastSelectAtRef = useRef(0);
+
+  const selectPlace = useCallback(
+    (place: MapSearchPlaceResult) => {
+      const now = Date.now();
+      if (now - lastSelectAtRef.current < 400) return;
+      lastSelectAtRef.current = now;
+      onSelect(place);
+    },
+    [onSelect],
+  );
 
   useEffect(() => {
     if (open) {
@@ -158,7 +169,16 @@ export function MapSearchResultsSheet({
 
           return (
             <li key={place.id || `${place.place_name}-${place.y}-${place.x}`}>
-              <button type="button" className="mapSearchResultsSheetItem" onClick={() => onSelect(place)}>
+              <button
+                type="button"
+                className="mapSearchResultsSheetItem"
+                // pointerup beats iOS keyboard-dismiss stealing the first tap; click covers a11y.
+                onPointerUp={(e) => {
+                  if (e.pointerType === "mouse" && e.button !== 0) return;
+                  selectPlace(place);
+                }}
+                onClick={() => selectPlace(place)}
+              >
                 <div className="mapSearchResultsSheetItemMain">
                   <p className="mapSearchResultsSheetItemName">{place.place_name}</p>
                   <p className="mapSearchResultsSheetItemAddress">{address}</p>
