@@ -52,6 +52,8 @@ const HUBS = [
   { id: "gamcheon", label: "감천문화마을", lat: 35.0975, lng: 129.0103 },
   { id: "gyeongpo", label: "강릉경포", lat: 37.805, lng: 128.908 },
   { id: "jeonju", label: "전주한옥마을", lat: 35.815, lng: 127.153 },
+  { id: "hongdae", label: "홍대", lat: 37.5563, lng: 126.9234 },
+  { id: "gangnam", label: "강남", lat: 37.4979, lng: 127.0276 },
 ];
 
 fs.mkdirSync(OUT, { recursive: true });

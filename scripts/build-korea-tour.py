@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Process TourAPI slim JSON → public/map/korea-tour.geojson.
+"""Process TourAPI slim JSON → build/tiles/korea-tour.geojson.
 
 - Clean titles (strip English-paren, truncate)
 - Dedupe vs korea-landmarks.geojson (normalized name + 100m; landmark wins)
 - Map contentTypeId/cat → class + rank
+- Per z12-tile local top-N: sparse cells promote local winners so z12/z13
+  filters show regional attractions without densifying Seoul hubs.
 """
 from __future__ import annotations
 
 import json
 import math
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,6 +136,124 @@ def load_landmarks() -> list[tuple[str, float, float]]:
     return out
 
 
+def lonlat_to_tile(lon: float, lat: float, z: int) -> tuple[int, int]:
+    n = 2**z
+    x = int((lon + 180.0) / 360.0 * n)
+    lat_r = math.radians(lat)
+    y = int((1.0 - math.asinh(math.tan(lat_r)) / math.pi) / 2.0 * n)
+    x = max(0, min(n - 1, x))
+    y = max(0, min(n - 1, y))
+    return x, y
+
+
+# Style bands (appendKoreaTourLayers): z12 rank<=16, z13 rank<=24, exclude shop.
+Z12_RANK_MAX = 16
+Z13_RANK_MAX = 24
+# Promote up to this many non-shop features per z12 cell when sparse.
+Z12_PROMOTE_N = 3
+Z13_PROMOTE_N = 8
+# If a cell already has this many z12-passers, treat as dense — no promotion.
+DENSE_Z12_MIN = 2
+# Seoul-scale cells (many attractions) stay on absolute ranks so hubs don't densify.
+DENSE_CELL_MIN_FEATURES = 25
+# Classes excluded from far-zoom promotion (style excludeShop).
+PROMOTE_SKIP_CLASS = frozenset({"shop"})
+
+
+def apply_z12_grid_promotion(features: list[dict]) -> dict:
+    """Per z12-tile top-N: promote sparse local winners; keep dense absolute ranks.
+
+    Also tags each non-shop feature with tippecanoe minzoom by local slot so
+    far zooms only carry the cell's top few (no tippecanoe densest-drop needed).
+    Shop class is kept at minzoom 15+ only (style excludes shops through z15).
+    """
+    cells: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for i, f in enumerate(features):
+        lon, lat = f["geometry"]["coordinates"]
+        cells[lonlat_to_tile(float(lon), float(lat), 12)].append(i)
+
+    sparse_cells = 0
+    dense_cells = 0
+    promoted = 0
+    for idxs in cells.values():
+        shops = [
+            i
+            for i in idxs
+            if features[i]["properties"].get("class") in PROMOTE_SKIP_CLASS
+        ]
+        eligible = [
+            i
+            for i in idxs
+            if features[i]["properties"].get("class") not in PROMOTE_SKIP_CLASS
+        ]
+        eligible.sort(key=lambda i: int(features[i]["properties"]["rank"]))
+        z12_pass = sum(
+            1
+            for i in eligible
+            if int(features[i]["properties"]["rank"]) <= Z12_RANK_MAX
+        )
+        is_dense = (
+            len(eligible) >= DENSE_CELL_MIN_FEATURES or z12_pass >= DENSE_Z12_MIN
+        )
+        if is_dense:
+            dense_cells += 1
+            # Dense: no rank remap. Far-zoom slots = absolute high-priority only.
+            z12_idxs = [
+                i
+                for i in eligible
+                if int(features[i]["properties"]["rank"]) <= Z12_RANK_MAX
+            ][:Z12_PROMOTE_N]
+            z13_idxs = [
+                i
+                for i in eligible
+                if Z12_RANK_MAX
+                < int(features[i]["properties"]["rank"])
+                <= Z13_RANK_MAX
+            ][: Z13_PROMOTE_N - len(z12_idxs)]
+            far = set(z12_idxs) | set(z13_idxs)
+            for i in eligible:
+                if i in z12_idxs:
+                    features[i]["tippecanoe"] = {"minzoom": 12, "maxzoom": 15}
+                elif i in z13_idxs:
+                    features[i]["tippecanoe"] = {"minzoom": 13, "maxzoom": 15}
+                else:
+                    features[i]["tippecanoe"] = {"minzoom": 15, "maxzoom": 15}
+        else:
+            sparse_cells += 1
+            for slot, i in enumerate(eligible[:Z12_PROMOTE_N]):
+                new_rank = 10 + slot * 2
+                props = features[i]["properties"]
+                if int(props["rank"]) > new_rank:
+                    props["rank"] = new_rank
+                    props["grid_promoted"] = 1
+                    promoted += 1
+                features[i]["tippecanoe"] = {"minzoom": 12, "maxzoom": 15}
+            for slot, i in enumerate(eligible[Z12_PROMOTE_N:Z13_PROMOTE_N]):
+                new_rank = min(Z13_RANK_MAX, 18 + slot)
+                props = features[i]["properties"]
+                if int(props["rank"]) > new_rank:
+                    props["rank"] = new_rank
+                    props["grid_promoted"] = 1
+                    promoted += 1
+                features[i]["tippecanoe"] = {"minzoom": 13, "maxzoom": 15}
+            for i in eligible[Z13_PROMOTE_N:]:
+                features[i]["tippecanoe"] = {"minzoom": 15, "maxzoom": 15}
+        for i in shops:
+            features[i]["tippecanoe"] = {"minzoom": 15, "maxzoom": 15}
+
+    return {
+        "z12_cells": len(cells),
+        "sparse_cells_promoted": sparse_cells,
+        "dense_cells_unchanged": dense_cells,
+        "features_rank_lowered": promoted,
+        "z12_promote_n": Z12_PROMOTE_N,
+        "z13_promote_n": Z13_PROMOTE_N,
+        "dense_z12_min": DENSE_Z12_MIN,
+        "dense_cell_min_features": DENSE_CELL_MIN_FEATURES,
+        "tippecanoe_minzoom": "sparse top3@z12 + next5@z13; dense absolute-rank bands",
+    }
+
+
 def main() -> int:
     rows = json.loads(SLIM.read_text(encoding="utf-8"))
     landmarks = load_landmarks()
@@ -213,6 +333,8 @@ def main() -> int:
         by_class[cls] += 1
         stats[str(r["contentTypeId"])] += 1
 
+    grid_stats = apply_z12_grid_promotion(features)
+
     fc = {"type": "FeatureCollection", "features": features}
     OUT_GEO.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(fc, ensure_ascii=False, separators=(",", ":"))
@@ -228,6 +350,7 @@ def main() -> int:
         "max_name_len": MAX_NAME_LEN,
         "by_contentTypeId": dict(stats),
         "by_class": dict(by_class),
+        "grid_promotion": grid_stats,
         "geojson_bytes": len(text.encode("utf-8")),
         "geojson_path": str(OUT_GEO.relative_to(ROOT)),
         "delivery": (
