@@ -2634,10 +2634,11 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
               "text-padding": PLACE_TEXT_PADDING,
               "text-variable-anchor": [...ADMIN_VARIABLE_ANCHOR],
               "text-optional": true,
+              // Below landmarks/tour (~220) but above shops (~850) — 동네 > 가게
               "symbol-sort-key": [
-                "-",
-                1400,
-                ["to-number", ["coalesce", ["get", "rank"], 999]],
+                "+",
+                480,
+                ["to-number", ["coalesce", ["get", "rank"], 50]],
               ],
               visibility: "visible",
             },
@@ -2695,9 +2696,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
               "text-variable-anchor": [...ADMIN_VARIABLE_ANCHOR],
               "text-optional": true,
               "symbol-sort-key": [
-                "-",
-                1350,
-                ["to-number", ["coalesce", ["get", "rank"], 999]],
+                "+",
+                500,
+                ["to-number", ["coalesce", ["get", "rank"], 50]],
               ],
               visibility: "visible",
             },
@@ -2731,9 +2732,11 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             "text-padding": PLACE_TEXT_PADDING,
             "text-variable-anchor": [...ADMIN_VARIABLE_ANCHOR],
             "text-optional": true,
+            // z14–16 동네: below tour hubs, above street shops
             "symbol-sort-key": [
-              "to-number",
-              ["coalesce", ["get", "rank"], 999],
+              "+",
+              520,
+              ["to-number", ["coalesce", ["get", "rank"], 50]],
             ],
             visibility: "visible",
           },

@@ -64,6 +64,16 @@ def haversine_m(lat1, lng1, lat2, lng2) -> float:
     return 2 * R * math.asin(min(1.0, math.sqrt(a)))
 
 
+# Regional “where am I” hubs — show from z12 even if TourAPI typed them as shop.
+HUB_NAME_RE = re.compile(
+    r"(한옥마을|문화마을|중앙시장|전통시장|해수욕장|해변|해수욕|대공원|국립공원)"
+)
+
+
+def is_hub_landmark(title: str) -> bool:
+    return bool(HUB_NAME_RE.search(title or ""))
+
+
 def map_class_rank(ctype: str, cat1: str, cat2: str, cat3: str, title: str) -> tuple[str, int] | None:
     """Return (class, rank). Lower rank = higher priority."""
     c1, c2, c3 = cat1 or "", cat2 or "", cat3 or ""
@@ -83,8 +93,10 @@ def map_class_rank(ctype: str, cat1: str, cat2: str, cat3: str, title: str) -> t
         "남이섬",
         "춘천",
         "홍천",
+        "중앙시장",
     )
     boost = any(f in title for f in famous)
+    hub = is_hub_landmark(title)
 
     if ctype == "12":  # 관광지
         if c1 == "A01" or "자연" in c2 or c2.startswith("A0101"):
@@ -103,17 +115,24 @@ def map_class_rank(ctype: str, cat1: str, cat2: str, cat3: str, title: str) -> t
     elif ctype == "28":  # 레포츠
         cls, rank = "sports", 35
     elif ctype == "38":  # 쇼핑
-        if "시장" in title or "마켓" in title:
+        # Central/traditional markets = regional landmarks (not every *시장* shop).
+        if hub or "중앙시장" in title or "전통시장" in title:
+            cls, rank = "attraction", 14
+        elif "마켓" in title or "시장" in title:
             cls, rank = "shop", 32
         else:
             cls, rank = "shop", 40
     else:
         return None
 
+    if hub:
+        # Force into z12 style band (rankMax 16) and above generic shops.
+        cls = "attraction" if cls == "shop" else cls
+        rank = min(rank, 12)
     if boost:
         rank = max(8, rank - 10)
     # Prefer named major tourism (A02 human culture often denser → slightly lower prio in city)
-    if ctype == "12" and c1 == "A02":
+    if ctype == "12" and c1 == "A02" and not hub:
         rank = min(50, rank + 4)
     return cls, rank
 
@@ -186,7 +205,14 @@ def apply_z12_grid_promotion(features: list[dict]) -> dict:
             for i in idxs
             if features[i]["properties"].get("class") not in PROMOTE_SKIP_CLASS
         ]
-        eligible.sort(key=lambda i: int(features[i]["properties"]["rank"]))
+        # Hubs first, then absolute rank — ensures 해수욕장/시장/한옥마을 keep z12 slots.
+        eligible.sort(
+            key=lambda i: (
+                0 if features[i]["properties"].get("hub") else 1,
+                int(features[i]["properties"]["rank"]),
+            )
+        )
+        hubs = [i for i in eligible if features[i]["properties"].get("hub")]
         z12_pass = sum(
             1
             for i in eligible
@@ -197,24 +223,28 @@ def apply_z12_grid_promotion(features: list[dict]) -> dict:
         )
         if is_dense:
             dense_cells += 1
-            # Dense: no rank remap. Far-zoom slots = absolute high-priority only.
-            z12_idxs = [
-                i
-                for i in eligible
-                if int(features[i]["properties"]["rank"]) <= Z12_RANK_MAX
-            ][:Z12_PROMOTE_N]
+            # Dense: keep absolute ranks, but always reserve z12 for hub landmarks.
+            z12_idxs = list(hubs[:Z12_PROMOTE_N])
+            for i in eligible:
+                if i in z12_idxs:
+                    continue
+                if (
+                    len(z12_idxs) < Z12_PROMOTE_N
+                    and int(features[i]["properties"]["rank"]) <= Z12_RANK_MAX
+                ):
+                    z12_idxs.append(i)
+            z12_set = set(z12_idxs)
             z13_idxs = [
                 i
                 for i in eligible
-                if Z12_RANK_MAX
-                < int(features[i]["properties"]["rank"])
-                <= Z13_RANK_MAX
-            ][: Z13_PROMOTE_N - len(z12_idxs)]
-            far = set(z12_idxs) | set(z13_idxs)
+                if i not in z12_set
+                and int(features[i]["properties"]["rank"]) <= Z13_RANK_MAX
+            ][: max(0, Z13_PROMOTE_N - len(z12_idxs))]
+            z13_set = set(z13_idxs)
             for i in eligible:
-                if i in z12_idxs:
+                if i in z12_set:
                     features[i]["tippecanoe"] = {"minzoom": 12, "maxzoom": 15}
-                elif i in z13_idxs:
+                elif i in z13_set:
                     features[i]["tippecanoe"] = {"minzoom": 13, "maxzoom": 15}
                 else:
                     features[i]["tippecanoe"] = {"minzoom": 15, "maxzoom": 15}
@@ -239,6 +269,7 @@ def apply_z12_grid_promotion(features: list[dict]) -> dict:
             for i in eligible[Z13_PROMOTE_N:]:
                 features[i]["tippecanoe"] = {"minzoom": 15, "maxzoom": 15}
         for i in shops:
+            # Hub markets were reclassified to attraction; remaining shops stay z15+.
             features[i]["tippecanoe"] = {"minzoom": 15, "maxzoom": 15}
 
     return {
@@ -316,17 +347,20 @@ def main() -> int:
             dropped_dup_lm += 1
             continue
 
+        props: dict = {
+            "name": name,
+            "class": cls,
+            "rank": rank,
+            "kind": "tour",
+            "contentTypeId": str(r["contentTypeId"]),
+            "contentid": str(r["contentid"]),
+        }
+        if is_hub_landmark(name):
+            props["hub"] = 1
         features.append(
             {
                 "type": "Feature",
-                "properties": {
-                    "name": name,
-                    "class": cls,
-                    "rank": rank,
-                    "kind": "tour",
-                    "contentTypeId": str(r["contentTypeId"]),
-                    "contentid": str(r["contentid"]),
-                },
+                "properties": props,
                 "geometry": {"type": "Point", "coordinates": [lng, lat]},
             }
         )
