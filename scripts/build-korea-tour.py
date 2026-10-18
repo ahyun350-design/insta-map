@@ -231,8 +231,8 @@ def main() -> int:
         "geojson_bytes": len(text.encode("utf-8")),
         "geojson_path": str(OUT_GEO.relative_to(ROOT)),
         "delivery": (
-            "build/tiles/korea-tour.geojson → Supabase map-tiles/korea-tour.geojson "
-            "(~7MB; no git commit; remote GeoJSON is simpler than a new PMTiles protocol)"
+            "build/tiles/korea-tour.geojson → tippecanoe korea-tour.pmtiles → "
+            "Supabase map-tiles/korea-tour.pmtiles (no git commit)"
         ),
         "name_policy": (
             f"strip English parentheses; truncate to {MAX_NAME_LEN} chars with …"
