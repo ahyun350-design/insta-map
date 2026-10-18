@@ -3674,6 +3674,98 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   appendShopPoiLayers(layers, theme);
   appendBusStopLayers(layers);
 
+  // Admin place names from places-extra (OSM boundary label points).
+  // After shops → beat cafes; before secondary landmarks / stations (paint later).
+  // Same name as sparse OMT suburb: later layer wins → one label (overlap=0).
+  if (style.sources?.[KOREA_PLACES_EXTRA_SOURCE]) {
+    const sigunguColor = theme.id === "neon" ? "#9AA2B8" : "#5C5C64";
+    const dongColor = theme.id === "neon" ? "#9AA2D0" : "#8A8A92";
+    layers.push({
+      id: "admin_sigungu_label",
+      type: "symbol",
+      source: KOREA_PLACES_EXTRA_SOURCE,
+      "source-layer": "admin_sigungu",
+      minzoom: 10,
+      maxzoom: 13,
+      layout: {
+        "text-field": GEOJSON_NAME_TEXT,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          10,
+          13,
+          12,
+          15,
+          13,
+          16,
+        ],
+        "text-letter-spacing": 0.04,
+        "text-max-width": 8,
+        "text-padding": PLACE_TEXT_PADDING,
+        "text-variable-anchor": [...ADMIN_VARIABLE_ANCHOR],
+        "text-optional": true,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        // Below stations/landmarks (~200-220), above shops (~850)
+        "symbol-sort-key": [
+          "+",
+          420,
+          ["to-number", ["coalesce", ["get", "rank"], 50]],
+        ],
+        visibility: "visible",
+      },
+      paint: {
+        "text-color": sigunguColor,
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.6,
+        "text-opacity": 0.95,
+      },
+    });
+    layers.push({
+      id: "admin_dong_label",
+      type: "symbol",
+      source: KOREA_PLACES_EXTRA_SOURCE,
+      "source-layer": "admin_dong",
+      minzoom: 13,
+      maxzoom: 16,
+      layout: {
+        "text-field": GEOJSON_NAME_TEXT,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          13,
+          13.5,
+          14,
+          14.5,
+          16,
+          15,
+        ],
+        "text-max-width": 7,
+        "text-padding": PLACE_TEXT_PADDING,
+        "text-variable-anchor": [...ADMIN_VARIABLE_ANCHOR],
+        "text-optional": true,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "symbol-sort-key": [
+          "+",
+          500,
+          ["to-number", ["coalesce", ["get", "rank"], 50]],
+        ],
+        visibility: "visible",
+      },
+      paint: {
+        "text-color": dongColor,
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.5,
+        "text-opacity": 0.92,
+      },
+    });
+  }
+
   // Parks / culture / post — after shops, before large apt (large apt may displace these)
   appendLandmarkLayers(layers, theme, { kind: "secondary" });
 

@@ -1,6 +1,7 @@
 /**
- * Admin self-tiles overlay: apartment complex + named building labels
- * from korea-places-extra.pmtiles (Supabase map-tiles bucket).
+ * Admin self-tiles overlay: apartment complex + named building +
+ * admin_dong / admin_sigungu labels from korea-places-extra.pmtiles
+ * (Supabase map-tiles bucket).
  */
 
 import maplibregl from "maplibre-gl";
@@ -62,7 +63,8 @@ export function ensureKoreaPlacesExtraSource(style: {
   style.sources[SOURCE_ID] = {
     type: "vector",
     tiles: [`${PROTOCOL}://{z}/{x}/{y}`],
-    minzoom: 12,
+    // admin_sigungu from z10; apt/building layers filter higher in style
+    minzoom: 10,
     maxzoom: 16,
     attribution: "© OpenStreetMap contributors",
   };
