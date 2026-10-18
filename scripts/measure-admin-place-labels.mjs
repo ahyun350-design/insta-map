@@ -51,8 +51,8 @@ const HUBS = [
   { id: "mangwon", label: "망원", lat: 37.556, lng: 126.9055 },
   { id: "hongdae", label: "홍대", lat: 37.5572, lng: 126.924 },
   { id: "gangnam", label: "강남", lat: 37.4979, lng: 127.0276 },
-  { id: "jeonju", label: "전주한옥마을", lat: 35.815, lng: 127.15 },
-  { id: "gangneung", label: "강릉중앙시장", lat: 37.754, lng: 128.898 },
+  { id: "jeonju", label: "전주한옥마을", lat: 35.8147, lng: 127.152 },
+  { id: "gangneung", label: "강릉중앙시장", lat: 37.7538, lng: 128.8965 },
   { id: "haeundae", label: "해운대", lat: 35.1587, lng: 129.1604 },
   { id: "chuncheon", label: "춘천", lat: 37.8813, lng: 127.73 },
 ];

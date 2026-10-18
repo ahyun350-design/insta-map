@@ -397,11 +397,13 @@ async function collect(stream) {
 }
 
 function toFeatures(rows, kind) {
+  // Low tippecanoe rank → retained preferentially under --order-by=rank
+  // when apt/building densest-drop would otherwise wipe admin labels at z14+.
   const sorted = [...rows].sort((a, b) => b.area - a.area);
   return sorted.map((x, i) => {
     const rank = Math.min(
-      99,
-      1 + Math.floor((i / Math.max(1, sorted.length)) * 80),
+      8,
+      1 + Math.floor((i / Math.max(1, sorted.length)) * 7),
     );
     return {
       type: "Feature",
