@@ -1,9 +1,13 @@
 /**
- * Kakao Places keyword ranking for expanded/fullscreen map search.
+ * Kakao Places keyword ranking for expanded MapLibre search (admin).
  *
  * DISTANCE+map-center bias turns destination queries like "전주 한옥마을" into
  * nearby franchise restaurants ("한옥마을 전주비빔밥 …"). Prefer ACCURACY for
  * multi-token / landmark-like queries and re-rank by name·category match.
+ *
+ * Gate: only when expanded MapLibre is active (admin force / e2e).
+ * General Kakao / native paths keep DISTANCE. To open to everyone later, set
+ * {@link DESTINATION_SEARCH_RANKING_REQUIRES_MAPLIBRE} to false (one flip).
  */
 
 export type KakaoPlaceHit = {
@@ -16,6 +20,20 @@ export type KakaoPlaceHit = {
   x?: string | number;
   [key: string]: unknown;
 };
+
+/**
+ * When true, destination ACCURACY ranking runs only on expanded MapLibre.
+ * Set to false to enable for all keyword-search callers (full public).
+ */
+export const DESTINATION_SEARCH_RANKING_REQUIRES_MAPLIBRE = true;
+
+/** Single flip point: MapLibre expanded today; all surfaces when flag is false. */
+export function shouldApplyDestinationSearchRanking(
+  isExpandedMapLibreActive: boolean,
+): boolean {
+  if (!DESTINATION_SEARCH_RANKING_REQUIRES_MAPLIBRE) return true;
+  return isExpandedMapLibreActive;
+}
 
 const LANDMARK_HINT =
   /(마을|시장|해수욕장|해변|공원|궁|타워|다리|역|사찰|박물관|미술관|성$|광장|폭포|섬|호수|온천|문화재|유적)/;
@@ -34,7 +52,6 @@ export function preferAccuracySort(query: string): boolean {
   if (!s) return false;
   if (/\s/.test(s) && s.length >= 4) return true;
   if (LANDMARK_HINT.test(s)) return true;
-  // City + place without space (전주한옥마을)
   if (s.length >= 6 && /(전주|강릉|부산|제주|경주|여수|속초|인천|대구|광주|대전)/.test(s)) {
     return true;
   }
@@ -46,10 +63,6 @@ function nameScore(queryNorm: string, placeName: string): number {
   if (!n || !queryNorm) return 0;
   if (n === queryNorm) return 100;
   if (n.includes(queryNorm) || queryNorm.includes(n)) return 80;
-  // Token overlap (전주 + 한옥마을)
-  const qTokens = queryNorm.length >= 4 ? [queryNorm] : [];
-  const rawTokens = queryNorm;
-  // Simple: shared substring length
   let best = 0;
   for (let len = Math.min(n.length, queryNorm.length); len >= 3; len--) {
     for (let i = 0; i <= queryNorm.length - len; i++) {
@@ -57,8 +70,6 @@ function nameScore(queryNorm: string, placeName: string): number {
       if (n.includes(sub)) best = Math.max(best, len);
     }
   }
-  void qTokens;
-  void rawTokens;
   return Math.min(70, best * 4);
 }
 
@@ -103,21 +114,20 @@ export function rankKakaoPlaceSearchResults<T extends KakaoPlaceHit>(
 
 /**
  * Build Kakao Places keywordSearch options.
- * Destination queries → ACCURACY (no DISTANCE). Everyday queries keep DISTANCE+bias.
+ * @param destinationRanking — true only for admin expanded MapLibre (see gate).
  */
 export function buildKakaoKeywordSearchOpts(
   kakaoMaps: { services?: { SortBy?: { DISTANCE?: unknown; ACCURACY?: unknown } } },
   query: string,
   bias: { lat: number; lng: number },
   LatLngCtor: new (lat: number, lng: number) => unknown,
+  destinationRanking = false,
 ): Record<string, unknown> {
   const SortBy = kakaoMaps.services?.SortBy;
   const location = new LatLngCtor(bias.lat, bias.lng);
-  if (preferAccuracySort(query)) {
+  if (destinationRanking && preferAccuracySort(query)) {
     const opts: Record<string, unknown> = {};
     if (SortBy?.ACCURACY != null) opts.sort = SortBy.ACCURACY;
-    // No location/DISTANCE — otherwise map-center bias floods results with
-    // nearby franchise name collisions (e.g. "한옥마을 전주비빔밥 …" in Seoul).
     void location;
     return opts;
   }

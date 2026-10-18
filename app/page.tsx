@@ -251,6 +251,7 @@ import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/M
 import {
   buildKakaoKeywordSearchOpts,
   rankKakaoPlaceSearchResults,
+  shouldApplyDestinationSearchRanking,
 } from "@/lib/mapSearchRank";
 import { MapResearchAreaButton } from "@/components/MapResearchAreaButton";
 import { Coachmark } from "@/components/Coachmark";
@@ -2911,12 +2912,14 @@ function HomePageContent() {
       }
 
       const ps = new window.kakao.maps.services.Places();
-      const keywordOpts = buildKakaoKeywordSearchOpts(
-        window.kakao.maps,
-        trimmed,
-        { lat: biasLat, lng: biasLng },
-        window.kakao.maps.LatLng,
-      );
+      // Native Kakao fullscreen: keep DISTANCE bias (general users). Destination
+      // ACCURACY ranking is MapLibre-expanded only — see mapSearchRank gate.
+      const bias = new window.kakao.maps.LatLng(biasLat, biasLng);
+      const SortBy = window.kakao.maps.services.SortBy;
+      const keywordOpts: Record<string, unknown> = { location: bias };
+      if (SortBy?.DISTANCE != null) {
+        keywordOpts.sort = SortBy.DISTANCE;
+      }
 
       await new Promise<void>((resolve) => {
         ps.keywordSearch(trimmed, (data: any[], st: string) => {
@@ -2936,8 +2939,7 @@ function HomePageContent() {
               }
 
               searchPinPlaceByIdRef.current.clear();
-              const ranked = rankKakaoPlaceSearchResults(trimmed, data);
-              const markers = ranked.slice(0, 15).flatMap((place, index) => {
+              const markers = data.slice(0, 15).flatMap((place, index) => {
                 const lat = Number(place.y);
                 const lng = Number(place.x);
                 if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
@@ -12251,12 +12253,13 @@ function HomePageContent() {
       return;
     }
     expandedSearchOpenDedupeRef.current = { t: now, key };
-    // Blur before camera — iOS WKWebView + open keyboard can swallow the first tap
-    // or stall WebGL camera updates until the keyboard finishes dismissing.
-    try {
-      expandedMapSearchInputRef.current?.blur();
-    } catch {
-      /* noop */
+    // MapLibre-only: blur before camera (iOS WKWebView + keyboard + WebGL).
+    if (isExpandedMapLibre(expandedMapRef.current)) {
+      try {
+        expandedMapSearchInputRef.current?.blur();
+      } catch {
+        /* noop */
+      }
     }
     devLog("[PindMap:expandedMap] open place card", source, place.place_name, { y: place.y, x: place.x });
     const expandedRef = placeRefFromKakaoPlace(place);
@@ -12439,9 +12442,15 @@ function HomePageContent() {
           pendingSearchCenterSyncRef.current = false;
           return;
         }
-        const ranked = rankKakaoPlaceSearchResults(trimmed, data ?? []);
+        const useDestRank = shouldApplyDestinationSearchRanking(
+          isExpandedMapLibre(expandedMapRef.current),
+        );
+        const ranked = useDestRank
+          ? rankKakaoPlaceSearchResults(trimmed, data ?? [])
+          : data ?? [];
         devLog("[PindMap:expandedMap] keywordSearch ok count=", ranked.length, {
           top: ranked.slice(0, 3).map((p) => p.place_name),
+          destRank: useDestRank,
         });
         clearSearchResultPins();
         addSearchResultPins(ranked, (place) => openExpandedSearchPlaceCard(place, "marker-keyword-click"));
@@ -12462,6 +12471,9 @@ function HomePageContent() {
           trimmed,
           { lat: center.getLat(), lng: center.getLng() },
           window.kakao.maps.LatLng,
+          shouldApplyDestinationSearchRanking(
+            isExpandedMapLibre(expandedMapRef.current),
+          ),
         );
         ps.keywordSearch(trimmed, applyKeywordSearchResults, keywordOpts);
       };
@@ -18459,6 +18471,7 @@ function HomePageContent() {
                           results={mapSearchResults}
                           userLocation={myLocationLatLngRef.current}
                           keyboardHeight={keyboardHeight}
+                          preferPointerSelect={useMapLibreExpandedChrome}
                           onSelect={(place) => {
                             // Focus pin + card + padded camera (see openExpandedSearchPlaceCard)
                             openExpandedSearchPlaceCard(place, "sheet-list-tap");

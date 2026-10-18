@@ -20,6 +20,11 @@ type Props = {
   onSelect: (place: MapSearchPlaceResult) => void;
   onClose: () => void;
   keyboardHeight?: number;
+  /**
+   * Admin MapLibre expanded only: select on pointerup so iOS keyboard dismiss
+   * does not swallow the first tap. Kakao expanded keeps click-only.
+   */
+  preferPointerSelect?: boolean;
 };
 
 function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -55,6 +60,7 @@ export function MapSearchResultsSheet({
   onSelect,
   onClose,
   keyboardHeight = 0,
+  preferPointerSelect = false,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [dragDelta, setDragDelta] = useState(0);
@@ -172,11 +178,14 @@ export function MapSearchResultsSheet({
               <button
                 type="button"
                 className="mapSearchResultsSheetItem"
-                // pointerup beats iOS keyboard-dismiss stealing the first tap; click covers a11y.
-                onPointerUp={(e) => {
-                  if (e.pointerType === "mouse" && e.button !== 0) return;
-                  selectPlace(place);
-                }}
+                onPointerUp={
+                  preferPointerSelect
+                    ? (e) => {
+                        if (e.pointerType === "mouse" && e.button !== 0) return;
+                        selectPlace(place);
+                      }
+                    : undefined
+                }
                 onClick={() => selectPlace(place)}
               >
                 <div className="mapSearchResultsSheetItemMain">
