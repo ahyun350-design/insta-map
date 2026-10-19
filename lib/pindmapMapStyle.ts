@@ -5,12 +5,18 @@
  * Preview-only extras: black, mono, dark (used by /map-preview).
  */
 
-import { koreaGuLabelsGeoJson } from "@/lib/koreaGuLabels";
+import {
+  KOREA_GU_LABELS,
+  koreaGuLabelsGeoJson,
+} from "@/lib/koreaGuLabels";
 import {
   KOREA_MAJOR_LABELS,
   koreaMajorLabelsGeoJson,
 } from "@/lib/koreaMajorLabels";
-import { koreaPlaceLabelsGeoJson } from "@/lib/koreaPlaceLabels";
+import {
+  KOREA_PLACE_LABELS,
+  koreaPlaceLabelsGeoJson,
+} from "@/lib/koreaPlaceLabels";
 import { KOREA_LANDMARK_NAME_BLOCKLIST } from "@/lib/mapSurface/koreaLandmarkNameBlocklist";
 import { labelNameBlocklistVariants } from "@/lib/mapSurface/labelNameDedup";
 import {
@@ -34,6 +40,25 @@ const OMT_NAME_BLOCKLIST: string[] = (() => {
     if (g.kind === "landmark" || g.kind === "mountain") {
       for (const v of labelNameBlocklistVariants(g.name)) names.add(v);
     }
+  }
+  return [...names];
+})();
+
+/**
+ * Hide admin_sigungu when the same display name already exists on korea gu/place
+ * overlays (gu/place always win; admin fills gaps only).
+ */
+const ADMIN_SIGUNGU_NAME_BLOCKLIST: string[] = (() => {
+  const names = new Set<string>();
+  for (const g of KOREA_GU_LABELS) {
+    const n = String(g.name || "").trim();
+    if (n) names.add(n);
+  }
+  for (const p of KOREA_PLACE_LABELS) {
+    const n = String(p.name || "").trim();
+    const full = String(p.full || "").trim();
+    if (n) names.add(n);
+    if (full) names.add(full);
   }
   return [...names];
 })();
@@ -3736,6 +3761,17 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       "source-layer": "admin_sigungu",
       minzoom: 10,
       maxzoom: 13,
+      // Drop names already covered by korea gu / si·gun place overlays.
+      filter: [
+        "!",
+        [
+          "match",
+          ["to-string", ["coalesce", ["get", "name"], ""]],
+          ADMIN_SIGUNGU_NAME_BLOCKLIST,
+          true,
+          false,
+        ],
+      ],
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
@@ -3819,6 +3855,19 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   appendLandmarkLayers(layers, theme, { kind: "priority" });
   // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)
   appendKoreaLandmarkGeoLayers(layers, theme);
+
+  // Seoul gu overlay must beat admin_sigungu (same zoom band z10–13).
+  // Later symbol layers win cross-layer collision in MapLibre.
+  const guPriorityIds = new Set([
+    "label_korea_gu_overlay",
+    "label_borough_ko",
+  ]);
+  const guPriorityLayers = layers.filter((l) => guPriorityIds.has(l.id));
+  if (guPriorityLayers.length) {
+    const rest = layers.filter((l) => !guPriorityIds.has(l.id));
+    layers.length = 0;
+    layers.push(...rest, ...guPriorityLayers);
+  }
 
   // Stations must paint after shops/anchors/korea so high sort-key actually wins
   // cross-layer collision (later layers beat earlier ones in MapLibre).
