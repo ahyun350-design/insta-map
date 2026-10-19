@@ -3851,13 +3851,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     });
   }
 
-  // School / civic / hospital — above large apt
-  appendLandmarkLayers(layers, theme, { kind: "priority" });
-  // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)
-  appendKoreaLandmarkGeoLayers(layers, theme);
-
-  // Seoul gu overlay must beat admin_sigungu (same zoom band z10–13).
-  // Later symbol layers win cross-layer collision in MapLibre.
+  // Gu/borough overlays must beat admin_sigungu (same z10–13 band) but still
+  // yield to priority landmarks / korea tier1 / stations (those paint later).
   const guPriorityIds = new Set([
     "label_korea_gu_overlay",
     "label_borough_ko",
@@ -3868,6 +3863,11 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     layers.length = 0;
     layers.push(...rest, ...guPriorityLayers);
   }
+
+  // School / civic / hospital — above large apt + admin + gu
+  appendLandmarkLayers(layers, theme, { kind: "priority" });
+  // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)
+  appendKoreaLandmarkGeoLayers(layers, theme);
 
   // Stations must paint after shops/anchors/korea so high sort-key actually wins
   // cross-layer collision (later layers beat earlier ones in MapLibre).
