@@ -49,6 +49,28 @@ export {
   type MapGlSurface,
 } from "./mapGlTelemetry";
 export {
+  MAP_GL_CONFIG_KEY,
+  MAP_GL_KILL_FETCH_TIMEOUT_MS,
+  getMapGlRemoteEnabledCached,
+  isMapGlRemoteAllowed,
+  refreshMapGlRemoteKill,
+  setMapGlRemoteEnabledForTests,
+  resetMapGlKillSwitchForTests,
+} from "./mapGlKillSwitch";
+export {
+  MAP_GL_AUTO_OFF_MS,
+  MAP_GL_AUTO_OFF_FALLBACK_THRESHOLD,
+  activateMapGlAutoOffForTests,
+  clearMapGlAutoOff,
+  getMapGlAutoOffUntil,
+  getMapGlFallbackCountForAutoOff,
+  isMapGlAutoOffActive,
+  noteMapGlFallbackForAutoOff,
+  noteMapGlWebGlRecoverFail,
+  resetMapGlAutoOffForTests,
+  type MapGlAutoOffCode,
+} from "./mapGlAutoOff";
+export {
   SELF_TILES_STORAGE_KEY,
   SELF_GLYPHS_URL,
   applyOfmPlanetTilesToMap,

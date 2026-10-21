@@ -2,6 +2,8 @@ import {
   type AdminMapGlOverride,
   shouldUseMapLibre,
 } from "./rollout";
+import { isMapGlAutoOffActive } from "./mapGlAutoOff";
+import { isMapGlRemoteAllowed } from "./mapGlKillSwitch";
 
 export const EXPANDED_MAPLIBRE_STORAGE_KEY = "pindmap_admin_expanded_maplibre";
 
@@ -69,11 +71,18 @@ export function isE2eForceExpandedMapLibre(): boolean {
   }
 }
 
-/** Expanded MapLibre: e2e force > session fallback > admin override > rollout. */
+/**
+ * Expanded MapLibre gate.
+ * Remote kill / unread / auto-off → Kakao (incl. admin force).
+ * E2E force still requires remote allow (set __PINDMAP_E2E_MAP_GL_REMOTE__=true).
+ * Then: e2e force > session fallback > admin override > rollout.
+ */
 export function shouldUseExpandedMapLibre(
   isAdmin: boolean,
   userId?: string | null,
 ): boolean {
+  if (isMapGlAutoOffActive()) return false;
+  if (!isMapGlRemoteAllowed()) return false;
   if (isE2eForceExpandedMapLibre()) return true;
   return shouldUseMapLibre({
     isAdmin,

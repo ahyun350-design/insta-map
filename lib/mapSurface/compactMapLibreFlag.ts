@@ -2,6 +2,8 @@ import {
   type AdminMapGlOverride,
   shouldUseMapLibre,
 } from "./rollout";
+import { isMapGlAutoOffActive } from "./mapGlAutoOff";
+import { isMapGlRemoteAllowed } from "./mapGlKillSwitch";
 
 export const COMPACT_MAPLIBRE_STORAGE_KEY = "pindmap_admin_compact_maplibre";
 
@@ -54,11 +56,17 @@ export function writeCompactMapLibreFlag(enabled: boolean): void {
   writeCompactMapLibreOverride(enabled ? "force_maplibre" : "force_kakao");
 }
 
-/** Compact MapLibre: session fallback > admin override > rollout. */
+/**
+ * Compact MapLibre gate.
+ * Remote kill / unread / auto-off → Kakao (incl. admin force).
+ * Then: session fallback > admin override > rollout.
+ */
 export function shouldUseCompactMapLibre(
   isAdmin: boolean,
   userId?: string | null,
 ): boolean {
+  if (isMapGlAutoOffActive()) return false;
+  if (!isMapGlRemoteAllowed()) return false;
   return shouldUseMapLibre({
     isAdmin,
     userId,

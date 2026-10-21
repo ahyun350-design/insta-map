@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { track } from "@/lib/track";
+import { noteMapGlFallbackForAutoOff } from "./mapGlAutoOff";
 
 export type MapGlSurface = "compact" | "expanded" | "public_list";
 export type MapGlFallbackReason =
@@ -45,11 +46,12 @@ export function trackMapGlReady(surface: MapGlSurface, ms: number): void {
   track("map_gl_ready", { surface, ms: safeMs(ms) });
 }
 
-/** Session-once: map_gl_fallback { surface, reason } — no coords/addresses. */
+/** Session-once telemetry; every call counts toward device auto-off. */
 export function trackMapGlFallback(
   surface: MapGlSurface,
   reason: MapGlFallbackReason,
 ): void {
+  noteMapGlFallbackForAutoOff();
   if (fallbackFired.has(surface)) return;
   fallbackFired.add(surface);
   track("map_gl_fallback", { surface, reason });
