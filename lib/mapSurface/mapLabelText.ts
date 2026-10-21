@@ -10,9 +10,11 @@ export const KO_TEXT_RAW: unknown = [
   ["get", "name"],
 ];
 
+/** Prefer Korean (name:ko / nonlatin) so Latin-only name is last resort. */
 export const SHOP_TEXT_RAW: unknown = [
   "coalesce",
   ["get", "name:ko"],
+  ["get", "name:nonlatin"],
   ["get", "name"],
 ];
 
