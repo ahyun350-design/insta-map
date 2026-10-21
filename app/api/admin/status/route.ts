@@ -15,6 +15,11 @@ import {
   type FailCodeTopEntry,
   type PipelineWarn,
 } from "./_pipelineWarn";
+import {
+  computeMapGlStatusMetrics,
+  emptyMapGlWindow,
+  type MapGlStatusMetrics,
+} from "./_mapGlMetrics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +54,8 @@ type AdminStatusBody = {
   pipelineWarn?: PipelineWarn;
   /** Recent failure reason top-3 (content + system), for admin panel line */
   recentFailTop3?: FailCodeTopEntry[];
+  /** MapLibre timing / fallback / auto-off windows */
+  mapGl?: MapGlStatusMetrics;
   timings?: Record<string, number>;
   cached?: boolean;
 };
@@ -135,6 +142,38 @@ async function loadPipelineWarn(
       3,
     ),
   };
+}
+
+async function loadMapGlMetrics(
+  admin: ReturnType<typeof getSupabaseAdmin>,
+): Promise<MapGlStatusMetrics> {
+  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const events = ["map_gl_timing", "map_gl_fallback", "map_gl_auto_off"];
+  try {
+    const { data } = await admin
+      .from("user_events")
+      .select("event,meta,user_id,created_at")
+      .in("event", events)
+      .gte("created_at", since7d)
+      .order("created_at", { ascending: false })
+      .limit(4000);
+    const rows7d = (data ?? []) as Array<{
+      event: string;
+      meta: unknown;
+      user_id?: string | null;
+      created_at?: string | null;
+    }>;
+    const cut = new Date(since24h).getTime();
+    const rows24h = rows7d.filter((r) => {
+      const t = r.created_at ? Date.parse(r.created_at) : NaN;
+      return Number.isFinite(t) && t >= cut;
+    });
+    return computeMapGlStatusMetrics({ rows24h, rows7d });
+  } catch (e) {
+    console.error("[admin/status] mapGl metrics", e);
+    return { last24h: emptyMapGlWindow(), last7d: emptyMapGlWindow() };
+  }
 }
 
 function normalizeRpcPayload(raw: unknown): AdminStatusBody {
@@ -282,7 +321,15 @@ export async function GET(req: Request) {
     const tWarn = Date.now();
     const { pipelineWarn, recentFailTop3 } = await loadPipelineWarn(admin);
     timings.pipeline_warn_ms = Date.now() - tWarn;
-    const withWarn: AdminStatusBody = { ...body, pipelineWarn, recentFailTop3 };
+    const tMapGl = Date.now();
+    const mapGl = await loadMapGlMetrics(admin);
+    timings.map_gl_ms = Date.now() - tMapGl;
+    const withWarn: AdminStatusBody = {
+      ...body,
+      pipelineWarn,
+      recentFailTop3,
+      mapGl,
+    };
     cache = { at: Date.now(), body: withWarn };
     timings.total_ms = Date.now() - t0;
 

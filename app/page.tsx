@@ -146,6 +146,22 @@ type AdminStatusPayload = {
     reason: string | null;
   };
   recentFailTop3?: Array<{ code: string; count: number }>;
+  mapGl?: {
+    last24h: {
+      timingMedianFirstVisibleMs: number | null;
+      timingP90FirstVisibleMs: number | null;
+      fallbackCount: number;
+      fallbackTop3: Array<{ code: string; count: number }>;
+      autoOffDeviceCount: number;
+    };
+    last7d: {
+      timingMedianFirstVisibleMs: number | null;
+      timingP90FirstVisibleMs: number | null;
+      fallbackCount: number;
+      fallbackTop3: Array<{ code: string; count: number }>;
+      autoOffDeviceCount: number;
+    };
+  };
 };
 
 function formatAdminHoursAgo(iso: string | null): string {
@@ -299,6 +315,15 @@ import {
   liveMapGlContextCount,
   trackMapGlFallback,
   trackMapGlRecovered,
+  refreshMapGlRemoteKill,
+  getMapGlRemoteEnabledCached,
+  setMapGlRemoteEnabledForTests,
+  isMapGlRemoteAllowed,
+  isMapGlAutoOffActive,
+  noteMapGlFallbackForAutoOff,
+  noteMapGlWebGlRecoverFail,
+  resetMapGlAutoOffForTests,
+  activateMapGlAutoOffForTests,
   prefetchAdminMapGlAssets,
   prefetchTilesForSearchResults,
   prefetchZ14Around,
@@ -1602,6 +1627,37 @@ function HomePageContent() {
     void hydrateGeocodeCache();
   }, []);
 
+  // E2E / admin diagnostics for remote kill + auto-off gates.
+  useEffect(() => {
+    const w = window as unknown as {
+      __PINDMAP_MAP_GL_GATE__?: {
+        isRemoteAllowed: () => boolean;
+        isAutoOff: () => boolean;
+        shouldCompact: (isAdmin: boolean, userId?: string | null) => boolean;
+        shouldExpanded: (isAdmin: boolean, userId?: string | null) => boolean;
+        noteFallback: () => void;
+        noteWebGlRecoverFail: () => void;
+        resetAutoOff: () => void;
+        activateAutoOff: () => void;
+        setRemoteForTests: (v: boolean | null) => void;
+      };
+    };
+    w.__PINDMAP_MAP_GL_GATE__ = {
+      isRemoteAllowed: () => isMapGlRemoteAllowed(),
+      isAutoOff: () => isMapGlAutoOffActive(),
+      shouldCompact: (isAdmin, userId) => shouldUseCompactMapLibre(isAdmin, userId),
+      shouldExpanded: (isAdmin, userId) => shouldUseExpandedMapLibre(isAdmin, userId),
+      noteFallback: () => noteMapGlFallbackForAutoOff(),
+      noteWebGlRecoverFail: () => noteMapGlWebGlRecoverFail(),
+      resetAutoOff: () => resetMapGlAutoOffForTests(),
+      activateAutoOff: () => activateMapGlAutoOffForTests(),
+      setRemoteForTests: (v) => setMapGlRemoteEnabledForTests(v),
+    };
+    return () => {
+      delete w.__PINDMAP_MAP_GL_GATE__;
+    };
+  }, []);
+
   useEffect(() => {
     if (user) authStallRetryRef.current = 0;
   }, [user]);
@@ -1744,6 +1800,11 @@ function HomePageContent() {
   const [mypageFollowingCount, setMypageFollowingCount] = useState(0);
   const [adminStatus, setAdminStatus] = useState<AdminStatusPayload | null>(null);
   const [adminStatusLoading, setAdminStatusLoading] = useState(false);
+  /** Remote map_gl_enabled — null unread/failed, drives kill switch UI. */
+  const [mapGlRemoteEnabled, setMapGlRemoteEnabled] = useState<boolean | null>(
+    () => getMapGlRemoteEnabledCached(),
+  );
+  const [mapGlRemoteBusy, setMapGlRemoteBusy] = useState(false);
   const [adminLastCleanupAt, setAdminLastCleanupAt] = useState<string | null>(null);
   /** 관리자 상태 카드 접이 — localStorage 기본 접힘 */
   const [adminCardOpen, setAdminCardOpen] = useState(false);
@@ -10250,6 +10311,45 @@ function HomePageContent() {
     tryRestoreExtractReview,
   ]);
 
+  // Remote MapLibre kill switch: once at boot + on foreground / visibility.
+  useEffect(() => {
+    if (!sessionChecked) return;
+    let cancelled = false;
+    let nativeHandle: { remove: () => Promise<void> } | undefined;
+
+    const apply = async () => {
+      await refreshMapGlRemoteKill();
+      if (cancelled) return;
+      setMapGlRemoteEnabled(getMapGlRemoteEnabledCached());
+    };
+
+    void apply();
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void apply();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    if (Capacitor.isNativePlatform()) {
+      void App.addListener("appStateChange", (state) => {
+        if (cancelled || !state.isActive) return;
+        void apply();
+      }).then((h) => {
+        if (cancelled) {
+          void h.remove();
+          return;
+        }
+        nativeHandle = h;
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      void nativeHandle?.remove();
+    };
+  }, [sessionChecked]);
+
   // One-shot: confirm native plugin is registered (Safari Web Inspector).
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
@@ -11393,6 +11493,7 @@ function HomePageContent() {
         }
         console.warn("[PindMap:maplibre] compact contextlost → kakao (remount exhausted)");
         trackMapGlFallback("compact", "webglcontextlost");
+        noteMapGlWebGlRecoverFail();
         setSessionForceKakaoCompact(true);
         setCompactMapIsMapLibre(false);
         if (!compactMapLibreFallbackToastedRef.current) {
@@ -13482,6 +13583,7 @@ function HomePageContent() {
               "[PindMap:maplibre] expanded contextlost → defer Kakao until next open",
             );
             trackMapGlFallback("expanded", "webglcontextlost");
+            noteMapGlWebGlRecoverFail();
             deferredExpandedForceKakaoRef.current = true;
             try {
               const dbg = (
@@ -19350,6 +19452,51 @@ function HomePageContent() {
                                     formatAdminHoursAgo(adminLastCleanupAt),
                                     false,
                                   )}
+                                  {(() => {
+                                    const mg = adminStatus.mapGl;
+                                    const fmtMs = (v: number | null | undefined) =>
+                                      v == null ? "—" : `${v}ms`;
+                                    const fmtTop = (
+                                      top: Array<{ code: string; count: number }> | undefined,
+                                    ) =>
+                                      !top || top.length === 0
+                                        ? "없음"
+                                        : top.map((e) => `${e.code}(${e.count})`).join(" · ");
+                                    return (
+                                      <>
+                                        {row(
+                                          "MapLibre 24h 첫표시",
+                                          `중앙 ${fmtMs(mg?.last24h.timingMedianFirstVisibleMs)} / p90 ${fmtMs(mg?.last24h.timingP90FirstVisibleMs)}`,
+                                          false,
+                                        )}
+                                        {row(
+                                          "MapLibre 24h fallback",
+                                          `${mg?.last24h.fallbackCount ?? 0}건 · ${fmtTop(mg?.last24h.fallbackTop3)}`,
+                                          (mg?.last24h.fallbackCount ?? 0) >= 3,
+                                        )}
+                                        {row(
+                                          "MapLibre 24h 자동꺼짐",
+                                          `${mg?.last24h.autoOffDeviceCount ?? 0}기기`,
+                                          (mg?.last24h.autoOffDeviceCount ?? 0) >= 1,
+                                        )}
+                                        {row(
+                                          "MapLibre 7d 첫표시",
+                                          `중앙 ${fmtMs(mg?.last7d.timingMedianFirstVisibleMs)} / p90 ${fmtMs(mg?.last7d.timingP90FirstVisibleMs)}`,
+                                          false,
+                                        )}
+                                        {row(
+                                          "MapLibre 7d fallback",
+                                          `${mg?.last7d.fallbackCount ?? 0}건 · ${fmtTop(mg?.last7d.fallbackTop3)}`,
+                                          false,
+                                        )}
+                                        {row(
+                                          "MapLibre 7d 자동꺼짐",
+                                          `${mg?.last7d.autoOffDeviceCount ?? 0}기기`,
+                                          false,
+                                        )}
+                                      </>
+                                    );
+                                  })()}
                                   <div
                                     style={{
                                       marginTop: 10,
@@ -20294,6 +20441,63 @@ function HomePageContent() {
               >
                 로그아웃
               </button>
+              {user?.id === ADMIN_USER_ID ? (
+                <button
+                  type="button"
+                  className="settingItem"
+                  data-testid="admin-map-gl-kill-toggle"
+                  style={{ width: "100%", padding: "16px 20px", color: "#1a2a7a" }}
+                  disabled={mapGlRemoteBusy}
+                  onClick={() => {
+                    void (async () => {
+                      const next = mapGlRemoteEnabled !== true;
+                      setMapGlRemoteBusy(true);
+                      try {
+                        const token = await getAccessToken();
+                        if (!token) {
+                          showToast("로그인 후 이용해주세요", "info");
+                          return;
+                        }
+                        const res = await fetch("/api/admin/map-gl-config", {
+                          method: "PUT",
+                          headers: {
+                            Authorization: `Bearer ${token}`,
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({ enabled: next }),
+                        });
+                        if (!res.ok) {
+                          showToast("원격 지도 설정을 저장하지 못했어요", "error");
+                          return;
+                        }
+                        setMapGlRemoteEnabledForTests(next);
+                        setMapGlRemoteEnabled(next);
+                        setShowMypageSettingsSheet(false);
+                        tearDownCompactMapForRemount();
+                        setCompactMapRemountKey((k) => k + 1);
+                        setExpandedMapRemountKey((k) => k + 1);
+                        showToast(
+                          next
+                            ? "원격 MapLibre · ON (관리자 테스트 가능)"
+                            : "원격 MapLibre · OFF (전원 Kakao)",
+                          "info",
+                        );
+                      } catch {
+                        showToast("원격 지도 설정을 저장하지 못했어요", "error");
+                      } finally {
+                        setMapGlRemoteBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  원격 MapLibre(전원) ·{" "}
+                  {mapGlRemoteEnabled === true
+                    ? "ON"
+                    : mapGlRemoteEnabled === false
+                      ? "OFF"
+                      : "미확인→Kakao"}
+                </button>
+              ) : null}
               {user?.id === ADMIN_USER_ID ? (
                 <button
                   type="button"

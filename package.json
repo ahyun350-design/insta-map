@@ -18,7 +18,8 @@
     "measure:detail": "npx tsx e2e/measure-detail-first-pixel.ts",
     "generate:subway-overlay": "npx tsx scripts/generate-subway-overlay.ts",
     "test:kakao-search-diag": "npx tsx --test lib/kakaoSearchDiag.test.ts",
-    "test:extract-job-writes": "npx tsx --test app/api/extract/_jobWrites.test.ts"
+    "test:extract-job-writes": "npx tsx --test app/api/extract/_jobWrites.test.ts",
+    "test:map-gl-kill": "npx tsx --test lib/mapSurface/mapGlKillSwitch.test.ts app/api/admin/status/_mapGlMetrics.test.ts"
   },
   "dependencies": {
     "@capacitor-firebase/messaging": "^8.2.0",

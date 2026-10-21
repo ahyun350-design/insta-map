@@ -11,6 +11,11 @@ import { getAppStoreUrl, getTrackDomain } from "@/lib/pindmapLinks";
 import { parsePindmapMapThemeId } from "@/lib/pindmapMapStyle";
 import { readCompactMapLibreOverride } from "@/lib/mapSurface/compactMapLibreFlag";
 import { readExpandedMapLibreOverride } from "@/lib/mapSurface/expandedMapLibreFlag";
+import { isMapGlAutoOffActive } from "@/lib/mapSurface/mapGlAutoOff";
+import {
+  isMapGlRemoteAllowed,
+  refreshMapGlRemoteKill,
+} from "@/lib/mapSurface/mapGlKillSwitch";
 import { trackMapGlFallback } from "@/lib/mapSurface/mapGlTelemetry";
 import { trackPublicListEvent } from "@/lib/track";
 import PindmapGlMap from "@/components/PindmapGlMap";
@@ -78,10 +83,11 @@ function loadKakaoMapsSdk(): Promise<NonNullable<(typeof window)["kakao"]>> {
 
 /**
  * Default Kakao for public share pages.
- * MapLibre only when ?map=gl, or admin force_maplibre localStorage override.
+ * MapLibre only when remote kill allows + (?map=gl or admin force_maplibre).
  */
 function readMapEngine(): "gl" | "kakao" {
   if (typeof window === "undefined") return "kakao";
+  if (isMapGlAutoOffActive() || !isMapGlRemoteAllowed()) return "kakao";
   const map = new URLSearchParams(window.location.search).get("map");
   if (map === "gl") return "gl";
   if (map === "kakao") return "kakao";
@@ -152,9 +158,17 @@ export function PublicListShareView({ list, places, isIOS }: Props) {
   );
 
   useEffect(() => {
-    setEngine(readMapEngine());
-    setTheme(readTheme());
-    setQueryReady(true);
+    let cancelled = false;
+    void (async () => {
+      await refreshMapGlRemoteKill();
+      if (cancelled) return;
+      setEngine(readMapEngine());
+      setTheme(readTheme());
+      setQueryReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
