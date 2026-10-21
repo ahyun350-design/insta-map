@@ -374,11 +374,12 @@ function ensureLayers(map: MlMap, theme: ThemeId): void {
         "text-field": ["to-string", ["get", "ref"]],
         "text-font": ["Noto Sans Regular"],
         "text-size": 10,
-        // Exit refs are tiny; don't crowd out shop/station names
-        "text-allow-overlap": true,
-        "text-ignore-placement": true,
+        // Yield to shops/stations; no overlap stacking
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
         "text-optional": true,
         "text-padding": 0.5,
+        "symbol-sort-key": 980,
         visibility: "visible",
       },
       paint: {

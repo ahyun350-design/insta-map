@@ -157,8 +157,8 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
     background: "#F2F2F2",
     land: "#F2F2F2",
     water: "#BFDDF2",
-    // Slightly deeper green so parks/mountains read at z11–12 (still paper-cool)
-    park: "#C5DDB8",
+    // Deeper park green so urban parks read clearly on cool-gray land
+    park: "#B8D4A8",
     building: "#E8E8E8",
     showBuildings: true,
     road: "#FFFFFF",
@@ -1276,7 +1276,7 @@ function appendSanggaShopLayers(
   }
 }
 
-/** Bus stops: small icon only (no name) at z17+. */
+/** Bus stops: small icon + Korean name at z17+ (below shops). */
 function appendBusStopLayers(layers: AnyLayer[]): void {
   layers.push({
     id: "bus_stop_icon",
@@ -1288,21 +1288,110 @@ function appendBusStopLayers(layers: AnyLayer[]): void {
       "all",
       ["==", ["get", "class"], "bus"],
       ["==", ["get", "subclass"], "bus_stop"],
+      ["has", "name"],
     ],
     layout: {
       visibility: "visible",
       "icon-image": "pind-poi-bus",
-      "icon-size": 0.75,
-      "icon-optional": false,
+      "icon-size": 0.7,
+      "icon-optional": true,
       "icon-allow-overlap": false,
       "icon-ignore-placement": false,
       "icon-padding": 0.5,
-      "symbol-sort-key": 50,
+      "text-field": KO_TEXT,
+      "text-font": ["Noto Sans Regular"],
+      "text-size": 10.5,
+      "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+      "text-radial-offset": 0.95,
+      "text-max-width": 6,
+      "text-padding": 1.2,
+      "text-optional": true,
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
+      // Higher than shop sort-keys (~400–850) → shops win collision
+      "symbol-sort-key": 960,
     },
     paint: {
-      "icon-opacity": 0.85,
+      "icon-opacity": 0.82,
+      "text-color": "#7A8088",
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.2,
+      "text-opacity": 0.88,
     },
   });
+}
+
+/** Large park / garden names from OMT poi (Liberty has no park_label layer). */
+function appendParkNameLayers(
+  layers: AnyLayer[],
+  theme: MapPreviewTheme,
+): void {
+  const color =
+    theme.id === "neon" ? "#7AB8A0" : theme.id === "white" ? "#5A7A58" : "#3F6B3A";
+  const bands: Array<{
+    id: string;
+    minzoom: number;
+    maxzoom?: number;
+    rankMax: number;
+  }> = [
+    { id: "park_name_label_z12", minzoom: 12, maxzoom: 14, rankMax: 12 },
+    { id: "park_name_label_z14", minzoom: 14, maxzoom: 16, rankMax: 30 },
+    { id: "park_name_label_z16", minzoom: 16, rankMax: 60 },
+  ];
+  for (const band of bands) {
+    layers.push({
+      id: band.id,
+      type: "symbol",
+      source: "openmaptiles",
+      "source-layer": "poi",
+      minzoom: band.minzoom,
+      ...(band.maxzoom != null ? { maxzoom: band.maxzoom } : {}),
+      filter: [
+        "all",
+        ["==", ["get", "class"], "park"],
+        ["has", "name"],
+        [
+          "<=",
+          ["to-number", ["coalesce", ["get", "rank"], 999]],
+          band.rankMax,
+        ],
+      ],
+      layout: {
+        visibility: "visible",
+        "text-field": KO_TEXT,
+        "text-font": ["Noto Sans Regular"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          12,
+          12,
+          14,
+          13.5,
+          16,
+          14.5,
+        ],
+        "text-max-width": 8,
+        "text-padding": PLACE_TEXT_PADDING,
+        "text-variable-anchor": [...ADMIN_VARIABLE_ANCHOR],
+        "text-optional": true,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        // Below landmarks/tour (~220), above shops (~850)
+        "symbol-sort-key": [
+          "+",
+          560,
+          ["to-number", ["coalesce", ["get", "rank"], 50]],
+        ],
+      },
+      paint: {
+        "text-color": color,
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.4,
+        "text-opacity": 0.92,
+      },
+    });
+  }
 }
 type AnyLayer = {
   id: string;
@@ -1882,13 +1971,14 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     }
 
     const useGuideRoads = theme.id === "paper" || theme.id === "white" || theme.id === "neon";
+    // Stronger forest green so Gangwon/mountain belts read vs flat gray land.
     const woodFill =
       theme.id === "white"
-        ? "#F5F7F3"
+        ? "#E8F0E4"
         : theme.id === "neon"
           ? "#0A2424"
           : theme.id === "paper"
-            ? "#D2E0C8"
+            ? "#BFD4AE"
             : "#E8F0E0";
     const buildingOutline =
       theme.id === "white"
@@ -1988,13 +2078,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             ["linear"],
             ["zoom"],
             5,
-            0.2,
-            8,
             0.35,
-            9,
+            8,
             0.55,
+            9,
+            0.72,
             11,
-            0.7,
+            0.85,
+            13,
+            0.9,
           ]);
         } else if (layer.id === "park" || layer.id.includes("grass")) {
           paintSet(layer, "fill-color", theme.park);
@@ -2003,15 +2095,15 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             ["linear"],
             ["zoom"],
             5,
-            0.28,
+            0.35,
             8,
-            0.45,
+            0.55,
             9,
-            0.82,
+            0.85,
             11,
-            0.92,
+            0.94,
             12,
-            0.95,
+            0.96,
           ]);
         } else if (layer.id.includes("sand") || layer.id.includes("ice")) {
           paintSet(layer, "fill-color", theme.land);
@@ -2115,20 +2207,28 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         continue;
       }
       if (layer.type === "line") {
-        // Far: thin gray solid (z12+). Overlay paints coloured subway on top from z12/14.
-        layer.minzoom = Math.max(layer.minzoom ?? 0, 12);
-        paintSet(layer, "line-color", theme.rail);
-        paintSet(layer, "line-opacity", theme.id === "neon" ? 0.45 : 0.55);
+        // Far: thin solid (z11+). OSM colour when present; else gray.
+        // Seoul subway colours also painted by subway_overlay on top.
+        layer.minzoom = Math.max(layer.minzoom ?? 0, 11);
+        paintSet(layer, "line-color", [
+          "coalesce",
+          ["get", "colour"],
+          ["get", "color"],
+          theme.rail,
+        ]);
+        paintSet(layer, "line-opacity", theme.id === "neon" ? 0.5 : 0.62);
         paintSet(layer, "line-width", [
           "interpolate",
           ["linear"],
           ["zoom"],
+          11,
+          0.7,
           12,
-          0.8,
+          0.9,
           14,
-          1.1,
+          1.2,
           16,
-          1.4,
+          1.6,
         ]);
         if (layer.paint) {
           delete layer.paint["line-dasharray"];
@@ -2165,19 +2265,33 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       paintSet(layer, "text-halo-width", 1.5);
 
       if (layer.id.startsWith("water") && layer.type === "symbol") {
-        // Ocean/sea names early; stream/line names later so they don't double place names
-        const isLineWater =
-          /waterway|line/i.test(layer.id) && !/point/i.test(layer.id);
-        layer.minzoom = isLineWater ? 14 : 5;
-        paintSet(layer, "text-color", theme.id === "white" ? "#6A8FA8" : theme.id === "neon" ? "#8AA0D8" : "#4A8BB8");
+        // Ocean/lake points early; river line labels from z11 (한강·소양강…).
+        const isWaterwayLine = layer.id === "waterway_line_label";
+        const isWaterNameLine = layer.id === "water_name_line_label";
+        const isLineWater = isWaterwayLine || isWaterNameLine;
+        layer.minzoom = isWaterwayLine ? 11 : isWaterNameLine ? 10 : 5;
+        if (layer.layout) {
+          layer.layout["text-field"] = KO_TEXT;
+          layer.layout["text-allow-overlap"] = false;
+          layer.layout["text-optional"] = true;
+        }
+        paintSet(
+          layer,
+          "text-color",
+          theme.id === "white"
+            ? "#5A8AA8"
+            : theme.id === "neon"
+              ? "#8AA0D8"
+              : "#3A7AA8",
+        );
         paintSet(layer, "text-opacity", [
           "interpolate",
           ["linear"],
           ["zoom"],
           5,
-          0.55,
+          0.6,
           8,
-          0.85,
+          0.88,
           11,
           1,
         ]);
@@ -2185,7 +2299,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         paintSet(layer, "text-halo-width", 1.5);
         if (layer.layout) {
           layer.layout["text-font"] = ["Noto Sans Italic"];
-          layer.layout["text-letter-spacing"] = 0.12;
+          layer.layout["text-letter-spacing"] = 0.1;
           if (layer.id === "water_name_point_label") {
             layer.layout["text-size"] = [
               "interpolate",
@@ -2200,13 +2314,26 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
               13,
               16,
             ];
-          } else {
-            // Major rivers (한강) via point labels; line labels from z14
+          } else if (isLineWater) {
+            layer.layout["symbol-placement"] = "line";
             layer.layout["text-size"] = [
               "interpolate",
               ["linear"],
               ["zoom"],
+              11,
+              11,
+              13,
+              12.5,
+              15,
               14,
+            ];
+            layer.layout["symbol-sort-key"] = 1600;
+          } else {
+            layer.layout["text-size"] = [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              12,
               12,
               16,
               14,
@@ -3275,7 +3402,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         visibility: "visible",
       },
       paint: {
-        "text-color": theme.id === "neon" ? "#8A9278" : "#4A5A48",
+        "text-color": theme.id === "neon" ? "#A09078" : "#6A5A48",
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.5,
       },
@@ -3486,17 +3613,19 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   if (boundAnchor >= 0) layers.splice(boundAnchor + 1, 0, ...boundaryLayers);
   else layers.push(...boundaryLayers);
 
-  // Mountain peaks (OMT) — zoom-split rank (no ["zoom"] in filter)
+  // Mountain peaks (OMT) — major high peaks from z10; general from z12.
   const peakBands: Array<{
     id: string;
     minzoom: number;
     maxzoom?: number;
     rankMax: number;
+    eleMin: number;
   }> = [
-    { id: "mountain_peak_label", minzoom: 12, maxzoom: 13, rankMax: 1 },
-    { id: "mountain_peak_label_z13", minzoom: 13, maxzoom: 14, rankMax: 2 },
-    { id: "mountain_peak_label_z14", minzoom: 14, maxzoom: 15, rankMax: 4 },
-    { id: "mountain_peak_label_z15", minzoom: 15, rankMax: 8 },
+    { id: "mountain_peak_label_z10", minzoom: 10, maxzoom: 12, rankMax: 2, eleMin: 800 },
+    { id: "mountain_peak_label", minzoom: 12, maxzoom: 13, rankMax: 3, eleMin: 250 },
+    { id: "mountain_peak_label_z13", minzoom: 13, maxzoom: 14, rankMax: 5, eleMin: 200 },
+    { id: "mountain_peak_label_z14", minzoom: 14, maxzoom: 15, rankMax: 8, eleMin: 150 },
+    { id: "mountain_peak_label_z15", minzoom: 15, rankMax: 16, eleMin: 100 },
   ];
   for (const band of peakBands) {
     layers.push({
@@ -3509,7 +3638,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
       filter: [
         "all",
         ["has", "name"],
-        [">=", ["to-number", ["coalesce", ["get", "ele"], 0]], 300],
+        [">=", ["to-number", ["coalesce", ["get", "ele"], 0]], band.eleMin],
         [
           "<=",
           ["to-number", ["coalesce", ["get", "rank"], 999]],
@@ -3537,7 +3666,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           ["linear"],
           ["zoom"],
           10,
-          11,
+          11.5,
           12,
           12.5,
           14,
@@ -3549,9 +3678,9 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
           ["linear"],
           ["zoom"],
           10,
-          10,
+          8,
           12,
-          6,
+          5,
           14,
           3,
         ],
@@ -3564,7 +3693,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         ],
       },
       paint: {
-        "text-color": theme.id === "neon" ? "#8A9278" : "#4A5A48",
+        // Kakao-like brown-green for peaks
+        "text-color": theme.id === "neon" ? "#A09078" : "#6A5A48",
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.4,
       },
@@ -3697,6 +3827,7 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   appendSanggaShopLayers(layers, theme, style);
   // Shop/facility names (z14+) below landmarks; adapter pins added later on top
   appendShopPoiLayers(layers, theme);
+  appendParkNameLayers(layers, theme);
   appendBusStopLayers(layers);
 
   // Parks / culture / post — after shops, before large apt (large apt may displace these)
