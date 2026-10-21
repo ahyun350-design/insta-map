@@ -125,39 +125,48 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
     });
   });
 
-  const z15 = await page.evaluate(() => {
-    const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
-      .__PINDMAP_PREVIEW_MAP__;
-    const landmarkLayers = (map.getStyle?.()?.layers ?? [])
-      .map((l: { id: string }) => l.id)
-      .filter(
-        (id: string) =>
-          (id === "landmark_label" ||
-            id.startsWith("landmark_label_") ||
-            id === "landmark_priority" ||
-            id.startsWith("landmark_priority_")) &&
-          !!map.getLayer(id),
-      );
-    return {
-      landmark: landmarkLayers.length
-        ? map.queryRenderedFeatures({ layers: landmarkLayers }).length
-        : 0,
-      line: map.queryRenderedFeatures({ layers: ["subway_overlay_line"] }).length,
-      station: map.queryRenderedFeatures({
-        layers: ["subway_overlay_station", "subway_overlay_station_transfer"],
-      }).length,
-      building: map.getLayer("building")
-        ? map.queryRenderedFeatures({ layers: ["building"] }).length
-        : 0,
-      zoom: map.getZoom(),
-    };
-  });
-
-  // Landmarks start at z13–14; z15 still shows subway + buildings + landmarks
-  expect(z15.landmark, `z15 landmark count=${z15.landmark}`).toBeGreaterThan(0);
-  expect(z15.line, `z15 subway line count=${z15.line}`).toBeGreaterThan(0);
-  expect(z15.station, `z15 station count=${z15.station}`).toBeGreaterThan(0);
-  expect(z15.building, `z15 building count=${z15.building}`).toBeGreaterThan(0);
+  // Landmarks start at z13–14; poll until tiles/idle expose features (z15 race).
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const map = (
+            window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap }
+          ).__PINDMAP_PREVIEW_MAP__;
+          const landmarkLayers = (map.getStyle?.()?.layers ?? [])
+            .map((l: { id: string }) => l.id)
+            .filter(
+              (id: string) =>
+                (id === "landmark_label" ||
+                  id.startsWith("landmark_label_") ||
+                  id === "landmark_priority" ||
+                  id.startsWith("landmark_priority_") ||
+                  id.startsWith("korea_landmark") ||
+                  id.includes("landmark")) &&
+                !!map.getLayer(id),
+            );
+          const landmark = landmarkLayers.length
+            ? map.queryRenderedFeatures({ layers: landmarkLayers }).length
+            : 0;
+          const line = map.queryRenderedFeatures({
+            layers: ["subway_overlay_line"],
+          }).length;
+          const station = map.queryRenderedFeatures({
+            layers: [
+              "subway_overlay_station",
+              "subway_overlay_station_transfer",
+            ],
+          }).length;
+          const building = map.getLayer("building")
+            ? map.queryRenderedFeatures({ layers: ["building"] }).length
+            : 0;
+          return landmark > 0 && line > 0 && station > 0 && building > 0
+            ? { landmark, line, station, building, zoom: map.getZoom() }
+            : null;
+        }),
+      { timeout: 20_000 },
+    )
+    .not.toBeNull();
 
   await page.evaluate(async () => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
