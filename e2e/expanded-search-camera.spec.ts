@@ -61,8 +61,14 @@ async function forceMapLibre(page: Page) {
   await page.addInitScript(
     ({ expandedKey }) => {
       (
-        window as unknown as { __PINDMAP_E2E_FORCE_MAPLIBRE__?: boolean }
+        window as unknown as {
+          __PINDMAP_E2E_FORCE_MAPLIBRE__?: boolean;
+          __PINDMAP_E2E_MAP_GL_REMOTE__?: boolean | null;
+        }
       ).__PINDMAP_E2E_FORCE_MAPLIBRE__ = true;
+      (
+        window as unknown as { __PINDMAP_E2E_MAP_GL_REMOTE__?: boolean | null }
+      ).__PINDMAP_E2E_MAP_GL_REMOTE__ = true;
       window.localStorage.setItem(expandedKey, "1");
       window.localStorage.setItem("pindmap_admin_self_tiles", "1");
     },
