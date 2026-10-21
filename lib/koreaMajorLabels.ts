@@ -154,7 +154,24 @@ const LANDMARKS: readonly KoreaMajorLabel[] = [
 
 /** Major peaks — OMT peak POIs are sparse / hidden with generic poi_* layers. */
 const MOUNTAINS: readonly KoreaMajorLabel[] = [
+  // Nationwide hubs (z10+)
   { name: "북한산", lng: 126.977, lat: 37.6585, kind: "mountain", priority: 1 },
+  { name: "설악산", lng: 128.4655, lat: 38.1195, kind: "mountain", priority: 1 },
+  { name: "한라산", lng: 126.5292, lat: 33.3617, kind: "mountain", priority: 1 },
+  { name: "지리산", lng: 127.7305, lat: 35.337, kind: "mountain", priority: 1 },
+  { name: "덕유산", lng: 127.7465, lat: 35.8605, kind: "mountain", priority: 2 },
+  { name: "소백산", lng: 128.4865, lat: 36.9575, kind: "mountain", priority: 2 },
+  { name: "오대산", lng: 128.5435, lat: 37.7985, kind: "mountain", priority: 2 },
+  { name: "태백산", lng: 128.9155, lat: 37.1195, kind: "mountain", priority: 2 },
+  { name: "치악산", lng: 128.05, lat: 37.3715, kind: "mountain", priority: 2 },
+  { name: "계룡산", lng: 127.2065, lat: 36.3425, kind: "mountain", priority: 3 },
+  { name: "내장산", lng: 126.8885, lat: 35.4885, kind: "mountain", priority: 3 },
+  { name: "월출산", lng: 126.7015, lat: 34.7565, kind: "mountain", priority: 3 },
+  { name: "팔공산", lng: 128.6955, lat: 35.99, kind: "mountain", priority: 2 },
+  { name: "무등산", lng: 126.9885, lat: 35.134, kind: "mountain", priority: 2 },
+  { name: "금정산", lng: 129.055, lat: 35.28, kind: "mountain", priority: 3 },
+  { name: "대둔산", lng: 127.306, lat: 36.134, kind: "mountain", priority: 4 },
+  // Seoul / metro
   { name: "관악산", lng: 126.96, lat: 37.4455, kind: "mountain", priority: 2 },
   { name: "도봉산", lng: 127.0155, lat: 37.6985, kind: "mountain", priority: 3 },
   { name: "인왕산", lng: 126.96, lat: 37.5855, kind: "mountain", priority: 4 },
