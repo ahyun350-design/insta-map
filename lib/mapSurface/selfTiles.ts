@@ -448,22 +448,26 @@ export async function prefetchSelfTilesZ14Around(
   }
 }
 
-/** Warm common Latin glyph ranges from same-origin (HTTP cache only). */
+/**
+ * Warm Latin/digit glyph ranges used by first-frame labels (HTTP cache only).
+ * Hangul uses localIdeographFontFamily — no Hangul PBF prefetch.
+ */
 export function prefetchSelfGlyphs(): void {
   if (typeof window === "undefined") return;
-  const stacks = ["Noto Sans Regular", "Noto Sans Bold", "Noto Sans Italic"];
-  const ranges = ["0-255", "256-511", "8448-8703"];
-  for (const stack of stacks) {
-    for (const range of ranges) {
-      if (stack !== "Noto Sans Regular" && range !== "0-255") continue;
-      const url = SELF_GLYPHS_URL.replace("{fontstack}", encodeURIComponent(stack)).replace(
-        "{range}",
-        range,
-      );
-      void fetch(url, { mode: "same-origin", credentials: "omit", cache: "force-cache" }).catch(
-        () => {},
-      );
-    }
+  // Regular 0–255 covers Latin/digits for road shields & metro codes.
+  const jobs: Array<[string, string]> = [
+    ["Noto Sans Regular", "0-255"],
+    ["Noto Sans Regular", "256-511"],
+    ["Noto Sans Italic", "0-255"],
+  ];
+  for (const [stack, range] of jobs) {
+    const url = SELF_GLYPHS_URL.replace("{fontstack}", encodeURIComponent(stack)).replace(
+      "{range}",
+      range,
+    );
+    void fetch(url, { mode: "same-origin", credentials: "omit", cache: "force-cache" }).catch(
+      () => {},
+    );
   }
 }
 

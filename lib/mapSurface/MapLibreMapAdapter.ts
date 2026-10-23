@@ -714,6 +714,11 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       }
     }
     void attachSubwayOverlay(map, theme).catch(() => {});
+    void import("@/lib/pindmapMapStyle")
+      .then(({ attachDeferredHeavyOverlays }) =>
+        attachDeferredHeavyOverlays(map, theme),
+      )
+      .catch(() => {});
   }
 
   /**

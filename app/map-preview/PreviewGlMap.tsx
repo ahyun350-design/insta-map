@@ -423,10 +423,24 @@ export default function PreviewGlMap({
 
     (async () => {
       try {
+        const bootView = initialViewRef.current ?? {
+          center: [127.8, 36.2] as [number, number],
+          zoom: 6.2,
+        };
+        // Warm PMTiles header + nearby leaves before Map() so first paint hits cache.
+        if (readSelfTilesEnabled() && !isSelfTilesBroken()) {
+          const [lng, lat] = bootView.center;
+          void prefetchSelfTilesZ14Around(lat, lng);
+        }
+        const eagerHeavy =
+          typeof window !== "undefined" &&
+          new URLSearchParams(window.location.search).get("eagerHeavy") === "1";
         const style =
           modeRef.current === "lite"
             ? await buildLitePreviewStyle(themeRef.current)
-            : await buildPindmapStyle(themeRef.current);
+            : await buildPindmapStyle(themeRef.current, {
+                deferHeavySources: !eagerHeavy,
+              });
         if (cancelled) return;
 
         const dpr =
@@ -448,10 +462,6 @@ export default function PreviewGlMap({
         // Static import — JS already in page bundle when this effect runs.
         const jsMs = 0;
         const createT0 = performance.now();
-        const bootView = initialViewRef.current ?? {
-          center: [127.8, 36.2] as [number, number],
-          zoom: 6.2,
-        };
         const mapT0 = performance.now();
         (
           window as unknown as { __PINDMAP_PREVIEW_MAP_T0__?: number }
@@ -676,6 +686,17 @@ export default function PreviewGlMap({
 
               sampleCompare();
               onReadyRef.current?.();
+              // Heavy overlays after first idle so basemap/label tiles win the network.
+              map.once("idle", () => {
+                window.setTimeout(() => {
+                  if (cancelled) return;
+                  void import("@/lib/pindmapMapStyle")
+                    .then(({ attachDeferredHeavyOverlays }) =>
+                      attachDeferredHeavyOverlays(map, themeRef.current),
+                    )
+                    .catch(() => {});
+                }, 400);
+              });
               void attachSubwayOverlay(map, themeRef.current)
                 .then((ok) => {
                   if (cancelled || !mapRef.current) return;

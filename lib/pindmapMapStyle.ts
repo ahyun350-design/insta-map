@@ -1334,9 +1334,10 @@ function appendParkNameLayers(
     maxzoom?: number;
     rankMax: number;
   }> = [
-    { id: "park_name_label_z12", minzoom: 12, maxzoom: 14, rankMax: 12 },
-    { id: "park_name_label_z14", minzoom: 14, maxzoom: 16, rankMax: 30 },
-    { id: "park_name_label_z16", minzoom: 16, rankMax: 60 },
+    // OMT park ranks are often 20–80; keep mid-zoom parks visible without flooding.
+    { id: "park_name_label_z12", minzoom: 12, maxzoom: 14, rankMax: 40 },
+    { id: "park_name_label_z14", minzoom: 14, maxzoom: 16, rankMax: 80 },
+    { id: "park_name_label_z16", minzoom: 16, rankMax: 200 },
   ];
   for (const band of bands) {
     layers.push({
@@ -1938,7 +1939,19 @@ function detectRoadKind(id: string): RoadKind {
   return "other";
 }
 
-export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<StyleJson> {
+export type BuildPindmapStyleOptions = {
+  /**
+   * When true (default with self-tiles), skip sangga / tour / places-extra
+   * sources on the first style so basemap tiles win the network.
+   * Call attachDeferredHeavyOverlays() after first idle.
+   */
+  deferHeavySources?: boolean;
+};
+
+export async function buildPindmapStyle(
+  themeId: MapPreviewThemeId,
+  opts?: BuildPindmapStyleOptions,
+): Promise<StyleJson> {
   const theme = MAP_PREVIEW_THEMES[themeId];
   const style = await fetchLibertyStyle();
   // Admin self-tiles: PMTiles vector source + same-origin glyphs (full pack /
@@ -1950,13 +1963,17 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
     if (ok) {
       applySelfTilesSource(style);
       applySelfHostedStyleAssets(style);
-      // Apt / named-building overlay (separate PMTiles); empty if not uploaded yet.
-      ensureKoreaPlacesExtraSource(style);
-      void warmKoreaPlacesExtra();
-      ensureKoreaSanggaSource(style);
-      void warmKoreaSangga();
-      ensureKoreaTourSource(style);
-      void warmKoreaTour();
+      // Default ON: first paint prefers OMT self-tiles over sangga/tour/extra.
+      const deferHeavy = opts?.deferHeavySources !== false;
+      if (!deferHeavy) {
+        // Apt / named-building overlay (separate PMTiles); empty if not uploaded yet.
+        ensureKoreaPlacesExtraSource(style);
+        void warmKoreaPlacesExtra();
+        ensureKoreaSanggaSource(style);
+        void warmKoreaSangga();
+        ensureKoreaTourSource(style);
+        void warmKoreaTour();
+      }
     }
   }
   const layers: AnyLayer[] = [];
@@ -2269,7 +2286,8 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
         const isWaterwayLine = layer.id === "waterway_line_label";
         const isWaterNameLine = layer.id === "water_name_line_label";
         const isLineWater = isWaterwayLine || isWaterNameLine;
-        layer.minzoom = isWaterwayLine ? 11 : isWaterNameLine ? 10 : 5;
+        // Rivers (한강) from z10; small waterways still fine at z10–11.
+        layer.minzoom = isWaterwayLine || isWaterNameLine ? 10 : 5;
         if (layer.layout) {
           layer.layout["text-field"] = KO_TEXT;
           layer.layout["text-allow-overlap"] = false;
@@ -2316,18 +2334,22 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
             ];
           } else if (isLineWater) {
             layer.layout["symbol-placement"] = "line";
+            // River names (한강) readable from z10 with the water_name_line minzoom.
             layer.layout["text-size"] = [
               "interpolate",
               ["linear"],
               ["zoom"],
+              10,
               11,
               11,
+              11.5,
               13,
               12.5,
               15,
               14,
             ];
-            layer.layout["symbol-sort-key"] = 1600;
+            // Higher sort-key → stronger placement vs gu overlays at mid zoom.
+            layer.layout["symbol-sort-key"] = 200;
           } else {
             layer.layout["text-size"] = [
               "interpolate",
@@ -4047,6 +4069,54 @@ export async function buildPindmapStyle(themeId: MapPreviewThemeId): Promise<Sty
   return style;
 }
 
+const HEAVY_SOURCE_IDS = new Set([
+  KOREA_PLACES_EXTRA_SOURCE,
+  KOREA_SANGGA_SOURCE,
+  KOREA_TOUR_SOURCE,
+]);
+
+/**
+ * After first idle: attach sangga / tour / places-extra sources + layers.
+ * Basemap (OMT self-tiles) paints first without competing Range requests.
+ */
+/** Live MapLibre map — typed loosely to avoid circular maplibre imports here. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function attachDeferredHeavyOverlays(
+  map: any,
+  themeId: MapPreviewThemeId,
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (!readSelfTilesEnabled()) return;
+  // Already attached (e.g. style built without defer).
+  if (map.getSource(KOREA_SANGGA_SOURCE) || map.getSource(KOREA_TOUR_SOURCE)) {
+    return;
+  }
+  const full = await buildPindmapStyle(themeId, { deferHeavySources: false });
+  const sources = full.sources || {};
+  for (const id of HEAVY_SOURCE_IDS) {
+    const src = sources[id];
+    if (!src || map.getSource(id)) continue;
+    try {
+      map.addSource(id, src);
+    } catch {
+      /* ignore */
+    }
+  }
+  void warmKoreaPlacesExtra();
+  void warmKoreaSangga();
+  void warmKoreaTour();
+  for (const layer of full.layers || []) {
+    if (!layer?.id || map.getLayer(layer.id)) continue;
+    const srcRaw = (layer as AnyLayer & { source?: unknown }).source;
+    const srcId = typeof srcRaw === "string" ? srcRaw : "";
+    if (!HEAVY_SOURCE_IDS.has(srcId)) continue;
+    try {
+      map.addLayer(layer);
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 /** @deprecated alias — prefer buildPindmapStyle */
 export const buildPreviewStyle = buildPindmapStyle;
