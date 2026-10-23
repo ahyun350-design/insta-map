@@ -935,7 +935,11 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
     {
       idSuffix: "z16",
       minzoom: 16,
-      classFilter: SHOP_Z16,
+      classFilter: [
+        "all",
+        SHOP_Z16,
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 45],
+      ],
       textPadding: [
         "interpolate",
         ["linear"],
@@ -943,9 +947,9 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         16,
         16,
         17,
-        2.4,
+        12,
         18,
-        1.1,
+        8,
       ],
     },
     {
@@ -954,16 +958,16 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       classFilter: [
         "all",
         SHOP_Z17_EXTRA,
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 120],
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 60],
       ],
       textPadding: [
         "interpolate",
         ["linear"],
         ["zoom"],
         17,
-        0.7,
+        8,
         18,
-        0.4,
+        5,
       ],
     },
     {
@@ -1222,16 +1226,16 @@ function appendSanggaShopLayers(
       classFilter: [
         "all",
         SHOP_Z16,
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 70],
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 45],
       ],
       textPadding: [
         "interpolate",
         ["linear"],
         ["zoom"],
         16,
-        14,
+        16,
         17,
-        8,
+        12,
       ],
     },
   ];
