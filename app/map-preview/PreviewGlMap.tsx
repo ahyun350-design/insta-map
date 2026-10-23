@@ -432,14 +432,14 @@ export default function PreviewGlMap({
           const [lng, lat] = bootView.center;
           void prefetchSelfTilesZ14Around(lat, lng);
         }
-        const eagerHeavy =
+        const deferHeavy =
           typeof window !== "undefined" &&
-          new URLSearchParams(window.location.search).get("eagerHeavy") === "1";
+          new URLSearchParams(window.location.search).get("deferHeavy") === "1";
         const style =
           modeRef.current === "lite"
             ? await buildLitePreviewStyle(themeRef.current)
             : await buildPindmapStyle(themeRef.current, {
-                deferHeavySources: !eagerHeavy,
+                deferHeavySources: deferHeavy,
               });
         if (cancelled) return;
 
@@ -686,17 +686,19 @@ export default function PreviewGlMap({
 
               sampleCompare();
               onReadyRef.current?.();
-              // Heavy overlays after first idle so basemap/label tiles win the network.
-              map.once("idle", () => {
-                window.setTimeout(() => {
-                  if (cancelled) return;
-                  void import("@/lib/pindmapMapStyle")
-                    .then(({ attachDeferredHeavyOverlays }) =>
-                      attachDeferredHeavyOverlays(map, themeRef.current),
-                    )
-                    .catch(() => {});
-                }, 400);
-              });
+              // Optional ?deferHeavy=1 path — attach sangga/tour/extra after idle.
+              if (deferHeavy) {
+                map.once("idle", () => {
+                  window.setTimeout(() => {
+                    if (cancelled) return;
+                    void import("@/lib/pindmapMapStyle")
+                      .then(({ attachDeferredHeavyOverlays }) =>
+                        attachDeferredHeavyOverlays(map, themeRef.current),
+                      )
+                      .catch(() => {});
+                  }, 400);
+                });
+              }
               void attachSubwayOverlay(map, themeRef.current)
                 .then((ok) => {
                   if (cancelled || !mapRef.current) return;

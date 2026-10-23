@@ -1941,9 +1941,9 @@ function detectRoadKind(id: string): RoadKind {
 
 export type BuildPindmapStyleOptions = {
   /**
-   * When true (default with self-tiles), skip sangga / tour / places-extra
-   * sources on the first style so basemap tiles win the network.
-   * Call attachDeferredHeavyOverlays() after first idle.
+   * When true, skip sangga / tour / places-extra on the first style and
+   * attach them via attachDeferredHeavyOverlays() after idle.
+   * Default false — defer regressed cold 4G first-label in local measure.
    */
   deferHeavySources?: boolean;
 };
@@ -1963,8 +1963,7 @@ export async function buildPindmapStyle(
     if (ok) {
       applySelfTilesSource(style);
       applySelfHostedStyleAssets(style);
-      // Default ON: first paint prefers OMT self-tiles over sangga/tour/extra.
-      const deferHeavy = opts?.deferHeavySources !== false;
+      const deferHeavy = opts?.deferHeavySources === true;
       if (!deferHeavy) {
         // Apt / named-building overlay (separate PMTiles); empty if not uploaded yet.
         ensureKoreaPlacesExtraSource(style);
