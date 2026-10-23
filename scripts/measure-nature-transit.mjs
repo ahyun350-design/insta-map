@@ -42,8 +42,13 @@ const BASE = (process.env.PLAYWRIGHT_BASE_URL || "https://pindmap.com").replace(
   /\/$/,
   "",
 );
-const OUT = path.join(process.cwd(), "e2e/artifacts/nature-transit");
+const OUT = (() => {
+  const raw = process.env.MEASURE_OUT || "e2e/artifacts/nature-transit";
+  return path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
+})();
 const TAG = process.env.MEASURE_TAG || "after";
+/** Skip deploy layer probe when measuring local builds (default off). */
+const SKIP_DEPLOY_PROBE = process.env.SKIP_DEPLOY_PROBE === "1";
 const HUBS = [
   { id: "seoul_z10", lat: 37.56, lng: 126.98, z: 10 },
   { id: "bukhansan_z12", lat: 37.6585, lng: 126.977, z: 12 },
@@ -120,6 +125,20 @@ async function measure(page) {
         }
       }
     }
+    const symIds = ids.filter(
+      (id) =>
+        map.getLayer(id) &&
+        map.getLayoutProperty(id, "visibility") !== "none" &&
+        (map.getStyle().layers.find((l) => l.id === id)?.type === "symbol"),
+    );
+    let totalLabels = 0;
+    for (const id of symIds) {
+      try {
+        totalLabels += map.queryRenderedFeatures({ layers: [id] }).length;
+      } catch {
+        /* ignore */
+      }
+    }
     return {
       peak: count(pick(/mountain_peak|korea_mountain/i)),
       water: count(pick(/water_name|waterway_line_label/i)),
@@ -127,6 +146,7 @@ async function measure(page) {
       subwayLine: ids.some((id) => id.includes("subway_overlay_line")),
       exits: count(pick(/subway_overlay_exit$/)),
       bus: count(pick(/bus_stop/)),
+      totalLabels,
       koPreferred,
       latinOnly,
       layers: {
@@ -146,7 +166,7 @@ async function main() {
   });
   const page = await context.newPage();
 
-  if (process.env.WAIT_DEPLOY === "1") {
+  if (process.env.WAIT_DEPLOY === "1" && !SKIP_DEPLOY_PROBE) {
     const ok = await waitDeploy(page, token);
     console.error(ok ? "DEPLOY_OK" : "DEPLOY_TIMEOUT");
   }
