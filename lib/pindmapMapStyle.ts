@@ -1218,7 +1218,12 @@ function appendSanggaShopLayers(
     {
       idSuffix: "z16",
       minzoom: 16,
-      classFilter: SHOP_Z16,
+      // Cap street density: rank filter + higher padding (target ≤~50 labels/viewport).
+      classFilter: [
+        "all",
+        SHOP_Z16,
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 70],
+      ],
       textPadding: [
         "interpolate",
         ["linear"],
@@ -1226,7 +1231,7 @@ function appendSanggaShopLayers(
         16,
         14,
         17,
-        2.4,
+        8,
       ],
     },
   ];
@@ -1304,7 +1309,7 @@ function appendBusStopLayers(layers: AnyLayer[]): void {
       "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
       "text-radial-offset": 0.95,
       "text-max-width": 6,
-      "text-padding": 1.2,
+      "text-padding": 4,
       "text-optional": true,
       "text-allow-overlap": false,
       "text-ignore-placement": false,
