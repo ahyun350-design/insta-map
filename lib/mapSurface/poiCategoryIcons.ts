@@ -1,22 +1,29 @@
 /**
  * Code-generated POI category icons for MapLibre addImage.
- * 20×20 CSS px circle + 1.5px white stroke + muted fill + white glyph.
+ * Distinct category colors + shapes (18–20 CSS px) + white stroke + white glyph.
  * No external downloads. Registered with device pixelRatio (≤3).
  */
 
 import { clampMapPinDpr, loadMapImageFromSvg } from "@/lib/mapPinImages";
 
-/** Kakao-like street POI circle (22px — larger than 20, denser than 24). */
-export const POI_ICON_CSS_PX = 22;
+/** Kakao-like street POI mark size (18–20px). */
+export const POI_ICON_CSS_PX = 19;
 
-/** Icon fill + darker label text (name must read clearer than icon). */
+/** Per-category icon fill + darker label text. */
 export const POI_CATEGORY_COLORS = {
-  food: { icon: "#D08858", text: "#8A4A28" },
-  shopping: { icon: "#8A7AAA", text: "#4A3A6A" },
-  life: { icon: "#5A6A9A", text: "#2E3E6A" },
-  medical: { icon: "#5A9A7A", text: "#2E6A4A" },
+  food: { icon: "#E8873A", text: "#8A3A12" },
+  cafe: { icon: "#B86A3A", text: "#6A3A1A" },
+  bar: { icon: "#8A5AAA", text: "#4A2A6A" },
+  bakery: { icon: "#D4A05A", text: "#7A4A1A" },
+  fast_food: { icon: "#E07040", text: "#8A3010" },
+  shopping: { icon: "#E070A0", text: "#8A2A5A" },
+  convenience: { icon: "#3AAA5A", text: "#1A6A2A" },
+  grocery: { icon: "#5ABA6A", text: "#2A6A2A" },
+  life: { icon: "#5A6A9A", text: "#2A3A6A" },
+  medical: { icon: "#E05050", text: "#8A1A1A" },
+  pharmacy: { icon: "#2AAA6A", text: "#1A6A3A" },
   culture: { icon: "#9A6A8A", text: "#5A2E4A" },
-  lodging: { icon: "#6A8AAA", text: "#2E4A6A" },
+  lodging: { icon: "#4A7ABA", text: "#1A3A6A" },
   park: { icon: "#4A7A44", text: "#2A4A28" },
   education: { icon: "#5A7AAA", text: "#2E4A7A" },
   transit: { icon: "#5A6A7A", text: "#2E3E4A" },
@@ -56,50 +63,84 @@ export function poiIconImageId(cat: PoiCategoryId): string {
   return `pind-poi-${cat}`;
 }
 
-function groupOf(cat: PoiCategoryId): keyof typeof POI_CATEGORY_COLORS {
+function colorOf(cat: PoiCategoryId): { icon: string; text: string } {
   switch (cat) {
     case "cafe":
+      return POI_CATEGORY_COLORS.cafe;
     case "restaurant":
+      return POI_CATEGORY_COLORS.food;
     case "bar":
+      return POI_CATEGORY_COLORS.bar;
     case "bakery":
+      return POI_CATEGORY_COLORS.bakery;
     case "fast_food":
-      return "food";
+      return POI_CATEGORY_COLORS.fast_food;
     case "convenience":
+      return POI_CATEGORY_COLORS.convenience;
     case "grocery":
+      return POI_CATEGORY_COLORS.grocery;
     case "mall":
     case "shop":
-      return "shopping";
+      return POI_CATEGORY_COLORS.shopping;
     case "bank":
-    case "pharmacy":
     case "post":
     case "town_hall":
     case "police":
     case "parking":
     case "fuel":
-      return "life";
+      return POI_CATEGORY_COLORS.life;
+    case "pharmacy":
+      return POI_CATEGORY_COLORS.pharmacy;
     case "hospital":
-      return "medical";
+      return POI_CATEGORY_COLORS.medical;
     case "lodging":
-      return "lodging";
+      return POI_CATEGORY_COLORS.lodging;
     case "cinema":
     case "museum":
-      return "culture";
+      return POI_CATEGORY_COLORS.culture;
     case "park":
-      return "park";
+      return POI_CATEGORY_COLORS.park;
     case "school":
     case "college":
-      return "education";
+      return POI_CATEGORY_COLORS.education;
     case "subway":
     case "bus":
-      return "transit";
+      return POI_CATEGORY_COLORS.transit;
     case "landmark":
-      return "landmark";
+      return POI_CATEGORY_COLORS.landmark;
     default:
-      return "other";
+      return POI_CATEGORY_COLORS.other;
   }
 }
 
-/** Simple white path inside the 20×20 circle (viewBox 0 0 20 20). */
+/** Shape silhouette behind the glyph (viewBox 0 0 20 20). */
+function shapePath(cat: PoiCategoryId, fill: string): string {
+  switch (cat) {
+    case "convenience":
+    case "grocery":
+    case "mall":
+    case "shop":
+      // Rounded square — shopping / convenience
+      return `<rect x="1.5" y="1.5" width="17" height="17" rx="4.5" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>`;
+    case "bar":
+      // Soft diamond
+      return `<path d="M10 1.6 L18.4 10 L10 18.4 L1.6 10 Z" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>`;
+    case "hospital":
+    case "pharmacy":
+      // Soft octagon-ish rounded rect taller feel via circle still, slight square
+      return `<rect x="1.8" y="1.8" width="16.4" height="16.4" rx="5" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>`;
+    case "lodging":
+      // Rounded rectangle (landscape)
+      return `<rect x="1.2" y="3.2" width="17.6" height="13.6" rx="4" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>`;
+    case "park":
+      // Soft hex
+      return `<path d="M10 1.5 L16.8 5.2 V14.8 L10 18.5 L3.2 14.8 V5.2 Z" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>`;
+    default:
+      return `<circle cx="10" cy="10" r="9.25" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>`;
+  }
+}
+
+/** Simple white path inside the 20×20 mark. */
 function glyphPath(cat: PoiCategoryId): string {
   switch (cat) {
     case "cafe":
@@ -158,9 +199,9 @@ function glyphPath(cat: PoiCategoryId): string {
 }
 
 export function poiCategoryIconSvg(cat: PoiCategoryId): string {
-  const fill = POI_CATEGORY_COLORS[groupOf(cat)].icon;
+  const fill = colorOf(cat).icon;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
-  <circle cx="10" cy="10" r="9.25" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>
+  ${shapePath(cat, fill)}
   ${glyphPath(cat)}
 </svg>`;
 }
@@ -306,40 +347,65 @@ export function poiCategoryIconImageExpr(): unknown {
   ];
 }
 
-/** Category text-color expression (paper muted; neon/white variants lighter). */
+/** Category text-color expression (darker for readability; neon/white variants). */
 export function poiCategoryTextColorExpr(themeId: string): unknown {
   const food =
-    themeId === "neon" ? "#D4A090" : themeId === "white" ? "#A86A4A" : POI_CATEGORY_COLORS.food.text;
+    themeId === "neon" ? "#D4A090" : themeId === "white" ? "#8A3A12" : POI_CATEGORY_COLORS.food.text;
+  const cafe =
+    themeId === "neon" ? "#D4A090" : themeId === "white" ? "#6A3A1A" : POI_CATEGORY_COLORS.cafe.text;
+  const bar =
+    themeId === "neon" ? "#C8A0E0" : themeId === "white" ? "#4A2A6A" : POI_CATEGORY_COLORS.bar.text;
+  const bakery =
+    themeId === "neon" ? "#E0C090" : themeId === "white" ? "#7A4A1A" : POI_CATEGORY_COLORS.bakery.text;
   const shopping =
-    themeId === "neon" ? "#A898C8" : themeId === "white" ? "#6A5A8A" : POI_CATEGORY_COLORS.shopping.text;
+    themeId === "neon" ? "#E0A0C0" : themeId === "white" ? "#8A2A5A" : POI_CATEGORY_COLORS.shopping.text;
+  const convenience =
+    themeId === "neon" ? "#7ABA8A" : themeId === "white" ? "#1A6A2A" : POI_CATEGORY_COLORS.convenience.text;
   const life =
-    themeId === "neon" ? "#8A9AC8" : themeId === "white" ? "#4A5A8A" : POI_CATEGORY_COLORS.life.text;
+    themeId === "neon" ? "#8A9AC8" : themeId === "white" ? "#2A3A6A" : POI_CATEGORY_COLORS.life.text;
   const medical =
-    themeId === "neon" ? "#7ABA9A" : themeId === "white" ? "#4A8A6A" : POI_CATEGORY_COLORS.medical.text;
+    themeId === "neon" ? "#E08080" : themeId === "white" ? "#8A1A1A" : POI_CATEGORY_COLORS.medical.text;
+  const pharmacy =
+    themeId === "neon" ? "#7ABA9A" : themeId === "white" ? "#1A6A3A" : POI_CATEGORY_COLORS.pharmacy.text;
   const culture =
-    themeId === "neon" ? "#C898B0" : themeId === "white" ? "#8A5A7A" : POI_CATEGORY_COLORS.culture.text;
+    themeId === "neon" ? "#C898B0" : themeId === "white" ? "#5A2E4A" : POI_CATEGORY_COLORS.culture.text;
   const lodging =
-    themeId === "neon" ? "#9AB8D0" : themeId === "white" ? "#4A6A8A" : POI_CATEGORY_COLORS.lodging.text;
+    themeId === "neon" ? "#9AB8D0" : themeId === "white" ? "#1A3A6A" : POI_CATEGORY_COLORS.lodging.text;
   const park =
-    themeId === "neon" ? "#7AB8A0" : themeId === "white" ? "#3F6B3A" : POI_CATEGORY_COLORS.park.text;
+    themeId === "neon" ? "#7AB8A0" : themeId === "white" ? "#2A4A28" : POI_CATEGORY_COLORS.park.text;
   const education =
-    themeId === "neon" ? "#8AA0D0" : themeId === "white" ? "#4A6A9A" : POI_CATEGORY_COLORS.education.text;
+    themeId === "neon" ? "#8AA0D0" : themeId === "white" ? "#2E4A7A" : POI_CATEGORY_COLORS.education.text;
   const other =
-    themeId === "neon" ? "#A0A0B0" : themeId === "white" ? "#6E6874" : POI_CATEGORY_COLORS.other.text;
+    themeId === "neon" ? "#A0A0B0" : themeId === "white" ? "#4A4A52" : POI_CATEGORY_COLORS.other.text;
 
   return [
     "case",
     [
       "any",
       ["==", ["get", "class"], "cafe"],
-      ["==", ["get", "class"], "restaurant"],
+      ["all", ["==", ["get", "class"], "shop"], ["==", ["get", "subclass"], "coffee"]],
+    ],
+    cafe,
+    [
+      "any",
       ["==", ["get", "class"], "bar"],
       ["==", ["get", "class"], "beer"],
+    ],
+    bar,
+    ["==", ["get", "class"], "bakery"],
+    bakery,
+    [
+      "any",
+      ["==", ["get", "class"], "restaurant"],
       ["==", ["get", "class"], "fast_food"],
-      ["==", ["get", "class"], "bakery"],
       ["==", ["get", "class"], "ice_cream"],
     ],
     food,
+    [
+      "any",
+      ["all", ["==", ["get", "class"], "shop"], ["==", ["get", "subclass"], "convenience"]],
+    ],
+    convenience,
     [
       "any",
       ["==", ["get", "class"], "shop"],
@@ -347,16 +413,16 @@ export function poiCategoryTextColorExpr(themeId: string): unknown {
       ["==", ["get", "class"], "clothes"],
       ["==", ["get", "class"], "mall"],
       ["==", ["get", "class"], "department_store"],
-      ["==", ["get", "subclass"], "convenience"],
       ["==", ["get", "subclass"], "department_store"],
       ["==", ["get", "subclass"], "supermarket"],
     ],
     shopping,
+    ["==", ["get", "class"], "pharmacy"],
+    pharmacy,
     [
       "any",
       ["==", ["get", "class"], "bank"],
       ["==", ["get", "class"], "post"],
-      ["==", ["get", "class"], "pharmacy"],
       ["==", ["get", "class"], "town_hall"],
       ["==", ["get", "class"], "police"],
       ["==", ["get", "class"], "parking"],

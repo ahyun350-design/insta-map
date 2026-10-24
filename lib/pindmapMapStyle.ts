@@ -162,22 +162,22 @@ export const MAP_PREVIEW_THEMES: Record<MapPreviewThemeId, MapPreviewTheme> = {
   paper: {
     id: "paper",
     label: "페이퍼",
-    // Very light cool gray (avoid cream/beige) — Kakao-like contrast at street zoom
-    background: "#F2F2F2",
-    land: "#F2F2F2",
+    // Kakao-like paper: cool gray land; white buildings float above
+    background: "#F2F2F0",
+    land: "#F2F2F0",
     water: "#BFDDF2",
     // Deeper park green so urban parks read clearly on cool-gray land
     park: "#B8D4A8",
-    building: "#E8E8E8",
+    building: "#FFFFFF",
     showBuildings: true,
     road: "#FFFFFF",
     roadMinor: "#FFFFFF",
     rail: "#B0B0B0",
 
-    text: "#3A4155",
+    text: "#2E3440",
     textHalo: "#FFFFFF",
     boundary: "#D0D0D0",
-    stationDot: "#3A4155",
+    stationDot: "#2E3440",
   },
   white: {
     id: "white",
@@ -511,11 +511,11 @@ function appendLandmarkLayers(
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1.05,
+        "icon-size": 1,
         "icon-optional": false,
         "text-field": KO_TEXT,
-        "text-font": ["Noto Sans Regular"],
-        "text-size": 13,
+        "text-font": ["Noto Sans Bold"],
+        "text-size": 12.5,
         "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
         "text-justify": "auto",
@@ -532,9 +532,9 @@ function appendLandmarkLayers(
       paint: {
         "text-color": color,
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.5,
+        "text-halo-width": 1.75,
         "text-halo-blur": 0,
-        "icon-opacity": 0.95,
+        "icon-opacity": 1,
       },
     });
   }
@@ -1010,12 +1010,25 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1.05,
+        "icon-size": 1,
         "icon-padding": 1,
         "icon-optional": false,
         "text-field": SHOP_TEXT,
-        "text-font": ["Noto Sans Regular"],
-        "text-size": 12.5,
+        // Bold stack → localIdeograph Hangul renders heavier (Medium~Bold feel)
+        "text-font": ["Noto Sans Bold"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          15,
+          11.5,
+          16,
+          12,
+          17,
+          12.5,
+          18,
+          13,
+        ],
         // Icon left, name right (left/right only — no top/bottom drift).
         "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
@@ -1032,11 +1045,11 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       },
       paint: {
         "text-color": color,
-        "text-opacity": 0.95,
+        "text-opacity": 1,
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.5,
+        "text-halo-width": 1.75,
         "text-halo-blur": 0,
-        "icon-opacity": 0.95,
+        "icon-opacity": 1,
       },
     };
     if (typeof band.maxzoom === "number") {
@@ -1121,12 +1134,12 @@ function appendKoreaTourLayers(
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": band.minzoom < 14 ? 1 : 1.05,
+        "icon-size": 1,
         "icon-padding": 1,
         "icon-optional": false,
         "text-field": POI_NAME_TEXT,
-        "text-font": ["Noto Sans Regular"],
-        "text-size": band.textSize,
+        "text-font": ["Noto Sans Bold"],
+        "text-size": Math.min(band.textSize, 12.5),
         "text-variable-anchor": [
           ...(band.minzoom < 14 ? PLACE_VARIABLE_ANCHOR : POI_VARIABLE_ANCHOR),
         ],
@@ -1159,11 +1172,11 @@ function appendKoreaTourLayers(
       },
       paint: {
         "text-color": color,
-        "text-opacity": 0.95,
+        "text-opacity": 1,
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
+        "text-halo-width": 1.75,
         "text-halo-blur": 0,
-        "icon-opacity": 0.95,
+        "icon-opacity": 1,
       },
     });
   }
@@ -1279,12 +1292,24 @@ function appendSanggaShopLayers(
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1.05,
+        "icon-size": 1,
         "icon-padding": 1,
         "icon-optional": false,
         "text-field": POI_NAME_TEXT,
-        "text-font": ["Noto Sans Regular"],
-        "text-size": 12.5,
+        "text-font": ["Noto Sans Bold"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          15,
+          11.5,
+          16,
+          12,
+          17,
+          12.5,
+          18,
+          13,
+        ],
         "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
         "text-justify": "auto",
@@ -1300,11 +1325,11 @@ function appendSanggaShopLayers(
       },
       paint: {
         "text-color": color,
-        "text-opacity": 0.95,
+        "text-opacity": 1,
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.5,
+        "text-halo-width": 1.75,
         "text-halo-blur": 0,
-        "icon-opacity": 0.95,
+        "icon-opacity": 1,
       },
     };
     if (typeof band.maxzoom === "number") {
@@ -2040,12 +2065,11 @@ function roadFillColor(
   theme: MapPreviewTheme,
   kind: RoadKind,
 ): string {
-  // motorway/trunk/primary = cream; secondary/tertiary/minor = white
+  // Paper/Kakao: white fill for all guide roads (hierarchy via width + casing).
   const arterial =
     kind === "motorway" || kind === "trunk" || kind === "primary";
   if (theme.id === "paper") {
-    if (arterial) return "#F3E6B8";
-    return theme.road;
+    return "#FFFFFF";
   }
   if (theme.id === "white") {
     if (arterial) return "#EDE8D8";
@@ -2067,9 +2091,10 @@ function roadCasingColor(
   const arterial =
     kind === "motorway" || kind === "trunk" || kind === "primary";
   if (theme.id === "paper") {
-    if (arterial) return "#E0D2A0";
-    if (kind === "secondary" || kind === "tertiary") return "#C8C8C8";
-    return "#D4D4D4";
+    // Very light gray casing — block edges read against white fill + paper land
+    if (arterial) return "#C8C8C8";
+    if (kind === "secondary" || kind === "tertiary") return "#D0D0D0";
+    return "#D8D8D8";
   }
   if (theme.id === "white") {
     return arterial ? "#D8D0B8" : "#E0E0E0";
@@ -2151,9 +2176,9 @@ function appendKoreaBuildingLayers(
   if (theme.id !== "paper") return;
   if (!style.sources?.[KOREA_BUILDINGS_SOURCE]) return;
 
-  // Kakao-like solid blocks (readable on paper); overzoom from source maxzoom 16.
-  const fillColor = "#E4E4E4";
-  const outlineColor = "#D2D2D2";
+  // Kakao: white fill + light gray outline so blocks float above paper land.
+  const fillColor = "#FFFFFF";
+  const outlineColor = "#D9D9D9";
   const fillOpacity: unknown = [
     "interpolate",
     ["linear"],
@@ -2161,13 +2186,13 @@ function appendKoreaBuildingLayers(
     14.99,
     0,
     15,
-    0.72,
+    0.92,
     16,
-    0.88,
+    0.96,
     17,
-    0.95,
+    1,
     18,
-    0.97,
+    1,
   ];
   const fillLayer: AnyLayer = {
     id: "building_kr_fill",
@@ -2200,11 +2225,11 @@ function appendKoreaBuildingLayers(
         ["linear"],
         ["zoom"],
         15,
-        0.35,
+        0.5,
         17,
-        0.7,
+        0.85,
         18,
-        0.9,
+        1,
       ],
       "line-opacity": [
         "interpolate",
@@ -2213,9 +2238,9 @@ function appendKoreaBuildingLayers(
         14.99,
         0,
         15,
-        0.55,
+        0.75,
         17,
-        0.85,
+        0.95,
       ],
     },
   };
@@ -2256,9 +2281,9 @@ function appendKoreaBuildingNumberLabels(
         ["linear"],
         ["zoom"],
         17,
-        9.5,
+        8.5,
         18,
-        11,
+        9.5,
       ],
       "text-padding": 3.5,
       "text-max-width": 5,
@@ -2269,10 +2294,10 @@ function appendKoreaBuildingNumberLabels(
       "symbol-sort-key": 2500,
     },
     paint: {
-      "text-color": "#9A9A9A",
+      "text-color": "#B0B0B0",
       "text-halo-color": "#FFFFFF",
-      "text-halo-width": 1.2,
-      "text-opacity": 0.82,
+      "text-halo-width": 1,
+      "text-opacity": 0.75,
     },
   });
 }
@@ -2343,7 +2368,7 @@ export async function buildPindmapStyle(
         : theme.id === "neon"
           ? "#242C5C"
           : theme.id === "paper"
-            ? "#DADADA"
+            ? "#D9D9D9"
             : "#E2DDD2";
 
     if (isCasing(layer.id)) {
@@ -2496,8 +2521,12 @@ export async function buildPindmapStyle(
       if (!theme.showBuildings) {
         setVisibility(layer, false);
       } else if (theme.id === "paper" || theme.id === "white") {
-        // z14+ light gray fill + outline; slightly stronger at z17+
-        paintSet(layer, "fill-color", theme.id === "paper" ? "#E8E8E8" : theme.building);
+        // Paper: white Kakao-like blocks; white theme keeps light gray
+        paintSet(
+          layer,
+          "fill-color",
+          theme.id === "paper" ? "#FFFFFF" : theme.building,
+        );
         paintSet(layer, "fill-opacity", [
           "interpolate",
           ["linear"],
@@ -2505,15 +2534,15 @@ export async function buildPindmapStyle(
           13.99,
           0,
           14,
-          0.55,
+          theme.id === "paper" ? 0.88 : 0.55,
           15,
-          0.72,
+          theme.id === "paper" ? 0.94 : 0.72,
           16,
-          0.82,
+          theme.id === "paper" ? 0.97 : 0.82,
           17,
-          0.92,
+          1,
           18,
-          0.96,
+          1,
         ]);
         paintSet(layer, "fill-outline-color", buildingOutline);
         layer.minzoom = 14;
@@ -4121,7 +4150,8 @@ export async function buildPindmapStyle(
   // MapLibre: later symbol layers win cross-layer collision; within that,
   // higher symbol-sort-key wins (same convention as shop_poi ≤850).
   if (style.sources?.[KOREA_PLACES_EXTRA_SOURCE]) {
-    const aptColor = theme.id === "neon" ? "#8A8A8A" : "#8A8A8A";
+    // Apt / wing labels: Naver-like light gray tiny (dong-number feel), low priority
+    const aptColor = theme.id === "neon" ? "#9A9A9A" : "#A8A8A8";
     layers.push({
       id: "apt_complex_label_small",
       type: "symbol",
@@ -4133,7 +4163,7 @@ export async function buildPindmapStyle(
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
-        "text-size": 12.5,
+        "text-size": 10.5,
         "text-max-width": 8,
         "text-padding": PLACE_TEXT_PADDING,
         "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
@@ -4151,8 +4181,8 @@ export async function buildPindmapStyle(
       paint: {
         "text-color": aptColor,
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.3,
-        "text-opacity": 0.82,
+        "text-halo-width": 1.1,
+        "text-opacity": 0.78,
       },
     });
     layers.push({
@@ -4164,7 +4194,7 @@ export async function buildPindmapStyle(
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
-        "text-size": 12,
+        "text-size": 10.5,
         "text-max-width": 7,
         "text-padding": PLACE_TEXT_PADDING,
         "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
@@ -4179,10 +4209,10 @@ export async function buildPindmapStyle(
         visibility: "visible",
       },
       paint: {
-        "text-color": theme.id === "neon" ? "#9A9A9A" : "#7A7A7A",
+        "text-color": theme.id === "neon" ? "#9A9A9A" : "#A0A0A0",
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.3,
-        "text-opacity": 0.85,
+        "text-halo-width": 1.1,
+        "text-opacity": 0.8,
       },
     });
   }
@@ -4207,7 +4237,7 @@ export async function buildPindmapStyle(
   // Large apartment complexes — after shops + secondary landmarks so they keep
   // Kakao-like presence; school/civic/korea-tier1/stations still come later.
   if (style.sources?.[KOREA_PLACES_EXTRA_SOURCE]) {
-    const aptColor = theme.id === "neon" ? "#8A8A8A" : "#8A8A8A";
+    const aptColor = theme.id === "neon" ? "#9A9A9A" : "#A8A8A8";
     layers.push({
       id: "apt_complex_label",
       type: "symbol",
@@ -4219,7 +4249,7 @@ export async function buildPindmapStyle(
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
-        "text-size": 13,
+        "text-size": 11,
         "text-max-width": 8,
         "text-padding": PLACE_TEXT_PADDING,
         "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
@@ -4241,7 +4271,7 @@ export async function buildPindmapStyle(
       paint: {
         "text-color": aptColor,
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
+        "text-halo-width": 1.1,
         "text-opacity": 0.9,
       },
     });
@@ -4386,8 +4416,8 @@ export async function buildPindmapStyle(
     layers.push(...rest, ...stationLayers);
   }
 
-  // Final pass: place/POI labels never use Bold or allow-overlap
-  // (saved/search/my-location pins are added later by adapters, not here).
+  // Final pass: overlap=0; keep Bold on POI/shop/tour/landmark (Hangul weight
+  // via localIdeograph). Houseno/apt/road stay Regular. Pins added by adapters.
   for (const layer of layers) {
     if (layer.type !== "symbol") continue;
     const id = layer.id;
@@ -4397,11 +4427,17 @@ export async function buildPindmapStyle(
       id.startsWith("water") &&
       Array.isArray(prevFont) &&
       String(prevFont[0] || "").includes("Italic");
+    const keepBold =
+      /shop_poi_label|sangga_shop_label|tour_poi_label|landmark_label|landmark_priority|korea_landmark/i.test(
+        id,
+      );
     const layout = { ...(layer.layout || {}) };
     if (layout["text-field"] != null) {
       layout["text-font"] = keepItalic
         ? ["Noto Sans Italic"]
-        : ["Noto Sans Regular"];
+        : keepBold
+          ? ["Noto Sans Bold"]
+          : ["Noto Sans Regular"];
     }
     // Overlap=0 for all place labels including road_name_* / building_kr_number.
     layout["text-allow-overlap"] = false;
