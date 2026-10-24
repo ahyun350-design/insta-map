@@ -72,8 +72,14 @@ export function truncateLongLabel(rawExpr: unknown, maxLen = 20): unknown {
 }
 
 export const KO_TEXT: unknown = stripParenName(KO_TEXT_RAW);
-export const SHOP_TEXT: unknown = truncateLongLabel(stripParenName(SHOP_TEXT_RAW), 20);
+/** Prefer KO; wrap via text-max-width; hard-cap ~10 chars for density. */
+export const SHOP_TEXT: unknown = truncateLongLabel(stripParenName(SHOP_TEXT_RAW), 10);
 export const GEOJSON_NAME_TEXT: unknown = stripParenName(["get", "name"]);
+/** Sangga/tour names with same short cap as shops. */
+export const POI_NAME_TEXT: unknown = truncateLongLabel(
+  stripParenName(["get", "name"]),
+  10,
+);
 
 /**
  * Dong / neighbourhood labels: ensure a 동/가/리 suffix so they don't share
@@ -126,6 +132,10 @@ export const PLACE_TEXT_PADDING: unknown = [
 ];
 
 export const PLACE_VARIABLE_ANCHOR = ["right", "left", "top", "bottom"] as const;
+/** POI icon+name: left/right only (Kakao — no top/bottom drift). Prefer name right of icon. */
+export const POI_VARIABLE_ANCHOR = ["left", "right"] as const;
 export const ADMIN_VARIABLE_ANCHOR = ["center", "top", "bottom"] as const;
-/** 20px circle icon → ~10px radius + gap ≈ 1.05em */
-export const ICON_TEXT_RADIAL_OFFSET = 1.05;
+/** 24px circle icon → ~12px radius + gap ≈ 1.15em at 12.5px text */
+export const ICON_TEXT_RADIAL_OFFSET = 1.15;
+/** Shop/POI name wrap ≈ 8–10 Hangul chars. */
+export const POI_TEXT_MAX_WIDTH = 5;

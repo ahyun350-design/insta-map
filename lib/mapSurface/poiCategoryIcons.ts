@@ -6,20 +6,22 @@
 
 import { clampMapPinDpr, loadMapImageFromSvg } from "@/lib/mapPinImages";
 
-export const POI_ICON_CSS_PX = 20;
+/** Kakao-like street POI circle (slightly larger than prior 20). */
+export const POI_ICON_CSS_PX = 24;
 
-/** Muted paper-tone fills (icon bg + matching label text). */
+/** Icon fill + darker label text (name must read clearer than icon). */
 export const POI_CATEGORY_COLORS = {
-  food: { icon: "#C4784A", text: "#B86A3E" },
-  shopping: { icon: "#7A6A9A", text: "#6E5E8E" },
-  life: { icon: "#4A5A8A", text: "#3E4E7A" },
-  medical: { icon: "#4A8A6A", text: "#3E7A5A" },
-  culture: { icon: "#8A5A7A", text: "#7A4A6A" },
-  park: { icon: "#3F6B3A", text: "#355A32" },
-  education: { icon: "#4A6A9A", text: "#3E5E8A" },
-  transit: { icon: "#4A5A6A", text: "#3E4E5A" },
-  other: { icon: "#7A7A82", text: "#6A6A72" },
-  landmark: { icon: "#5A5A66", text: "#2E2E36" },
+  food: { icon: "#D08858", text: "#8A4A28" },
+  shopping: { icon: "#8A7AAA", text: "#4A3A6A" },
+  life: { icon: "#5A6A9A", text: "#2E3E6A" },
+  medical: { icon: "#5A9A7A", text: "#2E6A4A" },
+  culture: { icon: "#9A6A8A", text: "#5A2E4A" },
+  lodging: { icon: "#6A8AAA", text: "#2E4A6A" },
+  park: { icon: "#4A7A44", text: "#2A4A28" },
+  education: { icon: "#5A7AAA", text: "#2E4A7A" },
+  transit: { icon: "#5A6A7A", text: "#2E3E4A" },
+  other: { icon: "#8A8A92", text: "#4A4A52" },
+  landmark: { icon: "#6A6A72", text: "#2A2A32" },
 } as const;
 
 export type PoiCategoryId =
@@ -78,6 +80,7 @@ function groupOf(cat: PoiCategoryId): keyof typeof POI_CATEGORY_COLORS {
     case "hospital":
       return "medical";
     case "lodging":
+      return "lodging";
     case "cinema":
     case "museum":
       return "culture";
@@ -315,6 +318,8 @@ export function poiCategoryTextColorExpr(themeId: string): unknown {
     themeId === "neon" ? "#7ABA9A" : themeId === "white" ? "#4A8A6A" : POI_CATEGORY_COLORS.medical.text;
   const culture =
     themeId === "neon" ? "#C898B0" : themeId === "white" ? "#8A5A7A" : POI_CATEGORY_COLORS.culture.text;
+  const lodging =
+    themeId === "neon" ? "#9AB8D0" : themeId === "white" ? "#4A6A8A" : POI_CATEGORY_COLORS.lodging.text;
   const park =
     themeId === "neon" ? "#7AB8A0" : themeId === "white" ? "#3F6B3A" : POI_CATEGORY_COLORS.park.text;
   const education =
@@ -364,6 +369,10 @@ export function poiCategoryTextColorExpr(themeId: string): unknown {
       "any",
       ["==", ["get", "class"], "hotel"],
       ["==", ["get", "class"], "lodging"],
+    ],
+    lodging,
+    [
+      "any",
       ["==", ["get", "class"], "cinema"],
       ["==", ["get", "class"], "theatre"],
       ["==", ["get", "class"], "theater"],

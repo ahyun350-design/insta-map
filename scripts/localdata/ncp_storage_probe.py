@@ -146,7 +146,9 @@ CORS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
 <CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <CORSRule>
     <AllowedOrigin>https://pindmap.com</AllowedOrigin>
+    <AllowedOrigin>https://insta-map-production.up.railway.app</AllowedOrigin>
     <AllowedOrigin>capacitor://localhost</AllowedOrigin>
+    <AllowedOrigin>ionic://localhost</AllowedOrigin>
     <AllowedOrigin>http://localhost:3000</AllowedOrigin>
     <AllowedOrigin>http://127.0.0.1:3000</AllowedOrigin>
     <AllowedMethod>GET</AllowedMethod>

@@ -11,6 +11,22 @@ const PROTOCOL = "pindbuildings";
 export const KOREA_BUILDINGS_SOURCE = "korea_buildings";
 export const KOREA_BUILDINGS_LAYER = "building_kr";
 
+let softFailTracked = false;
+
+/** Soft-fail telemetry once per session — code + source id only (no URL/coords). */
+function noteBuildingsSoftFail(code: string): void {
+  if (softFailTracked) return;
+  softFailTracked = true;
+  void import("@/lib/track")
+    .then(({ track }) => {
+      track("tile_source_error", {
+        code,
+        source: KOREA_BUILDINGS_SOURCE,
+      });
+    })
+    .catch(() => undefined);
+}
+
 /** Public URL on NCP KR Object Storage only (not Supabase / overseas). */
 export function getKoreaBuildingsPublicUrl(): string {
   const override = (process.env.NEXT_PUBLIC_KOREA_BUILDINGS_PMTILES_URL || "")
@@ -55,6 +71,7 @@ export function ensureKoreaBuildingsProtocol(): void {
         }
         return { data: copyTileBytes(tile.data) };
       } catch {
+        noteBuildingsSoftFail("tile_source_error");
         broken = true;
         return { data: new Uint8Array() };
       }
@@ -90,6 +107,7 @@ export async function warmKoreaBuildings(): Promise<boolean> {
     const h = await pmtiles.getHeader();
     return Number(h?.maxZoom ?? 0) >= 14;
   } catch {
+    noteBuildingsSoftFail("tile_source_error");
     broken = true;
     pmtiles = null;
     return false;

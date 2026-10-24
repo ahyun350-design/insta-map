@@ -27,6 +27,9 @@ import {
   KO_TEXT,
   PLACE_TEXT_PADDING,
   PLACE_VARIABLE_ANCHOR,
+  POI_NAME_TEXT,
+  POI_TEXT_MAX_WIDTH,
+  POI_VARIABLE_ANCHOR,
   SHOP_TEXT,
 } from "@/lib/mapSurface/mapLabelText";
 
@@ -508,14 +511,15 @@ function appendLandmarkLayers(
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1,
-        "icon-optional": true,
+        "icon-size": 1.1,
+        "icon-optional": false,
         "text-field": KO_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": 13,
-        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
-        "text-max-width": 7,
+        "text-justify": "auto",
+        "text-max-width": POI_TEXT_MAX_WIDTH,
         "text-padding": PLACE_TEXT_PADDING,
         "text-optional": false,
         "text-allow-overlap": false,
@@ -613,14 +617,15 @@ function appendKoreaLandmarkGeoLayers(
       layout: {
         visibility: "visible",
         "icon-image": "korea-landmark-building",
-        "icon-size": 1,
+        "icon-size": 1.1,
         "icon-optional": false,
-        "text-field": GEOJSON_NAME_TEXT,
+        "text-field": POI_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": t.textSize,
-        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
-        "text-max-width": 7,
+        "text-justify": "auto",
+        "text-max-width": POI_TEXT_MAX_WIDTH,
         "text-padding": PLACE_TEXT_PADDING,
         "text-optional": false,
         "text-allow-overlap": false,
@@ -1003,16 +1008,17 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1,
+        "icon-size": 1.1,
         "icon-padding": 1,
         "icon-optional": false,
         "text-field": SHOP_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": 12.5,
-        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        // Icon left, name right (left/right only — no top/bottom drift).
+        "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
-        // ~2 lines; long Latin shops truncated in SHOP_TEXT
-        "text-max-width": 6,
+        "text-justify": "auto",
+        "text-max-width": POI_TEXT_MAX_WIDTH,
         "text-padding": band.textPadding,
         "text-optional": false,
         "text-allow-overlap": false,
@@ -1024,7 +1030,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       },
       paint: {
         "text-color": color,
-        "text-opacity": 0.92,
+        "text-opacity": 0.95,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.5,
         "text-halo-blur": 0,
@@ -1113,15 +1119,16 @@ function appendKoreaTourLayers(
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1,
+        "icon-size": 1.1,
         "icon-padding": 1,
         "icon-optional": false,
-        "text-field": GEOJSON_NAME_TEXT,
+        "text-field": POI_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": band.textSize,
-        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
-        "text-max-width": 7,
+        "text-justify": "auto",
+        "text-max-width": POI_TEXT_MAX_WIDTH,
         "text-padding": [
           "interpolate",
           ["linear"],
@@ -1148,7 +1155,7 @@ function appendKoreaTourLayers(
       },
       paint: {
         "text-color": color,
-        "text-opacity": 0.92,
+        "text-opacity": 0.95,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.4,
         "text-halo-blur": 0,
@@ -1268,15 +1275,16 @@ function appendSanggaShopLayers(
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1,
+        "icon-size": 1.1,
         "icon-padding": 1,
         "icon-optional": false,
-        "text-field": GEOJSON_NAME_TEXT,
+        "text-field": POI_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": 12.5,
-        "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
+        "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
-        "text-max-width": 6,
+        "text-justify": "auto",
+        "text-max-width": POI_TEXT_MAX_WIDTH,
         "text-padding": band.textPadding,
         "text-optional": false,
         "text-allow-overlap": false,
@@ -1288,7 +1296,7 @@ function appendSanggaShopLayers(
       },
       paint: {
         "text-color": color,
-        "text-opacity": 0.92,
+        "text-opacity": 0.95,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.5,
         "text-halo-blur": 0,
@@ -2139,8 +2147,9 @@ function appendKoreaBuildingLayers(
   if (theme.id !== "paper") return;
   if (!style.sources?.[KOREA_BUILDINGS_SOURCE]) return;
 
-  const fillColor = "#EDEDED";
-  const outlineColor = "#C8C8C8";
+  // Kakao-like solid blocks (readable on paper); overzoom from source maxzoom 16.
+  const fillColor = "#E4E4E4";
+  const outlineColor = "#D2D2D2";
   const fillOpacity: unknown = [
     "interpolate",
     ["linear"],
@@ -2148,13 +2157,13 @@ function appendKoreaBuildingLayers(
     14.99,
     0,
     15,
-    0.5,
-    16,
     0.72,
-    17,
+    16,
     0.88,
+    17,
+    0.95,
     18,
-    0.94,
+    0.97,
   ];
   const fillLayer: AnyLayer = {
     id: "building_kr_fill",
