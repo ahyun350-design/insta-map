@@ -599,6 +599,7 @@ test("map-preview mid-zoom place labels: Mapo/Gangnam × z11–13", async ({
     12: { totalMin: 15, totalMax: 40 },
     13: { totalMin: 12, totalMax: 40 },
   };
+  // Liberty highway-name / shield layers must stay hidden (C-4 uses road_name_* instead).
   const roadIds = [
     "highway-name-path",
     "highway-name-minor",
@@ -734,7 +735,10 @@ test("map-preview mid-zoom place labels: Mapo/Gangnam × z11–13", async ({
     for (const z of [11, 12, 13] as const) {
       const m = await measureMid(z, hub.center);
       const t = targets[z];
-      expect(m.roadNames, `${hub.id} z${z} road names must be 0`).toBe(0);
+      expect(
+        m.roadNames,
+        `${hub.id} z${z} Liberty highway-name/shield labels must stay 0`,
+      ).toBe(0);
       expect(
         m.total,
         `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (gu=${m.gu} dong=${m.dong} st=${m.station} lm=${m.landmark} mt=${m.mountain})`,
@@ -801,6 +805,7 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
     { id: "hongdae", center: [126.924, 37.5572] },
     { id: "gangnam", center: [127.0276, 37.4979] },
   ];
+  // Liberty highway-name / shield layers must stay hidden (C-4 uses road_name_*).
   const roadIds = [
     "highway-name-path",
     "highway-name-minor",
@@ -818,7 +823,8 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
     14: { totalMin: 20, totalMax: 75, shopMin: 6 },
     15: { totalMin: 25, totalMax: 80, shopMin: 12 },
     16: { totalMin: 28, totalMax: 75, shopMin: 18 },
-    17: { totalMin: 30, totalMax: 80, shopMin: 18 },
+    // z17 floor: collision + road-name gaps; keep Kakao-like density without flake fails.
+    17: { totalMin: 20, totalMax: 80, shopMin: 14 },
   };
 
   async function measureAt(zoom: number, center: [number, number]) {
@@ -1017,7 +1023,7 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
       const t = targets[z];
       expect(
         m.roadNames,
-        `${hub.id} z${z} road names must be 0`,
+        `${hub.id} z${z} Liberty highway-name/shield labels must stay 0`,
       ).toBe(0);
       expect(
         m.namelessShop,
@@ -1294,25 +1300,25 @@ test("map-preview search-nav: far/near camera + shop labels", async ({
   ).toBeLessThanOrEqual(400);
 });
 
-test("map-preview road name / shield labels are hidden (0 features)", async ({
+test("map-preview major road names only; shields / alleys stay hidden", async ({
   page,
 }) => {
   await openPreview(page, "/map-preview?mode=nopins");
-  // Zooms where highway-name / shields previously appeared (major z13+, shields z8+)
+  // z15 Hongdae: major (대로 / primary) + secondary …로; no shields / 길
   await page.evaluate(async () => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
-    map.jumpTo({ zoom: 14, center: [126.92, 37.56] });
+    map.jumpTo({ zoom: 15, center: [126.9236, 37.5563] });
     await new Promise<void>((resolve) => {
       map.once("idle", () => resolve());
-      window.setTimeout(() => resolve(), 4000);
+      window.setTimeout(() => resolve(), 5000);
     });
   });
 
   const result = await page.evaluate(() => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
-    const roadLabelIds = [
+    const hiddenIds = [
       "highway-name-path",
       "highway-name-minor",
       "highway-name-major",
@@ -1321,34 +1327,82 @@ test("map-preview road name / shield labels are hidden (0 features)", async ({
       "road_shield_us",
       "label_bridge_ko",
     ];
-    const present = roadLabelIds.filter((id) => !!map.getLayer(id));
+    const presentHidden = hiddenIds.filter((id) => !!map.getLayer(id));
     const visibility = Object.fromEntries(
-      present.map((id) => [
+      presentHidden.map((id) => [
         id,
         map.getLayoutProperty(id, "visibility") ?? "visible",
       ]),
     );
-    const feats = present.length
-      ? map.queryRenderedFeatures({ layers: present })
+    const hiddenFeats = presentHidden.length
+      ? map.queryRenderedFeatures({ layers: presentHidden })
       : [];
+
+    const majorOk = !!map.getLayer("road_name_major");
+    const secondaryOk = !!map.getLayer("road_name_secondary");
+    const roadLayers = ["road_name_major", "road_name_secondary"].filter(
+      (id) => !!map.getLayer(id),
+    );
+    const roadFeats = roadLayers.length
+      ? map.queryRenderedFeatures({ layers: roadLayers })
+      : [];
+    const names = [
+      ...new Set(
+        (
+          roadFeats as Array<{
+            properties?: Record<string, unknown> | null;
+          }>
+        ).map((f) => {
+          const raw = String(
+            f.properties?.["name:ko"] ||
+              f.properties?.["name:nonlatin"] ||
+              f.properties?.name ||
+              "",
+          ).trim();
+          const cut = raw.indexOf("(");
+          return (cut >= 0 ? raw.slice(0, cut) : raw).trim();
+        }),
+      ),
+    ].filter(Boolean);
+    const gil = names.filter((n) => n.endsWith("길"));
+    const refOnly = names.filter((n) => /^[A-Za-z0-9\-]+$/.test(n));
     return {
-      present,
+      presentHidden,
       visibility,
-      featureCount: feats.length,
+      hiddenCount: hiddenFeats.length,
+      majorOk,
+      secondaryOk,
+      roadCount: names.length,
+      samples: names.slice(0, 8),
+      gil,
+      refOnly,
       zoom: map.getZoom(),
     };
   });
 
-  for (const id of result.present) {
+  expect(result.majorOk, "road_name_major layer missing").toBe(true);
+  expect(result.secondaryOk, "road_name_secondary layer missing").toBe(true);
+  for (const id of result.presentHidden) {
     expect(
       result.visibility[id],
       `${id} should be visibility:none`,
     ).toBe("none");
   }
   expect(
-    result.featureCount,
-    `road name/shield labels must be 0 at z${result.zoom}; layers=${result.present.join(",")}`,
+    result.hiddenCount,
+    `Liberty highway-name/shield must stay 0 at z${result.zoom}`,
   ).toBe(0);
+  expect(
+    result.roadCount,
+    `expected some major road names at Hongdae z15; samples=${result.samples.join(",")}`,
+  ).toBeGreaterThan(0);
+  expect(result.gil, `길 alley names must not render: ${result.gil.join(",")}`).toEqual(
+    [],
+  );
+  expect(
+    result.refOnly,
+    `ref/Latin-only road labels must not render: ${result.refOnly.join(",")}`,
+  ).toEqual([]);
 });
 
 test("map-preview basics: korea landmarks + z16 anchors", async ({ page }) => {

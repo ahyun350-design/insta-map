@@ -193,7 +193,8 @@ export default function PublicListGlProbe() {
   }, [engine, pins]);
 
   const showGl = engine === "gl" && pins.length > 0 && !mapError;
-  const showKakao = engine === "kakao" && !mapError;
+  // Keep Kakao host mounted after engine switch even if SDK load fails (e2e contract).
+  const showKakao = engine === "kakao";
 
   return (
     <div
