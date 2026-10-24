@@ -50,3 +50,10 @@ tsconfig.tsbuildinfo
 
 scripts/localdata/raw_sangga/
 scripts/localdata/.ncp_keys
+
+# Juso building SHP (국외 반출 금지 — 로컬만)
+scripts/localdata/raw_juso/
+scripts/localdata/.venv-boto135/
+build/tiles/
+scripts/localdata/build_korea_buildings.log
+build/tiles/*.build.json

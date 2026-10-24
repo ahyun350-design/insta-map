@@ -88,6 +88,12 @@ import {
   KOREA_TOUR_SOURCE,
   warmKoreaTour,
 } from "@/lib/mapSurface/koreaTour";
+import {
+  ensureKoreaBuildingsSource,
+  KOREA_BUILDINGS_LAYER,
+  KOREA_BUILDINGS_SOURCE,
+  warmKoreaBuildings,
+} from "@/lib/mapSurface/koreaBuildings";
 import bundledLibertyStyle from "@/lib/mapSurface/data/liberty-style.json";
 
 /** Production-adopted themes */
@@ -2118,6 +2124,144 @@ function detectRoadKind(id: string): RoadKind {
   return "other";
 }
 
+/**
+ * Admin paper self-tiles: Juso building_kr fill/outline above OMT building
+ * (covers OMT where KR present; OMT remains where KR absent). Soft-fail if
+ * source missing. Labels (houseno) at z17+ with lowest priority.
+ */
+function appendKoreaBuildingLayers(
+  layers: AnyLayer[],
+  theme: MapPreviewTheme,
+  style: StyleJson,
+): void {
+  if (theme.id !== "paper") return;
+  if (!style.sources?.[KOREA_BUILDINGS_SOURCE]) return;
+
+  const fillColor = "#EDEDED";
+  const outlineColor = "#C8C8C8";
+  const fillOpacity: unknown = [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    14.99,
+    0,
+    15,
+    0.5,
+    16,
+    0.72,
+    17,
+    0.88,
+    18,
+    0.94,
+  ];
+  const fillLayer: AnyLayer = {
+    id: "building_kr_fill",
+    type: "fill",
+    source: KOREA_BUILDINGS_SOURCE,
+    "source-layer": KOREA_BUILDINGS_LAYER,
+    minzoom: 15,
+    layout: { visibility: "visible" },
+    paint: {
+      "fill-color": fillColor,
+      "fill-opacity": fillOpacity,
+      "fill-outline-color": outlineColor,
+    },
+  };
+  const outlineLayer: AnyLayer = {
+    id: "building_kr_outline",
+    type: "line",
+    source: KOREA_BUILDINGS_SOURCE,
+    "source-layer": KOREA_BUILDINGS_LAYER,
+    minzoom: 15,
+    layout: {
+      visibility: "visible",
+      "line-cap": "butt",
+      "line-join": "miter",
+    },
+    paint: {
+      "line-color": outlineColor,
+      "line-width": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        15,
+        0.35,
+        17,
+        0.7,
+        18,
+        0.9,
+      ],
+      "line-opacity": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        14.99,
+        0,
+        15,
+        0.55,
+        17,
+        0.85,
+      ],
+    },
+  };
+
+  const buildingIdx = layers.findIndex((l) => l.id === "building");
+  if (buildingIdx >= 0) {
+    layers.splice(buildingIdx + 1, 0, fillLayer, outlineLayer);
+  } else {
+    layers.push(fillLayer, outlineLayer);
+  }
+}
+
+/** z17+ houseno — lowest priority (after major roads). No name/floors in Juso MST. */
+function appendKoreaBuildingNumberLabels(
+  layers: AnyLayer[],
+  theme: MapPreviewTheme,
+  style: StyleJson,
+): void {
+  if (theme.id !== "paper") return;
+  if (!style.sources?.[KOREA_BUILDINGS_SOURCE]) return;
+  layers.push({
+    id: "building_kr_number",
+    type: "symbol",
+    source: KOREA_BUILDINGS_SOURCE,
+    "source-layer": KOREA_BUILDINGS_LAYER,
+    minzoom: 17,
+    filter: [
+      ">",
+      ["length", ["to-string", ["coalesce", ["get", "no"], ""]]],
+      0,
+    ],
+    layout: {
+      visibility: "visible",
+      "text-field": ["to-string", ["get", "no"]],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        17,
+        9.5,
+        18,
+        11,
+      ],
+      "text-padding": 3.5,
+      "text-max-width": 5,
+      "text-optional": true,
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
+      // Higher than road names (1800) → yields to stations/shops/dong/roads.
+      "symbol-sort-key": 2200,
+    },
+    paint: {
+      "text-color": "#9A9A9A",
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.2,
+      "text-opacity": 0.82,
+    },
+  });
+}
+
 export type BuildPindmapStyleOptions = {
   /**
    * When true, skip sangga / tour / places-extra on the first style and
@@ -2142,6 +2286,9 @@ export async function buildPindmapStyle(
     if (ok) {
       applySelfTilesSource(style);
       applySelfHostedStyleAssets(style);
+      // Juso buildings (NCP KR) — soft-fail; paper fill/labels only when source warms.
+      ensureKoreaBuildingsSource(style);
+      void warmKoreaBuildings();
       const deferHeavy = opts?.deferHeavySources === true;
       if (!deferHeavy) {
         // Apt / named-building overlay (separate PMTiles); empty if not uploaded yet.
@@ -3162,6 +3309,9 @@ export async function buildPindmapStyle(
     layers.push(layer);
   }
 
+  // Juso building_kr fill/outline above OMT `building` (paper + self-tiles).
+  appendKoreaBuildingLayers(layers, theme, style);
+
   // 시·군 supplement (poi medians) + 구 overlay — tiles often sparse
   style.sources = {
     ...style.sources,
@@ -4021,6 +4171,9 @@ export async function buildPindmapStyle(
       },
     });
   }
+
+  // Houseno early so shops/apt/dong/stations/roads (later) all win collision.
+  appendKoreaBuildingNumberLabels(layers, theme, style);
 
   // 상가정보 first, then OMT shops: OMT-only wins collision; dups hidden via setFilter
   // (sangga preferred when name+50m match). Density still capped by padding/overlap=0.

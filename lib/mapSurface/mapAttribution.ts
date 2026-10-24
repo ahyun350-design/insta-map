@@ -12,9 +12,9 @@ export const MAP_ATTRIB_OSM_COPYRIGHT_URL =
 export const MAP_CORNER_ATTRIBUTION =
   "© OpenMapTiles © OpenStreetMap contributors";
 
-/** Self-tiles admin credit including 상가·TourAPI. */
+/** Self-tiles admin credit including 상가·TourAPI·행정안전부(건물도형). */
 export const MAP_CORNER_ATTRIBUTION_SELF =
-  "© OpenMapTiles © OpenStreetMap · 소상공인시장진흥공단 · 한국관광공사";
+  "© OpenMapTiles © OpenStreetMap · 소상공인시장진흥공단 · 한국관광공사 · 행정안전부";
 
 export type InstallMapLibreAttributionOptions = {
   className: string;
@@ -82,7 +82,7 @@ export function installMapLibreCornerAttribution(
       omt,
       " © ",
       osm,
-      " · 소상공인시장진흥공단 · 한국관광공사",
+      " · 소상공인시장진흥공단 · 한국관광공사 · 행정안전부",
     );
   } else {
     el.append("© ", omt, " © ", osm);
