@@ -145,8 +145,8 @@ def put_bucket_cors_md5(ak: str, sk: str, xml: bytes) -> int:
 CORS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
 <CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <CORSRule>
-    <AllowedOrigin>https://pindmap.com</AllowedOrigin>
     <AllowedOrigin>https://insta-map-production.up.railway.app</AllowedOrigin>
+    <AllowedOrigin>https://pindmap.com</AllowedOrigin>
     <AllowedOrigin>capacitor://localhost</AllowedOrigin>
     <AllowedOrigin>ionic://localhost</AllowedOrigin>
     <AllowedOrigin>http://localhost:3000</AllowedOrigin>
@@ -154,13 +154,15 @@ CORS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
     <AllowedMethod>GET</AllowedMethod>
     <AllowedMethod>HEAD</AllowedMethod>
     <AllowedHeader>*</AllowedHeader>
+    <AllowedHeader>Range</AllowedHeader>
+    <AllowedHeader>range</AllowedHeader>
     <ExposeHeader>ETag</ExposeHeader>
     <ExposeHeader>Content-Length</ExposeHeader>
     <ExposeHeader>Content-Range</ExposeHeader>
     <ExposeHeader>Accept-Ranges</ExposeHeader>
     <ExposeHeader>Content-Type</ExposeHeader>
     <ExposeHeader>Cache-Control</ExposeHeader>
-    <MaxAgeSeconds>86400</MaxAgeSeconds>
+    <MaxAgeSeconds>3600</MaxAgeSeconds>
   </CORSRule>
 </CORSConfiguration>"""
 
