@@ -135,7 +135,7 @@ export const PLACE_VARIABLE_ANCHOR = ["right", "left", "top", "bottom"] as const
 /** POI icon+name: left/right only (Kakao — no top/bottom drift). Prefer name right of icon. */
 export const POI_VARIABLE_ANCHOR = ["left", "right"] as const;
 export const ADMIN_VARIABLE_ANCHOR = ["center", "top", "bottom"] as const;
-/** 24px circle icon → ~12px radius + gap ≈ 1.15em at 12.5px text */
-export const ICON_TEXT_RADIAL_OFFSET = 1.15;
+/** 22px circle icon → ~11px radius + gap ≈ 1.1em at 12.5px text */
+export const ICON_TEXT_RADIAL_OFFSET = 1.1;
 /** Shop/POI name wrap ≈ 8–10 Hangul chars. */
 export const POI_TEXT_MAX_WIDTH = 5;

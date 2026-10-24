@@ -6,8 +6,8 @@
 
 import { clampMapPinDpr, loadMapImageFromSvg } from "@/lib/mapPinImages";
 
-/** Kakao-like street POI circle (slightly larger than prior 20). */
-export const POI_ICON_CSS_PX = 24;
+/** Kakao-like street POI circle (22px — larger than 20, denser than 24). */
+export const POI_ICON_CSS_PX = 22;
 
 /** Icon fill + darker label text (name must read clearer than icon). */
 export const POI_CATEGORY_COLORS = {

@@ -511,7 +511,7 @@ function appendLandmarkLayers(
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1.1,
+        "icon-size": 1.05,
         "icon-optional": false,
         "text-field": KO_TEXT,
         "text-font": ["Noto Sans Regular"],
@@ -607,11 +607,8 @@ function appendKoreaLandmarkGeoLayers(
     },
   ];
   for (const t of tiers) {
-    // City-scale (z11–13): allow center; street zoom: left/right only (icon+name pair).
-    const anchor =
-      t.minzoom < 14
-        ? (["center", "left", "right"] as const)
-        : POI_VARIABLE_ANCHOR;
+    // City-scale (z11–13): full anchors for coverage; street: left/right only.
+    const anchor = t.minzoom < 14 ? PLACE_VARIABLE_ANCHOR : POI_VARIABLE_ANCHOR;
     layers.push({
       id: t.id,
       type: "symbol",
@@ -622,9 +619,9 @@ function appendKoreaLandmarkGeoLayers(
       layout: {
         visibility: "visible",
         "icon-image": "korea-landmark-building",
-        "icon-size": t.minzoom < 14 ? 1 : 1.1,
+        "icon-size": t.minzoom < 14 ? 1 : 1.05,
         "icon-optional": false,
-        "text-field": POI_NAME_TEXT,
+        "text-field": t.minzoom < 14 ? GEOJSON_NAME_TEXT : POI_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": t.textSize,
         "text-variable-anchor": [...anchor],
@@ -1013,7 +1010,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1.1,
+        "icon-size": 1.05,
         "icon-padding": 1,
         "icon-optional": false,
         "text-field": SHOP_TEXT,
@@ -1124,16 +1121,18 @@ function appendKoreaTourLayers(
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1.1,
+        "icon-size": band.minzoom < 14 ? 1 : 1.05,
         "icon-padding": 1,
         "icon-optional": false,
         "text-field": POI_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": band.textSize,
-        "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
+        "text-variable-anchor": [
+          ...(band.minzoom < 14 ? PLACE_VARIABLE_ANCHOR : POI_VARIABLE_ANCHOR),
+        ],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
         "text-justify": "auto",
-        "text-max-width": POI_TEXT_MAX_WIDTH,
+        "text-max-width": band.minzoom < 14 ? 7 : POI_TEXT_MAX_WIDTH,
         "text-padding": [
           "interpolate",
           ["linear"],
@@ -1280,7 +1279,7 @@ function appendSanggaShopLayers(
       layout: {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
-        "icon-size": 1.1,
+        "icon-size": 1.05,
         "icon-padding": 1,
         "icon-optional": false,
         "text-field": POI_NAME_TEXT,
