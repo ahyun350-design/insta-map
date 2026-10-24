@@ -46,6 +46,36 @@ export function trackMapGlReady(surface: MapGlSurface, ms: number): void {
   track("map_gl_ready", { surface, ms: safeMs(ms) });
 }
 
+let mapEnvFired = false;
+
+/**
+ * Admin MapLibre only — once per page session.
+ * meta: origin_domain (hostname only) + scheme. No path/query/coords.
+ */
+export function trackMapEnv(surface: MapGlSurface): void {
+  if (mapEnvFired) return;
+  if (surface !== "compact" && surface !== "expanded") return;
+  if (typeof window === "undefined" || !window.location) return;
+  mapEnvFired = true;
+  let origin_domain = "";
+  let scheme = "";
+  try {
+    origin_domain = String(window.location.hostname || "").slice(0, 253);
+    scheme = String(window.location.protocol || "")
+      .replace(/:$/, "")
+      .slice(0, 32);
+  } catch {
+    return;
+  }
+  if (!origin_domain && !scheme) return;
+  track("map_env", {
+    code: "map_env",
+    origin_domain,
+    scheme,
+    surface,
+  });
+}
+
 /** Session-once telemetry; every call counts toward device auto-off. */
 export function trackMapGlFallback(
   surface: MapGlSurface,

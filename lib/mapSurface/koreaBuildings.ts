@@ -13,15 +13,40 @@ export const KOREA_BUILDINGS_LAYER = "building_kr";
 
 let softFailTracked = false;
 
-/** Soft-fail telemetry once per session — code + source id only (no URL/coords). */
-function noteBuildingsSoftFail(code: string): void {
+function pageOriginMeta(): { origin_domain: string; scheme: string } {
+  if (typeof window === "undefined" || !window.location) {
+    return { origin_domain: "", scheme: "" };
+  }
+  try {
+    return {
+      origin_domain: String(window.location.hostname || "").slice(0, 253),
+      scheme: String(window.location.protocol || "")
+        .replace(/:$/, "")
+        .slice(0, 32),
+    };
+  } catch {
+    return { origin_domain: "", scheme: "" };
+  }
+}
+
+/** Soft-fail telemetry once — code, source id, origin_domain, optional http status. */
+function noteBuildingsSoftFail(
+  code: string,
+  httpStatus?: number | null,
+): void {
   if (softFailTracked) return;
   softFailTracked = true;
+  const { origin_domain, scheme } = pageOriginMeta();
   void import("@/lib/track")
     .then(({ track }) => {
       track("tile_source_error", {
         code,
         source: KOREA_BUILDINGS_SOURCE,
+        origin_domain,
+        scheme,
+        ...(typeof httpStatus === "number" && Number.isFinite(httpStatus)
+          ? { http_status: Math.round(httpStatus) }
+          : {}),
       });
     })
     .catch(() => undefined);
@@ -70,13 +95,29 @@ export function ensureKoreaBuildingsProtocol(): void {
           return { data: new Uint8Array() };
         }
         return { data: copyTileBytes(tile.data) };
-      } catch {
-        noteBuildingsSoftFail("tile_source_error");
+      } catch (err) {
+        const status = extractHttpStatus(err);
+        noteBuildingsSoftFail("tile_source_error", status);
         broken = true;
         return { data: new Uint8Array() };
       }
     },
   );
+}
+
+function extractHttpStatus(err: unknown): number | null {
+  if (!err || typeof err !== "object") return null;
+  const e = err as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+    cause?: { status?: unknown };
+  };
+  for (const v of [e.status, e.statusCode, e.response?.status, e.cause?.status]) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return Math.round(n);
+  }
+  return null;
 }
 
 export function ensureKoreaBuildingsSource(style: {
@@ -103,11 +144,30 @@ export async function warmKoreaBuildings(): Promise<boolean> {
     ensureKoreaBuildingsProtocol();
     const url = getKoreaBuildingsPublicUrl();
     if (!url) return false;
+    // Probe Range first so CORS/HTTP failures yield a status for telemetry.
+    try {
+      const probe = await fetch(url, {
+        method: "GET",
+        headers: { Range: "bytes=0-15" },
+        mode: "cors",
+        credentials: "omit",
+        cache: "no-store",
+      });
+      if (!probe.ok && probe.status !== 206) {
+        noteBuildingsSoftFail("tile_source_error", probe.status);
+        broken = true;
+        return false;
+      }
+    } catch (err) {
+      noteBuildingsSoftFail("tile_source_error", extractHttpStatus(err));
+      broken = true;
+      return false;
+    }
     if (!pmtiles) pmtiles = new PMTiles(url);
     const h = await pmtiles.getHeader();
     return Number(h?.maxZoom ?? 0) >= 14;
-  } catch {
-    noteBuildingsSoftFail("tile_source_error");
+  } catch (err) {
+    noteBuildingsSoftFail("tile_source_error", extractHttpStatus(err));
     broken = true;
     pmtiles = null;
     return false;

@@ -48,6 +48,7 @@ import type {
 import {
   trackMapGlFallback,
   trackMapGlReady,
+  trackMapEnv,
   trackMapGlTiming,
 } from "./mapGlTelemetry";
 import { msSinceWebviewStart } from "@/lib/bootTiming";
@@ -681,6 +682,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
             (typeof performance !== "undefined" ? performance.now() : Date.now()) -
             this.mountStartedAt;
           trackMapGlReady(this.mode, ms);
+          trackMapEnv(this.mode);
           options.onReady?.();
           // Subway + landmarks: attached on first idle (attachDeferredDecoration).
         } catch {
