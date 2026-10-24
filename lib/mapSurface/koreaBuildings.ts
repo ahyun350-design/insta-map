@@ -10,6 +10,8 @@ import { PMTiles } from "pmtiles";
 const PROTOCOL = "pindbuildings";
 export const KOREA_BUILDINGS_SOURCE = "korea_buildings";
 export const KOREA_BUILDINGS_LAYER = "building_kr";
+/** Archive tile maxzoom — MapLibre overzooms above this; protocol clamps z/x/y. */
+export const KOREA_BUILDINGS_MAXZOOM = 16;
 
 let softFailTracked = false;
 
@@ -83,9 +85,18 @@ export function ensureKoreaBuildingsProtocol(): void {
         params.url,
       );
       if (!m) throw new Error("invalid_pindbuildings_url");
-      const z = Number(m[1]);
-      const x = Number(m[2]);
-      const y = Number(m[3]);
+      // Overzoom: archive stops at 16; parent-tile clamp so z17+ is not empty.
+      let z = Number(m[1]);
+      let x = Number(m[2]);
+      let y = Number(m[3]);
+      while (z > KOREA_BUILDINGS_MAXZOOM) {
+        z -= 1;
+        x = Math.floor(x / 2);
+        y = Math.floor(y / 2);
+      }
+      if (z < 0 || !Number.isFinite(x) || !Number.isFinite(y)) {
+        return { data: new Uint8Array() };
+      }
       const url = getKoreaBuildingsPublicUrl();
       if (!url) throw new Error("missing_buildings_url");
       try {
@@ -132,7 +143,8 @@ export function ensureKoreaBuildingsSource(style: {
     type: "vector",
     tiles: [`${PROTOCOL}://{z}/{x}/{y}`],
     minzoom: 14,
-    maxzoom: 16,
+    // maxzoom=16 → MapLibre overzooms z17+ from z16 parents (layers paint to 22).
+    maxzoom: KOREA_BUILDINGS_MAXZOOM,
     attribution: "행정안전부",
   };
 }

@@ -157,11 +157,15 @@ test("map-preview Hongdae: subway z15, landmark z15+, exit z17", async ({
               "subway_overlay_station_transfer",
             ],
           }).length;
-          const building = map.getLayer("building")
+          const buildingKr = map.getLayer("building_kr_fill")
+            ? map.queryRenderedFeatures({ layers: ["building_kr_fill"] }).length
+            : 0;
+          const buildingOmt = map.getLayer("building")
             ? map.queryRenderedFeatures({ layers: ["building"] }).length
             : 0;
+          const building = buildingKr + buildingOmt;
           return landmark > 0 && line > 0 && station > 0 && building > 0
-            ? { landmark, line, station, building, zoom: map.getZoom() }
+            ? { landmark, line, station, building, buildingKr, zoom: map.getZoom() }
             : null;
         }),
       { timeout: 20_000 },
@@ -1109,18 +1113,59 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
   const hz15Extra = await page.evaluate(() => {
     const map = (window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap })
       .__PINDMAP_PREVIEW_MAP__;
+    const kr = map.getLayer("building_kr_fill")
+      ? map.queryRenderedFeatures({ layers: ["building_kr_fill"] }).length
+      : 0;
+    const omt = map.getLayer("building")
+      ? map.queryRenderedFeatures({ layers: ["building"] }).length
+      : 0;
     return {
       subway: map.getLayer("subway_overlay_line")
         ? map.queryRenderedFeatures({ layers: ["subway_overlay_line"] }).length
         : 0,
-      building: map.getLayer("building")
-        ? map.queryRenderedFeatures({ layers: ["building"] }).length
-        : 0,
+      building: kr + omt,
+      buildingKr: kr,
     };
   });
   expect(hz15Extra.subway).toBeGreaterThanOrEqual(1);
   expect(hz15Extra.building).toBeGreaterThanOrEqual(1);
   expect(hz15.roadNames).toBe(0);
+
+  // Mangwon z17–z18: building_kr overzoom must stay > 0 (archive maxzoom 16).
+  for (const z of [17, 18] as const) {
+    await page.evaluate(async (zoom) => {
+      const map = (
+        window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap }
+      ).__PINDMAP_PREVIEW_MAP__;
+      map.jumpTo({ zoom, center: [126.9055, 37.556] });
+      await new Promise<void>((resolve) => {
+        map.once("idle", () => resolve());
+        window.setTimeout(() => resolve(), 7000);
+      });
+    }, z);
+    await page.waitForTimeout(1500);
+    const kr = await page.evaluate(() => {
+      const map = (
+        window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap }
+      ).__PINDMAP_PREVIEW_MAP__;
+      return {
+        zoom: map.getZoom(),
+        kr: map.getLayer("building_kr_fill")
+          ? map.queryRenderedFeatures({ layers: ["building_kr_fill"] }).length
+          : 0,
+        omt: map.getLayer("building")
+          ? map.queryRenderedFeatures({ layers: ["building"] }).length
+          : 0,
+        srcMax: (
+          map.getSource("korea_buildings") as { maxzoom?: number } | undefined
+        )?.maxzoom,
+      };
+    });
+    expect(
+      kr.kr,
+      `mangwon z${z} building_kr_fill > 0 (got ${kr.kr}, omt=${kr.omt}, srcMax=${kr.srcMax})`,
+    ).toBeGreaterThan(0);
+  }
 
   // Warm label latency after density (avoid perturbing counts)
   const labelLatencyMs = await page.evaluate(async () => {

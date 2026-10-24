@@ -2200,6 +2200,7 @@ function appendKoreaBuildingLayers(
     source: KOREA_BUILDINGS_SOURCE,
     "source-layer": KOREA_BUILDINGS_LAYER,
     minzoom: 15,
+    maxzoom: 22,
     layout: { visibility: "visible" },
     paint: {
       "fill-color": fillColor,
@@ -2213,6 +2214,7 @@ function appendKoreaBuildingLayers(
     source: KOREA_BUILDINGS_SOURCE,
     "source-layer": KOREA_BUILDINGS_LAYER,
     minzoom: 15,
+    maxzoom: 22,
     layout: {
       visibility: "visible",
       "line-cap": "butt",
@@ -2267,6 +2269,7 @@ function appendKoreaBuildingNumberLabels(
     source: KOREA_BUILDINGS_SOURCE,
     "source-layer": KOREA_BUILDINGS_LAYER,
     minzoom: 17,
+    maxzoom: 22,
     filter: [
       ">",
       ["length", ["to-string", ["coalesce", ["get", "no"], ""]]],
@@ -2284,6 +2287,8 @@ function appendKoreaBuildingNumberLabels(
         8.5,
         18,
         9.5,
+        19,
+        10,
       ],
       "text-padding": 3.5,
       "text-max-width": 5,
@@ -2520,8 +2525,14 @@ export async function buildPindmapStyle(
     if (layer.id === "building") {
       if (!theme.showBuildings) {
         setVisibility(layer, false);
+      } else if (
+        theme.id === "paper" &&
+        style.sources?.[KOREA_BUILDINGS_SOURCE]
+      ) {
+        // building_kr present: hide OMT building at all zooms (KR overzooms z17+).
+        setVisibility(layer, false);
       } else if (theme.id === "paper" || theme.id === "white") {
-        // Paper: white Kakao-like blocks; white theme keeps light gray
+        // Paper without KR / white: light blocks
         paintSet(
           layer,
           "fill-color",
