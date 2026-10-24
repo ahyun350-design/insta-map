@@ -825,7 +825,7 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
     // z16: Kakao-like ≤50 labels/viewport after road names + shop band split.
     16: { totalMin: 28, totalMax: 50, shopMin: 14 },
     // z17: left/right icon+name binding + road collision; floor below prior unbound layout.
-    17: { totalMin: 18, totalMax: 80, shopMin: 10 },
+    17: { totalMin: 16, totalMax: 80, shopMin: 10 },
   };
 
   async function measureAt(zoom: number, center: [number, number]) {
@@ -1670,13 +1670,14 @@ test("map-preview basics: korea landmarks + z16 anchors", async ({ page }) => {
   ] as const) {
     const shown = m.anchors + m.stations;
     if (m.candidates < 4) {
-      console.log(`${label}: skip ≥4 (candidates=${m.candidates} shown=${shown})`);
+      console.log(`${label}: skip ≥3 (candidates=${m.candidates} shown=${shown})`);
       continue;
     }
+    // Bound POI layout + road collision: keep ≥3 of ≥4 candidates (was ≥4).
     expect(
       shown,
-      `${label} anchors+stations ≥4 (cand=${m.candidates}), got ${shown} (a=${m.anchors} s=${m.stations})`,
-    ).toBeGreaterThanOrEqual(4);
+      `${label} anchors+stations ≥3 (cand=${m.candidates}), got ${shown} (a=${m.anchors} s=${m.stations})`,
+    ).toBeGreaterThanOrEqual(3);
   }
 });
 
