@@ -1352,7 +1352,9 @@ function appendBusStopLayers(layers: AnyLayer[]): void {
  * - z13+: name ends with 대로, or class motorway/trunk/primary
  * - z15+: secondary/tertiary whose name ends with 로 (not 대로 — those already at z13)
  * - Hide: 길 alleys, minor/service/track/path, ref-only / Latin-only, route shields
- * Yields to stations, landmarks, dong, shops (earlier layer + high sort-key).
+ * Overlap=0: allow-overlap + ignore-placement both false. Painted before
+ * shops/dong/stations (those layers come later → win collision); high sort-key
+ * so road names drop when space is taken.
  */
 function appendRoadNameLayers(
   layers: AnyLayer[],
@@ -1434,10 +1436,10 @@ function appendRoadNameLayers(
     // Tiny pad so labels fit along road centerlines between shop/dong pads.
     "text-padding": 0.5,
     "text-optional": true,
-    // Place only in free gaps; ignore-placement so we never displace shop/dong/station.
+    // Overlap=0: reserve collision boxes; yield via early layer + high sort-key.
     "text-allow-overlap": false,
-    "text-ignore-placement": true,
-    // MapLibre 4.7: lower sort-key wins when overlap=false → keep HIGH so roads yield.
+    "text-ignore-placement": false,
+    // MapLibre 4.7: lower sort-key wins → HIGH so roads yield to shops/dong/stations.
     "symbol-sort-key": 1800,
   };
   const sharedPaint = {
@@ -2213,7 +2215,7 @@ function appendKoreaBuildingLayers(
   }
 }
 
-/** z17+ houseno — lowest priority (after major roads). No name/floors in Juso MST. */
+/** z17+ houseno — lowest priority (below road names). No name/floors in Juso MST. */
 function appendKoreaBuildingNumberLabels(
   layers: AnyLayer[],
   theme: MapPreviewTheme,
@@ -2250,8 +2252,8 @@ function appendKoreaBuildingNumberLabels(
       "text-optional": true,
       "text-allow-overlap": false,
       "text-ignore-placement": false,
-      // Higher than road names (1800) → yields to stations/shops/dong/roads.
-      "symbol-sort-key": 2200,
+      // Highest sort-key + earliest among low-pri labels → yields to roads/shops/dong.
+      "symbol-sort-key": 2500,
     },
     paint: {
       "text-color": "#9A9A9A",
@@ -3828,7 +3830,7 @@ export async function buildPindmapStyle(
     });
   }
 
-  // Major road names: appendRoadNameLayers (after parks, before shops). Shields stay hidden.
+  // Major road names: appendRoadNameLayers (after houseno, before shops). Shields stay hidden.
 
   // Insert special landuse fills under roads/buildings (after park/school fills)
   const specialFills: Array<{
@@ -4172,8 +4174,10 @@ export async function buildPindmapStyle(
     });
   }
 
-  // Houseno early so shops/apt/dong/stations/roads (later) all win collision.
+  // Lowest priority first (later layers win collision): houseno → roads → shops…
   appendKoreaBuildingNumberLabels(layers, theme, style);
+  // Road names before shops/dong/stations so those layers win; overlap=0 flags.
+  appendRoadNameLayers(layers, theme);
 
   // 상가정보 first, then OMT shops: OMT-only wins collision; dups hidden via setFilter
   // (sangga preferred when name+50m match). Density still capped by padding/overlap=0.
@@ -4369,9 +4373,6 @@ export async function buildPindmapStyle(
     layers.push(...rest, ...stationLayers);
   }
 
-  // Major road names last: fill leftover gaps along lines; never displace other labels.
-  appendRoadNameLayers(layers, theme);
-
   // Final pass: place/POI labels never use Bold or allow-overlap
   // (saved/search/my-location pins are added later by adapters, not here).
   for (const layer of layers) {
@@ -4389,11 +4390,9 @@ export async function buildPindmapStyle(
         ? ["Noto Sans Italic"]
         : ["Noto Sans Regular"];
     }
+    // Overlap=0 for all place labels including road_name_* / building_kr_number.
     layout["text-allow-overlap"] = false;
-    // road_name_*: keep ignore-placement so roads never reserve space from shops/dong.
-    if (!id.startsWith("road_name_")) {
-      layout["text-ignore-placement"] = false;
-    }
+    layout["text-ignore-placement"] = false;
     layout["icon-allow-overlap"] = false;
     layout["icon-ignore-placement"] = false;
     if (typeof layout["text-halo-blur"] === "number" && layout["text-halo-blur"] > 0) {
