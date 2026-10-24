@@ -822,7 +822,8 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
   > = {
     14: { totalMin: 20, totalMax: 75, shopMin: 6 },
     15: { totalMin: 25, totalMax: 80, shopMin: 12 },
-    16: { totalMin: 28, totalMax: 75, shopMin: 18 },
+    // z16: Kakao-like ≤50 labels/viewport after road names + shop band split.
+    16: { totalMin: 28, totalMax: 50, shopMin: 14 },
     // z17 floor: collision + road-name gaps; keep Kakao-like density without flake fails.
     17: { totalMin: 20, totalMax: 80, shopMin: 14 },
   };
@@ -975,12 +976,46 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
         }
       }
 
+      // All visible symbol text labels (Kakao-like density budget includes roads/parks/tour).
+      const uniqueNames = new Set<string>();
+      let labelFeat = 0;
+      for (const id of layerIds) {
+        if (!map.getLayer(id)) continue;
+        if ((map.getLayoutProperty(id, "visibility") ?? "visible") === "none") {
+          continue;
+        }
+        const layerType = (
+          style?.layers as Array<{ id: string; type?: string }> | undefined
+        )?.find((l) => l.id === id)?.type;
+        if (layerType !== "symbol") continue;
+        if (/pin|myloc|search|route|cluster|unclustered/i.test(id)) continue;
+        try {
+          const feats = map.queryRenderedFeatures({ layers: [id] });
+          labelFeat += feats.length;
+          for (const f of feats as Array<{
+            properties?: Record<string, unknown> | null;
+          }>) {
+            const n = String(
+              f.properties?.["name:ko"] ||
+                f.properties?.["name:nonlatin"] ||
+                f.properties?.name ||
+                "",
+            ).trim();
+            if (n) uniqueNames.add(n);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
       return {
         shopCount: shop.length,
         landmarkCount: landmark.length,
         stationCount: station.length,
         aptCount: apt.length,
         total: shop.length + landmark.length + station.length + apt.length,
+        labelUnique: uniqueNames.size,
+        labelFeat,
         roadNames: roadFeats.length,
         namelessShop,
         shopCandidates,
@@ -1041,6 +1076,12 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
         m.total,
         `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (shop=${m.shopCount} lm=${m.landmarkCount} st=${m.stationCount} apt=${m.aptCount})`,
       ).toBeLessThanOrEqual(t.totalMax);
+      if (z === 16) {
+        expect(
+          m.labelUnique,
+          `${hub.id} z16 viewport labels ≤50 (unique), got ${m.labelUnique} feat=${m.labelFeat}`,
+        ).toBeLessThanOrEqual(50);
+      }
       if (z === 17 && m.shopCandidates > 0) {
         const coverage =
           m.shopCandidates <= m.shopCount
