@@ -49,3 +49,4 @@ plugins/**/.swiftpm/
 tsconfig.tsbuildinfo
 
 scripts/localdata/raw_sangga/
+scripts/localdata/.ncp_keys
