@@ -607,6 +607,11 @@ function appendKoreaLandmarkGeoLayers(
     },
   ];
   for (const t of tiers) {
+    // City-scale (z11–13): allow center; street zoom: left/right only (icon+name pair).
+    const anchor =
+      t.minzoom < 14
+        ? (["center", "left", "right"] as const)
+        : POI_VARIABLE_ANCHOR;
     layers.push({
       id: t.id,
       type: "symbol",
@@ -617,15 +622,15 @@ function appendKoreaLandmarkGeoLayers(
       layout: {
         visibility: "visible",
         "icon-image": "korea-landmark-building",
-        "icon-size": 1.1,
+        "icon-size": t.minzoom < 14 ? 1 : 1.1,
         "icon-optional": false,
         "text-field": POI_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": t.textSize,
-        "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
+        "text-variable-anchor": [...anchor],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
         "text-justify": "auto",
-        "text-max-width": POI_TEXT_MAX_WIDTH,
+        "text-max-width": t.minzoom < 14 ? 7 : POI_TEXT_MAX_WIDTH,
         "text-padding": PLACE_TEXT_PADDING,
         "text-optional": false,
         "text-allow-overlap": false,
@@ -970,16 +975,16 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       classFilter: [
         "all",
         SHOP_Z17_EXTRA,
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 60],
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 75],
       ],
       textPadding: [
         "interpolate",
         ["linear"],
         ["zoom"],
         17,
-        8,
-        18,
         5,
+        18,
+        3.5,
       ],
     },
     {
