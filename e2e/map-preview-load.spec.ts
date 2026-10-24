@@ -824,8 +824,8 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
     15: { totalMin: 25, totalMax: 80, shopMin: 12 },
     // z16: Kakao-like ≤50 labels/viewport after road names + shop band split.
     16: { totalMin: 28, totalMax: 50, shopMin: 14 },
-    // z17: left/right icon+name binding + road collision; floor below prior unbound layout.
-    17: { totalMin: 16, totalMax: 80, shopMin: 10 },
+    // z17: Bold Hangul + left/right binding; shop floor allows Kakao-like weight.
+    17: { totalMin: 16, totalMax: 80, shopMin: 9 },
   };
 
   async function measureAt(zoom: number, center: [number, number]) {

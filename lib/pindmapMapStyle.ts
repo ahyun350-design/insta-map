@@ -961,9 +961,9 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         16,
         20,
         17,
-        15,
+        11,
         18,
-        10,
+        8,
       ],
     },
     {
@@ -979,9 +979,9 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         ["linear"],
         ["zoom"],
         17,
-        5,
-        18,
         3.5,
+        18,
+        2.5,
       ],
     },
     {
@@ -1276,7 +1276,7 @@ function appendSanggaShopLayers(
         16,
         20,
         17,
-        15,
+        11,
       ],
     },
   ];
