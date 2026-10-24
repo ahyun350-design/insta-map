@@ -269,7 +269,8 @@ const HIDE_LAYER_IDS = new Set([
   // airport kept visible (guide label) — shop/POI icons stay hidden via poi_* above
   "road_one_way_arrow",
   "road_one_way_arrow_opposite",
-  // Road name labels + highway number shields (all themes / zooms). Road lines stay.
+  // Liberty road labels stay off; major Korean road names added via appendRoadNameLayers.
+  // Highway number / route shields stay hidden (all themes / zooms). Road lines stay.
   "highway-name-path",
   "highway-name-minor",
   "highway-name-major",
@@ -1325,6 +1326,157 @@ function appendBusStopLayers(layers: AnyLayer[]): void {
       "text-color": "#7A8088",
       "text-halo-color": "#FFFFFF",
       "text-halo-width": 1.2,
+      "text-opacity": 0.88,
+    },
+  });
+}
+
+/**
+ * Kakao-like major road names from OMT transportation_name.
+ * - z13+: name ends with 대로, or class motorway/trunk/primary
+ * - z15+: secondary/tertiary whose name ends with 로 (not 대로 — those already at z13)
+ * - Hide: 길 alleys, minor/service/track/path, ref-only / Latin-only, route shields
+ * Yields to stations, landmarks, dong, shops (earlier layer + high sort-key).
+ */
+function appendRoadNameLayers(
+  layers: AnyLayer[],
+  theme: MapPreviewTheme,
+): void {
+  const textColor =
+    theme.id === "neon" ? "#9AA0A8" : theme.id === "white" ? "#7A7A82" : "#8A8A92";
+  /** Prefer name:ko / nonlatin; empty → no label (hides ref-only / Latin-only). */
+  const nameRaw: unknown = [
+    "to-string",
+    [
+      "coalesce",
+      ["get", "name:ko"],
+      ["get", "name:nonlatin"],
+      "",
+    ],
+  ];
+  const hasKoName: unknown = [">", ["length", nameRaw], 0];
+  const notGil: unknown = ["!=", ["slice", nameRaw, -1], "길"];
+  const endsDaero: unknown = ["==", ["slice", nameRaw, -2], "대로"];
+  const endsRo: unknown = ["==", ["slice", nameRaw, -1], "로"];
+  const majorClass: unknown = [
+    "match",
+    ["get", "class"],
+    ["motorway", "trunk", "primary"],
+    true,
+    false,
+  ];
+  const secondaryClass: unknown = [
+    "match",
+    ["get", "class"],
+    ["secondary", "tertiary"],
+    true,
+    false,
+  ];
+  const excludedClass: unknown = [
+    "match",
+    ["get", "class"],
+    [
+      "minor",
+      "service",
+      "track",
+      "path",
+      "rail",
+      "transit",
+      "motorway_junction",
+      "raceway",
+      "minor_construction",
+      "service_construction",
+      "track_construction",
+      "path_construction",
+    ],
+    true,
+    false,
+  ];
+
+  const sharedLayout = {
+    visibility: "visible" as const,
+    "symbol-placement": "line" as const,
+    // Wide repeat gap (Kakao-like); short segments still skip via line placement.
+    "symbol-spacing": 360,
+    "text-field": KO_TEXT,
+    "text-font": ["Noto Sans Regular"],
+    "text-size": [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      13,
+      10,
+      15,
+      11,
+      17,
+      12,
+    ],
+    "text-max-angle": 45,
+    "text-rotation-alignment": "map",
+    "text-pitch-alignment": "viewport",
+    "text-keep-upright": true,
+    // Tiny pad so labels fit along road centerlines between shop/dong pads.
+    "text-padding": 0.5,
+    "text-optional": true,
+    // Place only in free gaps; ignore-placement so we never displace shop/dong/station.
+    "text-allow-overlap": false,
+    "text-ignore-placement": true,
+    // MapLibre 4.7: lower sort-key wins when overlap=false → keep HIGH so roads yield.
+    "symbol-sort-key": 1800,
+  };
+  const sharedPaint = {
+    "text-color": textColor,
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.35,
+    "text-opacity": 0.9,
+  };
+
+  layers.push({
+    id: "road_name_major",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "transportation_name",
+    minzoom: 13,
+    filter: [
+      "all",
+      hasKoName,
+      notGil,
+      ["!", excludedClass],
+      ["any", endsDaero, majorClass],
+    ],
+    layout: { ...sharedLayout },
+    paint: { ...sharedPaint },
+  });
+
+  layers.push({
+    id: "road_name_secondary",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "transportation_name",
+    minzoom: 15,
+    filter: [
+      "all",
+      hasKoName,
+      notGil,
+      secondaryClass,
+      endsRo,
+      ["!", endsDaero],
+    ],
+    layout: {
+      ...sharedLayout,
+      "symbol-spacing": 420,
+      "text-size": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        15,
+        10.5,
+        17,
+        12,
+      ],
+    },
+    paint: {
+      ...sharedPaint,
       "text-opacity": 0.88,
     },
   });
@@ -2930,7 +3082,7 @@ export async function buildPindmapStyle(
         });
         continue;
       }
-      // highway-name-* / highway-shield-* are in HIDE_LAYER_IDS (no road labels)
+      // Liberty highway-name-* / highway-shield-* stay in HIDE_LAYER_IDS; see road_name_*
       if (layer.id === "airport" || layer.id.startsWith("airport")) {
         // International airports only (IATA). Hides 수색비행장 etc. (no IATA).
         layer.filter = [
@@ -3508,7 +3660,7 @@ export async function buildPindmapStyle(
     });
   }
 
-  // No transportation_name labels (road / bridge names) — place / water / station stay.
+  // Major road names: appendRoadNameLayers (after parks, before shops). Shields stay hidden.
 
   // Insert special landuse fills under roads/buildings (after park/school fills)
   const specialFills: Array<{
@@ -4045,6 +4197,9 @@ export async function buildPindmapStyle(
     layers.push(...rest, ...stationLayers);
   }
 
+  // Major road names last: fill leftover gaps along lines; never displace other labels.
+  appendRoadNameLayers(layers, theme);
+
   // Final pass: place/POI labels never use Bold or allow-overlap
   // (saved/search/my-location pins are added later by adapters, not here).
   for (const layer of layers) {
@@ -4063,7 +4218,10 @@ export async function buildPindmapStyle(
         : ["Noto Sans Regular"];
     }
     layout["text-allow-overlap"] = false;
-    layout["text-ignore-placement"] = false;
+    // road_name_*: keep ignore-placement so roads never reserve space from shops/dong.
+    if (!id.startsWith("road_name_")) {
+      layout["text-ignore-placement"] = false;
+    }
     layout["icon-allow-overlap"] = false;
     layout["icon-ignore-placement"] = false;
     if (typeof layout["text-halo-blur"] === "number" && layout["text-halo-blur"] > 0) {
