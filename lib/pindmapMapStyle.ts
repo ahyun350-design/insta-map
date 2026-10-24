@@ -308,10 +308,9 @@ function notDuplicateKoreaLandmarkName(): unknown {
  * Split so large apt complexes can sit above parks/museums but below
  * school / civic / hospital (and korea tier1 / stations).
  */
-/** Parks / culture / post — may yield to large apt labels. */
+/** Culture / post / attraction — parks use park_name_* (green) instead. */
 const LANDMARK_FILTER_SECONDARY: unknown = [
   "any",
-  ["==", ["get", "class"], "park"],
   [
     "all",
     ["==", ["get", "class"], "grocery"],
@@ -912,7 +911,8 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
     {
       idSuffix: "z15",
       minzoom: 15,
-      maxzoom: 16.5,
+      // Exclusive at 16 so z15+z16 bands do not stack (hongdae z16 ≤50 labels).
+      maxzoom: 16,
       classFilter: [
         "any",
         SHOP_BIG,
@@ -930,7 +930,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         15,
         12,
         16,
-        9,
+        10,
       ],
     },
     {
@@ -939,18 +939,18 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       classFilter: [
         "all",
         SHOP_Z16,
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 45],
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 28],
       ],
       textPadding: [
         "interpolate",
         ["linear"],
         ["zoom"],
         16,
-        16,
+        20,
         17,
-        12,
+        15,
         18,
-        8,
+        10,
       ],
     },
     {
@@ -1072,8 +1072,17 @@ function appendKoreaTourLayers(
     {
       idSuffix: "z15",
       minzoom: 15,
+      maxzoom: 16,
       // Keep street-zoom shop/sangga density; Tour shopping stays out.
       rankMax: 28,
+      textSize: 12.5,
+      excludeShop: true,
+    },
+    {
+      // Hangang / major parks via TourAPI at street zoom (OMT park often loses collision).
+      idSuffix: "z16",
+      minzoom: 16,
+      rankMax: 12,
       textSize: 12.5,
       excludeShop: true,
     },
@@ -1199,7 +1208,8 @@ function appendSanggaShopLayers(
     {
       idSuffix: "z15",
       minzoom: 15,
-      maxzoom: 16.5,
+      // Exclusive at 16 — avoid stacking with z16 band.
+      maxzoom: 16,
       classFilter: [
         "any",
         SHOP_BIG,
@@ -1217,26 +1227,26 @@ function appendSanggaShopLayers(
         15,
         12,
         16,
-        9,
+        10,
       ],
     },
     {
       idSuffix: "z16",
       minzoom: 16,
-      // Cap street density: rank filter + higher padding (target ≤~50 labels/viewport).
+      // Cap street density after road names (target ≤50 labels/viewport).
       classFilter: [
         "all",
         SHOP_Z16,
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 45],
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 28],
       ],
       textPadding: [
         "interpolate",
         ["linear"],
         ["zoom"],
         16,
-        16,
+        20,
         17,
-        12,
+        15,
       ],
     },
   ];
@@ -1495,10 +1505,10 @@ function appendParkNameLayers(
     maxzoom?: number;
     rankMax: number;
   }> = [
-    // OMT park ranks are often 20–80; keep mid-zoom parks visible without flooding.
+    // OMT park ranks are often 1–80; keep mid-zoom parks visible without flooding.
     { id: "park_name_label_z12", minzoom: 12, maxzoom: 14, rankMax: 40 },
     { id: "park_name_label_z14", minzoom: 14, maxzoom: 16, rankMax: 80 },
-    { id: "park_name_label_z16", minzoom: 16, rankMax: 200 },
+    { id: "park_name_label_z16", minzoom: 16, rankMax: 120 },
   ];
   for (const band of bands) {
     layers.push({
@@ -1534,15 +1544,23 @@ function appendParkNameLayers(
           14.5,
         ],
         "text-max-width": 8,
-        "text-padding": PLACE_TEXT_PADDING,
+        "text-padding": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          14,
+          1.2,
+          16,
+          0.8,
+        ],
         "text-variable-anchor": [...ADMIN_VARIABLE_ANCHOR],
         "text-optional": true,
         "text-allow-overlap": false,
         "text-ignore-placement": false,
-        // Below landmarks/tour (~220), above shops (~850)
+        // MapLibre 4.7: lower sort-key wins — beat shops (~400–850), yield to stations.
         "symbol-sort-key": [
           "+",
-          560,
+          180,
           ["to-number", ["coalesce", ["get", "rank"], 50]],
         ],
       },
@@ -4009,11 +4027,12 @@ export async function buildPindmapStyle(
   appendSanggaShopLayers(layers, theme, style);
   // Shop/facility names (z14+) below landmarks; adapter pins added later on top
   appendShopPoiLayers(layers, theme);
-  appendParkNameLayers(layers, theme);
   appendBusStopLayers(layers);
 
   // Parks / culture / post — after shops, before large apt (large apt may displace these)
   appendLandmarkLayers(layers, theme, { kind: "secondary" });
+  // OMT park names after shops/secondary landmarks so they keep corridor space at z15+.
+  appendParkNameLayers(layers, theme);
 
   // Large apartment complexes — after shops + secondary landmarks so they keep
   // Kakao-like presence; school/civic/korea-tier1/stations still come later.
