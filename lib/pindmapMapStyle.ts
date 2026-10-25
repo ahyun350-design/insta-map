@@ -2176,9 +2176,25 @@ function appendKoreaBuildingLayers(
   if (theme.id !== "paper") return;
   if (!style.sources?.[KOREA_BUILDINGS_SOURCE]) return;
 
-  // Kakao: white fill + light gray outline so blocks float above paper land.
-  const fillColor = "#FFFFFF";
-  const outlineColor = "#D9D9D9";
+  // Use-aware fills (shop apricot / apt cool gray / default white). Soft so labels stay readable.
+  const fillColor: unknown = [
+    "match",
+    ["coalesce", ["get", "use"], ""],
+    "shop",
+    "#FBE3CF",
+    "apt",
+    "#E8EEF2",
+    "#FFFFFF",
+  ];
+  const outlineColor: unknown = [
+    "match",
+    ["coalesce", ["get", "use"], ""],
+    "shop",
+    "#E2C4A8",
+    "apt",
+    "#C9D2DA",
+    "#D9D9D9",
+  ];
   const fillOpacity: unknown = [
     "interpolate",
     ["linear"],
@@ -2227,11 +2243,11 @@ function appendKoreaBuildingLayers(
         ["linear"],
         ["zoom"],
         15,
-        0.5,
+        0.55,
         17,
-        0.85,
+        0.95,
         18,
-        1,
+        1.15,
       ],
       "line-opacity": [
         "interpolate",

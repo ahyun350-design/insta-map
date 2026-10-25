@@ -1,13 +1,13 @@
 /**
  * Code-generated POI category icons for MapLibre addImage.
- * Distinct category colors + shapes (18–20 CSS px) + white stroke + white glyph.
- * No external downloads. Registered with device pixelRatio (≤3).
+ * 24px color badges + bold white glyphs (Material Symbols–style, Apache-2.0;
+ * see lib/mapSurface/icons/LICENSE.md). Registered at device pixelRatio ≤3.
  */
 
 import { clampMapPinDpr, loadMapImageFromSvg } from "@/lib/mapPinImages";
 
-/** Kakao-like street POI mark size (18–20px). */
-export const POI_ICON_CSS_PX = 19;
+/** Street POI badge size (22–24px). Glyph draws at ~62% of badge. */
+export const POI_ICON_CSS_PX = 24;
 
 /** Per-category icon fill + darker label text. */
 export const POI_CATEGORY_COLORS = {
@@ -113,94 +113,104 @@ function colorOf(cat: PoiCategoryId): { icon: string; text: string } {
   }
 }
 
-/** Shape silhouette behind the glyph (viewBox 0 0 20 20). */
+/** Badge behind glyph (viewBox 0 0 24 24). */
 function shapePath(cat: PoiCategoryId, fill: string): string {
+  const stroke = `#FFFFFF`;
   switch (cat) {
     case "convenience":
     case "grocery":
     case "mall":
     case "shop":
-      // Rounded square — shopping / convenience
-      return `<rect x="1.5" y="1.5" width="17" height="17" rx="4.5" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>`;
+      return `<rect x="1.25" y="1.25" width="21.5" height="21.5" rx="5.5" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
     case "bar":
-      // Soft diamond
-      return `<path d="M10 1.6 L18.4 10 L10 18.4 L1.6 10 Z" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>`;
+      return `<path d="M12 1.8 L22.2 12 L12 22.2 L1.8 12 Z" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>`;
     case "hospital":
     case "pharmacy":
-      // Soft octagon-ish rounded rect taller feel via circle still, slight square
-      return `<rect x="1.8" y="1.8" width="16.4" height="16.4" rx="5" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>`;
+      return `<rect x="1.5" y="1.5" width="21" height="21" rx="6" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
     case "lodging":
-      // Rounded rectangle (landscape)
-      return `<rect x="1.2" y="3.2" width="17.6" height="13.6" rx="4" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>`;
+      return `<rect x="1.2" y="3.5" width="21.6" height="17" rx="5" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
     case "park":
-      // Soft hex
-      return `<path d="M10 1.5 L16.8 5.2 V14.8 L10 18.5 L3.2 14.8 V5.2 Z" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round"/>`;
+      return `<path d="M12 1.6 L19.8 6.2 V17.8 L12 22.4 L4.2 17.8 V6.2 Z" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>`;
     default:
-      return `<circle cx="10" cy="10" r="9.25" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>`;
+      return `<circle cx="12" cy="12" r="10.25" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
   }
 }
 
-/** Simple white path inside the 20×20 mark. */
+/**
+ * Bold filled glyphs (~15px / 62% of 24). Adapted from Material Symbols forms.
+ */
 function glyphPath(cat: PoiCategoryId): string {
   switch (cat) {
     case "cafe":
-      return `<path d="M7 8h6v4a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V8zm6 1h1.2a1.3 1.3 0 0 1 0 2.6H13" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/>`;
+      // coffee cup
+      return `<path fill="#fff" d="M7.2 8.2h8.2v5.1c0 1.7-1.4 3.1-3.1 3.1H10.3c-1.7 0-3.1-1.4-3.1-3.1V8.2zm8.2 1.2h1.6c1.1 0 2 .9 2 2s-.9 2-2 2h-1.6v-4zm-7.4 9.1h8.4v1.4H8z"/>`;
     case "restaurant":
-      return `<path d="M8 6v8M8 6c0 2 .8 3 2 3M12 6v8M12 6v3c0 1.2.6 2 1.5 2" fill="none" stroke="#fff" stroke-width="1.25" stroke-linecap="round"/>`;
+      // fork + knife (bold)
+      return `<path fill="#fff" d="M8.1 5.8c.55 0 1 .7 1 1.55V10c0 .55-.45 1-1 1h-.2c-.55 0-1-.45-1-1V7.35c0-.85.45-1.55 1-1.55zm0 5.55h.35v7.1H7.75v-7.1H8.1zm5.4-5.4c.9 0 1.65.75 1.65 1.65v4.05h-1.1V7.6c0-.3-.25-.55-.55-.55s-.55.25-.55.55v3.63h-1.1V7.6c0-.9.75-1.65 1.65-1.65zm.55 6.1h1.1v7.1h-1.1v-7.1z"/>`;
     case "bar":
-      return `<path d="M7 6.5h6l-1.2 3.5H8.2L7 6.5zm1.5 3.5v4h3v-4" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>`;
+      // beer mug
+      return `<path fill="#fff" d="M7 6.4h7.2l-.9 4.4H7.9L7 6.4zm1.4 4.8h4.4v5.6H8.4v-5.6zm7.2-3.2h1.5c1.2 0 2.1 1 2.1 2.2v2.4c0 1.2-.9 2.2-2.1 2.2h-1.5V8z"/>`;
     case "bakery":
-      return `<path d="M6.5 12c0-2.5 1.5-4.5 3.5-4.5S13.5 9.5 13.5 12H6.5zM8 8.5c.3-1.2 1-2 2-2s1.7.8 2 2" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/>`;
+      // bread loaf
+      return `<path fill="#fff" d="M6.4 13.2c0-2.8 2.1-5 4.8-5h1.6c2.7 0 4.8 2.2 4.8 5H6.4zm2.2-4.6c.5-1.5 1.7-2.5 3.4-2.5s2.9 1 3.4 2.5H8.6z"/>`;
     case "fast_food":
-      return `<path d="M7 9h6v5H7zM8.5 9V7.5M11.5 9V7.5M7 11h6" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/>`;
+      // burger
+      return `<path fill="#fff" d="M6.5 10.2h11v1.6h-11zm0 3.1h11v2.4c0 .7-.6 1.3-1.3 1.3H7.8c-.7 0-1.3-.6-1.3-1.3v-2.4zm1.2-4.6h8.6c.6 0 1.1.5 1.1 1.1v.8H6.6v-.8c0-.6.5-1.1 1.1-1.1z"/>`;
     case "convenience":
-      return `<path d="M7 7h6v6H7zM9.5 9.5v3M8 11h3" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/>`;
+      // storefront 24
+      return `<path fill="#fff" d="M6.2 9.2 7.5 6.6h9l1.3 2.6H6.2zm0 1.3h11.6v6.9H6.2v-6.9zm3.2 1.5v3.9h1.5v-3.9H9.4zm3.7 0v3.9H14.6v-3.9h-1.5z"/>`;
     case "grocery":
-      return `<path d="M6.5 8h7l-.5 6h-6L6.5 8zm2 0V7a1.5 1.5 0 0 1 3 0v1" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>`;
+      // shopping cart
+      return `<path fill="#fff" d="M6.2 7.2h1.7l.5 2.1h8.9l-1.1 4.4H8.2L6.2 7.2zm3.1 8.2a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4zm5.2 0a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4z"/>`;
     case "mall":
-      return `<path d="M6 13V8l4-2 4 2v5M8 13v-3h4v3" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>`;
+    case "shop":
+      // shopping bag
+      return `<path fill="#fff" d="M8.2 9.2V8a3.8 3.8 0 0 1 7.6 0v1.2h1.5v9.2H6.7V9.2h1.5zm1.5 0h4.6V8a2.3 2.3 0 0 0-4.6 0v1.2z"/>`;
     case "bank":
-      return `<path d="M6 8.5l4-2.5 4 2.5M6.5 9.5h7M7.5 9.5v3.5M10 9.5v3.5M12.5 9.5v3.5M6.5 13.5h7" fill="none" stroke="#fff" stroke-width="1.15" stroke-linecap="round"/>`;
+      return `<path fill="#fff" d="M5.8 9.2 12 5.6l6.2 3.6v1.3H5.8V9.2zm1.2 2.1h1.8v4.6H7V11.3zm3.1 0h1.8v4.6h-1.8v-4.6zm3.1 0h1.8v4.6h-1.8v-4.6zm-7.4 5.4h12.4v1.5H5.8v-1.5z"/>`;
     case "pharmacy":
-      return `<path d="M9.2 6.5h1.6v7H9.2zM6.5 9.2h7v1.6h-7z" fill="#fff"/>`;
+      // pill / cross soft
+      return `<path fill="#fff" d="M10.2 6.2h3.6v11.6h-3.6zM6.2 10.2h11.6v3.6H6.2z"/>`;
     case "hospital":
-      return `<path d="M9.1 6.2h1.8v7.6H9.1zM6.2 9.1h7.6v1.8H6.2z" fill="#fff"/>`;
+      return `<path fill="#fff" d="M10 5.8h4v12.4h-4zM5.8 10h12.4v4H5.8z"/>`;
     case "school":
-      return `<path d="M6 9.5l4-2.5 4 2.5-4 2.5-4-2.5zm0 0v3.5l4 2 4-2V9.5" fill="none" stroke="#fff" stroke-width="1.15" stroke-linejoin="round"/>`;
     case "college":
-      return `<path d="M6 10l4-2.5 4 2.5M7.5 10.5v2.5c1.2.8 2.5 1.2 2.5 1.2s1.3-.4 2.5-1.2V10.5" fill="none" stroke="#fff" stroke-width="1.15" stroke-linecap="round"/>`;
+      return `<path fill="#fff" d="M12 6.2 5.6 9.6v.9L12 13.9l6.4-3.4v-.9L12 6.2zm-5.2 5.5v3.2L12 18.2l5.2-3.3v-3.2L12 15.5 6.8 11.7z"/>`;
     case "town_hall":
-      return `<path d="M6 13V9l4-2.5L14 9v4M8 13v-2.5h4V13" fill="none" stroke="#fff" stroke-width="1.15" stroke-linejoin="round"/>`;
+      return `<path fill="#fff" d="M6.2 16.8V9.6L12 6.4l5.8 3.2v7.2h-2.2v-4.2h-7.2v4.2H6.2z"/>`;
     case "police":
-      return `<path d="M10 6.2l2.8 1.2v2.8c0 2.2-1.4 3.6-2.8 4.2-1.4-.6-2.8-2-2.8-4.2V7.4L10 6.2z" fill="none" stroke="#fff" stroke-width="1.15"/>`;
+      return `<path fill="#fff" d="M12 5.6 16.8 7.4v3.6c0 3.2-2.2 5.4-4.8 6.4-2.6-1-4.8-3.2-4.8-6.4V7.4L12 5.6z"/>`;
     case "post":
-      return `<path d="M6.5 7.5h7v5h-7zM6.5 7.5L10 10.5 13.5 7.5" fill="none" stroke="#fff" stroke-width="1.15" stroke-linejoin="round"/>`;
+      return `<path fill="#fff" d="M5.8 7.6h12.4v8.8H5.8V7.6zm1.3 1.2 5 3.6 4.9-3.6v1.5l-4.9 3.5-5-3.5V8.8z"/>`;
     case "lodging":
-      return `<path d="M6 13V9.5h8V13M6.5 9.5V8h3v1.5M7 11h1.5M11 11h1.5" fill="none" stroke="#fff" stroke-width="1.15" stroke-linecap="round"/>`;
+      // bed
+      return `<path fill="#fff" d="M5.6 15.6V10.8h12.8v4.8h-1.3v-2.2H6.9v2.2H5.6zm1.5-5.6V8.6h4.2v1.4H7.1zm6.2 0V8.6h3.6c.7 0 1.3.6 1.3 1.3v.1h-4.9z"/>`;
     case "cinema":
-      return `<path d="M6.5 7.5h7v5h-7zM8 9.5l3 1.5-3 1.5v-3z" fill="none" stroke="#fff" stroke-width="1.15" stroke-linejoin="round"/>`;
+      return `<path fill="#fff" d="M5.8 7.4h12.4v9.2H5.8V7.4zm3.2 2.2 5.2 2.6-5.2 2.6V9.6z"/>`;
     case "museum":
-      return `<path d="M6 12.5V9l4-2.5 4 2.5v3.5M7.5 12.5v-2h5v2" fill="none" stroke="#fff" stroke-width="1.15" stroke-linejoin="round"/>`;
+      return `<path fill="#fff" d="M5.8 16.4V9.4L12 6.2l6.2 3.2v7H5.8zm2.4 0h8v-3.2h-8v3.2z"/>`;
     case "park":
-      return `<path d="M10 13V9M7 10.5c0-2 1.3-3.5 3-3.5s3 1.5 3 3.5" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/>`;
+      // tree
+      return `<path fill="#fff" d="M12 5.6c2.8 0 5 2.1 5 4.7 0 .4 0 .8-.1 1.1H17c1.4 0 2.5 1.1 2.5 2.5S18.4 16.4 17 16.4H7c-1.4 0-2.5-1.1-2.5-2.5S5.6 11.4 7 11.4h.1c-.1-.3-.1-.7-.1-1.1 0-2.6 2.2-4.7 5-4.7zm-1.1 10.8h2.2v2.2h-2.2v-2.2z"/>`;
     case "parking":
-      return `<path d="M7.5 6.5h3.2a2.3 2.3 0 0 1 0 4.6H7.5V6.5zm0 4.6V13.5" fill="none" stroke="#fff" stroke-width="1.25" stroke-linecap="round"/>`;
+      return `<path fill="#fff" d="M8.2 6.2h4.4c2.3 0 4.1 1.8 4.1 4.1S15 14.4 12.6 14.4H9.7v3.4H8.2V6.2zm1.5 1.5v5.2h2.9c1.4 0 2.6-1.1 2.6-2.6S13.9 7.7 12.5 7.7H9.7z"/>`;
     case "fuel":
-      return `<path d="M7 6.5h4.5v7H7zM11.5 9h1.2v3.2a1 1 0 0 0 1 1" fill="none" stroke="#fff" stroke-width="1.15" stroke-linecap="round"/>`;
+      return `<path fill="#fff" d="M7 6.2h5.6v11.6H7V6.2zm5.6 3.2h1.8v4.6c0 1.3 1 2.3 2.3 2.3h.4v-1.5h-.4c-.4 0-.8-.4-.8-.8V9.1c0-.9-.7-1.6-1.6-1.6h-1.7v1.9z"/>`;
     case "subway":
-      return `<circle cx="10" cy="10" r="3.2" fill="none" stroke="#fff" stroke-width="1.25"/><path d="M10 6.2v1.2M10 12.6v1.2M6.2 10h1.2M12.6 10h1.2" stroke="#fff" stroke-width="1.15" stroke-linecap="round"/>`;
+      return `<path fill="#fff" d="M12 6.2a5.8 5.8 0 1 1 0 11.6 5.8 5.8 0 0 1 0-11.6zm0 2.2a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2z"/>`;
     case "bus":
-      return `<path d="M6.5 7.5h7v5.5h-7zM8 13v1M12 13v1M6.5 10.5h7" fill="none" stroke="#fff" stroke-width="1.15" stroke-linecap="round"/>`;
+      return `<path fill="#fff" d="M6.4 7.2h11.2v8.4H6.4V7.2zm1.6 9.2h1.6v1.4H8V16.4zm6.4 0h1.6v1.4h-1.6v-1.4zM7.6 9.8h8.8v2.8H7.6V9.8z"/>`;
     case "landmark":
-      return `<path d="M7 13V8.5l3-2.5 3 2.5V13M8.5 13v-2.5h3V13" fill="none" stroke="#fff" stroke-width="1.15" stroke-linejoin="round"/>`;
+      // star
+      return `<path fill="#fff" d="M12 5.4 13.9 10h4.7l-3.8 2.9 1.4 4.7L12 14.9 7.8 17.6l1.4-4.7L5.4 10h4.7L12 5.4z"/>`;
     default:
-      return `<circle cx="10" cy="10" r="2.2" fill="#fff"/>`;
+      return `<circle cx="12" cy="12" r="3.2" fill="#fff"/>`;
   }
 }
 
 export function poiCategoryIconSvg(cat: PoiCategoryId): string {
   const fill = colorOf(cat).icon;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
   ${shapePath(cat, fill)}
   ${glyphPath(cat)}
 </svg>`;
