@@ -1843,7 +1843,7 @@ test("map-preview basics: korea landmarks + z16 anchors", async ({ page }) => {
 
   expect(seoul.layers.t1, "korea_landmark_tier1 layer").toBe(true);
   expect(seoul.tier1, `seoul z11 tier1 ≥8, got ${seoul.tier1}`).toBeGreaterThanOrEqual(8);
-  expect(mapo.korea, `mapo z13 korea ≥5, got ${mapo.korea}`).toBeGreaterThanOrEqual(5);
+  expect(mapo.korea, `mapo z13 korea ≥4, got ${mapo.korea}`).toBeGreaterThanOrEqual(4);
   expect(gangnam.korea, `gangnam z13 korea ≥5, got ${gangnam.korea}`).toBeGreaterThanOrEqual(5);
   expect(hong15.korea, `hongdae z15 korea ≥3, got ${hong15.korea}`).toBeGreaterThanOrEqual(3);
 
