@@ -1165,6 +1165,171 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
       kr.kr,
       `mangwon z${z} building_kr_fill > 0 (got ${kr.kr}, omt=${kr.omt}, srcMax=${kr.srcMax})`,
     ).toBeGreaterThan(0);
+    expect(kr.srcMax, "korea_buildings source maxzoom").toBe(16);
+  }
+
+  // Same houseno centroid z16 vs z18 must stay within 5m (native overzoom, not bad clamp).
+  {
+    const geo = await page.evaluate(async () => {
+      const map = (
+        window as unknown as { __PINDMAP_PREVIEW_MAP__: PreviewMap }
+      ).__PINDMAP_PREVIEW_MAP__;
+
+      function ringCentroid(ring: number[][]): [number, number] {
+        let a = 0,
+          cx = 0,
+          cy = 0;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const xi = ring[i][0];
+          const yi = ring[i][1];
+          const xj = ring[j][0];
+          const yj = ring[j][1];
+          const f = xi * yj - xj * yi;
+          a += f;
+          cx += (xi + xj) * f;
+          cy += (yi + yj) * f;
+        }
+        a *= 0.5;
+        if (Math.abs(a) < 1e-18) {
+          const n = ring.length || 1;
+          return [
+            ring.reduce((s, p) => s + p[0], 0) / n,
+            ring.reduce((s, p) => s + p[1], 0) / n,
+          ];
+        }
+        return [cx / (6 * a), cy / (6 * a)];
+      }
+
+      function featureCentroid(f: {
+        geometry?: {
+          type?: string;
+          coordinates?: unknown;
+        };
+      }): { lng: number; lat: number } | null {
+        const g = f.geometry;
+        if (!g) return null;
+        let ring: number[][] | null = null;
+        if (g.type === "Polygon") {
+          ring = (g.coordinates as number[][][])[0] ?? null;
+        } else if (g.type === "MultiPolygon") {
+          ring = (g.coordinates as number[][][][])[0]?.[0] ?? null;
+        }
+        if (!ring || ring.length < 3) return null;
+        const [lng, lat] = ringCentroid(ring);
+        return { lng, lat };
+      }
+
+      function haversineM(
+        a: { lng: number; lat: number },
+        b: { lng: number; lat: number },
+      ): number {
+        const R = 6371000;
+        const toR = (d: number) => (d * Math.PI) / 180;
+        const dLat = toR(b.lat - a.lat);
+        const dLng = toR(b.lng - a.lng);
+        const la1 = toR(a.lat);
+        const la2 = toR(b.lat);
+        const h =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+        return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+      }
+
+      async function idle(ms: number) {
+        await new Promise<void>((resolve) => {
+          map.once("idle", () => resolve());
+          window.setTimeout(() => resolve(), ms);
+        });
+        await new Promise<void>((r) => window.setTimeout(r, 800));
+      }
+
+      const anchor = { lng: 126.9055, lat: 37.556 };
+      map.jumpTo({ zoom: 16, center: [anchor.lng, anchor.lat] });
+      await idle(7000);
+
+      const feats16 = map.getLayer("building_kr_fill")
+        ? map.queryRenderedFeatures({ layers: ["building_kr_fill"] })
+        : [];
+      let ref: { lng: number; lat: number; no: string } | null = null;
+      let bestD = Infinity;
+      type Feat = {
+        geometry?: { type?: string; coordinates?: unknown };
+        properties?: { no?: unknown };
+      };
+      for (const raw of feats16) {
+        const f = raw as Feat;
+        const no = String(f.properties?.no || "");
+        if (!no) continue;
+        const c = featureCentroid(f);
+        if (!c) continue;
+        const d = (c.lng - anchor.lng) ** 2 + (c.lat - anchor.lat) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          ref = { ...c, no };
+        }
+      }
+      if (!ref) return { ok: false as const, reason: "no_ref" };
+
+      map.jumpTo({ zoom: 18, center: [ref.lng, ref.lat] });
+      await idle(7000);
+
+      const feats18 = map.getLayer("building_kr_fill")
+        ? map.queryRenderedFeatures({ layers: ["building_kr_fill"] })
+        : [];
+      let cur: { lng: number; lat: number; no: string } | null = null;
+      for (const raw of feats18) {
+        const f = raw as Feat;
+        const no = String(f.properties?.no || "");
+        if (no !== ref.no) continue;
+        const c = featureCentroid(f);
+        if (!c) continue;
+        cur = { ...c, no };
+        break;
+      }
+      if (!cur) return { ok: false as const, reason: "no_match", no: ref.no };
+
+      const cache = (
+        map as unknown as {
+          style?: {
+            sourceCaches?: Record<
+              string,
+              { _tiles?: Record<string, { tileID?: { canonical?: { z?: number } } }> }
+            >;
+          };
+        }
+      ).style?.sourceCaches?.korea_buildings;
+      const heldZs: number[] = [];
+      if (cache?._tiles) {
+        for (const t of Object.values(cache._tiles)) {
+          const cz = t?.tileID?.canonical?.z;
+          if (typeof cz === "number") heldZs.push(cz);
+        }
+      }
+
+      return {
+        ok: true as const,
+        no: ref.no,
+        meters: haversineM(ref, cur),
+        srcMax: (
+          map.getSource("korea_buildings") as { maxzoom?: number } | undefined
+        )?.maxzoom,
+        heldZs: [...new Set(heldZs)].sort((a, b) => a - b),
+        kr18: feats18.length,
+      };
+    });
+
+    expect(geo.ok, `building geo match failed: ${JSON.stringify(geo)}`).toBe(
+      true,
+    );
+    if (geo.ok) {
+      expect(geo.srcMax).toBe(16);
+      expect(geo.heldZs.every((z) => z <= 16)).toBe(true);
+      expect(
+        geo.meters,
+        `z16 vs z18 building ${geo.no} centroid Δ=${geo.meters}m`,
+      ).toBeLessThan(5);
+      expect(geo.kr18).toBeGreaterThan(0);
+    }
   }
 
   // Warm label latency after density (avoid perturbing counts)

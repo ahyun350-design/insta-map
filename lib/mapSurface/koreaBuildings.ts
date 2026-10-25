@@ -10,7 +10,10 @@ import { PMTiles } from "pmtiles";
 const PROTOCOL = "pindbuildings";
 export const KOREA_BUILDINGS_SOURCE = "korea_buildings";
 export const KOREA_BUILDINGS_LAYER = "building_kr";
-/** Archive tile maxzoom — MapLibre overzooms above this; protocol clamps z/x/y. */
+/**
+ * Archive / style source maxzoom. MapLibre overzooms past this (reparseOverscaled);
+ * protocol must NOT remap child z→parent bytes (that misplaces geometry).
+ */
 export const KOREA_BUILDINGS_MAXZOOM = 16;
 
 let softFailTracked = false;
@@ -85,16 +88,17 @@ export function ensureKoreaBuildingsProtocol(): void {
         params.url,
       );
       if (!m) throw new Error("invalid_pindbuildings_url");
-      // Overzoom: archive stops at 16; parent-tile clamp so z17+ is not empty.
-      let z = Number(m[1]);
-      let x = Number(m[2]);
-      let y = Number(m[3]);
-      while (z > KOREA_BUILDINGS_MAXZOOM) {
-        z -= 1;
-        x = Math.floor(x / 2);
-        y = Math.floor(y / 2);
-      }
-      if (z < 0 || !Number.isFinite(x) || !Number.isFinite(y)) {
+      const z = Number(m[1]);
+      const x = Number(m[2]);
+      const y = Number(m[3]);
+      // Style source maxzoom=16 → MapLibre should only request z≤16 (overzoom).
+      // Never serve parent tile bytes under a child z/x/y (geometry would shift/scale).
+      if (
+        !Number.isFinite(z) ||
+        !Number.isFinite(x) ||
+        !Number.isFinite(y) ||
+        z < 0
+      ) {
         return { data: new Uint8Array() };
       }
       const url = getKoreaBuildingsPublicUrl();
@@ -143,7 +147,8 @@ export function ensureKoreaBuildingsSource(style: {
     type: "vector",
     tiles: [`${PROTOCOL}://{z}/{x}/{y}`],
     minzoom: 14,
-    // maxzoom=16 → MapLibre overzooms z17+ from z16 parents (layers paint to 22).
+    // Inline TileJSON fields — VectorTileSource.loadTileJson picks maxzoom so
+    // MapLibre overzooms rather than requesting missing z17+ leaves.
     maxzoom: KOREA_BUILDINGS_MAXZOOM,
     attribution: "행정안전부",
   };
