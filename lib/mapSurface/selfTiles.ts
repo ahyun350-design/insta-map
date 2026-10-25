@@ -134,12 +134,26 @@ export const KOREA_PMTILES_MAXZOOM = 14;
 
 const PROTOCOL_NAME = "pindself";
 const PREFETCH_ZOOM = 14;
+/** Match OFM warm: center + 8 neighbors. Larger rings duplicated MapLibre viewport fetches. */
+const PREFETCH_RADIUS = 1;
+/**
+ * MapLibre in-memory decoded-tile budget (admin self-tiles path).
+ * Keeps recent viewport tiles when panning back; not disk / IndexedDB.
+ */
+export const SELF_TILES_MAX_TILE_CACHE_SIZE = 80;
 
 let protocolRegistered = false;
 let pmtiles: PMTiles | null = null;
 let selfTilesBroken = false;
 let selfTilesErrorTracked = false;
 let warmPromise: Promise<boolean> | null = null;
+/** In-flight getZxy merge — same z/x/y shares one Range (not a byte store). */
+const inflightZxy = new Map<
+  string,
+  Promise<{ data: ArrayBuffer; cacheControl?: string; expires?: string } | undefined>
+>();
+/** Last z14 center tile prefetched this session (skip duplicate rings). */
+let lastPrefetchTileKey = "";
 
 /** map-preview / e2e session override (null = use localStorage flag). */
 let sessionOverride: boolean | null = null;
@@ -266,6 +280,39 @@ function getOrCreatePmtiles(): PMTiles {
   return pmtiles;
 }
 
+/**
+ * Shared getZxy with in-flight dedupe. Prefetch + MapLibre often request the
+ * same leaf concurrently; without this each call issues its own Range.
+ * Does not retain tile bytes after the promise settles (HTTP cache only).
+ */
+function getZxyDeduped(
+  z: number,
+  x: number,
+  y: number,
+  signal?: AbortSignal,
+): Promise<{ data: ArrayBuffer; cacheControl?: string; expires?: string } | undefined> {
+  const key = `${z}/${x}/${y}`;
+  const existing = inflightZxy.get(key);
+  if (existing) {
+    if (signal?.aborted) {
+      return Promise.reject(new DOMException("Aborted", "AbortError"));
+    }
+    return existing.then((v) => {
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return v;
+    });
+  }
+  const p = getOrCreatePmtiles()
+    .getZxy(z, x, y, signal)
+    .finally(() => {
+      inflightZxy.delete(key);
+    });
+  inflightZxy.set(key, p);
+  return p;
+}
+
 /** Shared PMTiles instance (null until first warm/get). */
 export function getSharedPmtiles(): PMTiles | null {
   return pmtiles;
@@ -291,7 +338,7 @@ export function ensureSelfTilesProtocolRegistered(): void {
 
       if (!selfTilesBroken) {
         try {
-          const tile = await getOrCreatePmtiles().getZxy(z, x, y, signal);
+          const tile = await getZxyDeduped(z, x, y, signal);
           if (tile?.data && tile.data.byteLength > 0) {
             selfTileHardFailCount = 0;
             // Detached Uint8Array — matches pmtiles.Protocol; avoids shared-buffer
@@ -397,8 +444,8 @@ export async function warmSelfTilesOrBreak(): Promise<boolean> {
         minZoom: header.minZoom,
         maxZoom: header.maxZoom,
       };
-      // Load root directory into PMTiles cache (tile may be empty outside Korea).
-      await p.getZxy(0, 0, 0);
+      // Header Range (0–16KB) already includes the root directory for this archive.
+      // Skip getZxy(0,0,0) — it was an extra tile Range outside Korea.
       return true;
     } catch {
       markBroken();
@@ -409,7 +456,8 @@ export async function warmSelfTilesOrBreak(): Promise<boolean> {
 }
 
 /**
- * Prefetch z14 center + 8 neighbors via shared PMTiles (HTTP Range cache only).
+ * Prefetch z14 3×3 via shared PMTiles (HTTP Range cache only).
+ * In-flight dedupe merges with MapLibre protocol gets for the same leaf.
  */
 export async function prefetchSelfTilesZ14Around(
   lat: number,
@@ -422,29 +470,18 @@ export async function prefetchSelfTilesZ14Around(
   const ok = await warmSelfTilesOrBreak();
   if (!ok || selfTilesBroken) return { requested: 0 };
   try {
-    const p = getOrCreatePmtiles();
     const { x: cx, y: cy } = lngLatToTile(lng, lat, PREFETCH_ZOOM);
+    const tileKey = `${PREFETCH_ZOOM}/${cx}/${cy}`;
+    if (tileKey === lastPrefetchTileKey) return { requested: 0 };
+    lastPrefetchTileKey = tileKey;
     const max = 2 ** PREFETCH_ZOOM - 1;
     const jobs: Promise<unknown>[] = [];
-    // 7×7 around center — mangwon z16 first paint was cold outside the old 5×5.
-    for (let dx = -3; dx <= 3; dx++) {
-      for (let dy = -3; dy <= 3; dy++) {
+    for (let dx = -PREFETCH_RADIUS; dx <= PREFETCH_RADIUS; dx++) {
+      for (let dy = -PREFETCH_RADIUS; dy <= PREFETCH_RADIUS; dy++) {
         const x = cx + dx;
         const y = cy + dy;
         if (x < 0 || y < 0 || x > max || y > max) continue;
-        jobs.push(p.getZxy(PREFETCH_ZOOM, x, y).catch(() => null));
-      }
-    }
-    // Also warm one zoom coarser (z13) for faster overzoom parent tiles.
-    const z13 = 13;
-    const { x: cx13, y: cy13 } = lngLatToTile(lng, lat, z13);
-    const max13 = 2 ** z13 - 1;
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dy = -2; dy <= 2; dy++) {
-        const x = cx13 + dx;
-        const y = cy13 + dy;
-        if (x < 0 || y < 0 || x > max13 || y > max13) continue;
-        jobs.push(p.getZxy(z13, x, y).catch(() => null));
+        jobs.push(getZxyDeduped(PREFETCH_ZOOM, x, y).catch(() => null));
       }
     }
     await Promise.all(jobs);
@@ -492,4 +529,6 @@ export function resetSelfTilesForTests(): void {
   ofmTileTemplatePromise = null;
   cachedHeaderBounds = null;
   sessionOverride = null;
+  inflightZxy.clear();
+  lastPrefetchTileKey = "";
 }

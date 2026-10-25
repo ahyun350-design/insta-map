@@ -52,6 +52,7 @@ import {
   isSelfTilesBroken,
   prefetchSelfTilesZ14Around,
   readSelfTilesEnabled,
+  SELF_TILES_MAX_TILE_CACHE_SIZE,
 } from "@/lib/mapSurface/selfTiles";
 import {
   paintPreviewRouteDemo,
@@ -427,8 +428,12 @@ export default function PreviewGlMap({
           center: [127.8, 36.2] as [number, number],
           zoom: 6.2,
         };
-        // Warm PMTiles header + nearby leaves before Map() so first paint hits cache.
-        if (readSelfTilesEnabled() && !isSelfTilesBroken()) {
+        // Street-zoom only: overview centers (z~6) burned z14 rings MapLibre never paints.
+        if (
+          readSelfTilesEnabled() &&
+          !isSelfTilesBroken() &&
+          bootView.zoom >= 13
+        ) {
           const [lng, lat] = bootView.center;
           void prefetchSelfTilesZ14Around(lat, lng);
         }
@@ -484,6 +489,12 @@ export default function PreviewGlMap({
           renderWorldCopies: modeRef.current !== "lite",
           pixelRatio: dpr,
           localIdeographFontFamily: MAP_LOCAL_IDEOGRAPH_FONT_FAMILY,
+          ...(readSelfTilesEnabled()
+            ? {
+                maxTileCacheSize: SELF_TILES_MAX_TILE_CACHE_SIZE,
+                maxTileCacheZoomLevels: 3,
+              }
+            : {}),
         });
         const createMs = Math.round(performance.now() - createT0);
         mapRef.current = map;

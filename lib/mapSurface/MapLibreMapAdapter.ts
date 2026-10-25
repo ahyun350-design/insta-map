@@ -64,6 +64,7 @@ import {
   breakSelfTilesToOfmSession,
   isSelfTilesBroken,
   prefetchSelfTilesZ14Around,
+  SELF_TILES_MAX_TILE_CACHE_SIZE,
   readSelfTilesEnabled,
 } from "./selfTiles";
 import { attachEmptyBasemapWatchdog } from "./emptyBasemapWatchdog";
@@ -391,6 +392,12 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       renderWorldCopies: false,
       pixelRatio: dpr,
       localIdeographFontFamily: MAP_LOCAL_IDEOGRAPH_FONT_FAMILY,
+      ...(readSelfTilesEnabled()
+        ? {
+            maxTileCacheSize: SELF_TILES_MAX_TILE_CACHE_SIZE,
+            maxTileCacheZoomLevels: 3,
+          }
+        : {}),
     });
     this.map = map;
     this.timingCreateMs = Math.round(now() - createT0);
