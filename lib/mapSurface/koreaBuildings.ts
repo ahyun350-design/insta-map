@@ -57,13 +57,19 @@ function noteBuildingsSoftFail(
     .catch(() => undefined);
 }
 
+/**
+ * Versioned object key — bump when rebuilding so immutable CDN drops stale tiles.
+ * Override with NEXT_PUBLIC_KOREA_BUILDINGS_PMTILES_URL (NCP KR only).
+ */
+export const KOREA_BUILDINGS_OBJECT_KEY = "korea-buildings-20261025.pmtiles";
+
 /** Public URL on NCP KR Object Storage only (not Supabase / overseas). */
 export function getKoreaBuildingsPublicUrl(): string {
   const override = (process.env.NEXT_PUBLIC_KOREA_BUILDINGS_PMTILES_URL || "")
     .trim()
     .replace(/\/$/, "");
   if (override) return override;
-  return "https://kr.object.ncloudstorage.com/pindmap-tiles-kr/korea-buildings.pmtiles";
+  return `https://kr.object.ncloudstorage.com/pindmap-tiles-kr/${KOREA_BUILDINGS_OBJECT_KEY}`;
 }
 
 let registered = false;
