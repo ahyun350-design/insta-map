@@ -1716,10 +1716,12 @@ test("map-preview basics: korea landmarks + z16 anchors", async ({ page }) => {
             id === "landmark_label" ||
             id.startsWith("landmark_label_") ||
             id === "landmark_priority" ||
-            id.startsWith("landmark_priority_"),
+            id.startsWith("landmark_priority_") ||
+            // Liberty has no park_label; parks render on park_name_label_*.
+            id === "label_park" ||
+            id === "park_label" ||
+            id.startsWith("park_name_label"),
         ),
-        "label_park",
-        "park_label",
       ]);
       const stations = uniq(["poi_transit", "poi_transit_mid"]);
       // Candidates in view (school/park/gov/market/hospital + rail station)

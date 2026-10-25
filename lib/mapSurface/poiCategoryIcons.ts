@@ -15,7 +15,8 @@ export const POI_CATEGORY_COLORS = {
   cafe: { icon: "#B86A3A", text: "#6A3A1A" },
   bar: { icon: "#8A5AAA", text: "#4A2A6A" },
   bakery: { icon: "#D4A05A", text: "#7A4A1A" },
-  fast_food: { icon: "#E07040", text: "#8A3010" },
+  // Amber (not red) — avoid red badge + bar glyph reading as “no entry”.
+  fast_food: { icon: "#D4A05A", text: "#7A4A1A" },
   shopping: { icon: "#E070A0", text: "#8A2A5A" },
   convenience: { icon: "#3AAA5A", text: "#1A6A2A" },
   grocery: { icon: "#5ABA6A", text: "#2A6A2A" },
@@ -145,8 +146,8 @@ function glyphPath(cat: PoiCategoryId): string {
       // coffee cup
       return `<path fill="#fff" d="M7.2 8.2h8.2v5.1c0 1.7-1.4 3.1-3.1 3.1H10.3c-1.7 0-3.1-1.4-3.1-3.1V8.2zm8.2 1.2h1.6c1.1 0 2 .9 2 2s-.9 2-2 2h-1.6v-4zm-7.4 9.1h8.4v1.4H8z"/>`;
     case "restaurant":
-      // fork + knife (bold)
-      return `<path fill="#fff" d="M8.1 5.8c.55 0 1 .7 1 1.55V10c0 .55-.45 1-1 1h-.2c-.55 0-1-.45-1-1V7.35c0-.85.45-1.55 1-1.55zm0 5.55h.35v7.1H7.75v-7.1H8.1zm5.4-5.4c.9 0 1.65.75 1.65 1.65v4.05h-1.1V7.6c0-.3-.25-.55-.55-.55s-.55.25-.55.55v3.63h-1.1V7.6c0-.9.75-1.65 1.65-1.65zm.55 6.1h1.1v7.1h-1.1v-7.1z"/>`;
+      // Fork + spoon (wide silhouette; avoids vertical fork/knife reading as ||).
+      return `<path fill="#fff" d="M7.8 5.4c.5 0 .9.7.9 1.55v2.6c0 .45-.35.8-.7.8h-.4c-.35 0-.7-.35-.7-.8V6.95c0-.85.4-1.55.9-1.55zm-.2 5.1h.55v8.5H7.05v-8.5H7.6zm7.2-4.7c1.65 0 3 1.25 3 2.8 0 1.05-.6 1.95-1.5 2.45v7.25h-1.5V10.05c-.9-.5-1.5-1.4-1.5-2.45 0-1.55 1.35-2.8 3-2.8z"/>`;
     case "bar":
       // beer mug
       return `<path fill="#fff" d="M7 6.4h7.2l-.9 4.4H7.9L7 6.4zm1.4 4.8h4.4v5.6H8.4v-5.6zm7.2-3.2h1.5c1.2 0 2.1 1 2.1 2.2v2.4c0 1.2-.9 2.2-2.1 2.2h-1.5V8z"/>`;
@@ -154,8 +155,8 @@ function glyphPath(cat: PoiCategoryId): string {
       // bread loaf
       return `<path fill="#fff" d="M6.4 13.2c0-2.8 2.1-5 4.8-5h1.6c2.7 0 4.8 2.2 4.8 5H6.4zm2.2-4.6c.5-1.5 1.7-2.5 3.4-2.5s2.9 1 3.4 2.5H8.6z"/>`;
     case "fast_food":
-      // burger
-      return `<path fill="#fff" d="M6.5 10.2h11v1.6h-11zm0 3.1h11v2.4c0 .7-.6 1.3-1.3 1.3H7.8c-.7 0-1.3-.6-1.3-1.3v-2.4zm1.2-4.6h8.6c.6 0 1.1.5 1.1 1.1v.8H6.6v-.8c0-.6.5-1.1 1.1-1.1z"/>`;
+      // Recognizable burger: curved top bun + oval patty + bottom bun (no full-width bars).
+      return `<path fill="#fff" d="M7.2 10.2c0-2.4 2.1-4 4.8-4s4.8 1.6 4.8 4H7.2zm.4 1.1h8.8c.5 0 .9.4.9.9v.35c0 .5-.4.9-.9.9H7.6c-.5 0-.9-.4-.9-.9v-.35c0-.5.4-.9.9-.9zm.3 3.1h8.2c.7 0 1.2.5 1.2 1.1 0 .4-.2.7-.5.9H7.2c-.3-.2-.5-.5-.5-.9 0-.6.5-1.1 1.2-1.1z"/>`;
     case "convenience":
       // storefront 24
       return `<path fill="#fff" d="M6.2 9.2 7.5 6.6h9l1.3 2.6H6.2zm0 1.3h11.6v6.9H6.2v-6.9zm3.2 1.5v3.9h1.5v-3.9H9.4zm3.7 0v3.9H14.6v-3.9h-1.5z"/>`;

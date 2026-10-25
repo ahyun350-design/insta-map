@@ -241,10 +241,15 @@ function kindOf(tags: Record<string, string>): string {
   );
 }
 
+/** Large-box mart / supermarket chains → shopping POI, not landmark star. */
+const MART_CHAIN_RE =
+  /홈플러스|이마트|롯데마트|코스트코|트레이더스|하나로마트|농협하나로|빅마켓|메가마트|롯데슈퍼|테크노마트|Homeplus|Costco|E-?mart/i;
+
 function elementToFeat(el: OsmEl): Feat | null {
   const tags = el.tags ?? {};
   const name = pickName(tags);
   if (!name) return null;
+  if (MART_CHAIN_RE.test(name) || tags.shop === "supermarket") return null;
   // Drop apartment-like noise
   if (/아파트|아파트단지|주상복합|오피스텔|단지/.test(name) && !tags.wikidata) {
     const h = parseHeight(tags) ?? 0;

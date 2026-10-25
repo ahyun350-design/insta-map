@@ -528,8 +528,7 @@ function appendLandmarkLayers(
         "text-optional": kind === "priority",
         "text-allow-overlap": false,
         "text-ignore-placement": false,
-        // School/civic icons stay visible under denser 23px shop badges.
-        "icon-allow-overlap": kind === "priority",
+        "icon-allow-overlap": false,
         "icon-ignore-placement": false,
         "symbol-sort-key": sortKey,
         "symbol-z-order": "source",
@@ -614,6 +613,7 @@ function appendKoreaLandmarkGeoLayers(
   ];
   for (const t of tiers) {
     // City-scale (z11–13): full anchors for coverage; street: left/right only.
+    // Overlap=0: win via layer order (painted late) + low sort-key + tight padding.
     const anchor = t.minzoom < 14 ? PLACE_VARIABLE_ANCHOR : POI_VARIABLE_ANCHOR;
     const cityZoom = t.minzoom < 14;
     layers.push({
@@ -635,15 +635,13 @@ function appendKoreaLandmarkGeoLayers(
         "text-radial-offset": cityZoom ? 0.9 : ICON_TEXT_RADIAL_OFFSET,
         "text-justify": "auto",
         "text-max-width": cityZoom ? 7 : POI_TEXT_MAX_WIDTH,
-        // Tighter padding at city zoom so mapo z13 keeps ≥5 anchors.
         "text-padding": cityZoom ? 1 : PLACE_TEXT_PADDING,
         "icon-padding": cityZoom ? 0.5 : 1,
-        // Icon stays if text fails; overlap so dense POI badges cannot hide anchors.
         "text-optional": true,
-        "text-allow-overlap": true,
-        "text-ignore-placement": cityZoom,
-        "icon-allow-overlap": true,
-        "icon-ignore-placement": cityZoom,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false,
         "symbol-sort-key": t.sortBase,
         "symbol-z-order": "source",
       },
@@ -959,17 +957,18 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
     {
       idSuffix: "z16",
       minzoom: 16,
+      // Leave room for school/civic anchors (mangwon z16 ≥4) under overlap=0.
       classFilter: [
         "all",
         SHOP_Z16,
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 28],
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 18],
       ],
       textPadding: [
         "interpolate",
         ["linear"],
         ["zoom"],
         16,
-        16,
+        18,
         17,
         6,
         18,
@@ -1129,6 +1128,7 @@ function appendKoreaTourLayers(
       "all",
       [">", ["length", ["to-string", ["coalesce", ["get", "name"], ""]]], 0],
       ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], band.rankMax],
+      notDuplicateKoreaLandmarkName(),
     ];
     if (band.excludeShop) {
       filter.push(["!", ["==", ["get", "class"], "shop"]]);
@@ -1274,13 +1274,13 @@ function appendSanggaShopLayers(
       idSuffix: "z16",
       minzoom: 16,
       maxzoom: 17,
-      // Cap street density after road names (target ≤50 labels/viewport).
+      // Cap street density; leave space for school/civic anchors.
       classFilter: [
         "all",
         SHOP_Z16,
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 28],
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 18],
       ],
-      textPadding: 16,
+      textPadding: 18,
     },
     {
       idSuffix: "z17",
@@ -1474,7 +1474,7 @@ function appendRoadNameLayers(
     visibility: "visible" as const,
     "symbol-placement": "line" as const,
     // Wide repeat gap (Kakao-like); short segments still skip via line placement.
-    "symbol-spacing": 360,
+    "symbol-spacing": 420,
     "text-field": KO_TEXT,
     "text-font": ["Noto Sans Regular"],
     "text-size": [
@@ -2198,22 +2198,26 @@ function appendKoreaBuildingLayers(
   if (theme.id !== "paper") return;
   if (!style.sources?.[KOREA_BUILDINGS_SOURCE]) return;
 
-  // Use-aware fills (shop apricot / apt cool gray / default white). Soft so labels stay readable.
+  // Shop fill only when use=shop AND shop_n≥2 (large footprints with 1 shop stay white).
+  // Color kept very light so neighborhoods do not read as solid apricot.
+  const isShopFill: unknown = [
+    "all",
+    ["==", ["coalesce", ["get", "use"], ""], "shop"],
+    [">=", ["to-number", ["coalesce", ["get", "shop_n"], 0]], 2],
+  ];
   const fillColor: unknown = [
-    "match",
-    ["coalesce", ["get", "use"], ""],
-    "shop",
-    "#FBE3CF",
-    "apt",
+    "case",
+    isShopFill,
+    "#FDF1E6",
+    ["==", ["coalesce", ["get", "use"], ""], "apt"],
     "#E8EEF2",
     "#FFFFFF",
   ];
   const outlineColor: unknown = [
-    "match",
-    ["coalesce", ["get", "use"], ""],
-    "shop",
-    "#E2C4A8",
-    "apt",
+    "case",
+    isShopFill,
+    "#F0DCC8",
+    ["==", ["coalesce", ["get", "use"], ""], "apt"],
     "#C9D2DA",
     "#D9D9D9",
   ];
@@ -3694,10 +3698,10 @@ export async function buildPindmapStyle(
       "text-size": 17,
       "text-letter-spacing": 0.05,
       "text-max-width": 7,
-      "text-padding": PLACE_TEXT_PADDING,
+      // Slightly roomier padding; yield to korea_landmark tiers (sort ~90–120).
+      "text-padding": 2.5,
       "text-variable-anchor": [...ADMIN_VARIABLE_ANCHOR],
-      // Gu wins over dong / landmark / mountain when colliding
-      "symbol-sort-key": 2000,
+      "symbol-sort-key": 400,
       visibility: "visible",
     },
     paint: {
@@ -3893,6 +3897,8 @@ export async function buildPindmapStyle(
           ["to-number", ["coalesce", ["get", "priority"], 99]],
           band.priorityMax,
         ],
+        // Hide when korea_landmarks GeoJSON already labels the same name.
+        notDuplicateKoreaLandmarkName(),
       ],
       minzoom: band.minzoom,
       maxzoom: band.maxzoom,
@@ -4394,7 +4400,8 @@ export async function buildPindmapStyle(
       type: "symbol",
       source: KOREA_PLACES_EXTRA_SOURCE,
       "source-layer": "admin_dong",
-      minzoom: 13,
+      // z13 covered by label_korea_dong_overlay_* (avoids same-name doubles).
+      minzoom: 14,
       maxzoom: 16,
       layout: {
         "text-field": GEOJSON_NAME_TEXT,
@@ -4445,13 +4452,7 @@ export async function buildPindmapStyle(
     layers.push(...rest, ...guPriorityLayers);
   }
 
-  // School / civic / hospital — above large apt + admin + gu
-  appendLandmarkLayers(layers, theme, { kind: "priority" });
-  // Famous buildings from Overpass GeoJSON (tier1 z11 / tier2 z13 / tier3 z15)
-  appendKoreaLandmarkGeoLayers(layers, theme);
-
-  // Stations must paint after shops/anchors/korea so high sort-key actually wins
-  // cross-layer collision (later layers beat earlier ones in MapLibre).
+  // Stations before korea tiers / school anchors (later layers place first).
   const stationIds = new Set([
     "poi_transit",
     "poi_transit_mid",
@@ -4464,6 +4465,11 @@ export async function buildPindmapStyle(
     layers.length = 0;
     layers.push(...rest, ...stationLayers);
   }
+
+  // Famous buildings (tier1 z11 / tier2 z13 / tier3 z15).
+  appendKoreaLandmarkGeoLayers(layers, theme);
+  // School / civic / hospital last so street anchors beat dense shops under overlap=0.
+  appendLandmarkLayers(layers, theme, { kind: "priority" });
 
   // Final pass: overlap=0; keep Bold on POI/shop/tour/landmark (Hangul weight
   // via localIdeograph). Houseno/apt/road stay Regular. Pins added by adapters.
@@ -4488,17 +4494,11 @@ export async function buildPindmapStyle(
           ? ["Noto Sans Bold"]
           : ["Noto Sans Regular"];
     }
-    // Overlap=0 for place labels including road_name_* / building_kr_number.
-    // Korea tiers + school/civic priority keep intentional icon overlap.
-    if (
-      !id.startsWith("korea_landmark_tier") &&
-      !id.startsWith("landmark_priority")
-    ) {
-      layout["text-allow-overlap"] = false;
-      layout["text-ignore-placement"] = false;
-      layout["icon-allow-overlap"] = false;
-      layout["icon-ignore-placement"] = false;
-    }
+    // Overlap=0 for every place label (road_name_* / building_kr_number / POI).
+    layout["text-allow-overlap"] = false;
+    layout["text-ignore-placement"] = false;
+    layout["icon-allow-overlap"] = false;
+    layout["icon-ignore-placement"] = false;
     if (typeof layout["text-halo-blur"] === "number" && layout["text-halo-blur"] > 0) {
       layout["text-halo-blur"] = 0;
     }

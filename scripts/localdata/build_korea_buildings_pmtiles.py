@@ -180,6 +180,7 @@ def main() -> int:
         flush=True,
     )
 
+    # Avoid --read-parallel/-P with stdin (tippecanoe can exit early → BrokenPipe).
     tippecanoe = [
         "tippecanoe",
         "-o",
@@ -189,7 +190,6 @@ def main() -> int:
         "-Z14",
         "-z16",
         "--force",
-        "--read-parallel",
         "--no-feature-limit",
         "--maximum-tile-bytes=480000",
         "--simplify-only-low-zooms",
@@ -198,7 +198,6 @@ def main() -> int:
         "--minimum-zoom=14",
         "--drop-densest-as-needed",
         "--extend-zooms-if-still-dropping",
-        "-P",
     ]
 
     transformer = Transformer.from_crs(
@@ -261,12 +260,29 @@ def main() -> int:
                         out_props: dict = {"no": no}
                         sc = points_inside(g2, shop_grid) if n_shops else 0
                         if sc > 0:
-                            out_props["use"] = "shop"
                             out_props["shop_n"] = int(sc)
-                            n_shop_bldg += 1
-                        elif n_apt and points_inside(g2, apt_grid) > 0:
+                        # Apt complex wins over shop tint (avoid whole complexes apricot).
+                        if n_apt and points_inside(g2, apt_grid) > 0:
                             out_props["use"] = "apt"
                             n_apt_bldg += 1
+                        elif sc > 0:
+                            # Lon/lat area → rough m² (Korea ~37°N). Large blocks need denser shops.
+                            try:
+                                cy = float(g2.centroid.y)
+                                m_lat = 111_320.0
+                                m_lon = 111_320.0 * math.cos(math.radians(cy))
+                                area_m2 = float(g2.area) * m_lon * m_lat
+                            except Exception:
+                                area_m2 = 0.0
+                            # ≥400m²: need shop_n≥2 and ≥1 shop / 80m²; smaller wings: any shop.
+                            if area_m2 >= 400.0:
+                                dens = sc / max(area_m2, 1.0)
+                                if sc >= 2 and dens >= (1.0 / 80.0):
+                                    out_props["use"] = "shop"
+                                    n_shop_bldg += 1
+                            elif sc >= 1:
+                                out_props["use"] = "shop"
+                                n_shop_bldg += 1
 
                         out = {
                             "type": "Feature",
@@ -276,7 +292,7 @@ def main() -> int:
                         proc.stdin.write(json.dumps(out, ensure_ascii=False))
                         proc.stdin.write("\n")
                         n_out += 1
-                        if n_out % 200000 == 0:
+                        if n_out % 50000 == 0:
                             print(
                                 json.dumps(
                                     {
@@ -285,6 +301,7 @@ def main() -> int:
                                         "apt_bldgs": n_apt_bldg,
                                         "rss_mb": round(peak_rss_mb(), 1),
                                         "elapsed_s": int(time.time() - t0),
+                                        "tippecanoe_alive": proc.poll() is None,
                                     }
                                 ),
                                 flush=True,
@@ -293,7 +310,18 @@ def main() -> int:
         stderr = proc.stderr.read() if proc.stderr else ""
         _stdout = proc.stdout.read() if proc.stdout else ""
         rc = proc.wait()
-    except Exception:
+    except Exception as e:
+        print(
+            json.dumps(
+                {
+                    "error": type(e).__name__,
+                    "msg": str(e)[:200],
+                    "progress_out": n_out,
+                    "tippecanoe_rc": proc.poll(),
+                }
+            ),
+            flush=True,
+        )
         proc.kill()
         raise
 

@@ -72,7 +72,9 @@ async function main() {
           for (const f of feats) {
             total += 1;
             const u = f.properties?.use;
-            if (u === "shop") shop += 1;
+            const sn = Number(f.properties?.shop_n || 0);
+            // Style paints apricot only when use=shop AND shop_n≥2.
+            if (u === "shop" && sn >= 2) shop += 1;
             else if (u === "apt") apt += 1;
           }
         } catch {
