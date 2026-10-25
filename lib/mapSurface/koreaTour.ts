@@ -5,6 +5,7 @@
 
 import maplibregl from "maplibre-gl";
 import { PMTiles } from "pmtiles";
+import { resolveKoreaArchiveUrl } from "./tileHostExp";
 
 const PROTOCOL = "pindtour";
 const SOURCE_ID = "korea_tour";
@@ -15,11 +16,7 @@ let pmtiles: PMTiles | null = null;
 export const KOREA_TOUR_SOURCE = SOURCE_ID;
 
 export function getKoreaTourPublicUrl(): string {
-  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || "")
-    .trim()
-    .replace(/\/$/, "");
-  if (!base) return "";
-  return `${base}/storage/v1/object/public/map-tiles/korea-tour.pmtiles`;
+  return resolveKoreaArchiveUrl("tour");
 }
 
 function copyTileBytes(src: ArrayBuffer | ArrayBufferView): Uint8Array {

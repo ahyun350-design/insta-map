@@ -5,6 +5,7 @@
 
 import maplibregl from "maplibre-gl";
 import { PMTiles } from "pmtiles";
+import { resolveKoreaArchiveUrl } from "./tileHostExp";
 
 const PROTOCOL = "pindsangga";
 const SOURCE_ID = "korea_sangga";
@@ -13,11 +14,7 @@ let registered = false;
 let pmtiles: PMTiles | null = null;
 
 export function getKoreaSanggaPublicUrl(): string {
-  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || "")
-    .trim()
-    .replace(/\/$/, "");
-  if (!base) return "";
-  return `${base}/storage/v1/object/public/map-tiles/korea-sangga.pmtiles`;
+  return resolveKoreaArchiveUrl("sangga");
 }
 
 function copyTileBytes(src: ArrayBuffer | ArrayBufferView): Uint8Array {

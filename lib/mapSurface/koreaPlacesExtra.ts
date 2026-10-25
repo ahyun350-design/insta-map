@@ -6,6 +6,7 @@
 
 import maplibregl from "maplibre-gl";
 import { PMTiles } from "pmtiles";
+import { resolveKoreaArchiveUrl } from "./tileHostExp";
 
 const PROTOCOL = "pindplaces";
 const SOURCE_ID = "korea_places_extra";
@@ -14,11 +15,7 @@ let registered = false;
 let pmtiles: PMTiles | null = null;
 
 export function getKoreaPlacesExtraPublicUrl(): string {
-  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || "")
-    .trim()
-    .replace(/\/$/, "");
-  if (!base) return "";
-  return `${base}/storage/v1/object/public/map-tiles/korea-places-extra.pmtiles`;
+  return resolveKoreaArchiveUrl("placesExtra");
 }
 
 function copyTileBytes(src: ArrayBuffer | ArrayBufferView): Uint8Array {

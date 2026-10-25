@@ -286,6 +286,15 @@ export default function MapPreviewClient() {
             zoom: Number.isFinite(zQ) ? zQ : 14,
           });
         }
+        // Admin tile-host experiment (default=Supabase; ncp=Seoul Object Storage)
+        const tileHost = sp.get("tileHost");
+        if (tileHost === "ncp" || tileHost === "default" || tileHost === "supabase") {
+          const { setTileHostSessionOverride, writeTileHostPreference } =
+            await import("@/lib/mapSurface/tileHostExp");
+          const host = tileHost === "ncp" ? "ncp" : "default";
+          setTileHostSessionOverride(host);
+          writeTileHostPreference(host);
+        }
         if (sp.get("selfTiles") === "1") {
           setSessionSelfTilesOverride(true);
           ensureSelfTilesProtocolRegistered();
@@ -327,6 +336,9 @@ export default function MapPreviewClient() {
     return () => {
       cancelled = true;
       setSessionSelfTilesOverride(null);
+      void import("@/lib/mapSurface/tileHostExp").then(({ setTileHostSessionOverride }) => {
+        setTileHostSessionOverride(null);
+      });
     };
   }, []);
 

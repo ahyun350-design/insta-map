@@ -7,6 +7,11 @@
 
 import maplibregl from "maplibre-gl";
 import { PMTiles } from "pmtiles";
+import {
+  isNcpTileHost,
+  ncpGlyphsUrlTemplate,
+  resolveKoreaArchiveUrl,
+} from "./tileHostExp";
 
 function lngLatToTile(
   lng: number,
@@ -172,11 +177,7 @@ export function writeSelfTilesEnabled(enabled: boolean): void {
 
 /** Public HTTPS URL for korea-latest.pmtiles (derived at runtime, never persisted). */
 export function getKoreaPmtilesPublicUrl(): string {
-  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || "")
-    .trim()
-    .replace(/\/$/, "");
-  if (!base) return "";
-  return `${base}/storage/v1/object/public/map-tiles/korea-latest.pmtiles`;
+  return resolveKoreaArchiveUrl("korea");
 }
 
 function isAbortError(err: unknown): boolean {
@@ -368,7 +369,12 @@ export function applySelfHostedStyleAssets(style: {
   glyphs?: string;
   sprite?: string;
 }): void {
-  style.glyphs = SELF_GLYPHS_URL;
+  // Default: Railway same-origin glyphs. NCP exp host only when tileHost=ncp
+  // and glyph pack was copied under exp/glyphs/ (optional; else keep Railway).
+  style.glyphs =
+    isNcpTileHost() && process.env.NEXT_PUBLIC_NCP_GLYPHS_EXP === "1"
+      ? ncpGlyphsUrlTemplate()
+      : SELF_GLYPHS_URL;
   // Do NOT delete style.sprite — pattern deps must resolve for MapLibre to paint.
 }
 
