@@ -630,10 +630,10 @@ function appendKoreaLandmarkGeoLayers(
         "text-max-width": t.minzoom < 14 ? 7 : POI_TEXT_MAX_WIDTH,
         "text-padding": PLACE_TEXT_PADDING,
         "text-optional": false,
-        // City zoom: larger 24px POI badges otherwise suppress korea anchors (e2e mapo z13).
-        "text-allow-overlap": t.minzoom < 14,
+        // Prefer korea anchors over dense 23px POI badges (mapo z13 needs ≥5 visible).
+        "text-allow-overlap": true,
         "text-ignore-placement": false,
-        "icon-allow-overlap": t.minzoom < 14,
+        "icon-allow-overlap": true,
         "icon-ignore-placement": false,
         "symbol-sort-key": t.sortBase,
         "symbol-z-order": "source",
