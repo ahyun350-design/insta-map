@@ -1176,28 +1176,14 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
       ).__PINDMAP_PREVIEW_MAP__;
 
       function ringCentroid(ring: number[][]): [number, number] {
-        let a = 0,
-          cx = 0,
-          cy = 0;
-        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-          const xi = ring[i][0];
-          const yi = ring[i][1];
-          const xj = ring[j][0];
-          const yj = ring[j][1];
-          const f = xi * yj - xj * yi;
-          a += f;
-          cx += (xi + xj) * f;
-          cy += (yi + yj) * f;
+        const n = ring.length > 1 ? ring.length - 1 : ring.length;
+        let sx = 0,
+          sy = 0;
+        for (let i = 0; i < n; i++) {
+          sx += ring[i][0];
+          sy += ring[i][1];
         }
-        a *= 0.5;
-        if (Math.abs(a) < 1e-18) {
-          const n = ring.length || 1;
-          return [
-            ring.reduce((s, p) => s + p[0], 0) / n,
-            ring.reduce((s, p) => s + p[1], 0) / n,
-          ];
-        }
-        return [cx / (6 * a), cy / (6 * a)];
+        return [sx / n, sy / n];
       }
 
       function featureCentroid(f: {
