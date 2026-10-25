@@ -7,7 +7,7 @@
 import { clampMapPinDpr, loadMapImageFromSvg } from "@/lib/mapPinImages";
 
 /** Street POI badge size (22–24px). Glyph draws at ~62% of badge. */
-export const POI_ICON_CSS_PX = 24;
+export const POI_ICON_CSS_PX = 23;
 
 /** Per-category icon fill + darker label text. */
 export const POI_CATEGORY_COLORS = {
