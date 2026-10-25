@@ -456,8 +456,9 @@ export async function warmSelfTilesOrBreak(): Promise<boolean> {
 }
 
 /**
- * Prefetch z14 3×3 via shared PMTiles (HTTP Range cache only).
- * In-flight dedupe merges with MapLibre protocol gets for the same leaf.
+ * Warm PMTiles header/dir only. Do not Range tile bodies here — MapLibre will
+ * request the viewport once; a prior 3×3/7×7 ring duplicated those Ranges
+ * (measured: +3–19MB) whenever HTTP cache missed.
  */
 export async function prefetchSelfTilesZ14Around(
   lat: number,
@@ -469,26 +470,13 @@ export async function prefetchSelfTilesZ14Around(
   ensureSelfTilesProtocolRegistered();
   const ok = await warmSelfTilesOrBreak();
   if (!ok || selfTilesBroken) return { requested: 0 };
-  try {
-    const { x: cx, y: cy } = lngLatToTile(lng, lat, PREFETCH_ZOOM);
-    const tileKey = `${PREFETCH_ZOOM}/${cx}/${cy}`;
-    if (tileKey === lastPrefetchTileKey) return { requested: 0 };
-    lastPrefetchTileKey = tileKey;
-    const max = 2 ** PREFETCH_ZOOM - 1;
-    const jobs: Promise<unknown>[] = [];
-    for (let dx = -PREFETCH_RADIUS; dx <= PREFETCH_RADIUS; dx++) {
-      for (let dy = -PREFETCH_RADIUS; dy <= PREFETCH_RADIUS; dy++) {
-        const x = cx + dx;
-        const y = cy + dy;
-        if (x < 0 || y < 0 || x > max || y > max) continue;
-        jobs.push(getZxyDeduped(PREFETCH_ZOOM, x, y).catch(() => null));
-      }
-    }
-    await Promise.all(jobs);
-    return { requested: jobs.length };
-  } catch {
-    return { requested: 0 };
-  }
+  const { x: cx, y: cy } = lngLatToTile(lng, lat, PREFETCH_ZOOM);
+  const tileKey = `${PREFETCH_ZOOM}/${cx}/${cy}`;
+  if (tileKey === lastPrefetchTileKey) return { requested: 0 };
+  lastPrefetchTileKey = tileKey;
+  // Keep signature/call sites; radius retained for docs/tests only.
+  void PREFETCH_RADIUS;
+  return { requested: 0 };
 }
 
 /**
