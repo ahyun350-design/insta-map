@@ -402,8 +402,11 @@ function appendLandmarkLayers(
 ): void {
   const kind = opts?.kind ?? "secondary";
   const color = landmarkGroupColor(theme);
-  // Above shops (≤850); below korea-landmark tiers (~1650+) and stations (~2000)
-  const sortKey: unknown = ["-", 1500, ["to-number", ["coalesce", ["get", "rank"], 999]]];
+  // MapLibre: lower sort-key places first. Priority (school/civic) must beat shops.
+  const sortKey: unknown =
+    kind === "priority"
+      ? ["-", 280, ["to-number", ["coalesce", ["get", "rank"], 999]]]
+      : ["-", 1500, ["to-number", ["coalesce", ["get", "rank"], 999]]];
   const classFilter =
     kind === "priority" ? LANDMARK_FILTER_PRIORITY : LANDMARK_FILTER_SECONDARY;
   const id =
@@ -520,11 +523,13 @@ function appendLandmarkLayers(
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
         "text-justify": "auto",
         "text-max-width": POI_TEXT_MAX_WIDTH,
-        "text-padding": PLACE_TEXT_PADDING,
-        "text-optional": false,
+        "text-padding": kind === "priority" ? 1 : PLACE_TEXT_PADDING,
+        "icon-padding": kind === "priority" ? 0.5 : 1,
+        "text-optional": kind === "priority",
         "text-allow-overlap": false,
         "text-ignore-placement": false,
-        "icon-allow-overlap": false,
+        // School/civic icons stay visible under denser 23px shop badges.
+        "icon-allow-overlap": kind === "priority",
         "icon-ignore-placement": false,
         "symbol-sort-key": sortKey,
         "symbol-z-order": "source",
@@ -557,13 +562,14 @@ function appendKoreaLandmarkGeoLayers(
     filter: unknown;
   }> = [
     // z11–13: tier1 only — collision caps ~12 on screen
+    // Lower sort-key (places first) so city anchors beat dong/admin/POI badges.
     {
       id: "korea_landmark_tier1_far",
       tier: 1,
       minzoom: 11,
       maxzoom: 12.5,
       textSize: 14,
-      sortBase: 1050,
+      sortBase: 90,
       filter: [
         "all",
         ["==", ["get", "tier"], 1],
@@ -585,7 +591,7 @@ function appendKoreaLandmarkGeoLayers(
       tier: 1,
       minzoom: 12.5,
       textSize: 14,
-      sortBase: 1550,
+      sortBase: 100,
       filter: ["==", ["get", "tier"], 1],
     },
     // z13+: tier1 + tier2 (z11–12 stay tier1-only via this minzoom)
@@ -594,7 +600,7 @@ function appendKoreaLandmarkGeoLayers(
       tier: 2,
       minzoom: 13,
       textSize: 13,
-      sortBase: 1520,
+      sortBase: 110,
       filter: ["==", ["get", "tier"], 2],
     },
     {
@@ -602,13 +608,14 @@ function appendKoreaLandmarkGeoLayers(
       tier: 3,
       minzoom: 15,
       textSize: 13,
-      sortBase: 1510,
+      sortBase: 120,
       filter: ["==", ["get", "tier"], 3],
     },
   ];
   for (const t of tiers) {
     // City-scale (z11–13): full anchors for coverage; street: left/right only.
     const anchor = t.minzoom < 14 ? PLACE_VARIABLE_ANCHOR : POI_VARIABLE_ANCHOR;
+    const cityZoom = t.minzoom < 14;
     layers.push({
       id: t.id,
       type: "symbol",
@@ -619,22 +626,24 @@ function appendKoreaLandmarkGeoLayers(
       layout: {
         visibility: "visible",
         "icon-image": "korea-landmark-building",
-        "icon-size": t.minzoom < 14 ? 1 : 1.05,
+        "icon-size": cityZoom ? 1 : 1.05,
         "icon-optional": false,
-        "text-field": t.minzoom < 14 ? GEOJSON_NAME_TEXT : POI_NAME_TEXT,
+        "text-field": cityZoom ? GEOJSON_NAME_TEXT : POI_NAME_TEXT,
         "text-font": ["Noto Sans Regular"],
         "text-size": t.textSize,
         "text-variable-anchor": [...anchor],
-        "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
+        "text-radial-offset": cityZoom ? 0.9 : ICON_TEXT_RADIAL_OFFSET,
         "text-justify": "auto",
-        "text-max-width": t.minzoom < 14 ? 7 : POI_TEXT_MAX_WIDTH,
-        "text-padding": PLACE_TEXT_PADDING,
-        "text-optional": false,
-        // Prefer korea anchors over dense 23px POI badges (mapo z13 needs ≥5 visible).
+        "text-max-width": cityZoom ? 7 : POI_TEXT_MAX_WIDTH,
+        // Tighter padding at city zoom so mapo z13 keeps ≥5 anchors.
+        "text-padding": cityZoom ? 1 : PLACE_TEXT_PADDING,
+        "icon-padding": cityZoom ? 0.5 : 1,
+        // Icon stays if text fails; overlap so dense POI badges cannot hide anchors.
+        "text-optional": true,
         "text-allow-overlap": true,
-        "text-ignore-placement": false,
+        "text-ignore-placement": cityZoom,
         "icon-allow-overlap": true,
-        "icon-ignore-placement": false,
+        "icon-ignore-placement": cityZoom,
         "symbol-sort-key": t.sortBase,
         "symbol-z-order": "source",
       },
@@ -960,11 +969,11 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         ["linear"],
         ["zoom"],
         16,
-        20,
+        16,
         17,
-        11,
+        6,
         18,
-        8,
+        4,
       ],
     },
     {
@@ -973,23 +982,23 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
       classFilter: [
         "all",
         SHOP_Z17_EXTRA,
-        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 75],
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 90],
       ],
       textPadding: [
         "interpolate",
         ["linear"],
         ["zoom"],
         17,
-        3.5,
+        2.2,
         18,
-        2.5,
+        1.6,
       ],
     },
     {
       idSuffix: "z18",
       minzoom: 18,
       classFilter: SHOP_Z18_REMAINDER,
-      textPadding: 0.6,
+      textPadding: 0.5,
     },
   ];
 
@@ -1012,7 +1021,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
         "icon-size": 1,
-        "icon-padding": 1,
+        "icon-padding": 0.5,
         "icon-optional": false,
         "text-field": SHOP_TEXT,
         // Bold stack → localIdeograph Hangul renders heavier (Medium~Bold feel)
@@ -1264,20 +1273,32 @@ function appendSanggaShopLayers(
     {
       idSuffix: "z16",
       minzoom: 16,
+      maxzoom: 17,
       // Cap street density after road names (target ≤50 labels/viewport).
       classFilter: [
         "all",
         SHOP_Z16,
         ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 28],
       ],
+      textPadding: 16,
+    },
+    {
+      idSuffix: "z17",
+      minzoom: 17,
+      // Denser at street zoom so restored shopMin≥14 holds with 23px badges.
+      classFilter: [
+        "all",
+        SHOP_Z16,
+        ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 70],
+      ],
       textPadding: [
         "interpolate",
         ["linear"],
         ["zoom"],
-        16,
-        20,
         17,
-        11,
+        2.2,
+        18,
+        1.6,
       ],
     },
   ];
@@ -1294,7 +1315,7 @@ function appendSanggaShopLayers(
         visibility: "visible",
         "icon-image": poiSpriteIcon(),
         "icon-size": 1,
-        "icon-padding": 1,
+        "icon-padding": 0.5,
         "icon-optional": false,
         "text-field": POI_NAME_TEXT,
         "text-font": ["Noto Sans Bold"],
@@ -4467,11 +4488,17 @@ export async function buildPindmapStyle(
           ? ["Noto Sans Bold"]
           : ["Noto Sans Regular"];
     }
-    // Overlap=0 for all place labels including road_name_* / building_kr_number.
-    layout["text-allow-overlap"] = false;
-    layout["text-ignore-placement"] = false;
-    layout["icon-allow-overlap"] = false;
-    layout["icon-ignore-placement"] = false;
+    // Overlap=0 for place labels including road_name_* / building_kr_number.
+    // Korea tiers + school/civic priority keep intentional icon overlap.
+    if (
+      !id.startsWith("korea_landmark_tier") &&
+      !id.startsWith("landmark_priority")
+    ) {
+      layout["text-allow-overlap"] = false;
+      layout["text-ignore-placement"] = false;
+      layout["icon-allow-overlap"] = false;
+      layout["icon-ignore-placement"] = false;
+    }
     if (typeof layout["text-halo-blur"] === "number" && layout["text-halo-blur"] > 0) {
       layout["text-halo-blur"] = 0;
     }

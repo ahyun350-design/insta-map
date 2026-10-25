@@ -828,8 +828,8 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
     15: { totalMin: 25, totalMax: 80, shopMin: 12 },
     // z16: Kakao-like ≤50 labels/viewport after road names + shop band split.
     16: { totalMin: 28, totalMax: 50, shopMin: 14 },
-    // z17: Bold Hangul + left/right binding; shop floor allows Kakao-like weight.
-    17: { totalMin: 16, totalMax: 80, shopMin: 9 },
+    // z17: Bold Hangul + left/right binding; restore pre-relaxation Kakao-like floors.
+    17: { totalMin: 20, totalMax: 80, shopMin: 14 },
   };
 
   async function measureAt(zoom: number, center: [number, number]) {
@@ -1843,7 +1843,7 @@ test("map-preview basics: korea landmarks + z16 anchors", async ({ page }) => {
 
   expect(seoul.layers.t1, "korea_landmark_tier1 layer").toBe(true);
   expect(seoul.tier1, `seoul z11 tier1 ≥8, got ${seoul.tier1}`).toBeGreaterThanOrEqual(8);
-  expect(mapo.korea, `mapo z13 korea ≥4, got ${mapo.korea}`).toBeGreaterThanOrEqual(4);
+  expect(mapo.korea, `mapo z13 korea ≥5, got ${mapo.korea}`).toBeGreaterThanOrEqual(5);
   expect(gangnam.korea, `gangnam z13 korea ≥5, got ${gangnam.korea}`).toBeGreaterThanOrEqual(5);
   expect(hong15.korea, `hongdae z15 korea ≥3, got ${hong15.korea}`).toBeGreaterThanOrEqual(3);
 
@@ -1866,14 +1866,13 @@ test("map-preview basics: korea landmarks + z16 anchors", async ({ page }) => {
   ] as const) {
     const shown = m.anchors + m.stations;
     if (m.candidates < 4) {
-      console.log(`${label}: skip ≥3 (candidates=${m.candidates} shown=${shown})`);
+      console.log(`${label}: skip ≥4 (candidates=${m.candidates} shown=${shown})`);
       continue;
     }
-    // Bound POI layout + road collision: keep ≥3 of ≥4 candidates (was ≥4).
     expect(
       shown,
-      `${label} anchors+stations ≥3 (cand=${m.candidates}), got ${shown} (a=${m.anchors} s=${m.stations})`,
-    ).toBeGreaterThanOrEqual(3);
+      `${label} anchors+stations ≥4 (cand=${m.candidates}), got ${shown} (a=${m.anchors} s=${m.stations})`,
+    ).toBeGreaterThanOrEqual(4);
   }
 });
 

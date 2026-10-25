@@ -135,8 +135,7 @@ export const PLACE_VARIABLE_ANCHOR = ["right", "left", "top", "bottom"] as const
 /** POI icon+name: left/right only (Kakao — no top/bottom drift). Prefer name right of icon. */
 export const POI_VARIABLE_ANCHOR = ["left", "right"] as const;
 export const ADMIN_VARIABLE_ANCHOR = ["center", "top", "bottom"] as const;
-/** 22px circle icon → ~11px radius + gap ≈ 1.1em at 12.5px text */
-/** Slightly larger for 22–24px badges so text clears the mark. */
-export const ICON_TEXT_RADIAL_OFFSET = 1.2;
+/** 23px badge → ~11.5px radius + gap; keep tight so z17 shop density holds. */
+export const ICON_TEXT_RADIAL_OFFSET = 1.05;
 /** Shop/POI name wrap ≈ 8–10 Hangul chars. */
 export const POI_TEXT_MAX_WIDTH = 5;
