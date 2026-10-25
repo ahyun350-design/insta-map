@@ -337,9 +337,12 @@ jobs:
             local src="$1"
             local key="$2"
             local ctype="$3"
+            # Immutable Cache-Control so browser HTTP cache can serve Range warm hits
+            # (objects previously uploaded as no-cache forced full re-download).
             aws s3 cp "$src" "s3://${BUCKET}/${key}" \
               --endpoint-url "$SUPABASE_S3_ENDPOINT" \
               --content-type "$ctype" \
+              --cache-control "public, max-age=31536000, immutable" \
               --only-show-errors \
               --cli-read-timeout 0 \
               --cli-connect-timeout 60

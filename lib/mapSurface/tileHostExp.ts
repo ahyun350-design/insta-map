@@ -24,6 +24,12 @@ export const TILE_HOST_EXP_FILES = {
   placesExtra: "korea-places-extra.pmtiles",
 } as const;
 
+/**
+ * Bump after rewriting Storage Cache-Control so CDN drops stale `no-cache`
+ * Range responses (Smart CDN can keep HIT with old headers on the bare key).
+ */
+export const MAP_TILES_CACHE_EPOCH = "cc1";
+
 let sessionOverride: TileHostId | null = null;
 
 export function setTileHostSessionOverride(host: TileHostId | null): void {
@@ -80,7 +86,7 @@ export function resolveKoreaArchiveUrl(
     .trim()
     .replace(/\/$/, "");
   if (!base) return "";
-  return `${base}/storage/v1/object/public/map-tiles/${file}`;
+  return `${base}/storage/v1/object/public/map-tiles/${file}?v=${MAP_TILES_CACHE_EPOCH}`;
 }
 
 /**
