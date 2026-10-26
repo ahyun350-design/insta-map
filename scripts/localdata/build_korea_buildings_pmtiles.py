@@ -35,6 +35,11 @@ LAYER = "building_kr"
 SRC_EPSG = 5179
 # ~220 m cells for sangga candidate lookup
 SHOP_CELL = 0.002
+# Hub survey (mangwon/hongdae): p99≈950–970m²; mapo riverside p99≫10k.
+# Treat ≥1000m² as complex / building-group polygons (~top 1% street fabric).
+LARGE_AREA_M2 = 1000.0
+# Apt point within this distance of a building → use=apt (단지 포인트 오프셋 보정).
+APT_NEAR_M = 60.0
 
 
 def peak_rss_mb() -> float:
@@ -42,6 +47,20 @@ def peak_rss_mb() -> float:
     if sys.platform == "darwin":
         return rss / (1024 * 1024)
     return rss / 1024
+
+
+def proc_rss_mb(pid: int | None) -> float | None:
+    if not pid:
+        return None
+    try:
+        out = subprocess.check_output(
+            ["ps", "-o", "rss=", "-p", str(pid)], text=True
+        ).strip()
+        if not out:
+            return None
+        return round(int(out) / 1024.0, 1)
+    except Exception:
+        return None
 
 
 def houseno(props: dict) -> str | None:
@@ -134,16 +153,21 @@ def load_apt_grid() -> tuple[dict[tuple[int, int], list[tuple[float, float]]], i
     return grid, n
 
 
-def points_inside(g, grid: dict) -> int:
+def _candidate_points(g, grid: dict, pad_cells: int = 1) -> list[tuple[float, float]]:
     minx, miny, maxx, maxy = g.bounds
     ix0, iy0 = cell_xy(minx, miny)
     ix1, iy1 = cell_xy(maxx, maxy)
     candidates: list[tuple[float, float]] = []
-    for ix in range(ix0 - 1, ix1 + 2):
-        for iy in range(iy0 - 1, iy1 + 2):
+    for ix in range(ix0 - pad_cells, ix1 + pad_cells + 1):
+        for iy in range(iy0 - pad_cells, iy1 + pad_cells + 1):
             pts = grid.get((ix, iy))
             if pts:
                 candidates.extend(pts)
+    return candidates
+
+
+def points_inside(g, grid: dict) -> int:
+    candidates = _candidate_points(g, grid, pad_cells=1)
     if not candidates:
         return 0
     pg = prep(g)
@@ -154,7 +178,56 @@ def points_inside(g, grid: dict) -> int:
     return n
 
 
+def near_apt(g, grid: dict, near_m: float = APT_NEAR_M) -> bool:
+    """True if any apt point is inside or within near_m of the building."""
+    # ~pad cells for 60m at Korea lat
+    candidates = _candidate_points(g, grid, pad_cells=2)
+    if not candidates:
+        return False
+    pg = prep(g)
+    try:
+        cy = float(g.centroid.y)
+        deg = near_m / max(111_320.0 * math.cos(math.radians(cy)), 1.0)
+    except Exception:
+        deg = near_m / 111_320.0
+    for lon, lat in candidates:
+        pt = Point(lon, lat)
+        if pg.contains(pt):
+            return True
+        try:
+            if g.distance(pt) <= deg:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def area_m2_lonlat(g) -> float:
+    try:
+        cy = float(g.centroid.y)
+        m_lat = 111_320.0
+        m_lon = 111_320.0 * math.cos(math.radians(cy))
+        return float(g.area) * m_lon * m_lat
+    except Exception:
+        return 0.0
+
+
 def main() -> int:
+    import signal
+
+    def _on_sig(signum, _frame):
+        print(
+            json.dumps({"fatal_signal": signum, "rss_mb_python": round(peak_rss_mb(), 1)}),
+            flush=True,
+        )
+        raise SystemExit(128 + int(signum))
+
+    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            signal.signal(s, _on_sig)
+        except Exception:
+            pass
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     zips = sorted(RAW.glob("건물도형_전체분_*.zip"))
     if not zips:
@@ -261,26 +334,19 @@ def main() -> int:
                         sc = points_inside(g2, shop_grid) if n_shops else 0
                         if sc > 0:
                             out_props["shop_n"] = int(sc)
-                        # Apt complex wins over shop tint (avoid whole complexes apricot).
-                        if n_apt and points_inside(g2, apt_grid) > 0:
+                        # Apt complex / nearby 단지 points win — no apricot on 아이파크-scale blocks.
+                        if n_apt and near_apt(g2, apt_grid):
                             out_props["use"] = "apt"
                             n_apt_bldg += 1
                         elif sc > 0:
-                            # Lon/lat area → rough m² (Korea ~37°N). Large blocks need denser shops.
-                            try:
-                                cy = float(g2.centroid.y)
-                                m_lat = 111_320.0
-                                m_lon = 111_320.0 * math.cos(math.radians(cy))
-                                area_m2 = float(g2.area) * m_lon * m_lat
-                            except Exception:
-                                area_m2 = 0.0
-                            # ≥400m²: need shop_n≥2 and ≥1 shop / 80m²; smaller wings: any shop.
-                            if area_m2 >= 400.0:
-                                dens = sc / max(area_m2, 1.0)
-                                if sc >= 2 and dens >= (1.0 / 80.0):
+                            area_m2 = area_m2_lonlat(g2)
+                            dens = sc / max(area_m2, 1.0)
+                            # Large polygons (집합건물군 ~p99): need dense shops.
+                            if area_m2 >= LARGE_AREA_M2:
+                                if sc >= 3 and dens >= (1.0 / 150.0):
                                     out_props["use"] = "shop"
                                     n_shop_bldg += 1
-                            elif sc >= 1:
+                            elif sc >= 2:
                                 out_props["use"] = "shop"
                                 n_shop_bldg += 1
 
@@ -299,7 +365,8 @@ def main() -> int:
                                         "progress_out": n_out,
                                         "shop_bldgs": n_shop_bldg,
                                         "apt_bldgs": n_apt_bldg,
-                                        "rss_mb": round(peak_rss_mb(), 1),
+                                        "rss_mb_python": round(peak_rss_mb(), 1),
+                                        "rss_mb_tippecanoe": proc_rss_mb(proc.pid),
                                         "elapsed_s": int(time.time() - t0),
                                         "tippecanoe_alive": proc.poll() is None,
                                     }
