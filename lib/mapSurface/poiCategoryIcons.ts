@@ -15,8 +15,8 @@ export const POI_CATEGORY_COLORS = {
   cafe: { icon: "#B86A3A", text: "#6A3A1A" },
   bar: { icon: "#8A5AAA", text: "#4A2A6A" },
   bakery: { icon: "#D4A05A", text: "#7A4A1A" },
-  // Amber (not red) — avoid red badge + bar glyph reading as “no entry”.
-  fast_food: { icon: "#D4A05A", text: "#7A4A1A" },
+  // Same utensil glyph as restaurant; slightly warmer badge only.
+  fast_food: { icon: "#E07040", text: "#8A3010" },
   shopping: { icon: "#E070A0", text: "#8A2A5A" },
   convenience: { icon: "#3AAA5A", text: "#1A6A2A" },
   grocery: { icon: "#5ABA6A", text: "#2A6A2A" },
@@ -146,17 +146,15 @@ function glyphPath(cat: PoiCategoryId): string {
       // coffee cup
       return `<path fill="#fff" d="M7.2 8.2h8.2v5.1c0 1.7-1.4 3.1-3.1 3.1H10.3c-1.7 0-3.1-1.4-3.1-3.1V8.2zm8.2 1.2h1.6c1.1 0 2 .9 2 2s-.9 2-2 2h-1.6v-4zm-7.4 9.1h8.4v1.4H8z"/>`;
     case "restaurant":
-      // Fork + spoon (wide silhouette; avoids vertical fork/knife reading as ||).
-      return `<path fill="#fff" d="M7.8 5.4c.5 0 .9.7.9 1.55v2.6c0 .45-.35.8-.7.8h-.4c-.35 0-.7-.35-.7-.8V6.95c0-.85.4-1.55.9-1.55zm-.2 5.1h.55v8.5H7.05v-8.5H7.6zm7.2-4.7c1.65 0 3 1.25 3 2.8 0 1.05-.6 1.95-1.5 2.45v7.25h-1.5V10.05c-.9-.5-1.5-1.4-1.5-2.45 0-1.55 1.35-2.8 3-2.8z"/>`;
+    case "fast_food":
+      // X-crossed fork + knife (no SVG transform — clear at 1× / MapLibre rasterize).
+      return `<g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"><path stroke-width="1.85" d="M8.1 6.4 15.6 17.4"/><path stroke-width="1.55" d="M6.4 5.3 8.3 7.2M7.6 4.5 9.5 6.4M8.8 3.8 10.5 5.5"/><path stroke-width="1.85" d="M15.9 6.4 8.4 17.4"/><path stroke-width="1.7" d="M14.2 4.6c1.1.35 1.9 1.4 1.7 2.4L15.2 8"/></g>`;
     case "bar":
       // beer mug
       return `<path fill="#fff" d="M7 6.4h7.2l-.9 4.4H7.9L7 6.4zm1.4 4.8h4.4v5.6H8.4v-5.6zm7.2-3.2h1.5c1.2 0 2.1 1 2.1 2.2v2.4c0 1.2-.9 2.2-2.1 2.2h-1.5V8z"/>`;
     case "bakery":
       // bread loaf
       return `<path fill="#fff" d="M6.4 13.2c0-2.8 2.1-5 4.8-5h1.6c2.7 0 4.8 2.2 4.8 5H6.4zm2.2-4.6c.5-1.5 1.7-2.5 3.4-2.5s2.9 1 3.4 2.5H8.6z"/>`;
-    case "fast_food":
-      // Recognizable burger: curved top bun + oval patty + bottom bun (no full-width bars).
-      return `<path fill="#fff" d="M7.2 10.2c0-2.4 2.1-4 4.8-4s4.8 1.6 4.8 4H7.2zm.4 1.1h8.8c.5 0 .9.4.9.9v.35c0 .5-.4.9-.9.9H7.6c-.5 0-.9-.4-.9-.9v-.35c0-.5.4-.9.9-.9zm.3 3.1h8.2c.7 0 1.2.5 1.2 1.1 0 .4-.2.7-.5.9H7.2c-.3-.2-.5-.5-.5-.9 0-.6.5-1.1 1.2-1.1z"/>`;
     case "convenience":
       // storefront 24
       return `<path fill="#fff" d="M6.2 9.2 7.5 6.6h9l1.3 2.6H6.2zm0 1.3h11.6v6.9H6.2v-6.9zm3.2 1.5v3.9h1.5v-3.9H9.4zm3.7 0v3.9H14.6v-3.9h-1.5z"/>`;
@@ -170,8 +168,8 @@ function glyphPath(cat: PoiCategoryId): string {
     case "bank":
       return `<path fill="#fff" d="M5.8 9.2 12 5.6l6.2 3.6v1.3H5.8V9.2zm1.2 2.1h1.8v4.6H7V11.3zm3.1 0h1.8v4.6h-1.8v-4.6zm3.1 0h1.8v4.6h-1.8v-4.6zm-7.4 5.4h12.4v1.5H5.8v-1.5z"/>`;
     case "pharmacy":
-      // pill / cross soft
-      return `<path fill="#fff" d="M10.2 6.2h3.6v11.6h-3.6zM6.2 10.2h11.6v3.6H6.2z"/>`;
+      // Capsule pill (diagonal, two-tone seam) — distinct from hospital cross.
+      return `<path fill="#fff" d="M8.2 14.4c-1.85-1.85-1.85-4.85 0-6.7 1.85-1.85 4.85-1.85 6.7 0 .35.35.35.9 0 1.25L9.45 14.4c-.35.35-.9.35-1.25 0z"/><path fill="#fff" fill-opacity=".72" d="M9.45 14.4 14.7 9.15c1.85 1.85 1.85 4.85 0 6.7-1.85 1.85-4.85 1.85-6.7 0-.35-.35-.35-.9 0-1.25z"/><path stroke="#1A6A3A" stroke-width="1.35" stroke-linecap="round" d="M9.1 14.1 14.1 9.1"/>`;
     case "hospital":
       return `<path fill="#fff" d="M10 5.8h4v12.4h-4zM5.8 10h12.4v4H5.8z"/>`;
     case "school":
@@ -260,8 +258,9 @@ export function poiCategoryIconImageExpr(): unknown {
     poiIconImageId("cafe"),
     ["==", ["get", "class"], "restaurant"],
     poiIconImageId("restaurant"),
+    // Unify with restaurant glyph (badge color still via text paint).
     ["==", ["get", "class"], "fast_food"],
-    poiIconImageId("fast_food"),
+    poiIconImageId("restaurant"),
     ["==", ["get", "class"], "bakery"],
     poiIconImageId("bakery"),
     [
