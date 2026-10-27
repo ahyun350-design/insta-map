@@ -61,7 +61,7 @@ function noteBuildingsSoftFail(
  * Versioned object key — bump when rebuilding so immutable CDN drops stale tiles.
  * Override with NEXT_PUBLIC_KOREA_BUILDINGS_PMTILES_URL (NCP KR only).
  */
-export const KOREA_BUILDINGS_OBJECT_KEY = "korea-buildings-20261025.pmtiles";
+export const KOREA_BUILDINGS_OBJECT_KEY = "korea-buildings-20261026-v2.pmtiles";
 
 /** Public URL on NCP KR Object Storage only (not Supabase / overseas). */
 export function getKoreaBuildingsPublicUrl(): string {
