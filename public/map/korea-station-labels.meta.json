@@ -1,20 +1,80 @@
 {
-  "before": 432,
-  "after": 430,
-  "secondPassMerges": 2,
-  "midzoom": 25,
-  "shin": [
-    [
-      126.939632,
-      37.557467
-    ]
-  ],
-  "hong": 1,
-  "mergeM": 300,
-  "mergeMSecond": 750,
-  "features": 430,
-  "originalRaw": 592,
-  "afterFirst": 436,
-  "afterSecond": 430,
-  "removed": 162
+  "stations": 430,
+  "withRef": 422,
+  "sampleRefs": [
+    {
+      "name": "공덕",
+      "ref": "5",
+      "refs": [
+        "5",
+        "6",
+        "경의·중앙",
+        "공항철도",
+        "AREX"
+      ],
+      "colour": "#794698"
+    },
+    {
+      "name": "합정",
+      "ref": "2",
+      "refs": [
+        "2",
+        "6"
+      ],
+      "colour": "#00A23F"
+    },
+    {
+      "name": "상수",
+      "ref": "6",
+      "refs": [
+        "6"
+      ],
+      "colour": "#7C4932"
+    },
+    {
+      "name": "망원",
+      "ref": "6",
+      "refs": [
+        "6"
+      ],
+      "colour": "#7C4932"
+    },
+    {
+      "name": "홍대입구",
+      "ref": "2",
+      "refs": [
+        "2",
+        "경의·중앙",
+        "공항철도",
+        "AREX"
+      ],
+      "colour": "#00A23F"
+    },
+    {
+      "name": "신촌",
+      "ref": "2",
+      "refs": [
+        "2"
+      ],
+      "colour": "#00A23F"
+    },
+    {
+      "name": "강남",
+      "ref": "2",
+      "refs": [
+        "2",
+        "신분당"
+      ],
+      "colour": "#00A23F"
+    },
+    {
+      "name": "강남구청",
+      "ref": "7",
+      "refs": [
+        "7",
+        "수인·분당"
+      ],
+      "colour": "#6E7E31"
+    }
+  ]
 }

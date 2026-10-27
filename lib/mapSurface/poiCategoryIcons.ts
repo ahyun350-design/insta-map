@@ -1,251 +1,243 @@
 /**
  * Code-generated POI category icons for MapLibre addImage.
- * 24px color badges + bold white glyphs (Material Symbols–style, Apache-2.0;
- * see lib/mapSurface/icons/LICENSE.md). Registered at device pixelRatio ≤3.
+ * Circle badges (≈22px), white 1.5px stroke, glyphs at 64% of badge.
+ * Registered at device pixelRatio 2–3.
  */
 
 import { clampMapPinDpr, loadMapImageFromSvg } from "@/lib/mapPinImages";
+import {
+  ALL_POI_MAP_CATEGORY_IDS,
+  POI_MAP_COLORS,
+  type PoiMapCategoryId,
+} from "@/lib/mapSurface/poiCategoryMapping";
+import { SEOUL_SUBWAY_REF_COLOURS } from "@/lib/mapSurface/subwayColour";
+import { SUBWAY_BADGE_COLOURS } from "@/lib/mapSurface/subwayBadgeColours.generated";
 
-/** Street POI badge size (22–24px). Glyph draws at ~62% of badge. */
-export const POI_ICON_CSS_PX = 23;
+/** Street POI badge CSS size (20–22px). */
+export const POI_ICON_CSS_PX = 22;
 
-/** Per-category icon fill + darker label text. */
+/** @deprecated use POI_MAP_COLORS — kept for import compatibility. */
 export const POI_CATEGORY_COLORS = {
-  food: { icon: "#E8873A", text: "#8A3A12" },
-  cafe: { icon: "#B86A3A", text: "#6A3A1A" },
-  bar: { icon: "#8A5AAA", text: "#4A2A6A" },
-  bakery: { icon: "#D4A05A", text: "#7A4A1A" },
-  // Same utensil glyph as restaurant; slightly warmer badge only.
-  fast_food: { icon: "#E07040", text: "#8A3010" },
-  shopping: { icon: "#E070A0", text: "#8A2A5A" },
-  convenience: { icon: "#3AAA5A", text: "#1A6A2A" },
-  grocery: { icon: "#5ABA6A", text: "#2A6A2A" },
-  life: { icon: "#5A6A9A", text: "#2A3A6A" },
-  medical: { icon: "#E05050", text: "#8A1A1A" },
-  pharmacy: { icon: "#2AAA6A", text: "#1A6A3A" },
-  culture: { icon: "#9A6A8A", text: "#5A2E4A" },
-  lodging: { icon: "#4A7ABA", text: "#1A3A6A" },
-  park: { icon: "#4A7A44", text: "#2A4A28" },
-  education: { icon: "#5A7AAA", text: "#2E4A7A" },
-  transit: { icon: "#5A6A7A", text: "#2E3E4A" },
+  food: POI_MAP_COLORS.restaurant,
+  cafe: POI_MAP_COLORS.cafe,
+  bar: POI_MAP_COLORS.bar,
+  bakery: POI_MAP_COLORS.bakery,
+  fast_food: POI_MAP_COLORS.fast_food,
+  shopping: POI_MAP_COLORS.shop,
+  convenience: POI_MAP_COLORS.convenience,
+  grocery: POI_MAP_COLORS.grocery,
+  life: POI_MAP_COLORS.town_hall,
+  medical: POI_MAP_COLORS.hospital,
+  pharmacy: POI_MAP_COLORS.pharmacy,
+  culture: POI_MAP_COLORS.landmark,
+  lodging: POI_MAP_COLORS.lodging,
+  park: POI_MAP_COLORS.park,
+  education: POI_MAP_COLORS.school,
+  transit: POI_MAP_COLORS.subway,
   other: { icon: "#8A8A92", text: "#4A4A52" },
-  landmark: { icon: "#6A6A72", text: "#2A2A32" },
+  landmark: POI_MAP_COLORS.landmark,
+  beauty: POI_MAP_COLORS.beauty,
+  bank: POI_MAP_COLORS.bank,
 } as const;
 
 export type PoiCategoryId =
-  | "cafe"
-  | "restaurant"
-  | "bar"
-  | "bakery"
-  | "fast_food"
-  | "convenience"
-  | "grocery"
+  | PoiMapCategoryId
   | "mall"
-  | "bank"
-  | "pharmacy"
-  | "hospital"
-  | "school"
   | "college"
-  | "town_hall"
-  | "police"
-  | "post"
-  | "lodging"
   | "cinema"
   | "museum"
-  | "park"
-  | "parking"
-  | "fuel"
-  | "subway"
-  | "bus"
-  | "landmark"
-  | "shop";
+  | "bus";
 
 export function poiIconImageId(cat: PoiCategoryId): string {
   return `pind-poi-${cat}`;
 }
 
+function resolveMapCat(cat: PoiCategoryId): PoiMapCategoryId {
+  switch (cat) {
+    case "mall":
+      return "shop";
+    case "college":
+      return "school";
+    case "cinema":
+    case "museum":
+      return "landmark";
+    case "bus":
+      return "subway";
+    default:
+      return cat;
+  }
+}
+
 function colorOf(cat: PoiCategoryId): { icon: string; text: string } {
-  switch (cat) {
-    case "cafe":
-      return POI_CATEGORY_COLORS.cafe;
-    case "restaurant":
-      return POI_CATEGORY_COLORS.food;
-    case "bar":
-      return POI_CATEGORY_COLORS.bar;
-    case "bakery":
-      return POI_CATEGORY_COLORS.bakery;
-    case "fast_food":
-      return POI_CATEGORY_COLORS.fast_food;
-    case "convenience":
-      return POI_CATEGORY_COLORS.convenience;
-    case "grocery":
-      return POI_CATEGORY_COLORS.grocery;
-    case "mall":
-    case "shop":
-      return POI_CATEGORY_COLORS.shopping;
-    case "bank":
-    case "post":
-    case "town_hall":
-    case "police":
-    case "parking":
-    case "fuel":
-      return POI_CATEGORY_COLORS.life;
-    case "pharmacy":
-      return POI_CATEGORY_COLORS.pharmacy;
-    case "hospital":
-      return POI_CATEGORY_COLORS.medical;
-    case "lodging":
-      return POI_CATEGORY_COLORS.lodging;
-    case "cinema":
-    case "museum":
-      return POI_CATEGORY_COLORS.culture;
-    case "park":
-      return POI_CATEGORY_COLORS.park;
-    case "school":
-    case "college":
-      return POI_CATEGORY_COLORS.education;
-    case "subway":
-    case "bus":
-      return POI_CATEGORY_COLORS.transit;
-    case "landmark":
-      return POI_CATEGORY_COLORS.landmark;
-    default:
-      return POI_CATEGORY_COLORS.other;
-  }
+  return POI_MAP_COLORS[resolveMapCat(cat)];
 }
 
-/** Badge behind glyph (viewBox 0 0 24 24). */
-function shapePath(cat: PoiCategoryId, fill: string): string {
-  const stroke = `#FFFFFF`;
-  switch (cat) {
-    case "convenience":
-    case "grocery":
-    case "mall":
-    case "shop":
-      return `<rect x="1.25" y="1.25" width="21.5" height="21.5" rx="5.5" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
-    case "bar":
-      return `<path d="M12 1.8 L22.2 12 L12 22.2 L1.8 12 Z" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>`;
-    case "hospital":
-    case "pharmacy":
-      return `<rect x="1.5" y="1.5" width="21" height="21" rx="6" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
-    case "lodging":
-      return `<rect x="1.2" y="3.5" width="21.6" height="17" rx="5" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
-    case "park":
-      return `<path d="M12 1.6 L19.8 6.2 V17.8 L12 22.4 L4.2 17.8 V6.2 Z" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>`;
-    default:
-      return `<circle cx="12" cy="12" r="10.25" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`;
-  }
+function circleBadge(fill: string): string {
+  return `<circle cx="12" cy="12" r="10.25" fill="${fill}" stroke="#FFFFFF" stroke-width="1.5"/>`;
 }
 
-/**
- * Bold filled glyphs (~15px / 62% of 24). Adapted from Material Symbols forms.
- */
-function glyphPath(cat: PoiCategoryId): string {
+/** Glyph paths (viewBox 0–24). Detail strokes use badge color `c`. */
+function glyphInner(cat: PoiMapCategoryId, c: string): string {
   switch (cat) {
-    case "cafe":
-      // coffee cup
-      return `<path fill="#fff" d="M7.2 8.2h8.2v5.1c0 1.7-1.4 3.1-3.1 3.1H10.3c-1.7 0-3.1-1.4-3.1-3.1V8.2zm8.2 1.2h1.6c1.1 0 2 .9 2 2s-.9 2-2 2h-1.6v-4zm-7.4 9.1h8.4v1.4H8z"/>`;
     case "restaurant":
+      return `<path fill="#fff" d="M3.5 12.5h17a8.5 8.5 0 0 1-17 0z"/><path fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" d="M13.2 3.2 9.6 11M18.2 3.4 13.4 11"/>`;
     case "fast_food":
-      // X-crossed fork + knife (no SVG transform — clear at 1× / MapLibre rasterize).
-      return `<g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"><path stroke-width="1.85" d="M8.1 6.4 15.6 17.4"/><path stroke-width="1.55" d="M6.4 5.3 8.3 7.2M7.6 4.5 9.5 6.4M8.8 3.8 10.5 5.5"/><path stroke-width="1.85" d="M15.9 6.4 8.4 17.4"/><path stroke-width="1.7" d="M14.2 4.6c1.1.35 1.9 1.4 1.7 2.4L15.2 8"/></g>`;
-    case "bar":
-      // beer mug
-      return `<path fill="#fff" d="M7 6.4h7.2l-.9 4.4H7.9L7 6.4zm1.4 4.8h4.4v5.6H8.4v-5.6zm7.2-3.2h1.5c1.2 0 2.1 1 2.1 2.2v2.4c0 1.2-.9 2.2-2.1 2.2h-1.5V8z"/>`;
+      return `<ellipse cx="14.6" cy="9.2" rx="6.2" ry="5.4" fill="#fff" transform="rotate(-40 14.6 9.2)"/><path fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" d="M10.4 13.6 6.6 17.4"/><circle cx="5.3" cy="16.9" r="1.8" fill="#fff"/><circle cx="7.1" cy="18.7" r="1.8" fill="#fff"/>`;
+    case "cafe":
+      return `<path fill="#fff" d="M4.5 9.5h11.5v4.5a5.2 5.2 0 0 1-5.2 5.2h-1.1a5.2 5.2 0 0 1-5.2-5.2z"/><path fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" d="M16 10.6h1.6a2.6 2.6 0 0 1 0 5.2H16"/><path fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" d="M8.5 3.5c-.9 1 .9 2 0 3M12 3.5c-.9 1 .9 2 0 3"/>`;
     case "bakery":
-      // bread loaf
-      return `<path fill="#fff" d="M6.4 13.2c0-2.8 2.1-5 4.8-5h1.6c2.7 0 4.8 2.2 4.8 5H6.4zm2.2-4.6c.5-1.5 1.7-2.5 3.4-2.5s2.9 1 3.4 2.5H8.6z"/>`;
+      return `<path fill="#fff" d="M6 20.5v-7.6A4.6 4.6 0 0 1 3.8 9 4.8 4.8 0 0 1 8.6 4.2h6.8A4.8 4.8 0 0 1 20.2 9 4.6 4.6 0 0 1 18 12.9v7.6z"/>`;
+    case "bar":
+      return `<rect x="5" y="8.5" width="10" height="12" rx="1.6" fill="#fff"/><circle cx="7" cy="7.6" r="2" fill="#fff"/><circle cx="10" cy="6.8" r="2.3" fill="#fff"/><circle cx="13" cy="7.6" r="2" fill="#fff"/><path fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" d="M15 11h1.8a2.2 2.2 0 0 1 2.2 2.2v2.4a2.2 2.2 0 0 1-2.2 2.2H15"/><path fill="none" stroke="${c}" stroke-width="1.3" stroke-linecap="round" d="M8.3 12v5.5M11.7 12v5.5"/>`;
     case "convenience":
-      // storefront 24
-      return `<path fill="#fff" d="M6.2 9.2 7.5 6.6h9l1.3 2.6H6.2zm0 1.3h11.6v6.9H6.2v-6.9zm3.2 1.5v3.9h1.5v-3.9H9.4zm3.7 0v3.9H14.6v-3.9h-1.5z"/>`;
+      return `<path fill="#fff" d="M3.5 9.5 5 5h14l1.5 4.5z"/><rect x="5" y="10.5" width="14" height="9" fill="#fff"/><rect x="10" y="13.5" width="4" height="6" fill="${c}"/>`;
     case "grocery":
-      // shopping cart
-      return `<path fill="#fff" d="M6.2 7.2h1.7l.5 2.1h8.9l-1.1 4.4H8.2L6.2 7.2zm3.1 8.2a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4zm5.2 0a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4z"/>`;
-    case "mall":
+      return `<path fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M2.5 4.5h2.8l2.2 9.6h10.2l2.1-6.8H6.6"/><path fill="#fff" d="M7 7.6h12.6l-1.8 5.6H8.2z"/><circle cx="9.2" cy="18.3" r="1.7" fill="#fff"/><circle cx="16.2" cy="18.3" r="1.7" fill="#fff"/>`;
     case "shop":
-      // shopping bag
-      return `<path fill="#fff" d="M8.2 9.2V8a3.8 3.8 0 0 1 7.6 0v1.2h1.5v9.2H6.7V9.2h1.5zm1.5 0h4.6V8a2.3 2.3 0 0 0-4.6 0v1.2z"/>`;
-    case "bank":
-      return `<path fill="#fff" d="M5.8 9.2 12 5.6l6.2 3.6v1.3H5.8V9.2zm1.2 2.1h1.8v4.6H7V11.3zm3.1 0h1.8v4.6h-1.8v-4.6zm3.1 0h1.8v4.6h-1.8v-4.6zm-7.4 5.4h12.4v1.5H5.8v-1.5z"/>`;
-    case "pharmacy":
-      // Capsule pill (diagonal, two-tone seam) — distinct from hospital cross.
-      return `<path fill="#fff" d="M8.2 14.4c-1.85-1.85-1.85-4.85 0-6.7 1.85-1.85 4.85-1.85 6.7 0 .35.35.35.9 0 1.25L9.45 14.4c-.35.35-.9.35-1.25 0z"/><path fill="#fff" fill-opacity=".72" d="M9.45 14.4 14.7 9.15c1.85 1.85 1.85 4.85 0 6.7-1.85 1.85-4.85 1.85-6.7 0-.35-.35-.35-.9 0-1.25z"/><path stroke="#1A6A3A" stroke-width="1.35" stroke-linecap="round" d="M9.1 14.1 14.1 9.1"/>`;
-    case "hospital":
-      return `<path fill="#fff" d="M10 5.8h4v12.4h-4zM5.8 10h12.4v4H5.8z"/>`;
-    case "school":
-    case "college":
-      return `<path fill="#fff" d="M12 6.2 5.6 9.6v.9L12 13.9l6.4-3.4v-.9L12 6.2zm-5.2 5.5v3.2L12 18.2l5.2-3.3v-3.2L12 15.5 6.8 11.7z"/>`;
-    case "town_hall":
-      return `<path fill="#fff" d="M6.2 16.8V9.6L12 6.4l5.8 3.2v7.2h-2.2v-4.2h-7.2v4.2H6.2z"/>`;
-    case "police":
-      return `<path fill="#fff" d="M12 5.6 16.8 7.4v3.6c0 3.2-2.2 5.4-4.8 6.4-2.6-1-4.8-3.2-4.8-6.4V7.4L12 5.6z"/>`;
-    case "post":
-      return `<path fill="#fff" d="M5.8 7.6h12.4v8.8H5.8V7.6zm1.3 1.2 5 3.6 4.9-3.6v1.5l-4.9 3.5-5-3.5V8.8z"/>`;
+      return `<rect x="4.5" y="8" width="15" height="12.5" rx="2" fill="#fff"/><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" d="M8.8 10V7.2a3.2 3.2 0 0 1 6.4 0V10"/>`;
     case "lodging":
-      // bed
-      return `<path fill="#fff" d="M5.6 15.6V10.8h12.8v4.8h-1.3v-2.2H6.9v2.2H5.6zm1.5-5.6V8.6h4.2v1.4H7.1zm6.2 0V8.6h3.6c.7 0 1.3.6 1.3 1.3v.1h-4.9z"/>`;
-    case "cinema":
-      return `<path fill="#fff" d="M5.8 7.4h12.4v9.2H5.8V7.4zm3.2 2.2 5.2 2.6-5.2 2.6V9.6z"/>`;
-    case "museum":
-      return `<path fill="#fff" d="M5.8 16.4V9.4L12 6.2l6.2 3.2v7H5.8zm2.4 0h8v-3.2h-8v3.2z"/>`;
+      return `<rect x="2.8" y="6" width="2.2" height="13" fill="#fff"/><rect x="2.8" y="13" width="18.4" height="3.6" fill="#fff"/><rect x="19" y="13" width="2.2" height="6" fill="#fff"/><rect x="6.2" y="9.6" width="4.6" height="2.8" rx="1.2" fill="#fff"/><path fill="#fff" d="M12 12.4v-1.6a1.6 1.6 0 0 1 1.6-1.6h5.6a2 2 0 0 1 2 2v1.2"/>`;
+    case "hospital":
+      return `<path fill="#fff" d="M9.3 4.5h5.4v4.8h4.8v5.4h-4.8v4.8H9.3v-4.8H4.5V9.3h4.8z"/>`;
+    case "pharmacy":
+      return `<g transform="rotate(-45 12 12)"><rect x="4" y="8.6" width="16" height="6.8" rx="3.4" fill="#fff"/><rect x="12" y="8.6" width="8" height="6.8" fill="${c}" fill-opacity="0.35"/><path stroke="${c}" stroke-width="1.2" d="M12 8.6v6.8"/></g>`;
+    case "bank":
+      return `<text x="12" y="16.2" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="800" fill="#fff">₩</text>`;
+    case "beauty":
+      return `<circle cx="7" cy="17" r="2.8" fill="none" stroke="#fff" stroke-width="2"/><circle cx="17" cy="17" r="2.8" fill="none" stroke="#fff" stroke-width="2"/><path fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" d="M8.9 15 17.5 4M15.1 15 6.5 4"/>`;
+    case "school":
+      return `<path fill="#fff" d="M12 4.5 22 9l-10 4.5L2 9z"/><path fill="#fff" d="M6.6 11.4v4.2c0 1.6 2.4 2.9 5.4 2.9s5.4-1.3 5.4-2.9v-4.2L12 13.8z"/>`;
     case "park":
-      // tree
-      return `<path fill="#fff" d="M12 5.6c2.8 0 5 2.1 5 4.7 0 .4 0 .8-.1 1.1H17c1.4 0 2.5 1.1 2.5 2.5S18.4 16.4 17 16.4H7c-1.4 0-2.5-1.1-2.5-2.5S5.6 11.4 7 11.4h.1c-.1-.3-.1-.7-.1-1.1 0-2.6 2.2-4.7 5-4.7zm-1.1 10.8h2.2v2.2h-2.2v-2.2z"/>`;
-    case "parking":
-      return `<path fill="#fff" d="M8.2 6.2h4.4c2.3 0 4.1 1.8 4.1 4.1S15 14.4 12.6 14.4H9.7v3.4H8.2V6.2zm1.5 1.5v5.2h2.9c1.4 0 2.6-1.1 2.6-2.6S13.9 7.7 12.5 7.7H9.7z"/>`;
-    case "fuel":
-      return `<path fill="#fff" d="M7 6.2h5.6v11.6H7V6.2zm5.6 3.2h1.8v4.6c0 1.3 1 2.3 2.3 2.3h.4v-1.5h-.4c-.4 0-.8-.4-.8-.8V9.1c0-.9-.7-1.6-1.6-1.6h-1.7v1.9z"/>`;
-    case "subway":
-      return `<path fill="#fff" d="M12 6.2a5.8 5.8 0 1 1 0 11.6 5.8 5.8 0 0 1 0-11.6zm0 2.2a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2z"/>`;
-    case "bus":
-      return `<path fill="#fff" d="M6.4 7.2h11.2v8.4H6.4V7.2zm1.6 9.2h1.6v1.4H8V16.4zm6.4 0h1.6v1.4h-1.6v-1.4zM7.6 9.8h8.8v2.8H7.6V9.8z"/>`;
+      return `<circle cx="12" cy="7.4" r="4.3" fill="#fff"/><circle cx="7.6" cy="11.4" r="3.8" fill="#fff"/><circle cx="16.4" cy="11.4" r="3.8" fill="#fff"/><rect x="7.6" y="10.6" width="8.8" height="4.6" fill="#fff"/><rect x="10.9" y="14" width="2.2" height="6.8" rx="0.8" fill="#fff"/>`;
     case "landmark":
-      // star
-      return `<path fill="#fff" d="M12 5.4 13.9 10h4.7l-3.8 2.9 1.4 4.7L12 14.9 7.8 17.6l1.4-4.7L5.4 10h4.7L12 5.4z"/>`;
+      return `<path fill="#fff" d="M12 3.2l2.6 5.5 6 .7-4.4 4.1 1.2 5.9L12 16.4l-5.4 3 1.2-5.9L3.4 9.4l6-.7z"/>`;
+    case "town_hall":
+      return `<path fill="#fff" d="M12 3.5 21 8H3z"/><rect x="5" y="9.4" width="2.2" height="8" fill="#fff"/><rect x="10.9" y="9.4" width="2.2" height="8" fill="#fff"/><rect x="16.8" y="9.4" width="2.2" height="8" fill="#fff"/><rect x="3.5" y="18.4" width="17" height="2.2" fill="#fff"/>`;
+    case "police":
+      return `<path fill="#fff" d="M12 3 19.5 6v5.6c0 4.6-3.2 8-7.5 9.4-4.3-1.4-7.5-4.8-7.5-9.4V6z"/>`;
+    case "post":
+      return `<rect x="3.5" y="6" width="17" height="12.5" rx="1.6" fill="#fff"/><path fill="none" stroke="${c}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M4.5 7.4 12 13l7.5-5.6"/>`;
+    case "fuel":
+      return `<rect x="4.5" y="4" width="9.5" height="16" rx="1.4" fill="#fff"/><rect x="6.5" y="6.2" width="5.5" height="4" fill="${c}"/><path fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M14 9h2.2a1.6 1.6 0 0 1 1.6 1.6v6a1.4 1.4 0 0 0 2.8 0V8.4L18 5.6"/>`;
+    case "parking":
+      return `<text x="12" y="16.4" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="14" font-weight="800" fill="#fff">P</text>`;
+    case "subway":
+      return `<circle cx="12" cy="12" r="5.2" fill="none" stroke="#fff" stroke-width="2.2"/><circle cx="12" cy="12" r="2.2" fill="#fff"/>`;
     default:
       return `<circle cx="12" cy="12" r="3.2" fill="#fff"/>`;
   }
 }
 
+function glyphScaled(cat: PoiMapCategoryId, badge: string): string {
+  // 64% of badge — scale around center.
+  return `<g transform="translate(12 12) scale(0.64) translate(-12 -12)">${glyphInner(cat, badge)}</g>`;
+}
+
+/** Bus stop / bus POI badge colour (not subway gray). */
+export const BUS_BADGE_COLOR = "#2C7BE5";
+
+/** Bus glyph (24×24 viewBox) — white body, badge-coloured windows/lights/wheels. */
+function busGlyphInner(badge: string): string {
+  return `<rect x="5" y="3.5" width="14" height="15" rx="3" fill="#fff"/><rect x="7" y="6.4" width="10" height="5.2" rx="1" fill="${badge}"/><circle cx="8.6" cy="15" r="1.2" fill="${badge}"/><circle cx="15.4" cy="15" r="1.2" fill="${badge}"/><rect x="6.4" y="18" width="2.8" height="2.6" rx="0.8" fill="${badge}"/><rect x="14.8" y="18" width="2.8" height="2.6" rx="0.8" fill="${badge}"/>`;
+}
+
 export function poiCategoryIconSvg(cat: PoiCategoryId): string {
+  if (cat === "bus") {
+    const fill = BUS_BADGE_COLOR;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  ${circleBadge(fill)}
+  <g transform="translate(12 12) scale(0.64) translate(-12 -12)">${busGlyphInner(fill)}</g>
+</svg>`;
+  }
+  const mapCat = resolveMapCat(cat);
   const fill = colorOf(cat).icon;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-  ${shapePath(cat, fill)}
-  ${glyphPath(cat)}
+  ${circleBadge(fill)}
+  ${glyphScaled(mapCat, fill)}
 </svg>`;
 }
 
+/** MapLibre image id for a line ref badge. */
+export function subwayBadgeImageId(ref: string): string {
+  const safe = (ref || "x").replace(/[^0-9A-Za-z가-힣]/g, "") || "x";
+  return `pind-subway-${safe}`;
+}
+
+/** Glyph: digits 1–9 as-is; letter/name lines → first character. */
+export function subwayBadgeGlyph(ref: string): string {
+  const r = (ref || "").trim();
+  if (/^[1-9]$/.test(r)) return r;
+  if (!r) return "?";
+  return [...r][0] ?? "?";
+}
+
+/** Dynamic subway line badge (line colour + ref glyph). */
+export function subwayLineBadgeSvg(colour: string, ref: string): string {
+  const label = subwayBadgeGlyph(ref);
+  const fontSize = label.length > 1 ? 9 : 12;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  ${circleBadge(colour)}
+  <text x="12" y="16" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="${fontSize}" font-weight="800" fill="#fff">${label}</text>
+</svg>`;
+}
+
+/** icon-image expr for korea_station_labels (uses feature `ref`). */
+export function subwayStationIconImageExpr(): unknown {
+  const refs = new Set([
+    ...Object.keys(SEOUL_SUBWAY_REF_COLOURS),
+    ...Object.keys(SUBWAY_BADGE_COLOURS),
+  ]);
+  const args: unknown[] = [
+    "match",
+    ["to-string", ["coalesce", ["get", "ref"], ""]],
+  ];
+  for (const ref of refs) {
+    args.push(ref, subwayBadgeImageId(ref));
+  }
+  args.push(subwayBadgeImageId("default"));
+  return args;
+}
+
+/** Register line-coloured number/letter badges (pixelRatio 2–3). */
+export async function ensureSubwayLineBadges(
+  map: Parameters<typeof loadMapImageFromSvg>[0],
+): Promise<void> {
+  const raw =
+    typeof window !== "undefined" ? window.devicePixelRatio || 2 : 2;
+  const dpr = Math.max(2, clampMapPinDpr(raw));
+  const colourByRef: Record<string, string> = {
+    ...SEOUL_SUBWAY_REF_COLOURS,
+    ...SUBWAY_BADGE_COLOURS,
+  };
+  const entries: Array<[string, string]> = [
+    ...Object.entries(colourByRef),
+    ["default", "#5A6570"],
+  ];
+  await Promise.all(
+    entries.map(([ref, colour]) =>
+      loadMapImageFromSvg(
+        map,
+        subwayBadgeImageId(ref),
+        subwayLineBadgeSvg(colour, ref === "default" ? "?" : ref),
+        POI_ICON_CSS_PX,
+        POI_ICON_CSS_PX,
+        dpr,
+      ).catch(() => undefined),
+    ),
+  );
+}
+
 export const ALL_POI_CATEGORY_IDS: PoiCategoryId[] = [
-  "cafe",
-  "restaurant",
-  "bar",
-  "bakery",
-  "fast_food",
-  "convenience",
-  "grocery",
+  ...ALL_POI_MAP_CATEGORY_IDS,
   "mall",
-  "bank",
-  "pharmacy",
-  "hospital",
-  "school",
   "college",
-  "town_hall",
-  "police",
-  "post",
-  "lodging",
   "cinema",
   "museum",
-  "park",
-  "parking",
-  "fuel",
-  "subway",
   "bus",
-  "landmark",
-  "shop",
 ];
 
 /**
- * MapLibre icon-image expression — custom pind-poi-* ids (replaces *_11 sprites).
+ * MapLibre icon-image expression — custom pind-poi-* ids.
  */
 export function poiCategoryIconImageExpr(): unknown {
   return [
@@ -258,20 +250,36 @@ export function poiCategoryIconImageExpr(): unknown {
     poiIconImageId("cafe"),
     ["==", ["get", "class"], "restaurant"],
     poiIconImageId("restaurant"),
-    // Unify with restaurant glyph (badge color still via text paint).
-    ["==", ["get", "class"], "fast_food"],
-    poiIconImageId("restaurant"),
-    ["==", ["get", "class"], "bakery"],
+    [
+      "any",
+      ["==", ["get", "class"], "fast_food"],
+      ["==", ["get", "subclass"], "chicken"],
+    ],
+    poiIconImageId("fast_food"),
+    [
+      "any",
+      ["==", ["get", "class"], "bakery"],
+      ["==", ["get", "class"], "ice_cream"],
+      ["==", ["get", "class"], "pastry"],
+      ["==", ["get", "class"], "confectionery"],
+    ],
     poiIconImageId("bakery"),
     [
       "any",
       ["==", ["get", "class"], "bar"],
       ["==", ["get", "class"], "beer"],
+      ["==", ["get", "class"], "pub"],
+      ["==", ["get", "class"], "alcohol"],
+      ["==", ["get", "class"], "wine"],
     ],
     poiIconImageId("bar"),
     ["==", ["get", "class"], "pharmacy"],
     poiIconImageId("pharmacy"),
-    ["==", ["get", "class"], "bank"],
+    [
+      "any",
+      ["==", ["get", "class"], "bank"],
+      ["==", ["get", "class"], "atm"],
+    ],
     poiIconImageId("bank"),
     [
       "any",
@@ -282,39 +290,61 @@ export function poiCategoryIconImageExpr(): unknown {
     poiIconImageId("lodging"),
     [
       "any",
+      ["==", ["get", "class"], "hairdresser"],
+      ["==", ["get", "class"], "beauty"],
+      ["==", ["get", "subclass"], "hairdresser"],
+      ["==", ["get", "subclass"], "beauty"],
+    ],
+    poiIconImageId("beauty"),
+    [
+      "any",
       ["==", ["get", "class"], "cinema"],
       ["==", ["get", "subclass"], "cinema"],
       ["==", ["get", "class"], "theatre"],
       ["==", ["get", "class"], "theater"],
+      ["==", ["get", "class"], "museum"],
+      ["==", ["get", "class"], "attraction"],
     ],
-    poiIconImageId("cinema"),
-    ["==", ["get", "class"], "museum"],
-    poiIconImageId("museum"),
+    poiIconImageId("landmark"),
     [
       "any",
       ["==", ["get", "class"], "mall"],
       ["==", ["get", "subclass"], "department_store"],
       ["==", ["get", "class"], "department_store"],
     ],
-    poiIconImageId("mall"),
+    poiIconImageId("shop"),
     [
       "any",
-      ["all", ["==", ["get", "class"], "shop"], ["==", ["get", "subclass"], "convenience"]],
+      [
+        "all",
+        ["==", ["get", "class"], "shop"],
+        ["==", ["get", "subclass"], "convenience"],
+      ],
     ],
     poiIconImageId("convenience"),
     [
       "any",
       ["==", ["get", "class"], "grocery"],
-      ["all", ["==", ["get", "class"], "shop"], ["==", ["get", "subclass"], "supermarket"]],
+      [
+        "all",
+        ["==", ["get", "class"], "shop"],
+        ["==", ["get", "subclass"], "supermarket"],
+      ],
     ],
     poiIconImageId("grocery"),
-    ["==", ["get", "class"], "hospital"],
-    poiIconImageId("hospital"),
-    ["==", ["get", "class"], "college"],
-    poiIconImageId("college"),
     [
       "any",
+      ["==", ["get", "class"], "hospital"],
+      ["==", ["get", "class"], "doctors"],
+      ["==", ["get", "class"], "clinic"],
+      ["==", ["get", "class"], "dentist"],
+    ],
+    poiIconImageId("hospital"),
+    [
+      "any",
+      ["==", ["get", "class"], "college"],
       ["==", ["get", "class"], "school"],
+      ["==", ["get", "class"], "kindergarten"],
       ["==", ["get", "subclass"], "university"],
     ],
     poiIconImageId("school"),
@@ -327,9 +357,18 @@ export function poiCategoryIconImageExpr(): unknown {
     poiIconImageId("park"),
     ["==", ["get", "class"], "police"],
     poiIconImageId("police"),
-    ["==", ["get", "class"], "post"],
+    [
+      "any",
+      ["==", ["get", "class"], "post"],
+      ["==", ["get", "subclass"], "post_office"],
+    ],
     poiIconImageId("post"),
-    ["==", ["get", "class"], "town_hall"],
+    [
+      "any",
+      ["==", ["get", "class"], "town_hall"],
+      ["==", ["get", "class"], "community_centre"],
+      ["==", ["get", "class"], "library"],
+    ],
     poiIconImageId("town_hall"),
     [
       "any",
@@ -347,46 +386,37 @@ export function poiCategoryIconImageExpr(): unknown {
       "any",
       ["==", ["get", "class"], "railway"],
       ["==", ["get", "class"], "rail"],
+      ["==", ["get", "class"], "subway"],
     ],
     poiIconImageId("subway"),
     ["==", ["get", "class"], "bus"],
     poiIconImageId("bus"),
-    ["==", ["get", "class"], "shop"],
+    [
+      "any",
+      ["==", ["get", "class"], "clothes"],
+      ["==", ["get", "class"], "shoes"],
+      ["==", ["get", "class"], "florist"],
+      ["==", ["get", "class"], "books"],
+      ["==", ["get", "class"], "gift"],
+      ["==", ["get", "class"], "jewelry"],
+      ["==", ["get", "class"], "cosmetics"],
+      ["==", ["get", "class"], "shop"],
+    ],
     poiIconImageId("shop"),
     poiIconImageId("shop"),
   ];
 }
 
-/** Category text-color expression (darker for readability; neon/white variants). */
+/** Category text-color expression (darker for readability). */
 export function poiCategoryTextColorExpr(themeId: string): unknown {
-  const food =
-    themeId === "neon" ? "#D4A090" : themeId === "white" ? "#8A3A12" : POI_CATEGORY_COLORS.food.text;
-  const cafe =
-    themeId === "neon" ? "#D4A090" : themeId === "white" ? "#6A3A1A" : POI_CATEGORY_COLORS.cafe.text;
-  const bar =
-    themeId === "neon" ? "#C8A0E0" : themeId === "white" ? "#4A2A6A" : POI_CATEGORY_COLORS.bar.text;
-  const bakery =
-    themeId === "neon" ? "#E0C090" : themeId === "white" ? "#7A4A1A" : POI_CATEGORY_COLORS.bakery.text;
-  const shopping =
-    themeId === "neon" ? "#E0A0C0" : themeId === "white" ? "#8A2A5A" : POI_CATEGORY_COLORS.shopping.text;
-  const convenience =
-    themeId === "neon" ? "#7ABA8A" : themeId === "white" ? "#1A6A2A" : POI_CATEGORY_COLORS.convenience.text;
-  const life =
-    themeId === "neon" ? "#8A9AC8" : themeId === "white" ? "#2A3A6A" : POI_CATEGORY_COLORS.life.text;
-  const medical =
-    themeId === "neon" ? "#E08080" : themeId === "white" ? "#8A1A1A" : POI_CATEGORY_COLORS.medical.text;
-  const pharmacy =
-    themeId === "neon" ? "#7ABA9A" : themeId === "white" ? "#1A6A3A" : POI_CATEGORY_COLORS.pharmacy.text;
-  const culture =
-    themeId === "neon" ? "#C898B0" : themeId === "white" ? "#5A2E4A" : POI_CATEGORY_COLORS.culture.text;
-  const lodging =
-    themeId === "neon" ? "#9AB8D0" : themeId === "white" ? "#1A3A6A" : POI_CATEGORY_COLORS.lodging.text;
-  const park =
-    themeId === "neon" ? "#7AB8A0" : themeId === "white" ? "#2A4A28" : POI_CATEGORY_COLORS.park.text;
-  const education =
-    themeId === "neon" ? "#8AA0D0" : themeId === "white" ? "#2E4A7A" : POI_CATEGORY_COLORS.education.text;
-  const other =
-    themeId === "neon" ? "#A0A0B0" : themeId === "white" ? "#4A4A52" : POI_CATEGORY_COLORS.other.text;
+  const c = (id: PoiMapCategoryId) => {
+    const t = POI_MAP_COLORS[id].text;
+    if (themeId === "neon") return t;
+    if (themeId === "white") return t;
+    return t;
+  };
+  // Subway station names: dark gray per spec.
+  const subwayName = "#1E2124";
 
   return [
     "case",
@@ -395,84 +425,149 @@ export function poiCategoryTextColorExpr(themeId: string): unknown {
       ["==", ["get", "class"], "cafe"],
       ["all", ["==", ["get", "class"], "shop"], ["==", ["get", "subclass"], "coffee"]],
     ],
-    cafe,
+    c("cafe"),
     [
       "any",
       ["==", ["get", "class"], "bar"],
       ["==", ["get", "class"], "beer"],
+      ["==", ["get", "class"], "pub"],
     ],
-    bar,
-    ["==", ["get", "class"], "bakery"],
-    bakery,
+    c("bar"),
     [
       "any",
-      ["==", ["get", "class"], "restaurant"],
-      ["==", ["get", "class"], "fast_food"],
+      ["==", ["get", "class"], "bakery"],
       ["==", ["get", "class"], "ice_cream"],
+      ["==", ["get", "class"], "pastry"],
+      ["==", ["get", "class"], "confectionery"],
     ],
-    food,
+    c("bakery"),
     [
       "any",
-      ["all", ["==", ["get", "class"], "shop"], ["==", ["get", "subclass"], "convenience"]],
+      ["==", ["get", "class"], "fast_food"],
+      ["==", ["get", "subclass"], "chicken"],
     ],
-    convenience,
+    c("fast_food"),
+    ["==", ["get", "class"], "restaurant"],
+    c("restaurant"),
     [
-      "any",
+      "all",
       ["==", ["get", "class"], "shop"],
-      ["==", ["get", "class"], "grocery"],
-      ["==", ["get", "class"], "clothes"],
-      ["==", ["get", "class"], "mall"],
-      ["==", ["get", "class"], "department_store"],
-      ["==", ["get", "subclass"], "department_store"],
-      ["==", ["get", "subclass"], "supermarket"],
+      ["==", ["get", "subclass"], "convenience"],
     ],
-    shopping,
+    c("convenience"),
+    [
+      "any",
+      ["==", ["get", "class"], "grocery"],
+      ["==", ["get", "subclass"], "supermarket"],
+      ["==", ["get", "subclass"], "marketplace"],
+    ],
+    c("grocery"),
+    [
+      "any",
+      ["==", ["get", "class"], "hairdresser"],
+      ["==", ["get", "class"], "beauty"],
+      ["==", ["get", "subclass"], "hairdresser"],
+      ["==", ["get", "subclass"], "beauty"],
+    ],
+    c("beauty"),
     ["==", ["get", "class"], "pharmacy"],
-    pharmacy,
+    c("pharmacy"),
     [
       "any",
       ["==", ["get", "class"], "bank"],
-      ["==", ["get", "class"], "post"],
-      ["==", ["get", "class"], "town_hall"],
-      ["==", ["get", "class"], "police"],
-      ["==", ["get", "class"], "parking"],
-      ["==", ["get", "class"], "fuel"],
+      ["==", ["get", "class"], "atm"],
     ],
-    life,
-    ["==", ["get", "class"], "hospital"],
-    medical,
+    c("bank"),
+    [
+      "any",
+      ["==", ["get", "class"], "hospital"],
+      ["==", ["get", "class"], "doctors"],
+      ["==", ["get", "class"], "clinic"],
+      ["==", ["get", "class"], "dentist"],
+    ],
+    c("hospital"),
     [
       "any",
       ["==", ["get", "class"], "hotel"],
       ["==", ["get", "class"], "lodging"],
+      ["==", ["get", "subclass"], "hotel"],
     ],
-    lodging,
+    c("lodging"),
     [
       "any",
-      ["==", ["get", "class"], "cinema"],
-      ["==", ["get", "class"], "theatre"],
-      ["==", ["get", "class"], "theater"],
-      ["==", ["get", "class"], "museum"],
+      ["==", ["get", "class"], "park"],
+      ["==", ["get", "class"], "playground"],
+      ["==", ["get", "subclass"], "playground"],
     ],
-    culture,
-    ["==", ["get", "class"], "park"],
-    park,
+    c("park"),
     [
       "any",
       ["==", ["get", "class"], "school"],
       ["==", ["get", "class"], "college"],
+      ["==", ["get", "class"], "kindergarten"],
       ["==", ["get", "subclass"], "university"],
     ],
-    education,
-    other,
+    c("school"),
+    ["==", ["get", "class"], "police"],
+    c("police"),
+    [
+      "any",
+      ["==", ["get", "class"], "post"],
+      ["==", ["get", "subclass"], "post_office"],
+    ],
+    c("post"),
+    [
+      "any",
+      ["==", ["get", "class"], "town_hall"],
+      ["==", ["get", "class"], "community_centre"],
+      ["==", ["get", "class"], "library"],
+    ],
+    c("town_hall"),
+    ["==", ["get", "class"], "fuel"],
+    c("fuel"),
+    [
+      "any",
+      ["==", ["get", "class"], "parking"],
+      ["==", ["get", "subclass"], "parking"],
+    ],
+    c("parking"),
+    [
+      "any",
+      ["==", ["get", "class"], "railway"],
+      ["==", ["get", "class"], "rail"],
+      ["==", ["get", "class"], "subway"],
+      ["==", ["get", "class"], "bus"],
+    ],
+    subwayName,
+    [
+      "any",
+      ["==", ["get", "class"], "attraction"],
+      ["==", ["get", "class"], "museum"],
+      ["==", ["get", "class"], "cinema"],
+      ["==", ["get", "class"], "theatre"],
+      ["==", ["get", "class"], "theater"],
+    ],
+    c("landmark"),
+    [
+      "any",
+      ["==", ["get", "class"], "shop"],
+      ["==", ["get", "class"], "clothes"],
+      ["==", ["get", "class"], "shoes"],
+      ["==", ["get", "class"], "mall"],
+      ["==", ["get", "class"], "department_store"],
+    ],
+    c("shop"),
+    c("shop"),
   ];
 }
 
 export async function ensurePoiCategoryIcons(
   map: Parameters<typeof loadMapImageFromSvg>[0],
 ): Promise<void> {
-  const dpr =
-    typeof window !== "undefined" ? clampMapPinDpr(window.devicePixelRatio || 2) : 2;
+  const raw =
+    typeof window !== "undefined" ? window.devicePixelRatio || 2 : 2;
+  // Prefer 2–3 as specified.
+  const dpr = Math.max(2, clampMapPinDpr(raw));
   await Promise.all(
     ALL_POI_CATEGORY_IDS.map((cat) =>
       loadMapImageFromSvg(
@@ -485,4 +580,5 @@ export async function ensurePoiCategoryIcons(
       ).catch(() => undefined),
     ),
   );
+  await ensureSubwayLineBadges(map);
 }
