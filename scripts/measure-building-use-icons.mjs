@@ -45,6 +45,9 @@ const HUBS = [
   { id: "hongcheon", lat: 37.697, lng: 127.889 },
 ];
 
+/** Mapo Hangang I-Park — use-value probe only (no coords in report). */
+const MAPO_IPARK = { id: "mapo_ipark", lat: 37.5426, lng: 126.947 };
+
 async function main() {
   const token = e2eToken();
   const browser = await chromium.launch({ headless: true });
@@ -108,7 +111,48 @@ async function main() {
   const iconShot = path.join(OUT, "icons-z17-mangwon.png");
   await page.screenshot({ path: iconShot, fullPage: false });
 
-  const report = { at: new Date().toISOString(), base: BASE, rows, iconShot: path.relative(process.cwd(), iconShot) };
+  // Mapo I-Park: report use values only (no coordinates).
+  const ipUrl = `${BASE}/map-preview?selfTiles=1&mode=nopins&theme=paper&lat=${MAPO_IPARK.lat}&lng=${MAPO_IPARK.lng}&z=17&e2e=${token}&t=${Date.now()}`;
+  await page.goto(ipUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
+  await page.waitForFunction(() => window.__PINDMAP_PREVIEW_MAP__ != null, null, {
+    timeout: 90000,
+  });
+  await page.waitForTimeout(6000);
+  const ipark = await page.evaluate(() => {
+    const map = window.__PINDMAP_PREVIEW_MAP__;
+    const counts = { shop: 0, apt: 0, other: 0, total: 0 };
+    const useValues = [];
+    try {
+      const feats = map.querySourceFeatures("korea_buildings", {
+        sourceLayer: "building_kr",
+      });
+      for (const f of feats) {
+        counts.total += 1;
+        const u = f.properties?.use;
+        const sn = Number(f.properties?.shop_n || 0);
+        // Painted apricot only when use=shop AND shop_n≥2
+        if (u === "shop" && sn >= 2) counts.shop += 1;
+        else if (u === "apt") counts.apt += 1;
+        else counts.other += 1;
+        if (u) useValues.push(String(u));
+      }
+    } catch {
+      /* missing */
+    }
+    const uniq = [...new Set(useValues)].sort();
+    return { counts, useValuesUniq: uniq };
+  });
+  const iparkShot = path.join(OUT, "mapo-ipark-z17.png");
+  await page.screenshot({ path: iparkShot, fullPage: false });
+  console.log(JSON.stringify({ hub: "mapo_ipark", z: 17, ...ipark }));
+
+  const report = {
+    at: new Date().toISOString(),
+    base: BASE,
+    rows,
+    iconShot: path.relative(process.cwd(), iconShot),
+    mapoIpark: { ...ipark, shot: path.relative(process.cwd(), iparkShot) },
+  };
   fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(report, null, 2));
   console.log("wrote", path.join(OUT, "summary.json"));
   await browser.close();
