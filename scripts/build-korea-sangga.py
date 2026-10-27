@@ -99,10 +99,18 @@ def map_category(
         if jung == "주점":
             return ("bar", None, 18)
         if jung == "기타 간이":
-            if "빵" in so or "도넛" in so or "떡" in so or "한과" in so:
+            if "빵" in so or "도넛" in so or "떡" in so or "한과" in so or "베이글" in so:
                 return ("bakery", None, 16)
             if "아이스크림" in so or "빙수" in so:
-                return ("cafe", None, 20)
+                return ("bakery", None, 18)
+            if (
+                "치킨" in so
+                or "햄버거" in so
+                or "피자" in so
+                or "샌드위치" in so
+                or "도시락" in so
+            ):
+                return ("fast_food", None, 16)
             return ("fast_food", None, 22)
         if jung in (
             "한식",

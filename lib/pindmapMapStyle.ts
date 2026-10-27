@@ -891,7 +891,8 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   // Stay below landmarks / stations / large apt. Painted after sangga so OMT-only wins.
   const sortKey: unknown = shopSortKeyExpr();
 
-  // Overlapping bands. Convenience excluded until z16. Padding: far=large, near=small.
+  // z13–14: markets / malls only (no street shops). z15: sparse top-rank food.
+  // z16: most shops. z17+: remainder. Convenience from z16.
   const bands: Array<{
     idSuffix: string;
     minzoom: number;
@@ -900,47 +901,60 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
     textPadding: unknown;
   }> = [
     {
+      idSuffix: "z13",
+      minzoom: 13,
+      maxzoom: 14,
+      // Market / mall only — no street cafes·restaurants.
+      classFilter: [
+        "any",
+        ["==", ["get", "class"], "mall"],
+        ["==", ["get", "class"], "department_store"],
+        ["==", ["get", "subclass"], "department_store"],
+        [
+          "all",
+          ["==", ["get", "class"], "grocery"],
+          [
+            "in",
+            ["get", "subclass"],
+            ["literal", ["marketplace", "supermarket"]],
+          ],
+        ],
+      ],
+      textPadding: 14,
+    },
+    {
+      // Sparse anchors at z14 (e2e shopMin≥6); bulk street shops from z15.
       idSuffix: "z14",
       minzoom: 14,
-      maxzoom: 16,
-      // Big venues + better-ranked food (no convenience)
+      maxzoom: 15,
       classFilter: [
         "any",
         [
           "all",
           SHOP_BIG,
-          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 40],
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 45],
         ],
         [
           "all",
           SHOP_FOOD,
-          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 30],
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 28],
         ],
+        SHOP_DAILY_NO_CONV,
       ],
-      textPadding: [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        14,
-        16,
-        15,
-        12,
-        16,
-        9,
-      ],
+      textPadding: 14,
     },
     {
       idSuffix: "z15",
       minzoom: 15,
-      // Exclusive at 16 so z15+z16 bands do not stack (hongdae z16 ≤50 labels).
       maxzoom: 16,
+      // Sparse street shops (≈≤10/screen with padding).
       classFilter: [
         "any",
         SHOP_BIG,
         [
           "all",
           SHOP_FOOD,
-          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 55],
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 22],
         ],
         SHOP_DAILY_NO_CONV,
       ],
@@ -949,15 +963,15 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         ["linear"],
         ["zoom"],
         15,
-        12,
+        14,
         16,
-        10,
+        11,
       ],
     },
     {
       idSuffix: "z16",
       minzoom: 16,
-      // Leave room for school/civic anchors (mangwon z16 ≥4) under overlap=0.
+      // Cap density for e2e ≤50 unique labels (hongdae/gangnam).
       classFilter: [
         "all",
         SHOP_Z16,
@@ -1217,38 +1231,29 @@ function appendSanggaShopLayers(
     textPadding: unknown;
   }> = [
     {
+      // Sparse anchors at z14 (align with OMT; e2e shopMin≥6).
       idSuffix: "z14",
       minzoom: 14,
-      maxzoom: 16,
+      maxzoom: 15,
       classFilter: [
         "any",
         [
           "all",
           SHOP_BIG,
-          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 40],
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 45],
         ],
         [
           "all",
           SHOP_FOOD,
-          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 30],
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 28],
         ],
+        SHOP_DAILY_NO_CONV,
       ],
-      textPadding: [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        14,
-        16,
-        15,
-        12,
-        16,
-        9,
-      ],
+      textPadding: 14,
     },
     {
       idSuffix: "z15",
       minzoom: 15,
-      // Exclusive at 16 — avoid stacking with z16 band.
       maxzoom: 16,
       classFilter: [
         "any",
@@ -1256,7 +1261,7 @@ function appendSanggaShopLayers(
         [
           "all",
           SHOP_FOOD,
-          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 55],
+          ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], 22],
         ],
         SHOP_DAILY_NO_CONV,
       ],
@@ -1265,16 +1270,15 @@ function appendSanggaShopLayers(
         ["linear"],
         ["zoom"],
         15,
-        12,
+        14,
         16,
-        10,
+        11,
       ],
     },
     {
       idSuffix: "z16",
       minzoom: 16,
       maxzoom: 17,
-      // Cap street density; leave space for school/civic anchors.
       classFilter: [
         "all",
         SHOP_Z16,
@@ -1285,7 +1289,6 @@ function appendSanggaShopLayers(
     {
       idSuffix: "z17",
       minzoom: 17,
-      // Denser at street zoom so restored shopMin≥14 holds with 23px badges.
       classFilter: [
         "all",
         SHOP_Z16,
