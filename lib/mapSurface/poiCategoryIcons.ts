@@ -10,6 +10,8 @@ import {
   POI_MAP_COLORS,
   type PoiMapCategoryId,
 } from "@/lib/mapSurface/poiCategoryMapping";
+import { SEOUL_SUBWAY_REF_COLOURS } from "@/lib/mapSurface/subwayColour";
+import { SUBWAY_BADGE_COLOURS } from "@/lib/mapSurface/subwayBadgeColours.generated";
 
 /** Street POI badge CSS size (20–22px). */
 export const POI_ICON_CSS_PX = 22;
@@ -84,7 +86,7 @@ function glyphInner(cat: PoiMapCategoryId, c: string): string {
     case "cafe":
       return `<path fill="#fff" d="M4.5 9.5h11.5v4.5a5.2 5.2 0 0 1-5.2 5.2h-1.1a5.2 5.2 0 0 1-5.2-5.2z"/><path fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" d="M16 10.6h1.6a2.6 2.6 0 0 1 0 5.2H16"/><path fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" d="M8.5 3.5c-.9 1 .9 2 0 3M12 3.5c-.9 1 .9 2 0 3"/>`;
     case "bakery":
-      return `<path fill="#fff" d="M3.5 14c0-4.4 3.8-7.8 8.5-7.8s8.5 3.4 8.5 7.8v4.3a1.2 1.2 0 0 1-1.2 1.2H4.7a1.2 1.2 0 0 1-1.2-1.2z"/><path fill="none" stroke="${c}" stroke-width="1.5" stroke-linecap="round" d="M8.4 10.2l1.6 2.6M12 9.4v3M15.6 10.2 14 12.8"/>`;
+      return `<path fill="#fff" d="M6 20.5v-7.6A4.6 4.6 0 0 1 3.8 9 4.8 4.8 0 0 1 8.6 4.2h6.8A4.8 4.8 0 0 1 20.2 9 4.6 4.6 0 0 1 18 12.9v7.6z"/>`;
     case "bar":
       return `<rect x="5" y="8.5" width="10" height="12" rx="1.6" fill="#fff"/><circle cx="7" cy="7.6" r="2" fill="#fff"/><circle cx="10" cy="6.8" r="2.3" fill="#fff"/><circle cx="13" cy="7.6" r="2" fill="#fff"/><path fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" d="M15 11h1.8a2.2 2.2 0 0 1 2.2 2.2v2.4a2.2 2.2 0 0 1-2.2 2.2H15"/><path fill="none" stroke="${c}" stroke-width="1.3" stroke-linecap="round" d="M8.3 12v5.5M11.7 12v5.5"/>`;
     case "convenience":
@@ -106,7 +108,7 @@ function glyphInner(cat: PoiMapCategoryId, c: string): string {
     case "school":
       return `<path fill="#fff" d="M12 4.5 22 9l-10 4.5L2 9z"/><path fill="#fff" d="M6.6 11.4v4.2c0 1.6 2.4 2.9 5.4 2.9s5.4-1.3 5.4-2.9v-4.2L12 13.8z"/>`;
     case "park":
-      return `<circle cx="12" cy="9.6" r="6" fill="#fff"/><rect x="10.9" y="13" width="2.2" height="7.5" fill="#fff"/>`;
+      return `<circle cx="12" cy="7.4" r="4.3" fill="#fff"/><circle cx="7.6" cy="11.4" r="3.8" fill="#fff"/><circle cx="16.4" cy="11.4" r="3.8" fill="#fff"/><rect x="7.6" y="10.6" width="8.8" height="4.6" fill="#fff"/><rect x="10.9" y="14" width="2.2" height="6.8" rx="0.8" fill="#fff"/>`;
     case "landmark":
       return `<path fill="#fff" d="M12 3.2l2.6 5.5 6 .7-4.4 4.1 1.2 5.9L12 16.4l-5.4 3 1.2-5.9L3.4 9.4l6-.7z"/>`;
     case "town_hall":
@@ -131,7 +133,22 @@ function glyphScaled(cat: PoiMapCategoryId, badge: string): string {
   return `<g transform="translate(12 12) scale(0.64) translate(-12 -12)">${glyphInner(cat, badge)}</g>`;
 }
 
+/** Bus stop / bus POI badge colour (not subway gray). */
+export const BUS_BADGE_COLOR = "#2C7BE5";
+
+/** Bus glyph (24×24 viewBox) — white body, badge-coloured windows/lights/wheels. */
+function busGlyphInner(badge: string): string {
+  return `<rect x="5" y="3.5" width="14" height="15" rx="3" fill="#fff"/><rect x="7" y="6.4" width="10" height="5.2" rx="1" fill="${badge}"/><circle cx="8.6" cy="15" r="1.2" fill="${badge}"/><circle cx="15.4" cy="15" r="1.2" fill="${badge}"/><rect x="6.4" y="18" width="2.8" height="2.6" rx="0.8" fill="${badge}"/><rect x="14.8" y="18" width="2.8" height="2.6" rx="0.8" fill="${badge}"/>`;
+}
+
 export function poiCategoryIconSvg(cat: PoiCategoryId): string {
+  if (cat === "bus") {
+    const fill = BUS_BADGE_COLOR;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  ${circleBadge(fill)}
+  <g transform="translate(12 12) scale(0.64) translate(-12 -12)">${busGlyphInner(fill)}</g>
+</svg>`;
+  }
   const mapCat = resolveMapCat(cat);
   const fill = colorOf(cat).icon;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
@@ -140,17 +157,74 @@ export function poiCategoryIconSvg(cat: PoiCategoryId): string {
 </svg>`;
 }
 
+/** MapLibre image id for a line ref badge. */
+export function subwayBadgeImageId(ref: string): string {
+  const safe = (ref || "x").replace(/[^0-9A-Za-z가-힣]/g, "") || "x";
+  return `pind-subway-${safe}`;
+}
+
+/** Glyph: digits 1–9 as-is; letter/name lines → first character. */
+export function subwayBadgeGlyph(ref: string): string {
+  const r = (ref || "").trim();
+  if (/^[1-9]$/.test(r)) return r;
+  if (!r) return "?";
+  return [...r][0] ?? "?";
+}
+
 /** Dynamic subway line badge (line colour + ref glyph). */
-export function subwayLineBadgeSvg(
-  colour: string,
-  ref: string,
-): string {
-  const label = (ref || "?").slice(0, 2);
-  const fontSize = label.length > 1 ? 9 : 11;
+export function subwayLineBadgeSvg(colour: string, ref: string): string {
+  const label = subwayBadgeGlyph(ref);
+  const fontSize = label.length > 1 ? 9 : 12;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
   ${circleBadge(colour)}
-  <text x="12" y="15.5" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="${fontSize}" font-weight="800" fill="#fff">${label}</text>
+  <text x="12" y="16" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="${fontSize}" font-weight="800" fill="#fff">${label}</text>
 </svg>`;
+}
+
+/** icon-image expr for korea_station_labels (uses feature `ref`). */
+export function subwayStationIconImageExpr(): unknown {
+  const refs = new Set([
+    ...Object.keys(SEOUL_SUBWAY_REF_COLOURS),
+    ...Object.keys(SUBWAY_BADGE_COLOURS),
+  ]);
+  const args: unknown[] = [
+    "match",
+    ["to-string", ["coalesce", ["get", "ref"], ""]],
+  ];
+  for (const ref of refs) {
+    args.push(ref, subwayBadgeImageId(ref));
+  }
+  args.push(subwayBadgeImageId("default"));
+  return args;
+}
+
+/** Register line-coloured number/letter badges (pixelRatio 2–3). */
+export async function ensureSubwayLineBadges(
+  map: Parameters<typeof loadMapImageFromSvg>[0],
+): Promise<void> {
+  const raw =
+    typeof window !== "undefined" ? window.devicePixelRatio || 2 : 2;
+  const dpr = Math.max(2, clampMapPinDpr(raw));
+  const colourByRef: Record<string, string> = {
+    ...SEOUL_SUBWAY_REF_COLOURS,
+    ...SUBWAY_BADGE_COLOURS,
+  };
+  const entries: Array<[string, string]> = [
+    ...Object.entries(colourByRef),
+    ["default", "#5A6570"],
+  ];
+  await Promise.all(
+    entries.map(([ref, colour]) =>
+      loadMapImageFromSvg(
+        map,
+        subwayBadgeImageId(ref),
+        subwayLineBadgeSvg(colour, ref === "default" ? "?" : ref),
+        POI_ICON_CSS_PX,
+        POI_ICON_CSS_PX,
+        dpr,
+      ).catch(() => undefined),
+    ),
+  );
 }
 
 export const ALL_POI_CATEGORY_IDS: PoiCategoryId[] = [
@@ -363,9 +437,15 @@ export function poiCategoryTextColorExpr(themeId: string): unknown {
       "any",
       ["==", ["get", "class"], "bakery"],
       ["==", ["get", "class"], "ice_cream"],
+      ["==", ["get", "class"], "pastry"],
+      ["==", ["get", "class"], "confectionery"],
     ],
     c("bakery"),
-    ["==", ["get", "class"], "fast_food"],
+    [
+      "any",
+      ["==", ["get", "class"], "fast_food"],
+      ["==", ["get", "subclass"], "chicken"],
+    ],
     c("fast_food"),
     ["==", ["get", "class"], "restaurant"],
     c("restaurant"),
@@ -386,6 +466,8 @@ export function poiCategoryTextColorExpr(themeId: string): unknown {
       "any",
       ["==", ["get", "class"], "hairdresser"],
       ["==", ["get", "class"], "beauty"],
+      ["==", ["get", "subclass"], "hairdresser"],
+      ["==", ["get", "subclass"], "beauty"],
     ],
     c("beauty"),
     ["==", ["get", "class"], "pharmacy"],
@@ -408,36 +490,53 @@ export function poiCategoryTextColorExpr(themeId: string): unknown {
       "any",
       ["==", ["get", "class"], "hotel"],
       ["==", ["get", "class"], "lodging"],
+      ["==", ["get", "subclass"], "hotel"],
     ],
     c("lodging"),
-    ["==", ["get", "class"], "park"],
+    [
+      "any",
+      ["==", ["get", "class"], "park"],
+      ["==", ["get", "class"], "playground"],
+      ["==", ["get", "subclass"], "playground"],
+    ],
     c("park"),
     [
       "any",
       ["==", ["get", "class"], "school"],
       ["==", ["get", "class"], "college"],
       ["==", ["get", "class"], "kindergarten"],
+      ["==", ["get", "subclass"], "university"],
     ],
     c("school"),
     ["==", ["get", "class"], "police"],
     c("police"),
-    ["==", ["get", "class"], "post"],
+    [
+      "any",
+      ["==", ["get", "class"], "post"],
+      ["==", ["get", "subclass"], "post_office"],
+    ],
     c("post"),
     [
       "any",
       ["==", ["get", "class"], "town_hall"],
+      ["==", ["get", "class"], "community_centre"],
       ["==", ["get", "class"], "library"],
     ],
     c("town_hall"),
     ["==", ["get", "class"], "fuel"],
     c("fuel"),
-    ["==", ["get", "class"], "parking"],
+    [
+      "any",
+      ["==", ["get", "class"], "parking"],
+      ["==", ["get", "subclass"], "parking"],
+    ],
     c("parking"),
     [
       "any",
       ["==", ["get", "class"], "railway"],
       ["==", ["get", "class"], "rail"],
       ["==", ["get", "class"], "subway"],
+      ["==", ["get", "class"], "bus"],
     ],
     subwayName,
     [
@@ -445,13 +544,17 @@ export function poiCategoryTextColorExpr(themeId: string): unknown {
       ["==", ["get", "class"], "attraction"],
       ["==", ["get", "class"], "museum"],
       ["==", ["get", "class"], "cinema"],
+      ["==", ["get", "class"], "theatre"],
+      ["==", ["get", "class"], "theater"],
     ],
     c("landmark"),
     [
       "any",
       ["==", ["get", "class"], "shop"],
       ["==", ["get", "class"], "clothes"],
+      ["==", ["get", "class"], "shoes"],
       ["==", ["get", "class"], "mall"],
+      ["==", ["get", "class"], "department_store"],
     ],
     c("shop"),
     c("shop"),
@@ -477,4 +580,5 @@ export async function ensurePoiCategoryIcons(
       ).catch(() => undefined),
     ),
   );
+  await ensureSubwayLineBadges(map);
 }

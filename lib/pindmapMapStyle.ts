@@ -68,6 +68,7 @@ const ADMIN_SIGUNGU_NAME_BLOCKLIST: string[] = (() => {
 import {
   poiCategoryIconImageExpr,
   poiCategoryTextColorExpr,
+  subwayStationIconImageExpr,
 } from "@/lib/mapSurface/poiCategoryIcons";
 import {
   applySelfHostedStyleAssets,
@@ -1364,28 +1365,62 @@ function appendSanggaShopLayers(
   }
 }
 
-/** Bus stops: small icon + Korean name at z17+ (below shops). */
+/**
+ * Bus stops (below shops/schools in collision):
+ * - z17–18: small bus badge only (16–18px)
+ * - z18+: icon + name
+ * Never remap school-named stops to school icons (wrong location).
+ */
 function appendBusStopLayers(layers: AnyLayer[]): void {
+  const busFilter: unknown = [
+    "all",
+    ["==", ["get", "class"], "bus"],
+    ["==", ["get", "subclass"], "bus_stop"],
+    ["has", "name"],
+  ];
+  // ~17px vs POI_ICON_CSS_PX 22 → icon-size ≈ 0.77
+  const busIconSize = 17 / 22;
+  // Higher than shop sort-keys (~400–850) → shops / schools place first
+  const busSortKey = 1200;
+
   layers.push({
     id: "bus_stop_icon",
     type: "symbol",
     source: "openmaptiles",
     "source-layer": "poi",
     minzoom: 17,
-    filter: [
-      "all",
-      ["==", ["get", "class"], "bus"],
-      ["==", ["get", "subclass"], "bus_stop"],
-      ["has", "name"],
-    ],
+    maxzoom: 18,
+    filter: busFilter,
     layout: {
       visibility: "visible",
       "icon-image": "pind-poi-bus",
-      "icon-size": 0.7,
-      "icon-optional": true,
+      "icon-size": busIconSize,
+      "icon-optional": false,
       "icon-allow-overlap": false,
       "icon-ignore-placement": false,
-      "icon-padding": 0.5,
+      "icon-padding": 1.5,
+      "symbol-sort-key": busSortKey,
+      "symbol-z-order": "source",
+    },
+    paint: {
+      "icon-opacity": 0.9,
+    },
+  });
+  layers.push({
+    id: "bus_stop_label",
+    type: "symbol",
+    source: "openmaptiles",
+    "source-layer": "poi",
+    minzoom: 18,
+    filter: busFilter,
+    layout: {
+      visibility: "visible",
+      "icon-image": "pind-poi-bus",
+      "icon-size": busIconSize,
+      "icon-optional": false,
+      "icon-allow-overlap": false,
+      "icon-ignore-placement": false,
+      "icon-padding": 1.5,
       "text-field": KO_TEXT,
       "text-font": ["Noto Sans Regular"],
       "text-size": 10.5,
@@ -1396,15 +1431,15 @@ function appendBusStopLayers(layers: AnyLayer[]): void {
       "text-optional": true,
       "text-allow-overlap": false,
       "text-ignore-placement": false,
-      // Higher than shop sort-keys (~400–850) → shops win collision
-      "symbol-sort-key": 960,
+      "symbol-sort-key": busSortKey,
+      "symbol-z-order": "source",
     },
     paint: {
-      "icon-opacity": 0.82,
-      "text-color": "#7A8088",
+      "icon-opacity": 0.9,
+      "text-color": "#2C7BE5",
       "text-halo-color": "#FFFFFF",
       "text-halo-width": 1.2,
-      "text-opacity": 0.88,
+      "text-opacity": 0.9,
     },
   });
 }
@@ -1567,8 +1602,9 @@ function appendParkNameLayers(
   layers: AnyLayer[],
   theme: MapPreviewTheme,
 ): void {
+  // Spec park label colour (#286E39); neon/white keep readable variants.
   const color =
-    theme.id === "neon" ? "#7AB8A0" : theme.id === "white" ? "#5A7A58" : "#3F6B3A";
+    theme.id === "neon" ? "#7AB8A0" : theme.id === "white" ? "#5A7A58" : "#286E39";
   const bands: Array<{
     id: string;
     minzoom: number;
@@ -3374,7 +3410,7 @@ export async function buildPindmapStyle(
       // 큰 공원 이름 — z12+ with landmarks
       if (layer.id.includes("park_label") || layer.id === "label_park") {
         layer.minzoom = 12;
-        paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : theme.id === "neon" ? "#7AB8A0" : "#3F6B3A");
+        paintSet(layer, "text-color", theme.id === "white" ? "#5A7A58" : theme.id === "neon" ? "#7AB8A0" : "#286E39");
         paintSet(layer, "text-halo-color", "#FFFFFF");
         paintSet(layer, "text-halo-width", 1.5);
         if (layer.layout) {
@@ -3438,9 +3474,7 @@ export async function buildPindmapStyle(
       attribution: "© OpenStreetMap contributors",
     },
   };
-  const quietStation =
-    theme.id === "neon" ? "#A8B0C8" : theme.id === "white" ? "#5A606C" : "#444A54";
-  // Merged station names (300m same-name → one). Keep layer ids for e2e.
+  // Legacy circle dots kept for e2e layer-id presence; hidden — line badges replace them.
   layers.push({
     id: "subway_station_dot",
     type: "circle",
@@ -3448,46 +3482,29 @@ export async function buildPindmapStyle(
     minzoom: 11,
     maxzoom: 14,
     filter: ["==", ["get", "midzoom"], 1],
+    layout: { visibility: "none" },
     paint: {
-      "circle-radius": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        11,
-        2.0,
-        13,
-        2.8,
-      ],
+      "circle-radius": 2,
       "circle-color": theme.stationDot,
-      "circle-opacity": 0.88,
-      "circle-stroke-width": theme.id === "neon" ? 1.3 : 1.0,
-      "circle-stroke-color": theme.textHalo,
+      "circle-opacity": 0,
     },
   });
-  // Transfer hub badge (multi-line stations after 300m merge)
   layers.push({
     id: "station_line_badge_0",
     type: "circle",
     source: "korea_station_labels",
     minzoom: 13,
     filter: ["==", ["get", "transfer"], 1],
+    layout: { visibility: "none" },
     paint: {
-      "circle-radius": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        13,
-        3.4,
-        16,
-        4.6,
-      ],
+      "circle-radius": 3,
       "circle-color": "#FFFFFF",
-      "circle-stroke-width": 1.6,
-      "circle-stroke-color": theme.stationDot,
-      "circle-opacity": 0.95,
+      "circle-opacity": 0,
     },
   });
-  // z11–13: curated midzoom hubs only (spread-out map would otherwise show 30+). z14+: all.
+  // Station name colour: dark gray (spec). Badge = line colour + ref glyph.
+  const stationNameColor = "#1E2124";
+  // z11–13: curated midzoom hubs only. z14+: all. Line-coloured number badges.
   layers.push({
     id: "poi_transit_mid",
     type: "symbol",
@@ -3497,13 +3514,16 @@ export async function buildPindmapStyle(
     filter: ["==", ["get", "midzoom"], 1],
     layout: {
       visibility: "visible",
+      "icon-image": subwayStationIconImageExpr() as never,
+      "icon-size": 1,
+      "icon-padding": 0.5,
+      "icon-optional": false,
       "text-field": GEOJSON_NAME_TEXT,
-      "text-font": ["Noto Sans Regular"],
+      "text-font": ["Noto Sans Bold"],
       "text-size": 13.5,
-      "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
-      "text-radial-offset": 0.7,
+      "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
+      "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
       "text-max-width": 7,
-      // Mid-zoom: slightly roomier padding so sparse hubs don't crowd gu/dong.
       "text-padding": [
         "interpolate",
         ["linear"],
@@ -3516,6 +3536,8 @@ export async function buildPindmapStyle(
       "text-optional": false,
       "text-allow-overlap": false,
       "text-ignore-placement": false,
+      "icon-allow-overlap": false,
+      "icon-ignore-placement": false,
       "symbol-sort-key": [
         "-",
         2200,
@@ -3524,9 +3546,10 @@ export async function buildPindmapStyle(
       "symbol-z-order": "source",
     },
     paint: {
-      "text-color": quietStation,
+      "text-color": stationNameColor,
       "text-halo-color": "#FFFFFF",
-      "text-halo-width": 1.5,
+      "text-halo-width": 1.75,
+      "icon-opacity": 1,
     },
   });
   layers.push({
@@ -3536,16 +3559,22 @@ export async function buildPindmapStyle(
     minzoom: 14,
     layout: {
       visibility: "visible",
+      "icon-image": subwayStationIconImageExpr() as never,
+      "icon-size": 1,
+      "icon-padding": 0.5,
+      "icon-optional": false,
       "text-field": GEOJSON_NAME_TEXT,
-      "text-font": ["Noto Sans Regular"],
+      "text-font": ["Noto Sans Bold"],
       "text-size": 13.5,
-      "text-variable-anchor": [...PLACE_VARIABLE_ANCHOR],
-      "text-radial-offset": 0.75,
+      "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
+      "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
       "text-max-width": 7,
       "text-padding": PLACE_TEXT_PADDING,
       "text-optional": false,
       "text-allow-overlap": false,
       "text-ignore-placement": false,
+      "icon-allow-overlap": false,
+      "icon-ignore-placement": false,
       "symbol-sort-key": [
         "-",
         2200,
@@ -3554,9 +3583,10 @@ export async function buildPindmapStyle(
       "symbol-z-order": "source",
     },
     paint: {
-      "text-color": quietStation,
+      "text-color": stationNameColor,
       "text-halo-color": "#FFFFFF",
-      "text-halo-width": 1.5,
+      "text-halo-width": 1.75,
+      "icon-opacity": 1,
     },
   });
   layers.push({
