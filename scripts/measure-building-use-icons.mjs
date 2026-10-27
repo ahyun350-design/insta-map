@@ -46,7 +46,7 @@ const HUBS = [
 ];
 
 /** Mapo Hangang I-Park — use-value probe only (no coords in report). */
-const MAPO_IPARK = { id: "mapo_ipark", lat: 37.5426, lng: 126.947 };
+const MAPO_IPARK = { id: "mapo_ipark", lat: 37.5372, lng: 126.9478 };
 
 async function main() {
   const token = e2eToken();
