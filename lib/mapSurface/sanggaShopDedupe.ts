@@ -9,6 +9,7 @@
 
 import type { Map as MaplibreMap } from "maplibre-gl";
 import { KOREA_SANGGA_SOURCE } from "./koreaSangga";
+import { SHOP_ZOOM_CAP_LAYER_IDS } from "./shopZoomCap";
 
 const DEDUP_M = 50;
 
@@ -63,7 +64,10 @@ function shopLayerIds(map: MaplibreMap): string[] {
   return style.layers
     .map((l) => l.id)
     .filter(
-      (id) => id.startsWith("shop_poi_label_") && Boolean(map.getLayer(id)),
+      (id) =>
+        id.startsWith("shop_poi_label_") &&
+        !SHOP_ZOOM_CAP_LAYER_IDS.has(id) &&
+        Boolean(map.getLayer(id)),
     );
 }
 

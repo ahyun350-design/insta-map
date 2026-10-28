@@ -48,6 +48,7 @@ import {
   prefetchZ14Around,
 } from "@/lib/mapSurface/tilePrefetch";
 import { attachEmptyBasemapWatchdog } from "@/lib/mapSurface/emptyBasemapWatchdog";
+import { installShopZoomCap } from "@/lib/mapSurface/shopZoomCap";
 import {
   isSelfTilesBroken,
   prefetchSelfTilesZ14Around,
@@ -421,6 +422,7 @@ export default function PreviewGlMap({
     const perfOrigin = performance.now();
     prefetchSubwayOverlay();
     let disposeEmptyWatchFn: (() => void) | null = null;
+    let disposeShopCapFn: (() => void) | null = null;
 
     (async () => {
       try {
@@ -598,6 +600,7 @@ export default function PreviewGlMap({
         map.on("moveend", onMoveEndPrefetch);
         map.on("zoomend", sampleCompare);
         disposeEmptyWatchFn = attachEmptyBasemapWatchdog(map, "expanded");
+        disposeShopCapFn = installShopZoomCap(map);
 
         map.on("error", (ev) => {
           const msg = String(ev.error?.message ?? "");
@@ -753,6 +756,8 @@ export default function PreviewGlMap({
       handlersBound.current = false;
       disposeEmptyWatchFn?.();
       disposeEmptyWatchFn = null;
+      disposeShopCapFn?.();
+      disposeShopCapFn = null;
       releaseMapGlSlot("preview");
       if (window.__PINDMAP_PREVIEW_MAP__ === mapRef.current) {
         window.__PINDMAP_PREVIEW_MAP__ = null;
