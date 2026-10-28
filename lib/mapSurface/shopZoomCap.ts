@@ -2,11 +2,12 @@
  * z14–15 shop budget: neighbourhood anchors (stations, markets, streets, parks,
  * schools, 주민센터) lead; only the top-ranked shops in the viewport show.
  *
- * Style filters cannot count per screen, so the cap is an id allow-list applied
- * with setFilter (feature-state is not valid in filters, and opacity:0 still
- * occupies collision slots). Candidates that lose collision are skipped and the
- * next-ranked shop fills the slot, so the band shows exactly `max` when enough
- * candidates exist.
+ * Style filters cannot count per screen, so the cap is a name allow-list applied
+ * with setFilter (self-tiles POIs carry no feature ids; feature-state is not valid
+ * in filters, and opacity:0 still occupies collision slots). Names that occur at
+ * more than one place around the viewport are skipped so one allowed name = one
+ * label. Candidates that lose collision are skipped and the next-ranked shop
+ * fills the slot, so the band shows exactly `max` when enough candidates exist.
  */
 
 import type { Map as MaplibreMap } from "maplibre-gl";
@@ -40,7 +41,23 @@ export const SHOP_ZOOM_CAP_LAYER_IDS: ReadonlySet<string> = new Set(
 );
 
 /** Bounded top-up rounds per view (collision losers → next candidate). */
-const MAX_ROUNDS = 6;
+const MAX_ROUNDS = 10;
+/**
+ * Pre-placement guess (screen px) so most picks survive collision on the first
+ * round: keep clear of already-placed labels and of each other (text-padding 14).
+ */
+const CLEAR_OF_LABEL = { dx: 70, dy: 24 };
+const CLEAR_OF_SHOP = { dx: 130, dy: 40 };
+/** Same-name points closer than this are one shop (tile-buffer copies, OMT+상가). */
+const SAME_PLACE_M = 40;
+/** Same name elsewhere within this screen margin would double-render → skip name. */
+const UNIQUE_MARGIN_PX = 240;
+
+/** Must match the text source of shop_poi / sangga labels. */
+const NAME_EXPR: unknown = [
+  "to-string",
+  ["coalesce", ["get", "name:ko"], ["get", "name"], ""],
+];
 
 export type ShopZoomCapStats = {
   zoom: number;
@@ -52,40 +69,78 @@ export type ShopZoomCapStats = {
   atMs: number;
 };
 
-type FeatureId = string | number;
+/** Food / café / retail first; lodging · fuel · bank only fill leftover slots. */
+const SERVICE_CLASSES = new Set([
+  "hotel",
+  "lodging",
+  "motel",
+  "fuel",
+  "bank",
+  "pharmacy",
+]);
 
-type Candidate = { id: FeatureId; layerOrder: number; rank: number; name: string };
+type Candidate = {
+  name: string;
+  layerOrder: number;
+  tier: number;
+  rank: number;
+  x: number;
+  y: number;
+};
 
-function normalizeName(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[()[\]{}]/g, "")
-    .replace(/(점|본점|지점)$/u, "");
+function near(a: { x: number; y: number }, b: { x: number; y: number }, box: { dx: number; dy: number }) {
+  return Math.abs(a.x - b.x) < box.dx && Math.abs(a.y - b.y) < box.dy;
+}
+
+function rawName(p: Record<string, unknown> | null | undefined): string {
+  return String(p?.["name:ko"] || p?.name || "");
+}
+
+function haversineM(a: [number, number], b: [number, number]): number {
+  const R = 6371000;
+  const toR = (d: number) => (d * Math.PI) / 180;
+  const dLat = toR(b[1] - a[1]);
+  const dLon = toR(b[0] - a[0]);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toR(a[1])) * Math.cos(toR(b[1])) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
 function bandForZoom(z: number): CapBand | null {
   return SHOP_ZOOM_CAP_BANDS.find((b) => z >= b.minZoom && z < b.maxZoom) ?? null;
 }
 
-function allowFilter(base: unknown, allow: FeatureId[]): unknown {
-  return ["all", base, ["in", ["id"], ["literal", allow]]];
+function allowFilter(base: unknown, allow: string[]): unknown {
+  return ["all", base, ["in", NAME_EXPR, ["literal", allow]]];
 }
 
 export function installShopZoomCap(map: MaplibreMap): () => void {
   const baseFilterByLayer = new Map<string, unknown>();
   let viewKey = "";
-  let allow: FeatureId[] = [];
-  let skip = new Set<FeatureId>();
+  /** Allowed names in priority order; each name is shown from one layer only. */
+  let allow: Candidate[] = [];
+  let allowBand: CapBand | null = null;
+  let skip = new Set<string>();
   let rounds = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const applyAllow = (layerIds: string[], next: FeatureId[]) => {
+  const namesFor = (layerId: string): string[] => {
+    const order = allowBand?.layerIds.indexOf(layerId) ?? -1;
+    if (order < 0) return [];
+    return allow.filter((c) => c.layerOrder === order).map((c) => c.name);
+  };
+
+  const applyAllow = (band: CapBand, layerIds: string[], next: Candidate[]) => {
     allow = next;
+    allowBand = band;
     for (const id of layerIds) {
       if (!map.getLayer(id)) continue;
       try {
-        map.setFilter(id, allowFilter(baseFilterByLayer.get(id) ?? true, next) as never);
+        map.setFilter(
+          id,
+          allowFilter(baseFilterByLayer.get(id) ?? true, namesFor(id)) as never,
+        );
       } catch {
         /* ignore */
       }
@@ -104,7 +159,7 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
       }
       baseFilterByLayer.set(id, base);
       try {
-        map.setFilter(id, allowFilter(base, allow) as never);
+        map.setFilter(id, allowFilter(base, namesFor(id)) as never);
       } catch {
         /* ignore */
       }
@@ -115,7 +170,9 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
     const canvas = map.getCanvas();
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
-    const byId = new Map<FeatureId, Candidate>();
+    /** Distinct places per name (around the viewport, incl. margin). */
+    const places = new Map<string, Array<[number, number]>>();
+    const best = new Map<string, Candidate>();
     band.layerIds.forEach((layerId, layerOrder) => {
       const layer = map.getLayer(layerId) as
         | { source?: string; sourceLayer?: string }
@@ -131,7 +188,8 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
         return;
       }
       for (const f of feats) {
-        if (f.id == null || byId.has(f.id)) continue;
+        const name = rawName(f.properties);
+        if (!name.trim()) continue;
         const g = f.geometry;
         if (!g || g.type !== "Point") continue;
         const c = g.coordinates as [number, number];
@@ -141,33 +199,73 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
         } catch {
           continue;
         }
+        const m = UNIQUE_MARGIN_PX;
+        if (p.x < -m || p.y < -m || p.x > w + m || p.y > h + m) continue;
+        const list = places.get(name) ?? [];
+        if (!list.some((q) => haversineM(q, c) <= SAME_PLACE_M)) list.push(c);
+        places.set(name, list);
         if (p.x < 0 || p.y < 0 || p.x > w || p.y > h) continue;
-        const name = normalizeName(
-          String(f.properties?.["name:ko"] || f.properties?.name || ""),
-        );
-        if (!name) continue;
-        byId.set(f.id, {
-          id: f.id,
-          layerOrder,
-          rank: Number(f.properties?.rank ?? 999),
+        const cls = String(f.properties?.class ?? "");
+        const sub = String(f.properties?.subclass ?? "");
+        const cand: Candidate = {
           name,
-        });
+          layerOrder,
+          tier: SERVICE_CLASSES.has(cls) || SERVICE_CLASSES.has(sub) ? 1 : 0,
+          rank: Number(f.properties?.rank ?? 999),
+          x: p.x,
+          y: p.y,
+        };
+        const prev = best.get(name);
+        if (
+          !prev ||
+          cand.layerOrder < prev.layerOrder ||
+          (cand.layerOrder === prev.layerOrder && cand.rank < prev.rank)
+        ) {
+          best.set(name, cand);
+        }
       }
     });
-    const sorted = [...byId.values()].sort(
-      (a, b) =>
-        a.layerOrder - b.layerOrder ||
-        a.rank - b.rank ||
-        a.name.localeCompare(b.name) ||
-        String(a.id).localeCompare(String(b.id)),
+    return [...best.values()]
+      .filter((c) => (places.get(c.name)?.length ?? 0) === 1)
+      .sort(
+        (a, b) =>
+          a.layerOrder - b.layerOrder ||
+          a.tier - b.tier ||
+          a.rank - b.rank ||
+          a.name.localeCompare(b.name),
+      );
+  };
+
+  /** Point labels placed ahead of this band's shops (later style layers win). */
+  const placedLabelPoints = (band: CapBand): Array<{ x: number; y: number }> => {
+    const styleLayers = map.getStyle()?.layers ?? [];
+    const bandIdx = Math.min(
+      ...band.layerIds
+        .map((id) => styleLayers.findIndex((l) => l.id === id))
+        .filter((i) => i >= 0),
     );
-    // One label per name (OMT + 상가 often carry the same shop).
-    const seen = new Set<string>();
-    return sorted.filter((c) => {
-      if (seen.has(c.name)) return false;
-      seen.add(c.name);
-      return true;
-    });
+    const ids = styleLayers
+      .filter(
+        (l, i) =>
+          i > bandIdx &&
+          l.type === "symbol" &&
+          !SHOP_ZOOM_CAP_LAYER_IDS.has(l.id) &&
+          (l.layout as Record<string, unknown> | undefined)?.["symbol-placement"] !==
+            "line",
+      )
+      .map((l) => l.id);
+    if (!ids.length) return [];
+    const pts: Array<{ x: number; y: number }> = [];
+    try {
+      for (const f of map.queryRenderedFeatures({ layers: ids })) {
+        const g = f.geometry;
+        if (!g || g.type !== "Point") continue;
+        pts.push(map.project(g.coordinates as [number, number]));
+      }
+    } catch {
+      /* ignore */
+    }
+    return pts;
   };
 
   const reconcile = (fromIdle: boolean) => {
@@ -193,35 +291,63 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
       rounds = 0;
     }
 
-    let rendered = new Set<FeatureId>();
+    const rendered = new Set<string>();
     try {
       for (const f of map.queryRenderedFeatures({ layers: layerIds })) {
-        if (f.id != null) rendered.add(f.id);
+        const n = rawName(f.properties);
+        if (n) rendered.add(n);
       }
     } catch {
-      rendered = new Set();
+      /* ignore */
     }
-    if (fromIdle && rounds < MAX_ROUNDS) {
-      for (const id of allow) if (!rendered.has(id)) skip.add(id);
+    if (fromIdle && allowBand === band && rounds < MAX_ROUNDS) {
+      for (const c of allow) if (!rendered.has(c.name)) skip.add(c.name);
     }
 
     const candidates = collectCandidates(band);
-    const next = candidates
-      .filter((c) => !skip.has(c.id))
-      .slice(0, band.max)
-      .map((c) => c.id);
+    const pool = candidates.filter((c) => !skip.has(c.name));
+    const sameSlot = (a: Candidate, c: Candidate) =>
+      a.name === c.name && a.layerOrder === c.layerOrder;
+    // Keep shops that already won placement (no flicker across top-up rounds).
+    const chosen = pool
+      .filter(
+        (c) =>
+          allowBand === band &&
+          rendered.has(c.name) &&
+          allow.some((a) => sameSlot(a, c)),
+      )
+      .slice(0, band.max);
+    const obstacles = placedLabelPoints(band);
+    const clearOfShops = (c: Candidate) =>
+      !chosen.some((s) => near(s, c, CLEAR_OF_SHOP));
+    const passes: Array<(c: Candidate) => boolean> = [
+      (c) => clearOfShops(c) && !obstacles.some((o) => near(o, c, CLEAR_OF_LABEL)),
+      clearOfShops,
+      () => true,
+    ];
+    for (const ok of passes) {
+      for (const c of pool) {
+        if (chosen.length >= band.max) break;
+        if (chosen.some((s) => sameSlot(s, c))) continue;
+        if (ok(c)) chosen.push(c);
+      }
+    }
+    const slotKey = (c: Candidate) => `${c.layerOrder}|${c.name}`;
+    const prevKeys = new Set(allow.map(slotKey));
     const changed =
-      next.length !== allow.length || next.some((id, i) => id !== allow[i]);
+      band !== allowBand ||
+      chosen.length !== allow.length ||
+      chosen.some((c) => !prevKeys.has(slotKey(c)));
     if (changed) {
       rounds += 1;
-      applyAllow(layerIds, next);
+      applyAllow(band, layerIds, chosen);
     }
 
     const stats: ShopZoomCapStats = {
       zoom: z,
       max: band.max,
       candidates: candidates.length,
-      allowed: next.length,
+      allowed: chosen.length,
       rendered: rendered.size,
       skipped: skip.size,
       atMs: Date.now(),

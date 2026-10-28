@@ -1202,14 +1202,24 @@ function appendKoreaTourLayers(
   ];
   const name: unknown = ["to-string", ["coalesce", ["get", "name"], ""]];
   const rank: unknown = ["to-number", ["coalesce", ["get", "rank"], 999]];
-  const isMarket: unknown = ["in", "시장", name];
-  // 망리단길 · 경의선숲길 · 홍대걷고싶은거리 · …골목 · 망원시장
+  const endsWith = (suffix: string): unknown => [
+    "==",
+    ["slice", name, -suffix.length],
+    suffix,
+  ];
+  // 망리단길 · 경의선숲길 · 홍대걷고싶은거리 · …골목 · 망원시장. Tour "shop"
+  // rows are often chain branches (렌즈미 홍대거리점) → only 시장/골목 names.
   const isStreetOrMarket: unknown = [
-    "any",
-    isMarket,
-    ["in", "거리", name],
-    ["in", "골목", name],
-    ["==", ["slice", name, -1], "길"],
+    "case",
+    ["==", ["get", "class"], "shop"],
+    ["any", endsWith("시장"), endsWith("골목")],
+    [
+      "any",
+      ["in", "시장", name],
+      ["in", "거리", name],
+      ["in", "골목", name],
+      endsWith("길"),
+    ],
   ];
   const isAnchor: unknown = [
     "any",
