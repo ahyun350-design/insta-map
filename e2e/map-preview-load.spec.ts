@@ -822,10 +822,11 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
   // Kakao-like street density; apt complexes share the budget with shops.
   const targets: Record<
     number,
-    { totalMin: number; totalMax: number; shopMin: number }
+    { totalMin: number; totalMax: number; shopMin: number; shopMax?: number }
   > = {
     14: { totalMin: 20, totalMax: 75, shopMin: 6 },
-    15: { totalMin: 25, totalMax: 80, shopMin: 12 },
+    // z15: neighbourhood anchors first — top-ranked shops only (≤5/screen, approved 2026-10-28).
+    15: { totalMin: 25, totalMax: 80, shopMin: 5, shopMax: 5 },
     // z16: Kakao-like ≤50 labels/viewport after road names + shop band split.
     16: { totalMin: 28, totalMax: 50, shopMin: 14 },
     // z17: Bold Hangul + left/right binding; restore pre-relaxation Kakao-like floors.
@@ -1072,6 +1073,12 @@ test("map-preview place-name density: 3 hubs × z14–17", async ({ page }) => {
         m.shopCount,
         `${hub.id} z${z} shops ≥${t.shopMin}, got ${m.shopCount}`,
       ).toBeGreaterThanOrEqual(t.shopMin);
+      if (t.shopMax != null) {
+        expect(
+          m.shopCount,
+          `${hub.id} z${z} shops ≤${t.shopMax}, got ${m.shopCount}`,
+        ).toBeLessThanOrEqual(t.shopMax);
+      }
       expect(
         m.total,
         `${hub.id} z${z} total ${t.totalMin}–${t.totalMax}, got ${m.total} (shop=${m.shopCount} lm=${m.landmarkCount} st=${m.stationCount} apt=${m.aptCount})`,

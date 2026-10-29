@@ -5,6 +5,7 @@
 
 import type { Map as MaplibreMap } from "maplibre-gl";
 import { KOREA_TOUR_SOURCE } from "./koreaTour";
+import { SHOP_ZOOM_CAP_LAYER_IDS } from "./shopZoomCap";
 
 const DEDUP_M = 50;
 const baseFilterByLayer = new Map<string, unknown>();
@@ -37,7 +38,9 @@ function sanggaLayerIds(map: MaplibreMap): string[] {
     .map((l) => l.id)
     .filter(
       (id) =>
-        id.startsWith("sangga_shop_label_") && Boolean(map.getLayer(id)),
+        id.startsWith("sangga_shop_label_") &&
+        !SHOP_ZOOM_CAP_LAYER_IDS.has(id) &&
+        Boolean(map.getLayer(id)),
     );
 }
 

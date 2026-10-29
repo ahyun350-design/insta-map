@@ -358,6 +358,35 @@ const LANDMARK_FILTER_CORE: unknown = [
   LANDMARK_FILTER_SECONDARY,
 ];
 
+/** z14–15 neighbourhood reference points (Naver-like): dark gray, bold, larger. */
+const ANCHOR_TEXT_COLOR = "#2B2F33";
+const FONT_BOLD_EXPR: unknown = ["literal", ["Noto Sans Bold"]];
+const FONT_REGULAR_EXPR: unknown = ["literal", ["Noto Sans Regular"]];
+
+const OMT_MARKET: unknown = [
+  "all",
+  ["==", ["get", "class"], "grocery"],
+  ["==", ["get", "subclass"], "marketplace"],
+];
+
+/** OMT anchors at z14–15: school · 주민센터/구청 · 전통시장 · 명소. */
+const LANDMARK_ANCHOR: unknown = [
+  "any",
+  ["==", ["get", "class"], "school"],
+  ["==", ["get", "class"], "college"],
+  ["==", ["get", "subclass"], "university"],
+  ["==", ["get", "class"], "town_hall"],
+  ["==", ["get", "class"], "attraction"],
+  OMT_MARKET,
+];
+
+/** Bold outside the anchor band: 시장 · 대표 명소 only. */
+const LANDMARK_BOLD: unknown = [
+  "any",
+  ["==", ["get", "class"], "attraction"],
+  OMT_MARKET,
+];
+
 /** Playgrounds only from street zoom — separate layer with minzoom:15. */
 const LANDMARK_FILTER_PLAYGROUND: unknown = [
   "any",
@@ -426,6 +455,8 @@ function appendLandmarkLayers(
     rankMax: number;
     classFilter: unknown;
     excludeKindergarten: boolean;
+    /** z14–15: anchors get their own rank cap + dark bold text. */
+    anchorRankMax?: number;
   }> = [
     {
       id: id("landmark_label"),
@@ -456,6 +487,7 @@ function appendLandmarkLayers(
       minzoom: 14,
       maxzoom: 15,
       rankMax: 4,
+      anchorRankMax: 8,
       classFilter,
       excludeKindergarten: true,
     },
@@ -465,6 +497,7 @@ function appendLandmarkLayers(
       minzoom: 15,
       maxzoom: 16,
       rankMax: 40,
+      anchorRankMax: 40,
       classFilter,
       excludeKindergarten: false,
     },
@@ -495,15 +528,25 @@ function appendLandmarkLayers(
   }
 
   for (const band of bands) {
+    const rank: unknown = ["to-number", ["coalesce", ["get", "rank"], 999]];
+    const anchorBand = band.anchorRankMax != null;
+    const rankFilter: unknown = anchorBand
+      ? [
+          "any",
+          ["all", LANDMARK_ANCHOR, ["<=", rank, band.anchorRankMax]],
+          ["<=", rank, band.rankMax],
+        ]
+      : ["<=", rank, band.rankMax];
     const filter: unknown = [
       "all",
       band.classFilter,
       NOT_AIRFIELD,
       ["has", "name"],
       notDuplicateKoreaLandmarkName(),
-      ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], band.rankMax],
+      rankFilter,
       ...(band.excludeKindergarten ? [NOT_KINDERGARTEN] : []),
     ];
+    const boldWhen = anchorBand ? LANDMARK_ANCHOR : LANDMARK_BOLD;
     layers.push({
       id: band.id,
       type: "symbol",
@@ -518,8 +561,8 @@ function appendLandmarkLayers(
         "icon-size": 1,
         "icon-optional": false,
         "text-field": KO_TEXT,
-        "text-font": ["Noto Sans Bold"],
-        "text-size": 12.5,
+        "text-font": ["case", boldWhen, FONT_BOLD_EXPR, FONT_REGULAR_EXPR],
+        "text-size": anchorBand ? ["case", LANDMARK_ANCHOR, 13.5, 12.5] : 12.5,
         "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
         "text-justify": "auto",
@@ -531,11 +574,15 @@ function appendLandmarkLayers(
         "text-ignore-placement": false,
         "icon-allow-overlap": false,
         "icon-ignore-placement": false,
-        "symbol-sort-key": sortKey,
+        "symbol-sort-key": anchorBand
+          ? ["-", sortKey, ["case", LANDMARK_ANCHOR, 100, 0]]
+          : sortKey,
         "symbol-z-order": "source",
       },
       paint: {
-        "text-color": color,
+        "text-color": anchorBand
+          ? ["case", LANDMARK_ANCHOR, ANCHOR_TEXT_COLOR, color]
+          : color,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.75,
         "text-halo-blur": 0,
@@ -860,6 +907,60 @@ const SHOP_Z18_REMAINDER: unknown = [
   ],
 ];
 
+/** Shop / 상가 names — kept a step below landmark / anchor text (12.5+). */
+const SHOP_TEXT_SIZE: unknown = [
+  "interpolate",
+  ["linear"],
+  ["zoom"],
+  15,
+  10.5,
+  16,
+  11,
+  17,
+  11.5,
+  18,
+  12,
+];
+
+/** HSL lightness × (1 − amount) for every #RRGGBB literal inside an expression. */
+function darkenHexColors(expr: unknown, amount: number): unknown {
+  if (typeof expr === "string" && /^#[0-9a-f]{6}$/i.test(expr)) {
+    const n = (i: number) => parseInt(expr.slice(i, i + 2), 16) / 255;
+    const [r, g, b] = [n(1), n(3), n(5)];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    const d = max - min;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    let h = 0;
+    if (d !== 0) {
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+    }
+    h *= 60;
+    const l2 = l * (1 - amount);
+    const c = (1 - Math.abs(2 * l2 - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l2 - c / 2;
+    const [r1, g1, b1] =
+      h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+        : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+    const hex = (v: number) =>
+      Math.round(Math.min(1, Math.max(0, v + m)) * 255)
+        .toString(16)
+        .padStart(2, "0");
+    return `#${hex(r1)}${hex(g1)}${hex(b1)}`.toUpperCase();
+  }
+  if (Array.isArray(expr)) return expr.map((e) => darkenHexColors(e, amount));
+  return expr;
+}
+
+/** z16+ shop names: category hue, ~15% darker for street-zoom legibility. */
+function shopPoiColorStreet(theme: MapPreviewTheme): unknown {
+  return darkenHexColors(shopPoiColor(theme), 0.15);
+}
+
 /** Category text colors — same family as icon fills (muted paper). */
 function shopPoiColor(theme: MapPreviewTheme): unknown {
   return poiCategoryTextColorExpr(theme.id);
@@ -889,6 +990,7 @@ function shopSortKeyExpr(): unknown {
 
 function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = shopPoiColor(theme);
+  const streetColor = shopPoiColorStreet(theme);
   // Stay below landmarks / stations / large apt. Painted after sangga so OMT-only wins.
   const sortKey: unknown = shopSortKeyExpr();
 
@@ -1038,21 +1140,9 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         "icon-padding": 0.5,
         "icon-optional": false,
         "text-field": SHOP_TEXT,
-        // Bold stack → localIdeograph Hangul renders heavier (Medium~Bold feel)
-        "text-font": ["Noto Sans Bold"],
-        "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          15,
-          11.5,
-          16,
-          12,
-          17,
-          12.5,
-          18,
-          13,
-        ],
+        // Regular stack → localIdeograph Hangul at weight 400 (Bold = 900)
+        "text-font": ["Noto Sans Regular"],
+        "text-size": SHOP_TEXT_SIZE,
         // Icon left, name right (left/right only — no top/bottom drift).
         "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
@@ -1068,7 +1158,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         "symbol-z-order": "source",
       },
       paint: {
-        "text-color": color,
+        "text-color": band.minzoom >= 16 ? streetColor : color,
         "text-opacity": 1,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.75,
@@ -1103,6 +1193,8 @@ function appendKoreaTourLayers(
     textSize: number;
     /** Exclude TourAPI shopping until street zoom so city density stays intact. */
     excludeShop: boolean;
+    /** z14–15: streets / markets / parks become dark bold anchors. */
+    anchorBand?: boolean;
   }> = [
     {
       idSuffix: "z12",
@@ -1115,19 +1207,29 @@ function appendKoreaTourLayers(
     {
       idSuffix: "z13",
       minzoom: 13,
-      maxzoom: 15,
+      maxzoom: 14,
       rankMax: 24,
       textSize: 13,
       excludeShop: true,
     },
     {
+      idSuffix: "z14",
+      minzoom: 14,
+      maxzoom: 15,
+      rankMax: 24,
+      textSize: 13,
+      excludeShop: true,
+      anchorBand: true,
+    },
+    {
       idSuffix: "z15",
       minzoom: 15,
       maxzoom: 16,
-      // Keep street-zoom shop/sangga density; Tour shopping stays out.
+      // Tour shopping stays out except 시장 (anchor).
       rankMax: 28,
       textSize: 12.5,
       excludeShop: true,
+      anchorBand: true,
     },
     {
       // Hangang / major parks via TourAPI at street zoom (OMT park often loses collision).
@@ -1138,16 +1240,59 @@ function appendKoreaTourLayers(
       excludeShop: true,
     },
   ];
+  const name: unknown = ["to-string", ["coalesce", ["get", "name"], ""]];
+  const rank: unknown = ["to-number", ["coalesce", ["get", "rank"], 999]];
+  const endsWith = (suffix: string): unknown => [
+    "==",
+    ["slice", name, -suffix.length],
+    suffix,
+  ];
+  // 망리단길 · 경의선숲길 · 홍대걷고싶은거리 · …골목 · 망원시장. Tour "shop"
+  // rows are often chain branches (렌즈미 홍대거리점) → only 시장/골목 names.
+  const isStreetOrMarket: unknown = [
+    "case",
+    ["==", ["get", "class"], "shop"],
+    ["any", endsWith("시장"), endsWith("골목")],
+    [
+      "any",
+      ["in", "시장", name],
+      ["in", "거리", name],
+      ["in", "골목", name],
+      endsWith("길"),
+    ],
+  ];
+  const isAnchor: unknown = [
+    "any",
+    isStreetOrMarket,
+    ["==", ["get", "class"], "park"],
+  ];
+  // 공원 names stay park-green at every zoom (anchor band keeps them bold).
+  const isParkName: unknown = ["in", "공원", name];
+  // Bold = anchors + 대표 명소 (z12-band ranks); other Tour POIs stay Regular.
+  const isBold: unknown = ["any", isAnchor, ["<=", rank, 16]];
   for (const band of bands) {
     const filter: unknown[] = [
       "all",
-      [">", ["length", ["to-string", ["coalesce", ["get", "name"], ""]]], 0],
-      ["<=", ["to-number", ["coalesce", ["get", "rank"], 999]], band.rankMax],
+      [">", ["length", name], 0],
       notDuplicateKoreaLandmarkName(),
     ];
-    if (band.excludeShop) {
-      filter.push(["!", ["==", ["get", "class"], "shop"]]);
+    if (band.anchorBand) {
+      filter.push([
+        "any",
+        [
+          "all",
+          ["<=", rank, band.rankMax],
+          ["!", ["==", ["get", "class"], "shop"]],
+        ],
+        ["all", isStreetOrMarket, ["<=", rank, 40]],
+      ]);
+    } else {
+      filter.push(["<=", rank, band.rankMax]);
+      if (band.excludeShop) {
+        filter.push(["!", ["==", ["get", "class"], "shop"]]);
+      }
     }
+    const baseSize = Math.min(band.textSize, 12.5);
     layers.push({
       id: `tour_poi_label_${band.idSuffix}`,
       type: "symbol",
@@ -1163,8 +1308,10 @@ function appendKoreaTourLayers(
         "icon-padding": 1,
         "icon-optional": false,
         "text-field": POI_NAME_TEXT,
-        "text-font": ["Noto Sans Bold"],
-        "text-size": Math.min(band.textSize, 12.5),
+        "text-font": ["case", isBold, FONT_BOLD_EXPR, FONT_REGULAR_EXPR],
+        "text-size": band.anchorBand
+          ? ["case", isAnchor, 14, baseSize]
+          : baseSize,
         "text-variable-anchor": [
           ...(band.minzoom < 14 ? PLACE_VARIABLE_ANCHOR : POI_VARIABLE_ANCHOR),
         ],
@@ -1187,16 +1334,22 @@ function appendKoreaTourLayers(
         "text-ignore-placement": false,
         "icon-allow-overlap": false,
         "icon-ignore-placement": false,
-        // Lower rank → lower sort-key → placed first
+        // Lower rank → lower sort-key → placed first; anchors ahead in z14–15
         "symbol-sort-key": [
           "+",
-          220,
+          band.anchorBand ? ["case", isAnchor, 120, 220] : 220,
           ["to-number", ["coalesce", ["get", "rank"], 40]],
         ],
         "symbol-z-order": "source",
       },
       paint: {
-        "text-color": color,
+        "text-color": [
+          "case",
+          isParkName,
+          parkLabelColor(theme),
+          ...(band.anchorBand ? [isStreetOrMarket, ANCHOR_TEXT_COLOR] : []),
+          color,
+        ],
         "text-opacity": 1,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.75,
@@ -1218,6 +1371,7 @@ function appendSanggaShopLayers(
 ): void {
   if (!style.sources?.[KOREA_SANGGA_SOURCE]) return;
   const color = shopPoiColor(theme);
+  const streetColor = shopPoiColorStreet(theme);
   const sortKey: unknown = shopSortKeyExpr();
   const hasName: unknown = [
     ">",
@@ -1322,20 +1476,8 @@ function appendSanggaShopLayers(
         "icon-padding": 0.5,
         "icon-optional": false,
         "text-field": POI_NAME_TEXT,
-        "text-font": ["Noto Sans Bold"],
-        "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          15,
-          11.5,
-          16,
-          12,
-          17,
-          12.5,
-          18,
-          13,
-        ],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": SHOP_TEXT_SIZE,
         "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
         "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
         "text-justify": "auto",
@@ -1350,7 +1492,7 @@ function appendSanggaShopLayers(
         "symbol-z-order": "source",
       },
       paint: {
-        "text-color": color,
+        "text-color": band.minzoom >= 16 ? streetColor : color,
         "text-opacity": 1,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.75,
@@ -1597,14 +1739,17 @@ function appendRoadNameLayers(
   });
 }
 
+/** Spec park label colour (#286E39); neon/white keep readable variants. */
+function parkLabelColor(theme: MapPreviewTheme): string {
+  return theme.id === "neon" ? "#7AB8A0" : theme.id === "white" ? "#5A7A58" : "#286E39";
+}
+
 /** Large park / garden names from OMT poi (Liberty has no park_label layer). */
 function appendParkNameLayers(
   layers: AnyLayer[],
   theme: MapPreviewTheme,
 ): void {
-  // Spec park label colour (#286E39); neon/white keep readable variants.
-  const color =
-    theme.id === "neon" ? "#7AB8A0" : theme.id === "white" ? "#5A7A58" : "#286E39";
+  const color = parkLabelColor(theme);
   const bands: Array<{
     id: string;
     minzoom: number;
@@ -1617,6 +1762,8 @@ function appendParkNameLayers(
     { id: "park_name_label_z16", minzoom: 16, rankMax: 120 },
   ];
   for (const band of bands) {
+    // z14–15 band = neighbourhood anchor (bold, a little larger; stays green).
+    const anchorBand = band.minzoom === 14;
     layers.push({
       id: band.id,
       type: "symbol",
@@ -1637,18 +1784,20 @@ function appendParkNameLayers(
       layout: {
         visibility: "visible",
         "text-field": KO_TEXT,
-        "text-font": ["Noto Sans Regular"],
-        "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          12,
-          12,
-          14,
-          13.5,
-          16,
-          14.5,
-        ],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": anchorBand
+          ? ["interpolate", ["linear"], ["zoom"], 14, 14.5, 16, 15]
+          : [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              12,
+              12,
+              14,
+              13.5,
+              16,
+              14.5,
+            ],
         "text-max-width": 8,
         "text-padding": [
           "interpolate",
@@ -1674,7 +1823,7 @@ function appendParkNameLayers(
         "text-color": color,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.4,
-        "text-opacity": 0.92,
+        "text-opacity": anchorBand ? 1 : 0.92,
       },
     });
   }
@@ -2122,14 +2271,72 @@ function roadCasingWidth(kind: RoadKind): unknown {
   }
 }
 
+/** Paper arterials: paler below z15 so the city view isn't covered in orange. */
+function paperArterialColor(lowZoom: string, street: string): unknown {
+  return ["step", ["zoom"], lowZoom, 15, street];
+}
+
+function isPaperArterial(theme: MapPreviewTheme, kind: RoadKind): boolean {
+  return (
+    theme.id === "paper" &&
+    (kind === "motorway" || kind === "trunk" || kind === "primary")
+  );
+}
+
+/** Value of an ["interpolate", ["exponential", b] | ["linear"], ["zoom"], …] at z. */
+function evalZoomInterpolate(expr: unknown[], z: number): number {
+  const base =
+    Array.isArray(expr[1]) && expr[1][0] === "exponential" ? Number(expr[1][1]) : 1;
+  const stops: Array<[number, number]> = [];
+  for (let i = 3; i + 1 < expr.length; i += 2) {
+    stops.push([Number(expr[i]), Number(expr[i + 1])]);
+  }
+  if (z <= stops[0][0]) return stops[0][1];
+  for (let i = 0; i + 1 < stops.length; i += 1) {
+    const [z0, v0] = stops[i];
+    const [z1, v1] = stops[i + 1];
+    if (z > z1) continue;
+    const t =
+      base === 1
+        ? (z - z0) / (z1 - z0)
+        : (Math.pow(base, z - z0) - 1) / (Math.pow(base, z1 - z0) - 1);
+    return v0 + (v1 - v0) * t;
+  }
+  return stops[stops.length - 1][1];
+}
+
+/** ~70% width below z15; z15+ unchanged (adds an exact z15 stop). */
+function softenLowZoomWidth(width: unknown): unknown {
+  if (!Array.isArray(width) || width[0] !== "interpolate") return width;
+  const at15 = evalZoomInterpolate(width, 15);
+  const out: unknown[] = width.slice(0, 3);
+  let has15 = false;
+  for (let i = 3; i + 1 < width.length; i += 2) {
+    const z = Number(width[i]);
+    const v = Number(width[i + 1]);
+    if (z > 15 && !has15) {
+      out.push(15, Number(at15.toFixed(3)));
+      has15 = true;
+    }
+    if (z === 15) has15 = true;
+    out.push(z, z < 15 ? Number((v * 0.7).toFixed(3)) : v);
+  }
+  if (!has15) out.push(15, Number(at15.toFixed(3)));
+  return out;
+}
+
 function roadFillColor(
   theme: MapPreviewTheme,
   kind: RoadKind,
-): string {
-  // Paper/Kakao: white fill for all guide roads (hierarchy via width + casing).
+): unknown {
+  // Paper/Naver: pale orange expressways, pale yellow 대로, white below.
   const arterial =
     kind === "motorway" || kind === "trunk" || kind === "primary";
   if (theme.id === "paper") {
+    if (kind === "motorway" || kind === "trunk") {
+      return paperArterialColor("#FBDDB5", "#F9C78A");
+    }
+    if (kind === "primary") return paperArterialColor("#FDF0C8", "#FCE3A0");
     return "#FFFFFF";
   }
   if (theme.id === "white") {
@@ -2148,11 +2355,15 @@ function roadFillColor(
 function roadCasingColor(
   theme: MapPreviewTheme,
   kind: RoadKind,
-): string {
+): unknown {
   const arterial =
     kind === "motorway" || kind === "trunk" || kind === "primary";
   if (theme.id === "paper") {
     // Very light gray casing — block edges read against white fill + paper land
+    if (kind === "motorway" || kind === "trunk") {
+      return paperArterialColor("#F0C597", "#E8A866");
+    }
+    if (kind === "primary") return paperArterialColor("#EEDDA6", "#E9C878");
     if (arterial) return "#C8C8C8";
     if (kind === "secondary" || kind === "tertiary") return "#D0D0D0";
     return "#D8D8D8";
@@ -2171,6 +2382,7 @@ function applyGuideRoadStyle(
   theme: MapPreviewTheme,
   kind: RoadKind,
   casing: boolean,
+  colorKind: RoadKind = kind,
 ) {
   // Hide mountain/foot path dashes entirely (always-hidden rule).
   if (kind === "path") {
@@ -2179,9 +2391,18 @@ function applyGuideRoadStyle(
   }
   layer.minzoom = Math.max(layer.minzoom ?? 0, roadMinZoom(kind));
   if (layer.type === "line") {
-    paintSet(layer, "line-color", casing ? roadCasingColor(theme, kind) : roadFillColor(theme, kind));
+    paintSet(
+      layer,
+      "line-color",
+      casing ? roadCasingColor(theme, colorKind) : roadFillColor(theme, colorKind),
+    );
     paintSet(layer, "line-opacity", 1);
-    paintSet(layer, "line-width", casing ? roadCasingWidth(kind) : roadFillWidth(kind));
+    const width = casing ? roadCasingWidth(kind) : roadFillWidth(kind);
+    paintSet(
+      layer,
+      "line-width",
+      isPaperArterial(theme, colorKind) ? softenLowZoomWidth(width) : width,
+    );
     if (layer.paint) delete layer.paint["line-dasharray"];
   }
   setVisibility(layer, true);
@@ -2222,6 +2443,12 @@ function detectRoadKind(id: string): RoadKind {
   if (id.includes("service") || id.includes("track")) return "service";
   if (id.includes("minor") || id.includes("street")) return "minor";
   return "other";
+}
+
+/** Ramps keep link widths but take the expressway colour. */
+function detectRoadColorKind(id: string): RoadKind {
+  if (id.includes("motorway")) return "motorway";
+  return detectRoadKind(id);
 }
 
 /**
@@ -2469,7 +2696,7 @@ export async function buildPindmapStyle(
         continue;
       }
       const kind = detectRoadKind(layer.id);
-      applyGuideRoadStyle(layer, theme, kind, true);
+      applyGuideRoadStyle(layer, theme, kind, true, detectRoadColorKind(layer.id));
       layers.push(layer);
       continue;
     }
@@ -2657,7 +2884,7 @@ export async function buildPindmapStyle(
             continue;
           }
           const kind = detectRoadKind(layer.id);
-          applyGuideRoadStyle(layer, theme, kind, false);
+          applyGuideRoadStyle(layer, theme, kind, false, detectRoadColorKind(layer.id));
           layers.push(layer);
           continue;
         }
@@ -3565,7 +3792,7 @@ export async function buildPindmapStyle(
       "icon-optional": false,
       "text-field": GEOJSON_NAME_TEXT,
       "text-font": ["Noto Sans Bold"],
-      "text-size": 13.5,
+      "text-size": ["step", ["zoom"], 14.5, 16, 13.5],
       "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
       "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
       "text-max-width": 7,
@@ -3583,7 +3810,7 @@ export async function buildPindmapStyle(
       "symbol-z-order": "source",
     },
     paint: {
-      "text-color": stationNameColor,
+      "text-color": ["step", ["zoom"], ANCHOR_TEXT_COLOR, 16, stationNameColor],
       "text-halo-color": "#FFFFFF",
       "text-halo-width": 1.75,
       "icon-opacity": 1,
@@ -4504,8 +4731,12 @@ export async function buildPindmapStyle(
   // School / civic / hospital last so street anchors beat dense shops under overlap=0.
   appendLandmarkLayers(layers, theme, { kind: "priority" });
 
-  // Final pass: overlap=0; keep Bold on POI/shop/tour/landmark (Hangul weight
-  // via localIdeograph). Houseno/apt/road stay Regular. Pins added by adapters.
+  // Final pass: overlap=0; weight hierarchy (Hangul weight via localIdeograph:
+  // Bold stack = 900, Regular = 400). Bold only for stations · 동/구 · parks ·
+  // 대표 명소; landmark / tour layers pick per-feature weight via expressions.
+  // Shops, apt, roads, houseno stay Regular. Pins added by adapters.
+  const boldLayer =
+    /^(poi_transit|label_(dong|suburb|borough|korea_gu|korea_dong|korea_landmark)|admin_(dong|sigungu)_label|park_name_label|korea_landmark_tier)/;
   for (const layer of layers) {
     if (layer.type !== "symbol") continue;
     const id = layer.id;
@@ -4515,17 +4746,14 @@ export async function buildPindmapStyle(
       id.startsWith("water") &&
       Array.isArray(prevFont) &&
       String(prevFont[0] || "").includes("Italic");
-    const keepBold =
-      /shop_poi_label|sangga_shop_label|tour_poi_label|landmark_label|landmark_priority|korea_landmark/i.test(
-        id,
-      );
+    const fontExpr =
+      Array.isArray(prevFont) &&
+      ["case", "match", "step"].includes(String(prevFont[0]));
     const layout = { ...(layer.layout || {}) };
     if (layout["text-field"] != null) {
-      layout["text-font"] = keepItalic
-        ? ["Noto Sans Italic"]
-        : keepBold
-          ? ["Noto Sans Bold"]
-          : ["Noto Sans Regular"];
+      if (keepItalic) layout["text-font"] = ["Noto Sans Italic"];
+      else if (boldLayer.test(id)) layout["text-font"] = ["Noto Sans Bold"];
+      else if (!fontExpr) layout["text-font"] = ["Noto Sans Regular"];
     }
     // Overlap=0 for every place label (road_name_* / building_kr_number / POI).
     layout["text-allow-overlap"] = false;

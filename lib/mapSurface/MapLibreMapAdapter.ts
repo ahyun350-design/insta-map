@@ -91,6 +91,8 @@ import type { DirectionsRouteThemeId } from "./directionsRouteTheme";
 import { installMapLibreCornerAttribution } from "./mapAttribution";
 import { installSanggaShopDedupe } from "./sanggaShopDedupe";
 import { installTourSanggaDedupe } from "./tourSanggaDedupe";
+import { installShopZoomCap } from "./shopZoomCap";
+import { installLabelDupHide } from "./labelDupHide";
 import {
   composeMapCanvasToJpeg,
   snapshotBackgroundCss,
@@ -585,6 +587,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         this.touchCleanups.push(installSanggaShopDedupe(map));
         this.touchCleanups.push(installTourSanggaDedupe(map));
       }
+      this.touchCleanups.push(installShopZoomCap(map));
+      this.touchCleanups.push(installLabelDupHide(map));
       // Defer landmarks + shop POI labels until first idle (faster basemap first paint).
       const styleLayers = map.getStyle()?.layers ?? [];
       for (const layer of styleLayers) {
