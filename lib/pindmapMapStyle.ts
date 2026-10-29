@@ -922,6 +922,45 @@ const SHOP_TEXT_SIZE: unknown = [
   12,
 ];
 
+/** HSL lightness × (1 − amount) for every #RRGGBB literal inside an expression. */
+function darkenHexColors(expr: unknown, amount: number): unknown {
+  if (typeof expr === "string" && /^#[0-9a-f]{6}$/i.test(expr)) {
+    const n = (i: number) => parseInt(expr.slice(i, i + 2), 16) / 255;
+    const [r, g, b] = [n(1), n(3), n(5)];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    const d = max - min;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    let h = 0;
+    if (d !== 0) {
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+    }
+    h *= 60;
+    const l2 = l * (1 - amount);
+    const c = (1 - Math.abs(2 * l2 - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l2 - c / 2;
+    const [r1, g1, b1] =
+      h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+        : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+    const hex = (v: number) =>
+      Math.round(Math.min(1, Math.max(0, v + m)) * 255)
+        .toString(16)
+        .padStart(2, "0");
+    return `#${hex(r1)}${hex(g1)}${hex(b1)}`.toUpperCase();
+  }
+  if (Array.isArray(expr)) return expr.map((e) => darkenHexColors(e, amount));
+  return expr;
+}
+
+/** z16+ shop names: category hue, ~15% darker for street-zoom legibility. */
+function shopPoiColorStreet(theme: MapPreviewTheme): unknown {
+  return darkenHexColors(shopPoiColor(theme), 0.15);
+}
+
 /** Category text colors — same family as icon fills (muted paper). */
 function shopPoiColor(theme: MapPreviewTheme): unknown {
   return poiCategoryTextColorExpr(theme.id);
@@ -951,6 +990,7 @@ function shopSortKeyExpr(): unknown {
 
 function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
   const color = shopPoiColor(theme);
+  const streetColor = shopPoiColorStreet(theme);
   // Stay below landmarks / stations / large apt. Painted after sangga so OMT-only wins.
   const sortKey: unknown = shopSortKeyExpr();
 
@@ -1118,7 +1158,7 @@ function appendShopPoiLayers(layers: AnyLayer[], theme: MapPreviewTheme): void {
         "symbol-z-order": "source",
       },
       paint: {
-        "text-color": color,
+        "text-color": band.minzoom >= 16 ? streetColor : color,
         "text-opacity": 1,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.75,
@@ -1226,6 +1266,8 @@ function appendKoreaTourLayers(
     isStreetOrMarket,
     ["==", ["get", "class"], "park"],
   ];
+  // 공원 names stay park-green at every zoom (anchor band keeps them bold).
+  const isParkName: unknown = ["in", "공원", name];
   // Bold = anchors + 대표 명소 (z12-band ranks); other Tour POIs stay Regular.
   const isBold: unknown = ["any", isAnchor, ["<=", rank, 16]];
   for (const band of bands) {
@@ -1301,9 +1343,13 @@ function appendKoreaTourLayers(
         "symbol-z-order": "source",
       },
       paint: {
-        "text-color": band.anchorBand
-          ? ["case", isAnchor, ANCHOR_TEXT_COLOR, color]
-          : color,
+        "text-color": [
+          "case",
+          isParkName,
+          parkLabelColor(theme),
+          ...(band.anchorBand ? [isStreetOrMarket, ANCHOR_TEXT_COLOR] : []),
+          color,
+        ],
         "text-opacity": 1,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.75,
@@ -1325,6 +1371,7 @@ function appendSanggaShopLayers(
 ): void {
   if (!style.sources?.[KOREA_SANGGA_SOURCE]) return;
   const color = shopPoiColor(theme);
+  const streetColor = shopPoiColorStreet(theme);
   const sortKey: unknown = shopSortKeyExpr();
   const hasName: unknown = [
     ">",
@@ -1445,7 +1492,7 @@ function appendSanggaShopLayers(
         "symbol-z-order": "source",
       },
       paint: {
-        "text-color": color,
+        "text-color": band.minzoom >= 16 ? streetColor : color,
         "text-opacity": 1,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.75,
@@ -1692,14 +1739,17 @@ function appendRoadNameLayers(
   });
 }
 
+/** Spec park label colour (#286E39); neon/white keep readable variants. */
+function parkLabelColor(theme: MapPreviewTheme): string {
+  return theme.id === "neon" ? "#7AB8A0" : theme.id === "white" ? "#5A7A58" : "#286E39";
+}
+
 /** Large park / garden names from OMT poi (Liberty has no park_label layer). */
 function appendParkNameLayers(
   layers: AnyLayer[],
   theme: MapPreviewTheme,
 ): void {
-  // Spec park label colour (#286E39); neon/white keep readable variants.
-  const color =
-    theme.id === "neon" ? "#7AB8A0" : theme.id === "white" ? "#5A7A58" : "#286E39";
+  const color = parkLabelColor(theme);
   const bands: Array<{
     id: string;
     minzoom: number;
@@ -1712,7 +1762,7 @@ function appendParkNameLayers(
     { id: "park_name_label_z16", minzoom: 16, rankMax: 120 },
   ];
   for (const band of bands) {
-    // z14–15 band = neighbourhood anchor (dark bold, a little larger).
+    // z14–15 band = neighbourhood anchor (bold, a little larger; stays green).
     const anchorBand = band.minzoom === 14;
     layers.push({
       id: band.id,
@@ -1770,7 +1820,7 @@ function appendParkNameLayers(
         ],
       },
       paint: {
-        "text-color": anchorBand ? ANCHOR_TEXT_COLOR : color,
+        "text-color": color,
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.4,
         "text-opacity": anchorBand ? 1 : 0.92,
@@ -2221,16 +2271,72 @@ function roadCasingWidth(kind: RoadKind): unknown {
   }
 }
 
+/** Paper arterials: paler below z15 so the city view isn't covered in orange. */
+function paperArterialColor(lowZoom: string, street: string): unknown {
+  return ["step", ["zoom"], lowZoom, 15, street];
+}
+
+function isPaperArterial(theme: MapPreviewTheme, kind: RoadKind): boolean {
+  return (
+    theme.id === "paper" &&
+    (kind === "motorway" || kind === "trunk" || kind === "primary")
+  );
+}
+
+/** Value of an ["interpolate", ["exponential", b] | ["linear"], ["zoom"], …] at z. */
+function evalZoomInterpolate(expr: unknown[], z: number): number {
+  const base =
+    Array.isArray(expr[1]) && expr[1][0] === "exponential" ? Number(expr[1][1]) : 1;
+  const stops: Array<[number, number]> = [];
+  for (let i = 3; i + 1 < expr.length; i += 2) {
+    stops.push([Number(expr[i]), Number(expr[i + 1])]);
+  }
+  if (z <= stops[0][0]) return stops[0][1];
+  for (let i = 0; i + 1 < stops.length; i += 1) {
+    const [z0, v0] = stops[i];
+    const [z1, v1] = stops[i + 1];
+    if (z > z1) continue;
+    const t =
+      base === 1
+        ? (z - z0) / (z1 - z0)
+        : (Math.pow(base, z - z0) - 1) / (Math.pow(base, z1 - z0) - 1);
+    return v0 + (v1 - v0) * t;
+  }
+  return stops[stops.length - 1][1];
+}
+
+/** ~70% width below z15; z15+ unchanged (adds an exact z15 stop). */
+function softenLowZoomWidth(width: unknown): unknown {
+  if (!Array.isArray(width) || width[0] !== "interpolate") return width;
+  const at15 = evalZoomInterpolate(width, 15);
+  const out: unknown[] = width.slice(0, 3);
+  let has15 = false;
+  for (let i = 3; i + 1 < width.length; i += 2) {
+    const z = Number(width[i]);
+    const v = Number(width[i + 1]);
+    if (z > 15 && !has15) {
+      out.push(15, Number(at15.toFixed(3)));
+      has15 = true;
+    }
+    if (z === 15) has15 = true;
+    out.push(z, z < 15 ? Number((v * 0.7).toFixed(3)) : v);
+  }
+  if (!has15) out.push(15, Number(at15.toFixed(3)));
+  return out;
+}
+
 function roadFillColor(
   theme: MapPreviewTheme,
   kind: RoadKind,
-): string {
+): unknown {
   // Paper/Naver: pale orange expressways, pale yellow 대로, white below.
   const arterial =
     kind === "motorway" || kind === "trunk" || kind === "primary";
   if (theme.id === "paper") {
-    if (kind === "motorway" || kind === "trunk") return "#F9C78A";
-    if (kind === "primary") return "#FCE3A0";
+    if (kind === "motorway" || kind === "trunk") {
+      return paperArterialColor("#FBDDB5", "#F9C78A");
+    }
+    if (kind === "primary") return paperArterialColor("#FDF0C8", "#FCE3A0");
     return "#FFFFFF";
   }
   if (theme.id === "white") {
@@ -2249,13 +2355,15 @@ function roadFillColor(
 function roadCasingColor(
   theme: MapPreviewTheme,
   kind: RoadKind,
-): string {
+): unknown {
   const arterial =
     kind === "motorway" || kind === "trunk" || kind === "primary";
   if (theme.id === "paper") {
     // Very light gray casing — block edges read against white fill + paper land
-    if (kind === "motorway" || kind === "trunk") return "#E8A866";
-    if (kind === "primary") return "#E9C878";
+    if (kind === "motorway" || kind === "trunk") {
+      return paperArterialColor("#F0C597", "#E8A866");
+    }
+    if (kind === "primary") return paperArterialColor("#EEDDA6", "#E9C878");
     if (arterial) return "#C8C8C8";
     if (kind === "secondary" || kind === "tertiary") return "#D0D0D0";
     return "#D8D8D8";
@@ -2289,7 +2397,12 @@ function applyGuideRoadStyle(
       casing ? roadCasingColor(theme, colorKind) : roadFillColor(theme, colorKind),
     );
     paintSet(layer, "line-opacity", 1);
-    paintSet(layer, "line-width", casing ? roadCasingWidth(kind) : roadFillWidth(kind));
+    const width = casing ? roadCasingWidth(kind) : roadFillWidth(kind);
+    paintSet(
+      layer,
+      "line-width",
+      isPaperArterial(theme, colorKind) ? softenLowZoomWidth(width) : width,
+    );
     if (layer.paint) delete layer.paint["line-dasharray"];
   }
   setVisibility(layer, true);
