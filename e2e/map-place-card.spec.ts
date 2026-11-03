@@ -12,6 +12,7 @@ import path from "node:path";
 import { ensureLoggedIn } from "./helpers/login";
 import { gotoTab, suppressCoachmarks, dismissCoachmarks } from "./helpers/nav";
 import { EXPANDED_MAPLIBRE_STORAGE_KEY } from "../lib/mapSurface/expandedMapLibreFlag";
+import { computeMapPreviewE2eToken } from "./helpers/mapPreviewE2e";
 
 const OUT = path.join(process.cwd(), "e2e/artifacts/d1");
 
@@ -76,8 +77,11 @@ async function jump(page: Page, lat: number, lng: number, zoom: number) {
   );
 }
 
-/** Wait for a rendered label of `kinds`, tap it on screen, return its name. */
-async function tapPoi(page: Page, kinds: PoiKind[]): Promise<string> {
+/** Wait for a rendered label of `kinds`, tap it on screen, return its name + point. */
+async function tapPoi(
+  page: Page,
+  kinds: PoiKind[],
+): Promise<{ name: string; px: number; py: number }> {
   let hit: { x: number; y: number; name: string } | null = null;
   await expect
     .poll(
@@ -98,7 +102,7 @@ async function tapPoi(page: Page, kinds: PoiKind[]): Promise<string> {
   if (!box || !hit) throw new Error("map box / poi missing");
   const { x, y, name } = hit as { x: number; y: number; name: string };
   await page.touchscreen.tap(box.x + x, box.y + y);
-  return name;
+  return { name, px: box.x + x, py: box.y + y };
 }
 
 type CallLog = { name: string; kind: string; apiCalls: number; kakaoCalls: number | null; ms: number | null };
@@ -121,6 +125,12 @@ test("map place card: tap → card → other tap → move → close", async ({ b
   await dismissCoachmarks(page);
   await openExpandedMapLibre(page);
 
+  // E2E account is not the admin user: attach the server-secret e2e token (test-side only).
+  const e2eToken = computeMapPreviewE2eToken();
+  await page.route("**/api/admin/map-place", (route) =>
+    route.continue({ headers: { ...route.request().headers(), "x-pindmap-e2e": e2eToken } }),
+  );
+
   const calls: CallLog[] = [];
   let pending: CallLog | null = null;
   page.on("request", (req) => {
@@ -140,8 +150,12 @@ test("map place card: tap → card → other tap → move → close", async ({ b
   const card = page.locator('[data-testid="expanded-place-detail-sheet"]');
   const openCard = async (kinds: PoiKind[], shot: string) => {
     pending = { name: "", kind: kinds.join("|"), apiCalls: 0, kakaoCalls: null, ms: null };
-    const name = await tapPoi(page, kinds);
+    const { name, px, py } = await tapPoi(page, kinds);
     pending.name = name;
+    const label = card.getByText(name.slice(0, 4)).first();
+    if (!(await label.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      await page.mouse.click(px, py);
+    }
     await expect(card).toBeVisible({ timeout: 15_000 });
     await expect(card).toContainText(name.slice(0, 4), { timeout: 10_000 });
     await expect(card.locator('[data-testid="map-place-saves"]')).not.toContainText(
@@ -159,13 +173,15 @@ test("map place card: tap → card → other tap → move → close", async ({ b
   await page.waitForTimeout(4000);
   await openCard(["sangga", "shop"], "card-shop.png");
 
-  // 2) Another place while the card is open — Tour label, 홍대 z16
-  await jump(page, 37.5572, 126.924, 16);
+  // 2) Another place while the card is open — Tour label, 홍대 z15 (z16 Tour band is rank ≤12)
+  await jump(page, 37.5572, 126.924, 15);
   await page.waitForTimeout(4000);
   await expect(card, "card stays open while the map moves").toBeVisible();
   await openCard(["tour"], "card-tour.png");
 
-  // 3) Station — 홍대 z16
+  // 3) Station — back to 홍대 (the previous card panned the camera)
+  await jump(page, 37.5572, 126.924, 15);
+  await page.waitForTimeout(3000);
   await openCard(["station"], "card-station.png");
 
   // Close

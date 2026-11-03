@@ -16,6 +16,7 @@ import {
   getLayerBaseFilter,
   setLayerFilterPart,
 } from "./layerFilterParts";
+import { isShopNameDeduped } from "./sanggaShopDedupe";
 
 type CapBand = {
   minZoom: number;
@@ -194,6 +195,8 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
         if (!list.some((q) => haversineM(q, c) <= SAME_PLACE_M)) list.push(c);
         places.set(name, list);
         if (p.x < 0 || p.y < 0 || p.x > w || p.y > h) continue;
+        // Cross-source dedupe hides this copy (e.g. OMT twin of a 상가 shop).
+        if (isShopNameDeduped(map, layerId, name)) continue;
         const cls = String(f.properties?.class ?? "");
         const sub = String(f.properties?.subclass ?? "");
         const cand: Candidate = {
@@ -290,11 +293,11 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
       /* ignore */
     }
     if (fromIdle && allowBand === band && rounds < MAX_ROUNDS) {
-      for (const c of allow) if (!rendered.has(c.name)) skip.add(c.name);
+      for (const c of allow) if (!rendered.has(c.name)) skip.add(`${c.layerOrder}|${c.name}`);
     }
 
     const candidates = collectCandidates(band);
-    const pool = candidates.filter((c) => !skip.has(c.name));
+    const pool = candidates.filter((c) => !skip.has(`${c.layerOrder}|${c.name}`));
     const sameSlot = (a: Candidate, c: Candidate) =>
       a.name === c.name && a.layerOrder === c.layerOrder;
     // Keep shops that already won placement (no flicker across top-up rounds).

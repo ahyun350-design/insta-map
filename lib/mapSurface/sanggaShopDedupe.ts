@@ -50,6 +50,18 @@ export type SourceDedupeStats = {
   atMs: number;
 };
 
+const hiddenByMap = new WeakMap<MaplibreMap, Record<Group, Set<string>>>();
+
+/** Raw names this pass currently hides in a shop layer (shopZoomCap skips them). */
+export function isShopNameDeduped(map: MaplibreMap, layerId: string, rawName: string): boolean {
+  const h = hiddenByMap.get(map);
+  if (!h) return false;
+  for (const group of Object.keys(LAYER_PREFIX) as Group[]) {
+    if (layerId.startsWith(LAYER_PREFIX[group])) return h[group].has(rawName);
+  }
+  return false;
+}
+
 export function normalizeShopName(raw: string): string {
   return raw.toLowerCase().replace(/\s+/g, "").replace(/[()[\]{}·.,'"-]/g, "");
 }
@@ -85,6 +97,7 @@ export function installSanggaShopDedupe(map: MaplibreMap): () => void {
       for (const id of layersOf(group)) setLayerFilterPart(map, id, OWNER, part);
     }
     hidden = next;
+    hiddenByMap.set(map, next);
   };
 
   const collect = (): Pt[] => {
@@ -250,5 +263,6 @@ export function installSanggaShopDedupe(map: MaplibreMap): () => void {
     map.off("idle", schedule);
     map.off("moveend", schedule);
     clearLayerFilterOwner(map, OWNER);
+    hiddenByMap.delete(map);
   };
 }

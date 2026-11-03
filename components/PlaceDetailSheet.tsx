@@ -76,6 +76,17 @@ type Props = {
 
 const LIGHT_PIN_CATEGORIES = new Set(["카페", "쇼핑", "숙소", "놀거리", "여행지"]);
 
+/** 상가 층정보: "1" → 1층, "지"/"B1" → 지하, others as given. */
+function formatSanggaFloor(raw: string | null | undefined): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return `${s}층`;
+  if (s === "지" || s === "지하") return "지하";
+  const b = /^(?:B|지하)\s*(\d+)$/i.exec(s);
+  if (b) return `지하 ${b[1]}층`;
+  return s;
+}
+
 function PlaceDetailCurationImages({
   entries,
   onImageSelect,
@@ -171,7 +182,8 @@ export function PlaceDetailSheet({
   const lat = parseFloat(String(place.y ?? ""));
   const lng = parseFloat(String(place.x ?? ""));
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
-  const isMapTap = showAdminMapExtras && place._placeSource === "map";
+  // Basemap-label taps exist only on the (admin) MapLibre expanded map.
+  const isMapTap = place._placeSource === "map";
   const adminPoiPhone =
     showAdminMapExtras && place._placeSource === "poi"
       ? displayablePhone(place._poiPhone)
@@ -367,7 +379,7 @@ export function PlaceDetailSheet({
             <span className="placeDetailSheetLabel">위치</span>
             <span className="placeDetailSheetValue">
               {[
-                place._mapFloor ? `${place._mapFloor}층` : null,
+                formatSanggaFloor(place._mapFloor),
                 place._mapBuildingNo ? `건물 ${place._mapBuildingNo}` : null,
               ]
                 .filter(Boolean)
@@ -409,7 +421,7 @@ export function PlaceDetailSheet({
             카카오맵에서 영업시간 보기
           </a>
         )}
-        {showAdminMapExtras && hasCoordinates && onOpenExternalMapUrl ? (
+        {(showAdminMapExtras || isMapTap) && hasCoordinates && onOpenExternalMapUrl ? (
           <div className="placeDetailSheetExternalMaps">
             <button
               type="button"

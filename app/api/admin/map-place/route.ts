@@ -8,8 +8,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { isMapPreviewE2eTokenValid } from "@/lib/mapPreviewAccess";
 import {
   countSavedUsers,
+  normalizePlaceName,
   pickKakaoDoc,
   pickSanggaRow,
   type KakaoDocLite,
@@ -28,6 +30,8 @@ async function requireAdmin(req: Request): Promise<
   | { ok: true }
   | { ok: false; status: number; error: string }
 > {
+  // Playwright (non-admin e2e account): same server-secret token that opens /map-preview.
+  if (isMapPreviewE2eTokenValid(req.headers.get("x-pindmap-e2e"))) return { ok: true };
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
   if (!supabaseUrl || !anonKey) {
@@ -59,6 +63,7 @@ async function kakaoLookup(
   name: string,
   lat: number,
   lng: number,
+  stationOnly: boolean,
 ): Promise<{ doc: KakaoDocLite | null; called: boolean; error: string | null }> {
   const restKey = process.env.KAKAO_REST_API_KEY?.trim();
   if (!restKey) return { doc: null, called: false, error: "no_key" };
@@ -77,7 +82,10 @@ async function kakaoLookup(
     });
     if (!res.ok) return { doc: null, called: true, error: `http_${res.status}` };
     const data = (await res.json()) as { documents?: KakaoDocLite[] };
-    return { doc: pickKakaoDoc(name, lat, lng, data.documents ?? []), called: true, error: null };
+    const docs = (data.documents ?? []).filter(
+      (d) => !stationOnly || normalizePlaceName(d.place_name).startsWith(normalizePlaceName(name)),
+    );
+    return { doc: pickKakaoDoc(name, lat, lng, docs), called: true, error: null };
   } catch {
     return { doc: null, called: true, error: "fetch_failed" };
   }
@@ -104,15 +112,19 @@ export async function POST(req: Request) {
 
   const admin = getSupabaseAdmin();
   const t0 = Date.now();
-  // Tile points come from the same CSV rows → 5m for 상가 labels; other sources 50m.
+  // Tile points come from the same CSV rows → 5m for 상가 labels; OMT shops 50m.
+  // Stations / parks / landmarks are not 상가 rows (a nearby "홍대입구…" shop is not the station).
   const sanggaRadius = kind === "sangga" ? 5 : 50;
+  const wantsSangga = kind === "sangga" || kind === "shop";
   const kakaoQuery = kind === "station" && !name.endsWith("역") ? `${name}역` : name;
   const latPad = SAVED_RADIUS_M / 111320;
   const lngPad = SAVED_RADIUS_M / (111320 * Math.cos((lat * Math.PI) / 180));
 
   const [sanggaRes, kakaoRes, savedRes] = await Promise.all([
-    admin.rpc("sangga_places_near", { p_lat: lat, p_lng: lng, p_radius_m: sanggaRadius }),
-    kakaoLookup(kakaoQuery, lat, lng),
+    wantsSangga
+      ? admin.rpc("sangga_places_near", { p_lat: lat, p_lng: lng, p_radius_m: sanggaRadius })
+      : Promise.resolve({ data: [], error: null }),
+    kakaoLookup(kakaoQuery, lat, lng, kind === "station"),
     admin
       .from("places")
       .select("user_id,name,lat,lng")
