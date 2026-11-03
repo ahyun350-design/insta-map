@@ -14,6 +14,8 @@ export type CompactPinInput = {
   postCount?: number;
   /** Admin MapLibre: dim pin when poi.closed_at is set (~45% opacity) */
   closed?: boolean;
+  /** Focus pin only: POI / subway badge SVG drawn in the head instead of the emoji. */
+  badge?: { key: string; svg: string };
 };
 
 export type CompactRouteMode = "car" | "walk" | "course" | "preview";

@@ -183,6 +183,7 @@ test("map place card: tap → card → other tap → move → close", async ({ b
   await jump(page, 37.5572, 126.924, 15);
   await page.waitForTimeout(3000);
   await openCard(["station"], "card-station.png");
+  await expect(card, "station card shows line names").toContainText("지하철역");
 
   // Close
   await card.getByRole("button", { name: "닫기" }).click();

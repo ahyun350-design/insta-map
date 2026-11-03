@@ -17,6 +17,7 @@ import {
   MAP_PIN_WIDTH,
   MY_LOCATION_IMAGE_ID,
   clampMapPinDpr,
+  focusBadgeMarkerSvg,
   focusMarkerSvg,
   loadMapImageFromSvg,
   myLocationMarkerSvg,
@@ -2006,15 +2007,16 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private async applyFocusMarker(pin: CompactPinInput) {
     const map = this.map;
     if (!map?.getSource(FOCUS_SOURCE)) return;
-    const icon = pinImageKey("focus", pin.category, pin.fillColor) + (this.theme === "neon" ? ":neon" : "");
+    const neon = this.theme === "neon" ? { stroke: "#ffffff", glow: true } : undefined;
+    const icon = pin.badge
+      ? `focus-badge:${pin.badge.key}:${pin.fillColor.toLowerCase()}${neon ? ":neon" : ""}`
+      : pinImageKey("focus", pin.category, pin.fillColor) + (neon ? ":neon" : "");
     await loadMapImageFromSvg(
       map,
       icon,
-      focusMarkerSvg(
-        pin.category,
-        pin.fillColor,
-        this.theme === "neon" ? { stroke: "#ffffff", glow: true } : undefined,
-      ),
+      pin.badge
+        ? focusBadgeMarkerSvg(pin.badge.svg, pin.fillColor, neon)
+        : focusMarkerSvg(pin.category, pin.fillColor, neon),
       MAP_FOCUS_PIN_WIDTH,
       MAP_FOCUS_PIN_HEIGHT,
       this.imageDpr,

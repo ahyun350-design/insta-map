@@ -22,6 +22,57 @@ export function placeNamesMatch(a: string | null | undefined, b: string | null |
   return x.includes(y) || y.includes(x);
 }
 
+function editDistanceAtMost1(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else {
+      i++;
+      j++;
+    }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
+function bigramDice(a: string, b: string): number {
+  const grams = (s: string) => {
+    const m = new Map<string, number>();
+    for (let k = 0; k + 1 < s.length; k++) {
+      const g = s.slice(k, k + 2);
+      m.set(g, (m.get(g) ?? 0) + 1);
+    }
+    return m;
+  };
+  const ga = grams(a);
+  const gb = grams(b);
+  let overlap = 0;
+  for (const [g, n] of ga) overlap += Math.min(n, gb.get(g) ?? 0);
+  const total = Math.max(0, a.length - 1) + Math.max(0, b.length - 1);
+  return total ? (2 * overlap) / total : 0;
+}
+
+/**
+ * Same shop spelled slightly differently (one-character variant, or bigram
+ * Dice ≥ 0.6) — only used together with a tight distance gate.
+ */
+export function placeNamesClose(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (placeNamesMatch(a, b)) return true;
+  const x = normalizePlaceName(a);
+  const y = normalizePlaceName(b);
+  if (Math.min(x.length, y.length) < 4) return false;
+  return editDistanceAtMost1(x, y) || bigramDice(x, y) >= 0.6;
+}
+
 export function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
   const toR = (d: number) => (d * Math.PI) / 180;
@@ -72,7 +123,13 @@ export type KakaoDocLite = {
   y: string;
 };
 
-/** Kakao keyword hit adopted only when the name matches and it is ≤ maxDistM away. */
+/** Close-spelling hits must sit this near the tapped point. */
+export const KAKAO_CLOSE_NAME_MAX_M = 30;
+
+/**
+ * Kakao keyword hit adopted when the name matches within maxDistM, or the name
+ * is a near spelling within KAKAO_CLOSE_NAME_MAX_M.
+ */
 export function pickKakaoDoc(
   tapName: string,
   lat: number,
@@ -80,14 +137,17 @@ export function pickKakaoDoc(
   docs: KakaoDocLite[],
   maxDistM = 100,
 ): KakaoDocLite | null {
+  let close: KakaoDocLite | null = null;
   for (const d of docs) {
     const dy = Number(d.y);
     const dx = Number(d.x);
     if (!Number.isFinite(dy) || !Number.isFinite(dx)) continue;
-    if (distanceMeters(lat, lng, dy, dx) > maxDistM) continue;
+    const m = distanceMeters(lat, lng, dy, dx);
+    if (m > maxDistM) continue;
     if (placeNamesMatch(tapName, d.place_name)) return d;
+    if (!close && m <= KAKAO_CLOSE_NAME_MAX_M && placeNamesClose(tapName, d.place_name)) close = d;
   }
-  return null;
+  return close;
 }
 
 export type SavedPlaceLite = {

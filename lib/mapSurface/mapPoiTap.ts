@@ -5,6 +5,14 @@
  */
 
 import type { Map as MaplibreMap } from "maplibre-gl";
+import {
+  poiCategoryBadgeFill,
+  poiCategoryIconSvg,
+  poiCategoryIdForProps,
+  subwayLineBadgeSvg,
+  subwayRefColour,
+  type PoiCategoryId,
+} from "./poiCategoryIcons";
 
 export type MapPoiKind =
   | "shop"
@@ -25,7 +33,27 @@ export type MapPoiTap = {
   subclass: string | null;
   /** building_kr house number under the place, when the building layer has one. */
   buildingNo: string | null;
+  /** Station: line refs (e.g. "5", "경의·중앙") and the primary line colour / ref. */
+  lines: string[];
+  lineColour: string | null;
+  lineRef: string | null;
+  /** TourAPI contentTypeId (12 관광지 · 14 문화시설 · 28 레포츠 · 38 쇼핑 …). */
+  tourType: string | null;
 };
+
+/** GeoJSON array props come back from queryRenderedFeatures as JSON strings. */
+function listProp(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v === "string" && v.startsWith("[")) {
+    try {
+      const a = JSON.parse(v) as unknown;
+      return Array.isArray(a) ? a.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 const KIND_BY_LAYER: Array<[RegExp, MapPoiKind]> = [
   [/^sangga_shop_label_/, "sangga"],
@@ -83,7 +111,55 @@ function toTap(
     cls: props.class != null ? String(props.class) : null,
     subclass: props.subclass != null ? String(props.subclass) : null,
     buildingNo: buildingNoAt(map, p.x, p.y),
+    lines: kind === "station" ? listProp(props.refs) : [],
+    lineColour: kind === "station" && props.colour ? String(props.colour) : null,
+    lineRef: kind === "station" && props.ref ? String(props.ref) : null,
+    tourType: kind === "tour" && props.contentTypeId != null ? String(props.contentTypeId) : null,
   };
+}
+
+/** Focus-pin badge for a tap: same glyph + colour as the map icon; stations use the line badge. */
+export function mapTapBadge(tap: MapPoiTap): { key: string; svg: string; fill: string } {
+  if (tap.kind === "station") {
+    const ref = tap.lineRef ?? "";
+    const fill = tap.lineColour || subwayRefColour(ref);
+    return { key: `subway-${ref || "x"}-${fill}`, svg: subwayLineBadgeSvg(fill, ref || "?"), fill };
+  }
+  const cat: PoiCategoryId =
+    tap.kind === "bus"
+      ? "bus"
+      : tap.kind === "park"
+        ? "park"
+        : tap.kind === "landmark" && !tap.cls
+          ? "landmark"
+          : tap.kind === "tour" && tap.cls !== "shop" && tap.cls !== "park"
+            ? "landmark"
+            : poiCategoryIdForProps(tap.cls, tap.subclass);
+  return { key: `poi-${cat}`, svg: poiCategoryIconSvg(cat), fill: poiCategoryBadgeFill(cat) };
+}
+
+const TOUR_TYPE_LABEL: Record<string, string> = {
+  "12": "관광지",
+  "14": "문화시설",
+  "15": "축제·공연",
+  "25": "여행코스",
+  "28": "레포츠",
+  "32": "숙박",
+  "38": "쇼핑",
+  "39": "음식점",
+};
+
+/** Card category line for stations / Tour POIs (null → app category label). */
+export function mapTapCategoryLabel(tap: MapPoiTap): string | null {
+  if (tap.kind === "station") {
+    const korean = tap.lines.filter((r) => /[0-9가-힣]/.test(r));
+    const refs = [...new Set(korean.length ? korean : tap.lines)];
+    const named = refs.map((r) => (/^[0-9]+$/.test(r) ? `${r}호선` : r));
+    return named.length ? `지하철역 · ${named.join(", ")}` : "지하철역";
+  }
+  if (tap.kind === "bus") return "버스정류장";
+  if (tap.kind === "tour" && tap.tourType) return TOUR_TYPE_LABEL[tap.tourType] ?? null;
+  return null;
 }
 
 /** Nearest tappable place label to a screen point (null when nothing is there). */

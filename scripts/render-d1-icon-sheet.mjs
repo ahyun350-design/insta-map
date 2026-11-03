@@ -24,7 +24,9 @@ const omtOf = (id) =>
     .join(", ");
 const sanggaOf = (id) => {
   const k = p.sangga[id] ?? {};
-  return [...(k.jung ?? []), ...(k.so ?? []).map((s) => `소:${s}`)].join(", ");
+  // 대분류-only buckets (e.g. 숙박 → lodging) have no 중/소 keywords.
+  const dae = !(k.jung?.length || k.so?.length) ? (k.dae ?? []).map((d) => `대:${d}`) : [];
+  return [...dae, ...(k.jung ?? []), ...(k.so ?? []).map((s) => `소:${s}`)].join(", ");
 };
 
 const cards = p.ids

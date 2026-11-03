@@ -279,7 +279,11 @@ import {
   useEdgeSwipeBack,
 } from "@/lib/useEdgeSwipeBack";
 import { pushInAppRoute } from "@/lib/safeRouterBack";
-import type { MapPoiTap } from "@/lib/mapSurface/mapPoiTap";
+import {
+  mapTapBadge,
+  mapTapCategoryLabel,
+  type MapPoiTap,
+} from "@/lib/mapSurface/mapPoiTap";
 import type { ExpandedMapSurface } from "@/lib/mapSurface";
 import {
   adminMapGlOverrideLabel,
@@ -2861,6 +2865,10 @@ function HomePageContent() {
       document.querySelector<HTMLElement>(".placeDetailSheetEmbedded") ||
       document.querySelector<HTMLElement>(".placeDetailSheet");
     const h = el?.getBoundingClientRect().height ?? 0;
+    // Expanded MapLibre corner credit rides on the card's top edge (CSS var).
+    if (h > 80) {
+      document.documentElement.style.setProperty("--pindmap-expanded-card-h", `${Math.round(h)}px`);
+    }
     if (h > 80) return Math.round(h + 24);
     return 280;
   }, []);
@@ -8292,6 +8300,7 @@ function HomePageContent() {
       lng: number,
       category: Category,
       listPresetId?: string | null,
+      badge?: { key: string; svg: string; fill: string } | null,
     ) => {
       if (scope === "main" && isCompactMapLibre(map)) {
         const fillColor = resolveListColor(listPresetId) ?? resolvePinColor(category);
@@ -8308,13 +8317,15 @@ function HomePageContent() {
         return;
       }
       if (scope === "expanded" && isExpandedMapLibre(map)) {
-        const fillColor = resolveListColor(listPresetId) ?? resolvePinColor(category);
+        const fillColor =
+          badge?.fill ?? resolveListColor(listPresetId) ?? resolvePinColor(category);
         void map.adapter.setFocusMarker({
           id: FOCUS_PLACE_MARKER_ID,
           lat,
           lng,
           category,
           fillColor,
+          ...(badge ? { badge: { key: badge.key, svg: badge.svg } } : {}),
         });
         focusPlaceMarkerRef.current.expanded = {
           setMap: () => map.adapter.clearFocusMarker(),
@@ -8376,7 +8387,13 @@ function HomePageContent() {
 
   /** 저장 핀과 별도 임시 강조 마커 (미니맵 + 확장 웹 + 네이티브) */
   const showFocusPlaceMarker = useCallback(
-    (lat: number, lng: number, category: Category, listPresetId?: string | null) => {
+    (
+      lat: number,
+      lng: number,
+      category: Category,
+      listPresetId?: string | null,
+      badge?: { key: string; svg: string; fill: string } | null,
+    ) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       focusPlaceCoordsRef.current = { lat, lng, category, listPresetId: listPresetId ?? null };
       if (mapRef.current) {
@@ -8390,6 +8407,7 @@ function HomePageContent() {
           lng,
           category,
           listPresetId,
+          badge,
         );
       }
       syncFocusPlaceMarkerToNative(lat, lng, category, listPresetId);
@@ -12445,6 +12463,7 @@ function HomePageContent() {
       x: String(tap.lng),
       _placeSource: "map",
       _mapBuildingNo: tap.buildingNo,
+      _mapCategoryLabel: mapTapCategoryLabel(tap),
       _mapDetailLoading: true,
     };
     const ref = placeRefFromKakaoPlace(base);
@@ -12454,7 +12473,7 @@ function HomePageContent() {
       _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, ref),
       _placeRef: ref,
     });
-    showFocusPlaceMarker(tap.lat, tap.lng, category);
+    showFocusPlaceMarker(tap.lat, tap.lng, category, null, mapTapBadge(tap));
     // Keep the user's zoom; only pan so the place sits above the card.
     const level = getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? 3;
     const applyPaddedCamera = () => {
@@ -12503,6 +12522,8 @@ function HomePageContent() {
           _mapDetailLoading: false,
         };
       });
+      // Card grew with the detail rows — keep the corner credit on its top edge.
+      window.setTimeout(() => measureExpandedPlaceCardPaddingBottom(), 80);
     })();
   }, [showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom]);
   const openMapPoiPlaceCardRef = useRef(openMapPoiPlaceCard);

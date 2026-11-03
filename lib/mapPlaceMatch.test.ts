@@ -5,6 +5,7 @@ import {
   normalizePlaceName,
   pickKakaoDoc,
   pickSanggaRow,
+  placeNamesClose,
   placeNamesMatch,
 } from "./mapPlaceMatch";
 
@@ -37,6 +38,14 @@ test("pickKakaoDoc: name + 100m gate", () => {
   ];
   assert.equal(pickKakaoDoc("카페온도 망원점", 37.5565, 126.9019, docs)?.id, "2");
   assert.equal(pickKakaoDoc("다른곳", 37.5565, 126.9019, docs), null);
+});
+
+test("pickKakaoDoc: one-character spelling variant only within 30m", () => {
+  const near = [{ id: "n", place_name: "고깃집망원본가", x: "126.9019", y: "37.5565" }];
+  const far = [{ id: "f", place_name: "고깃집망원본가", x: "126.9025", y: "37.5565" }];
+  assert.equal(pickKakaoDoc("고깃집망원분가", 37.5565, 126.9019, near)?.id, "n");
+  assert.equal(pickKakaoDoc("고깃집망원분가", 37.5565, 126.9019, far), null);
+  assert.ok(!placeNamesClose("카페", "카페온"));
 });
 
 test("countSavedUsers: distinct users, same name, ≤100m", () => {

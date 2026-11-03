@@ -342,6 +342,8 @@ export function PlaceDetailSheet({
                 </ul>
               ) : null}
             </div>
+          ) : isMapTap && place._mapCategoryLabel ? (
+            <p className="placeDetailSheetCategory">{place._mapCategoryLabel}</p>
           ) : currentCategory ? (
             <p className="placeDetailSheetCategory">{categoryLabel}</p>
           ) : null}
@@ -446,15 +448,18 @@ export function PlaceDetailSheet({
             >
               네이버 지도에서 보기
             </button>
-            <button
-              type="button"
-              className="placeDetailSheetExternalMapBtn"
-              onClick={() =>
-                onOpenExternalMapUrl(buildKakaoTransitUrl(place.place_name, lat, lng))
-              }
-            >
-              대중교통 길찾기
-            </button>
+            {/* Bottom 대중교통 mode button already opens Kakao transit — no duplicate. */}
+            {!(showDirections && onOpenTransit) ? (
+              <button
+                type="button"
+                className="placeDetailSheetExternalMapBtn"
+                onClick={() =>
+                  onOpenExternalMapUrl(buildKakaoTransitUrl(place.place_name, lat, lng))
+                }
+              >
+                대중교통 길찾기
+              </button>
+            ) : null}
           </div>
         ) : null}
 

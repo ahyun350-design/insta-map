@@ -426,6 +426,59 @@ export function poiCategoryIconImageExpr(): unknown {
   ];
 }
 
+/** Same decision as poiCategoryIconImageExpr, for one feature in JS (place-card pin). */
+export function poiCategoryIdForProps(
+  cls: string | null | undefined,
+  subclass: string | null | undefined,
+): PoiCategoryId {
+  const c = cls ?? "";
+  const s = subclass ?? "";
+  const any = (...xs: string[]) => xs.includes(c);
+  if (c === "cafe" || (c === "shop" && s === "coffee")) return "cafe";
+  if (c === "restaurant") return "restaurant";
+  if (c === "fast_food" || s === "chicken") return "fast_food";
+  if (any("bakery", "ice_cream", "pastry", "confectionery")) return "bakery";
+  if (any("bar", "beer", "pub", "alcohol", "wine")) return "bar";
+  if (c === "pharmacy") return "pharmacy";
+  if (any("bank", "atm")) return "bank";
+  if (any("hotel", "lodging") || s === "hotel") return "lodging";
+  if (any("hairdresser", "beauty") || s === "hairdresser" || s === "beauty") return "beauty";
+  if (any("cinema", "theatre", "theater", "museum", "attraction") || s === "cinema") return "landmark";
+  if (c === "mall" || c === "department_store" || s === "department_store") return "shop";
+  if (c === "shop" && s === "convenience") return "convenience";
+  if (c === "grocery" || (c === "shop" && s === "supermarket")) return "grocery";
+  if (any("hospital", "doctors", "clinic", "dentist")) return "hospital";
+  if (any("college", "school", "kindergarten") || s === "university") return "school";
+  if (any("park", "playground") || s === "playground") return "park";
+  if (c === "police") return "police";
+  if (c === "post" || s === "post_office") return "post";
+  if (any("town_hall", "community_centre", "library")) return "town_hall";
+  if (c === "parking" || s === "parking") return "parking";
+  if (c === "fuel" || s === "fuel") return "fuel";
+  if (any("railway", "rail", "subway")) return "subway";
+  if (c === "bus") return "bus";
+  if (c === "car_repair") return "car_repair";
+  if (any("hardware", "repair")) return "tools";
+  if (c === "second_hand") return "second_hand";
+  if (c === "misc_service") return "misc_service";
+  return "shop";
+}
+
+/** Badge colour for a category id (bus uses its own blue). */
+export function poiCategoryBadgeFill(cat: PoiCategoryId): string {
+  return cat === "bus" ? BUS_BADGE_COLOR : colorOf(cat).icon;
+}
+
+/** Line colour for a station ref (known Seoul / generated colours; gray fallback). */
+export function subwayRefColour(ref: string | null | undefined): string {
+  const r = String(ref ?? "");
+  return (
+    (SUBWAY_BADGE_COLOURS as Record<string, string>)[r] ??
+    (SEOUL_SUBWAY_REF_COLOURS as Record<string, string>)[r] ??
+    "#5A6570"
+  );
+}
+
 /** Category text-color expression (darker for readability). */
 export function poiCategoryTextColorExpr(themeId: string): unknown {
   const c = (id: PoiMapCategoryId) => {

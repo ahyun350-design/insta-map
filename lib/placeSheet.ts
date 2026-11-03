@@ -40,6 +40,8 @@ export type PlaceSheetData = {
   _mapFloor?: string | null;
   _mapBuildingNo?: string | null;
   _mapDetailLoading?: boolean;
+  /** Admin map tap: category line shown instead of the app category ("지하철역 · 5호선" / "관광지") */
+  _mapCategoryLabel?: string | null;
   /** Admin map tap: distinct PindMap users with a same-name place ≤100m */
   _mapSaveCount?: number | null;
   /** public.poi.phone (never copied onto places) */
