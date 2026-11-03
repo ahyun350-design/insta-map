@@ -24,6 +24,11 @@ export const TILE_HOST_EXP_FILES = {
   placesExtra: "korea-places-extra.pmtiles",
 } as const;
 
+/** Supabase map-tiles only (NCP exp/ keeps the files above). */
+const DEFAULT_HOST_FILES: Partial<Record<keyof typeof TILE_HOST_EXP_FILES, string>> = {
+  sangga: "korea-sangga-v2.pmtiles",
+};
+
 /**
  * Bump after rewriting Storage Cache-Control so CDN drops stale `no-cache`
  * Range responses (Smart CDN can keep HIT with old headers on the bare key).
@@ -78,10 +83,10 @@ export function isNcpTileHost(): boolean {
 export function resolveKoreaArchiveUrl(
   kind: keyof typeof TILE_HOST_EXP_FILES,
 ): string {
-  const file = TILE_HOST_EXP_FILES[kind];
   if (isNcpTileHost()) {
-    return `${NCP_TILES_EXP_BASE}/${file}`;
+    return `${NCP_TILES_EXP_BASE}/${TILE_HOST_EXP_FILES[kind]}`;
   }
+  const file = DEFAULT_HOST_FILES[kind] ?? TILE_HOST_EXP_FILES[kind];
   const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || "")
     .trim()
     .replace(/\/$/, "");

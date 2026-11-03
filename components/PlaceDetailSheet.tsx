@@ -171,10 +171,13 @@ export function PlaceDetailSheet({
   const lat = parseFloat(String(place.y ?? ""));
   const lng = parseFloat(String(place.x ?? ""));
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
+  const isMapTap = showAdminMapExtras && place._placeSource === "map";
   const adminPoiPhone =
     showAdminMapExtras && place._placeSource === "poi"
       ? displayablePhone(place._poiPhone)
-      : null;
+      : isMapTap
+        ? displayablePhone(place.phone)
+        : null;
   const adminClosedMonth =
     showAdminMapExtras && place._placeSource === "poi"
       ? formatPoiClosedAtMonthLabel(place._poiClosedAt)
@@ -359,6 +362,31 @@ export function PlaceDetailSheet({
             <span className="placeDetailSheetValue">{place.road_address_name}</span>
           </div>
         )}
+        {isMapTap && (place._mapFloor || place._mapBuildingNo) ? (
+          <div className="placeDetailSheetRow" data-testid="map-place-floor">
+            <span className="placeDetailSheetLabel">위치</span>
+            <span className="placeDetailSheetValue">
+              {[
+                place._mapFloor ? `${place._mapFloor}층` : null,
+                place._mapBuildingNo ? `건물 ${place._mapBuildingNo}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </div>
+        ) : null}
+        {isMapTap ? (
+          <div className="placeDetailSheetRow" data-testid="map-place-saves">
+            <span className="placeDetailSheetLabel">핀맵</span>
+            <span className="placeDetailSheetValue">
+              {place._mapDetailLoading
+                ? "정보 불러오는 중…"
+                : typeof place._mapSaveCount === "number"
+                  ? `${place._mapSaveCount}명이 저장`
+                  : "저장 정보 없음"}
+            </span>
+          </div>
+        ) : null}
         {showAdminMapExtras
           ? adminPoiPhone && (
               <div className="placeDetailSheetRow placeDetailSheetRowCenter">

@@ -11,6 +11,11 @@
  */
 
 import type { Map as MaplibreMap } from "maplibre-gl";
+import {
+  clearLayerFilterOwner,
+  getLayerBaseFilter,
+  setLayerFilterPart,
+} from "./layerFilterParts";
 
 type CapBand = {
   minZoom: number;
@@ -111,12 +116,14 @@ function bandForZoom(z: number): CapBand | null {
   return SHOP_ZOOM_CAP_BANDS.find((b) => z >= b.minZoom && z < b.maxZoom) ?? null;
 }
 
-function allowFilter(base: unknown, allow: string[]): unknown {
-  return ["all", base, ["in", NAME_EXPR, ["literal", allow]]];
+const OWNER = "shopZoomCap";
+
+function allowPart(allow: string[]): unknown {
+  return ["in", NAME_EXPR, ["literal", allow]];
 }
 
 export function installShopZoomCap(map: MaplibreMap): () => void {
-  const baseFilterByLayer = new Map<string, unknown>();
+  const seenLayers = new Set<string>();
   let viewKey = "";
   /** Allowed names in priority order; each name is shown from one layer only. */
   let allow: Candidate[] = [];
@@ -135,34 +142,16 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
     allow = next;
     allowBand = band;
     for (const id of layerIds) {
-      if (!map.getLayer(id)) continue;
-      try {
-        map.setFilter(
-          id,
-          allowFilter(baseFilterByLayer.get(id) ?? true, namesFor(id)) as never,
-        );
-      } catch {
-        /* ignore */
-      }
+      setLayerFilterPart(map, id, OWNER, allowPart(namesFor(id)));
     }
   };
 
-  /** Capture base filters; new layers start hidden until the first reconcile. */
+  /** New cap layers start hidden until the first reconcile. */
   const ensureBase = () => {
     for (const id of SHOP_ZOOM_CAP_LAYER_IDS) {
-      if (baseFilterByLayer.has(id) || !map.getLayer(id)) continue;
-      let base: unknown = true;
-      try {
-        base = map.getFilter(id) ?? true;
-      } catch {
-        base = true;
-      }
-      baseFilterByLayer.set(id, base);
-      try {
-        map.setFilter(id, allowFilter(base, namesFor(id)) as never);
-      } catch {
-        /* ignore */
-      }
+      if (seenLayers.has(id) || !map.getLayer(id)) continue;
+      seenLayers.add(id);
+      setLayerFilterPart(map, id, OWNER, allowPart(namesFor(id)));
     }
   };
 
@@ -182,7 +171,7 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
       try {
         feats = map.querySourceFeatures(layer.source, {
           sourceLayer: layer.sourceLayer,
-          filter: (baseFilterByLayer.get(layerId) ?? true) as never,
+          filter: getLayerBaseFilter(map, layerId) as never,
         });
       } catch {
         return;
@@ -392,13 +381,7 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
     map.off("idle", onIdle);
     map.off("moveend", onMoveEnd);
     map.off("styledata", onStyleData);
-    for (const [id, base] of baseFilterByLayer) {
-      try {
-        if (map.getLayer(id)) map.setFilter(id, base as never);
-      } catch {
-        /* ignore */
-      }
-    }
-    baseFilterByLayer.clear();
+    clearLayerFilterOwner(map, OWNER);
+    seenLayers.clear();
   };
 }

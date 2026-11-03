@@ -25,7 +25,11 @@ export type PoiMapCategoryId =
   | "post"
   | "fuel"
   | "parking"
-  | "subway";
+  | "subway"
+  | "car_repair"
+  | "tools"
+  | "second_hand"
+  | "misc_service";
 
 /** Badge + label colors (paper). Glyph detail strokes use `icon`. */
 export const POI_MAP_COLORS: Record<
@@ -54,6 +58,10 @@ export const POI_MAP_COLORS: Record<
   fuel: { icon: "#64727F", text: "#3E4A55" },
   parking: { icon: "#2F7DE1", text: "#1B57A6" },
   subway: { icon: "#5A6A7A", text: "#1E2124" },
+  car_repair: { icon: "#5B6B8C", text: "#3A4766" },
+  tools: { icon: "#8A6D4E", text: "#5E4529" },
+  second_hand: { icon: "#4F8F6A", text: "#2F6247" },
+  misc_service: { icon: "#8A8A92", text: "#4A4A52" },
 };
 
 /**
@@ -146,6 +154,26 @@ export const SANGGA_CATEGORY_KEYWORDS: Record<
   fuel: { so: ["주유", "LPG", "충전소"] },
   parking: { so: ["주차장", "주차"] },
   subway: { so: ["지하철", "전철", "역"] },
+  // z17+ only, lowest priority (build-korea-sangga.py HIDDEN_*_JUNG).
+  car_repair: {
+    dae: ["수리·개인", "소매"],
+    jung: ["자동차 수리·세차", "모터사이클 수리", "자동차 부품 소매", "모터사이클 소매"],
+  },
+  tools: {
+    dae: ["수리·개인", "소매"],
+    jung: [
+      "철물·건설자재 소매",
+      "가전제품 수리",
+      "컴퓨터 수리",
+      "통신장비 수리",
+      "기타 가정용품 수리",
+    ],
+  },
+  second_hand: { dae: ["소매"], jung: ["중고 상품 소매"] },
+  misc_service: {
+    dae: ["수리·개인", "소매"],
+    jung: ["장례식장", "기타 개인", "담배 소매"],
+  },
 };
 
 /** OMT class/subclass literals that resolve to each category (for filters + docs). */
@@ -216,7 +244,20 @@ export const OMT_CLASS_TO_CATEGORY: Array<{
   { category: "fuel", classes: ["fuel"] },
   { category: "parking", classes: ["parking"] },
   { category: "subway", classes: ["railway", "rail", "subway", "station"] },
+  { category: "car_repair", classes: ["car_repair"] },
+  { category: "tools", classes: ["hardware", "repair"] },
+  { category: "second_hand", classes: ["second_hand"] },
+  { category: "misc_service", classes: ["misc_service"] },
 ];
+
+/** Sangga classes drawn only at z17+ (sangga_shop_label_z17_hidden). */
+export const HIDDEN_SANGGA_CLASSES = [
+  "car_repair",
+  "hardware",
+  "repair",
+  "second_hand",
+  "misc_service",
+] as const;
 
 export const ALL_POI_MAP_CATEGORY_IDS: PoiMapCategoryId[] = [
   "restaurant",
@@ -241,4 +282,8 @@ export const ALL_POI_MAP_CATEGORY_IDS: PoiMapCategoryId[] = [
   "fuel",
   "parking",
   "subway",
+  "car_repair",
+  "tools",
+  "second_hand",
+  "misc_service",
 ];

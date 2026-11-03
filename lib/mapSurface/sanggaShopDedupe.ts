@@ -1,267 +1,254 @@
 /**
- * Hide OMT shop labels that duplicate 상가(상권) points (normalized name + 50m).
- * Sangga remains visible for duplicates; OMT-only shops stay (OMT layers paint
- * after sangga so they win collision against nearby different-named sangga).
+ * One label per shop across OMT · 상가 · TourAPI (z14+).
  *
- * Uses setFilter with excluded feature ids (feature-state is not valid in filters,
- * and opacity:0 still occupies collision slots).
+ * Self-tiles POIs carry no feature ids, so twins are found by normalized name
+ * (equal, or one contains the other, ≥3 chars) within 50m on loaded source
+ * features. Priority: Tour attraction > 상가 > OMT > Tour shop. The weaker
+ * source drops the name via a layer filter part — only when every instance of
+ * that name around the viewport sits next to a stronger twin, so chains
+ * elsewhere on screen keep their labels.
  */
 
 import type { Map as MaplibreMap } from "maplibre-gl";
 import { KOREA_SANGGA_SOURCE } from "./koreaSangga";
-import { SHOP_ZOOM_CAP_LAYER_IDS } from "./shopZoomCap";
+import { KOREA_TOUR_SOURCE } from "./koreaTour";
+import { haversineMeters } from "./labelNameDedup";
+import { clearLayerFilterOwner, setLayerFilterPart } from "./layerFilterParts";
 
+const OWNER = "sourceDedupe";
+const MIN_ZOOM = 14;
 const DEDUP_M = 50;
+/** Tile-buffer copies of one feature. */
+const SAME_FEATURE_M = 5;
+const MARGIN_PX = 120;
 
-/** Base filters captured once per shop layer id (without id exclusions). */
-const baseFilterByLayer = new Map<string, unknown>();
+const NAME_EXPR: unknown = [
+  "to-string",
+  ["coalesce", ["get", "name:ko"], ["get", "name"], ""],
+];
 
-/** Last reconcile stats (for diagnose / e2e). */
-export type SanggaDedupeStats = {
-  sanggaCandidates: number;
-  omtCandidates: number;
-  dupIds: number;
-  filterLiteralSize: number;
+type Group = "omt" | "sangga" | "tour";
+const LAYER_PREFIX: Record<Group, string> = {
+  omt: "shop_poi_label_",
+  sangga: "sangga_shop_label_",
+  tour: "tour_poi_label_",
+};
+
+type Pt = {
+  group: Group;
+  /** Lower wins: 0 tour attraction, 1 상가, 2 OMT, 3 tour shop. */
+  rank: number;
+  raw: string;
+  norm: string;
+  lng: number;
+  lat: number;
+};
+
+export type SourceDedupeStats = {
+  points: number;
+  hidden: Record<Group, number>;
   atMs: number;
 };
 
-let lastStats: SanggaDedupeStats = {
-  sanggaCandidates: 0,
-  omtCandidates: 0,
-  dupIds: 0,
-  filterLiteralSize: 0,
-  atMs: 0,
-};
-
-export function getSanggaDedupeStats(): SanggaDedupeStats {
-  return { ...lastStats };
+export function normalizeShopName(raw: string): string {
+  return raw.toLowerCase().replace(/\s+/g, "").replace(/[()[\]{}·.,'"-]/g, "");
 }
 
-function normalizeShopName(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[()[\]{}]/g, "")
-    .replace(/(점|본점|지점)$/u, "");
+function similar(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 3 || b.length < 3) return false;
+  return a.includes(b) || b.includes(a);
 }
 
-function haversineM(a: [number, number], b: [number, number]): number {
-  const R = 6371000;
-  const toR = (d: number) => (d * Math.PI) / 180;
-  const dLat = toR(b[1] - a[1]);
-  const dLon = toR(b[0] - a[0]);
-  const lat1 = toR(a[1]);
-  const lat2 = toR(b[1]);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-}
-
-function shopLayerIds(map: MaplibreMap): string[] {
-  const style = map.getStyle();
-  if (!style?.layers) return [];
-  return style.layers
-    .map((l) => l.id)
-    .filter(
-      (id) =>
-        id.startsWith("shop_poi_label_") &&
-        !SHOP_ZOOM_CAP_LAYER_IDS.has(id) &&
-        Boolean(map.getLayer(id)),
-    );
-}
-
-type Pt = { name: string; c: [number, number] };
-
-function ensureBaseFilters(map: MaplibreMap, oLayers: string[]) {
-  for (const id of oLayers) {
-    if (baseFilterByLayer.has(id)) continue;
-    try {
-      const f = map.getFilter(id);
-      baseFilterByLayer.set(id, f ?? true);
-    } catch {
-      baseFilterByLayer.set(id, true);
-    }
-  }
-}
-
-function inViewport(
-  map: MaplibreMap,
-  c: [number, number],
-  pad = 32,
-): boolean {
-  try {
-    const p = map.project(c);
-    const { clientWidth: w, clientHeight: h } = map.getCanvas();
-    return p.x >= -pad && p.y >= -pad && p.x <= w + pad && p.y <= h + pad;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Mark OMT shop feature ids that match a nearby sangga point (source features,
- * not only rendered labels), then setFilter so dups leave collision space.
- */
-export function reconcileSanggaOmtShopDedupe(map: MaplibreMap): void {
-  if (!map.getSource(KOREA_SANGGA_SOURCE)) return;
-  const oLayers = shopLayerIds(map);
-  if (!oLayers.length) return;
-  ensureBaseFilters(map, oLayers);
-
-  let omtFeats: ReturnType<MaplibreMap["queryRenderedFeatures"]> = [];
-  try {
-    omtFeats = map.queryRenderedFeatures({ layers: oLayers });
-  } catch {
-    return;
-  }
-
-  // Prefer source features (all loaded points); fall back to rendered sangga labels.
-  const sangga: Pt[] = [];
-  let srcFeats: ReturnType<MaplibreMap["querySourceFeatures"]> = [];
-  try {
-    srcFeats = map.querySourceFeatures(KOREA_SANGGA_SOURCE, {
-      sourceLayer: "sangga",
-    });
-  } catch {
-    srcFeats = [];
-  }
-  const pushFeat = (f: {
-    properties?: Record<string, unknown> | null;
-    geometry?: GeoJSON.Geometry | null;
-  }) => {
-    const name = normalizeShopName(
-      String(f.properties?.["name:ko"] || f.properties?.name || ""),
-    );
-    if (!name || name.length < 2) return;
-    const g = f.geometry;
-    if (!g || g.type !== "Point") return;
-    const c = g.coordinates as [number, number];
-    if (!Number.isFinite(c[0]) || !Number.isFinite(c[1])) return;
-    if (!inViewport(map, c)) return;
-    sangga.push({ name, c });
-  };
-  for (const f of srcFeats) pushFeat(f);
-  if (!sangga.length) {
-    const sLayers = (map.getStyle()?.layers ?? [])
-      .map((l) => l.id)
-      .filter(
-        (id) =>
-          id.startsWith("sangga_shop_label_") && Boolean(map.getLayer(id)),
-      );
-    if (sLayers.length) {
-      try {
-        for (const f of map.queryRenderedFeatures({ layers: sLayers })) {
-          pushFeat(f);
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  const byName = new Map<string, Pt[]>();
-  for (const s of sangga) {
-    const list = byName.get(s.name);
-    if (list) list.push(s);
-    else byName.set(s.name, [s]);
-  }
-
-  const dupIds: Array<string | number> = [];
-  if (sangga.length) {
-    for (const f of omtFeats) {
-      const id = f.id;
-      if (id == null) continue;
-      const name = normalizeShopName(
-        String(f.properties?.["name:ko"] || f.properties?.name || ""),
-      );
-      if (!name || name.length < 2) continue;
-      const g = f.geometry;
-      if (!g || g.type !== "Point") continue;
-      const c = g.coordinates as [number, number];
-      const cands = byName.get(name);
-      if (!cands) continue;
-      for (const s of cands) {
-        if (haversineM(c, s.c) <= DEDUP_M) {
-          dupIds.push(id);
-          break;
-        }
-      }
-    }
-  }
-
-  // Cap literal size — viewport dups are typically small
-  const unique = [...new Set(dupIds)].slice(0, 500);
-
-  lastStats = {
-    sanggaCandidates: sangga.length,
-    omtCandidates: omtFeats.length,
-    dupIds: dupIds.length,
-    filterLiteralSize: unique.length,
-    atMs: Date.now(),
-  };
-  try {
-    (
-      window as unknown as { __PINDMAP_SANGGA_DEDUPE__?: SanggaDedupeStats }
-    ).__PINDMAP_SANGGA_DEDUPE__ = lastStats;
-  } catch {
-    /* ignore */
-  }
-
-  for (const id of oLayers) {
-    const base = baseFilterByLayer.get(id) ?? true;
-    const next: unknown =
-      unique.length === 0
-        ? base
-        : [
-            "all",
-            base,
-            [
-              "!",
-              [
-                "in",
-                ["id"],
-                ["literal", unique],
-              ],
-            ],
-          ];
-    try {
-      map.setFilter(id, next as never);
-    } catch {
-      /* ignore */
-    }
-  }
+/** ~50m grid cell key. */
+function cellOf(lat: number, lng: number): [number, number] {
+  return [Math.floor(lat / 0.00045), Math.floor(lng / 0.00057)];
 }
 
 export function installSanggaShopDedupe(map: MaplibreMap): () => void {
+  let hidden: Record<Group, Set<string>> = {
+    omt: new Set(),
+    sangga: new Set(),
+    tour: new Set(),
+  };
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const run = () => {
+
+  const layersOf = (group: Group) =>
+    (map.getStyle()?.layers ?? [])
+      .map((l) => l.id)
+      .filter((id) => id.startsWith(LAYER_PREFIX[group]) && map.getLayer(id));
+
+  const apply = (next: Record<Group, Set<string>>) => {
+    for (const group of Object.keys(LAYER_PREFIX) as Group[]) {
+      const names = [...next[group]].sort();
+      const part = names.length ? ["!", ["in", NAME_EXPR, ["literal", names]]] : null;
+      for (const id of layersOf(group)) setLayerFilterPart(map, id, OWNER, part);
+    }
+    hidden = next;
+  };
+
+  const collect = (): Pt[] => {
+    const canvas = map.getCanvas();
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const pts: Pt[] = [];
+    const take = (
+      source: string,
+      sourceLayer: string,
+      toPt: (p: Record<string, unknown>) => Pick<Pt, "group" | "rank"> | null,
+    ) => {
+      if (!map.getSource(source)) return;
+      let feats: ReturnType<MaplibreMap["querySourceFeatures"]> = [];
+      try {
+        feats = map.querySourceFeatures(source, { sourceLayer });
+      } catch {
+        return;
+      }
+      for (const f of feats) {
+        const g = f.geometry;
+        if (!g || g.type !== "Point") continue;
+        const props = (f.properties ?? {}) as Record<string, unknown>;
+        const raw = String(props["name:ko"] || props.name || "");
+        const norm = normalizeShopName(raw);
+        if (norm.length < 2) continue;
+        const kind = toPt(props);
+        if (!kind) continue;
+        const [lng, lat] = g.coordinates as [number, number];
+        let p: { x: number; y: number };
+        try {
+          p = map.project([lng, lat]);
+        } catch {
+          continue;
+        }
+        if (p.x < -MARGIN_PX || p.y < -MARGIN_PX || p.x > w + MARGIN_PX || p.y > h + MARGIN_PX) {
+          continue;
+        }
+        pts.push({ ...kind, raw, norm, lng, lat });
+      }
+    };
+    take("openmaptiles", "poi", (p) =>
+      p.class === "bus" || p.class === "railway" ? null : { group: "omt", rank: 2 },
+    );
+    take(KOREA_SANGGA_SOURCE, "sangga", () => ({ group: "sangga", rank: 1 }));
+    take(KOREA_TOUR_SOURCE, "tour", (p) =>
+      p.class === "shop" ? { group: "tour", rank: 3 } : { group: "tour", rank: 0 },
+    );
+    return pts;
+  };
+
+  const reconcile = () => {
+    if (map.getZoom() < MIN_ZOOM) {
+      if (hidden.omt.size || hidden.sangga.size || hidden.tour.size) {
+        apply({ omt: new Set(), sangga: new Set(), tour: new Set() });
+      }
+      return;
+    }
+    const raw = collect();
+
+    // Collapse tile-buffer copies (same group + name within a few metres).
+    const grid = new Map<string, Pt[]>();
+    const pts: Pt[] = [];
+    const key = (a: number, b: number) => `${a}:${b}`;
+    for (const p of raw) {
+      const [cy, cx] = cellOf(p.lat, p.lng);
+      let dup = false;
+      for (let dy = -1; dy <= 1 && !dup; dy++) {
+        for (let dx = -1; dx <= 1 && !dup; dx++) {
+          for (const q of grid.get(key(cy + dy, cx + dx)) ?? []) {
+            if (
+              q.group === p.group &&
+              q.rank === p.rank &&
+              q.raw === p.raw &&
+              haversineMeters(q.lng, q.lat, p.lng, p.lat) <= SAME_FEATURE_M
+            ) {
+              dup = true;
+              break;
+            }
+          }
+        }
+      }
+      if (dup) continue;
+      const k = key(cy, cx);
+      const list = grid.get(k);
+      if (list) list.push(p);
+      else grid.set(k, [p]);
+      pts.push(p);
+    }
+
+    const covered = (p: Pt): boolean => {
+      const [cy, cx] = cellOf(p.lat, p.lng);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (const q of grid.get(key(cy + dy, cx + dx)) ?? []) {
+            if (q.rank >= p.rank) continue;
+            if (!similar(q.norm, p.norm)) continue;
+            if (haversineMeters(q.lng, q.lat, p.lng, p.lat) <= DEDUP_M) return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    // name → all instances covered? (per group)
+    const verdict: Record<Group, Map<string, boolean>> = {
+      omt: new Map(),
+      sangga: new Map(),
+      tour: new Map(),
+    };
+    for (const p of pts) {
+      if (p.rank === 0) continue;
+      const m = verdict[p.group];
+      const prev = m.get(p.raw);
+      if (prev === false) continue;
+      m.set(p.raw, covered(p));
+    }
+    // A Tour attraction name never hides itself in the tour layers.
+    for (const p of pts) {
+      if (p.group === "tour" && p.rank === 0) verdict.tour.set(p.raw, false);
+    }
+
+    const next: Record<Group, Set<string>> = {
+      omt: new Set(),
+      sangga: new Set(),
+      tour: new Set(),
+    };
+    for (const group of Object.keys(verdict) as Group[]) {
+      for (const [name, all] of verdict[group]) if (all) next[group].add(name);
+    }
+    apply(next);
+
+    const stats: SourceDedupeStats = {
+      points: pts.length,
+      hidden: { omt: next.omt.size, sangga: next.sangga.size, tour: next.tour.size },
+      atMs: Date.now(),
+    };
+    try {
+      (
+        window as unknown as { __PINDMAP_SANGGA_DEDUPE__?: SourceDedupeStats }
+      ).__PINDMAP_SANGGA_DEDUPE__ = stats;
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const schedule = () => {
     if (timer) clearTimeout(timer);
-    // Debounce idle+moveend — typically ≤1 setFilter burst per gesture (~280ms)
     timer = setTimeout(() => {
       timer = null;
       try {
-        reconcileSanggaOmtShopDedupe(map);
+        reconcile();
       } catch {
         /* soft */
       }
-    }, 280);
+    }, 250);
   };
-  map.on("idle", run);
-  map.on("moveend", run);
-  run();
+  map.on("idle", schedule);
+  map.on("moveend", schedule);
+  schedule();
   return () => {
     if (timer) clearTimeout(timer);
-    map.off("idle", run);
-    map.off("moveend", run);
-    // Restore base filters
-    for (const [id, base] of baseFilterByLayer) {
-      try {
-        if (map.getLayer(id)) map.setFilter(id, base as never);
-      } catch {
-        /* ignore */
-      }
-    }
-    baseFilterByLayer.clear();
+    map.off("idle", schedule);
+    map.off("moveend", schedule);
+    clearLayerFilterOwner(map, OWNER);
   };
 }

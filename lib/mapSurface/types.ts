@@ -108,6 +108,12 @@ export type ExpandedMapSurface = CompactMapSurface & {
   } | null;
   project: (lat: number, lng: number) => { x: number; y: number } | null;
   unproject: (x: number, y: number) => MapLatLng | null;
+  /** E2E / QA: screen point (map px) of a rendered place label of these kinds. */
+  findRenderedMapPoi: (
+    kinds: Array<"shop" | "sangga" | "tour" | "landmark" | "park" | "station" | "bus">,
+  ) => { x: number; y: number; name: string; kind: string } | null;
+  /** E2E / QA: exact MapLibre zoom jump (no Kakao level rounding). */
+  jumpToZoom: (lat: number, lng: number, zoom: number) => void;
   setSearchPins: (pins: SearchPinInput[]) => void;
   clearSearchPins: () => void;
   /** Admin discover layer (WebGL). Empty / missing data → clear. */

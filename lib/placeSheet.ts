@@ -34,8 +34,14 @@ export type PlaceSheetData = {
   _feedPosts?: PlaceSheetFeedPost[];
   _savedPlaceId?: string;
   _placeRef?: PlaceRefForPhotoTagMatch;
-  /** places.source — admin MapLibre sheet phone gate */
-  _placeSource?: "kakao" | "user" | "poi" | null;
+  /** places.source — admin MapLibre sheet phone gate ("map" = tapped basemap label) */
+  _placeSource?: "kakao" | "user" | "poi" | "map" | null;
+  /** Admin map tap: 상가 층정보 / building_kr house number / details loading */
+  _mapFloor?: string | null;
+  _mapBuildingNo?: string | null;
+  _mapDetailLoading?: boolean;
+  /** Admin map tap: distinct PindMap users with a same-name place ≤100m */
+  _mapSaveCount?: number | null;
   /** public.poi.phone (never copied onto places) */
   _poiPhone?: string | null;
   /** public.poi.closed_at ISO date (never copied onto places / bootstrap cache) */

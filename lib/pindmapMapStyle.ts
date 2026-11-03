@@ -19,6 +19,7 @@ import {
 } from "@/lib/koreaPlaceLabels";
 import { KOREA_LANDMARK_NAME_BLOCKLIST } from "@/lib/mapSurface/koreaLandmarkNameBlocklist";
 import { labelNameBlocklistVariants } from "@/lib/mapSurface/labelNameDedup";
+import { HIDDEN_SANGGA_CLASSES } from "@/lib/mapSurface/poiCategoryMapping";
 import {
   ADMIN_VARIABLE_ANCHOR,
   DONG_TEXT,
@@ -1460,6 +1461,51 @@ function appendSanggaShopLayers(
       ],
     },
   ];
+
+  // Street services (정비·철물·수리·중고·기타): z17+, pushed first so every
+  // other label places before them (lowest priority, overlap=0).
+  layers.push({
+    id: "sangga_shop_label_z17_hidden",
+    type: "symbol",
+    source: KOREA_SANGGA_SOURCE,
+    "source-layer": "sangga",
+    minzoom: 17,
+    filter: [
+      "all",
+      hasName,
+      ["in", ["get", "class"], ["literal", [...HIDDEN_SANGGA_CLASSES]]],
+    ],
+    layout: {
+      visibility: "visible",
+      "icon-image": poiSpriteIcon(),
+      "icon-size": 0.9,
+      "icon-padding": 0.5,
+      "icon-optional": false,
+      "text-field": POI_NAME_TEXT,
+      "text-font": ["Noto Sans Regular"],
+      "text-size": SHOP_TEXT_SIZE,
+      "text-variable-anchor": [...POI_VARIABLE_ANCHOR],
+      "text-radial-offset": ICON_TEXT_RADIAL_OFFSET,
+      "text-justify": "auto",
+      "text-max-width": POI_TEXT_MAX_WIDTH,
+      "text-padding": 2,
+      "text-optional": false,
+      "text-allow-overlap": false,
+      "text-ignore-placement": false,
+      "icon-allow-overlap": false,
+      "icon-ignore-placement": false,
+      "symbol-sort-key": ["+", 2000, ["to-number", ["coalesce", ["get", "rank"], 99]]],
+      "symbol-z-order": "source",
+    },
+    paint: {
+      "text-color": streetColor,
+      "text-opacity": 1,
+      "text-halo-color": "#FFFFFF",
+      "text-halo-width": 1.75,
+      "text-halo-blur": 0,
+      "icon-opacity": 1,
+    },
+  });
 
   for (const band of bands) {
     const layerSpec: AnyLayer = {

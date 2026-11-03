@@ -123,6 +123,17 @@ function glyphInner(cat: PoiMapCategoryId, c: string): string {
       return `<text x="12" y="16.4" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-size="14" font-weight="800" fill="#fff">P</text>`;
     case "subway":
       return `<circle cx="12" cy="12" r="5.2" fill="none" stroke="#fff" stroke-width="2.2"/><circle cx="12" cy="12" r="2.2" fill="#fff"/>`;
+    case "car_repair":
+      // Open-end wrench
+      return `<path fill="#fff" d="M16 3a5 5 0 0 0-4.8 6.4l-7.6 7.6a2.2 2.2 0 0 0 3.1 3.1l7.6-7.6A5 5 0 0 0 20.8 7.2l-3 3-2.6-.5-.5-2.6 3-3A5 5 0 0 0 16 3z"/>`;
+    case "tools":
+      // Claw hammer
+      return `<g transform="rotate(-45 12 12)"><rect x="10.7" y="9.2" width="2.6" height="12.6" rx="1.1" fill="#fff"/><path fill="#fff" d="M6 4.2h9.6a1.2 1.2 0 0 1 1.2 1.2v3.1a1.2 1.2 0 0 1-1.2 1.2H6z"/><path fill="#fff" d="M16.8 5.2 20 4v5.4l-3.2-1.2z"/></g>`;
+    case "second_hand":
+      // Two chasing arrows (reuse)
+      return `<path fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" d="M18.6 10A7 7 0 0 0 6.6 7.2"/><path fill="#fff" d="M4.2 4.4l.9 5.8 5.2-2.4z"/><path fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" d="M5.4 14a7 7 0 0 0 12 2.8"/><path fill="#fff" d="M19.8 19.6l-.9-5.8-5.2 2.4z"/>`;
+    case "misc_service":
+      return `<circle cx="6.4" cy="12" r="2.1" fill="#fff"/><circle cx="12" cy="12" r="2.1" fill="#fff"/><circle cx="17.6" cy="12" r="2.1" fill="#fff"/>`;
     default:
       return `<circle cx="12" cy="12" r="3.2" fill="#fff"/>`;
   }
@@ -391,6 +402,14 @@ export function poiCategoryIconImageExpr(): unknown {
     poiIconImageId("subway"),
     ["==", ["get", "class"], "bus"],
     poiIconImageId("bus"),
+    ["==", ["get", "class"], "car_repair"],
+    poiIconImageId("car_repair"),
+    ["any", ["==", ["get", "class"], "hardware"], ["==", ["get", "class"], "repair"]],
+    poiIconImageId("tools"),
+    ["==", ["get", "class"], "second_hand"],
+    poiIconImageId("second_hand"),
+    ["==", ["get", "class"], "misc_service"],
+    poiIconImageId("misc_service"),
     [
       "any",
       ["==", ["get", "class"], "clothes"],
@@ -548,6 +567,14 @@ export function poiCategoryTextColorExpr(themeId: string): unknown {
       ["==", ["get", "class"], "theater"],
     ],
     c("landmark"),
+    ["==", ["get", "class"], "car_repair"],
+    c("car_repair"),
+    ["any", ["==", ["get", "class"], "hardware"], ["==", ["get", "class"], "repair"]],
+    c("tools"),
+    ["==", ["get", "class"], "second_hand"],
+    c("second_hand"),
+    ["==", ["get", "class"], "misc_service"],
+    c("misc_service"),
     [
       "any",
       ["==", ["get", "class"], "shop"],
