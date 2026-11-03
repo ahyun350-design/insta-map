@@ -292,8 +292,12 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
     } catch {
       /* ignore */
     }
+    // Only collision top-ups consume rounds; re-picks caused by tile loads or the
+    // dedupe pass changing the candidate set must not exhaust the budget.
     if (fromIdle && allowBand === band && rounds < MAX_ROUNDS) {
+      const before = skip.size;
       for (const c of allow) if (!rendered.has(c.name)) skip.add(`${c.layerOrder}|${c.name}`);
+      if (skip.size > before) rounds += 1;
     }
 
     const candidates = collectCandidates(band);
@@ -331,7 +335,6 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
       chosen.length !== allow.length ||
       chosen.some((c) => !prevKeys.has(slotKey(c)));
     if (changed) {
-      rounds += 1;
       applyAllow(band, layerIds, chosen);
     }
 
