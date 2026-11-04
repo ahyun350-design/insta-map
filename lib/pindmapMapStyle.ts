@@ -2372,37 +2372,43 @@ function softenLowZoomWidth(width: unknown): unknown {
 }
 
 /**
- * Paper street-zoom fill widths (z17 px; Kakao-like steps). z15 / z16 / z18 keep
- * the same ratios between classes. Casing adds a thin border except on service.
+ * Paper street-zoom fill widths (z16 px). Three readable tiers, Kakao-like:
+ * yellow arterials → wide white streets with a visible border → thin white
+ * alleys without border. z15 / z17 / z18 keep the same ratios between classes.
  */
-const PAPER_STREET_FILL_Z17: Partial<Record<RoadKind, number>> = {
-  motorway: 16,
-  trunk: 16,
-  primary: 13,
-  secondary: 10,
-  tertiary: 8,
-  minor: 5,
-  service: 3,
+const PAPER_STREET_FILL_Z16: Partial<Record<RoadKind, number>> = {
+  motorway: 13,
+  trunk: 13,
+  primary: 11,
+  secondary: 9,
+  tertiary: 7,
+  minor: 4.5,
+  service: 2,
+  path: 1.5,
 };
 const PAPER_STREET_ZOOM_SCALE: Array<[number, number]> = [
-  [15, 0.45],
-  [16, 0.68],
-  [17, 1],
-  [18, 1.4],
+  [15, 0.7],
+  [16, 1],
+  [17, 1.4],
+  [18, 1.85],
 ];
+/** Alleys: white, no border (casing drawn white at fill width). */
+const PAPER_BORDERLESS: ReadonlySet<RoadKind> = new Set(["service", "path"]);
 
 /** Keep the expression's own stops below z15, then the paper street ladder. */
 function paperStreetWidth(base: unknown, kind: RoadKind, casing: boolean): unknown {
-  const z17 = PAPER_STREET_FILL_Z17[kind];
-  if (z17 == null || !Array.isArray(base) || base[0] !== "interpolate") return base;
-  const out: unknown[] = base.slice(0, 3);
-  for (let i = 3; i + 1 < base.length; i += 2) {
-    if (Number(base[i]) < 15) out.push(base[i], base[i + 1]);
+  const z16 = PAPER_STREET_FILL_Z16[kind];
+  if (z16 == null) return base;
+  const out: unknown[] = ["interpolate", ["exponential", 1.2], ["zoom"]];
+  if (Array.isArray(base) && base[0] === "interpolate") {
+    for (let i = 3; i + 1 < base.length; i += 2) {
+      if (Number(base[i]) < 15) out.push(base[i], base[i + 1]);
+    }
   }
   for (const [z, s] of PAPER_STREET_ZOOM_SCALE) {
-    const fill = z17 * s;
-    // Border ≈1–1.2px each side; service draws no visible border.
-    const w = casing && kind !== "service" ? fill + (z >= 17 ? 2.4 : 2) : fill;
+    const fill = z16 * s;
+    // Border ≈1.2–1.5px each side so streets read against #F2F2F0 land.
+    const w = casing && !PAPER_BORDERLESS.has(kind) ? fill + (z >= 17 ? 3 : 2.4) : fill;
     out.push(z, Number(w.toFixed(2)));
   }
   return out;
@@ -2420,7 +2426,7 @@ function roadFillColor(
       return paperArterialColor("#FBDDB5", "#F9C78A");
     }
     if (kind === "primary") return paperArterialColor("#FDF0C8", "#FCE3A0");
-    if (kind === "secondary") return "#FFF6D6";
+    if (kind === "secondary") return "#FFE9A8";
     return "#FFFFFF";
   }
   if (theme.id === "white") {
@@ -2449,10 +2455,10 @@ function roadCasingColor(
     }
     if (kind === "primary") return paperArterialColor("#EEDDA6", "#E9C878");
     if (arterial) return "#C8C8C8";
-    if (kind === "secondary") return "#E8DCAE";
-    if (kind === "tertiary") return "#D0D0D0";
-    // Service / alleys: casing = fill colour + same width → no visible border.
-    if (kind === "service") return "#FFFFFF";
+    if (kind === "secondary") return "#E3C46E";
+    if (kind === "tertiary" || kind === "minor") return "#CFCFC9";
+    // Service / path alleys: casing = fill colour + same width → no visible border.
+    if (kind === "service" || kind === "path") return "#FFFFFF";
     return "#D8D8D8";
   }
   if (theme.id === "white") {
@@ -2471,9 +2477,18 @@ function applyGuideRoadStyle(
   casing: boolean,
   colorKind: RoadKind = kind,
 ) {
-  // Hide mountain/foot path dashes entirely (always-hidden rule).
+  // Paths: hidden, except paper z16+ thin white alleys (no dash, no border).
   if (kind === "path") {
-    setVisibility(layer, false);
+    if (theme.id !== "paper" || layer.type !== "line") {
+      setVisibility(layer, false);
+      return;
+    }
+    layer.minzoom = Math.max(layer.minzoom ?? 0, 16);
+    paintSet(layer, "line-color", "#FFFFFF");
+    paintSet(layer, "line-opacity", 1);
+    paintSet(layer, "line-width", paperStreetWidth(null, "path", casing));
+    if (layer.paint) delete layer.paint["line-dasharray"];
+    setVisibility(layer, true);
     return;
   }
   layer.minzoom = Math.max(layer.minzoom ?? 0, roadMinZoom(kind));
