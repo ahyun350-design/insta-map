@@ -2337,6 +2337,9 @@ function HomePageContent() {
   const expandedMlLocateInFlightRef = useRef(false);
   const expandedMlFollowMyLocationRef = useRef(false);
   const [expandedMlFollowMyLocation, setExpandedMlFollowMyLocation] = useState(false);
+  /** Admin MapLibre expanded: map bearing (compass shows when not north-up). */
+  const [expandedMlBearing, setExpandedMlBearing] = useState(0);
+  const expandedMlBearingUnsubRef = useRef<(() => void) | null>(null);
   /** Brief locate spinner while waiting for first GPS (no cached position). */
   const [expandedMlLocateLoading, setExpandedMlLocateLoading] = useState(false);
   /** 확장 지도 직접 검색 시 Location bias — addMyLocation 성공 시 저장, 없으면 지도 center */
@@ -13627,6 +13630,12 @@ function HomePageContent() {
             }
             addMyLocation(expandedMapRef.current, "expanded");
             setExpandedMapPinsTick((n) => n + 1);
+            expandedMlBearingUnsubRef.current?.();
+            setExpandedMlBearing(0);
+            expandedMlBearingUnsubRef.current =
+              getExpandedMapLibreAdapter(expandedMapRef.current)?.onBearingChange((b) =>
+                setExpandedMlBearing(Math.round(b * 10) / 10),
+              ) ?? null;
             if (showCourseRouteRef.current) {
               window.setTimeout(() => void drawCourseRoute(), 200);
             }
@@ -13654,6 +13663,9 @@ function HomePageContent() {
                     kinds: Parameters<ExpandedMapSurface["findRenderedMapPoi"]>[0],
                   ) => ReturnType<ExpandedMapSurface["findRenderedMapPoi"]>;
                   jumpToZoom?: (lat: number, lng: number, zoom: number) => void;
+                  setBearing?: (deg: number) => void;
+                  getBearing?: () => number;
+                  getCenter?: () => { lat: number; lng: number } | null;
                 };
               };
               const prev = w.__PINDMAP_EXPANDED_GL__;
@@ -13688,6 +13700,12 @@ function HomePageContent() {
                 findMapPoi: (kinds) =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.findRenderedMapPoi(kinds) ??
                   null,
+                setBearing: (deg) =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.setBearing(deg),
+                getBearing: () =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.getBearing() ?? 0,
+                getCenter: () =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.getCenter() ?? null,
                 jumpToZoom: (lat, lng, zoom) =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.jumpToZoom(lat, lng, zoom),
               };
@@ -18584,6 +18602,39 @@ function HomePageContent() {
                         </>
                       )}
                       <MapResearchAreaButton visible={showMapResearchButton} onResearch={handleResearchThisArea} />
+                      {adminExpandedMlPortal &&
+                        (() => {
+                          const b = ((expandedMlBearing % 360) + 360) % 360;
+                          if (b < 0.5 || b > 359.5) return null;
+                          return (
+                            <button
+                              type="button"
+                              className={[
+                                "expandedMapLibreCompassBtn",
+                                selectedPlace || isMapSearchSheetOpen ? "is-sheet-open" : "",
+                                adminMapLibreTheme === "neon" ? "is-neon" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                              aria-label="북쪽으로 돌리기"
+                              data-testid="expanded-maplibre-compass"
+                              onClick={() =>
+                                getExpandedMapLibreAdapter(expandedMapRef.current)?.resetNorth(300)
+                              }
+                            >
+                              <svg
+                                width="22"
+                                height="22"
+                                viewBox="0 0 24 24"
+                                aria-hidden
+                                style={{ transform: `rotate(${-expandedMlBearing}deg)` }}
+                              >
+                                <path d="M12 2.5 16 12h-8z" fill="#E5484D" />
+                                <path d="M12 21.5 8 12h8z" fill="currentColor" />
+                              </svg>
+                            </button>
+                          );
+                        })()}
                       {adminExpandedMlPortal && (
                         <button
                           type="button"

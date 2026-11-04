@@ -395,7 +395,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       center: [options.center.lng, options.center.lat],
       zoom: kakaoLevelToMapLibreZoom(options.level),
       attributionControl: false,
-      dragRotate: false,
+      // Expanded admin map: rotate (two-finger / right- or ctrl-drag); never tilt.
+      dragRotate: this.mode === "expanded",
       pitchWithRotate: false,
       touchPitch: false,
       pitch: 0,
@@ -430,7 +431,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         /* load handler retries */
       }
     })();
-    map.touchZoomRotate.disableRotation();
+    if (this.mode === "expanded") map.touchZoomRotate.enableRotation();
+    else map.touchZoomRotate.disableRotation();
     this.installEdgeGestureGuard(map);
     this.installAttribution(options.container);
     const canvas = map.getCanvas();
@@ -2129,6 +2131,33 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   jumpToZoom(lat: number, lng: number, zoom: number) {
     this.map?.jumpTo({ center: [lng, lat], zoom });
+  }
+
+  getBearing(): number {
+    return this.map?.getBearing() ?? 0;
+  }
+
+  /** Compass: ease back to north (keeps center / zoom). */
+  resetNorth(durationMs = 300) {
+    this.map?.easeTo({ bearing: 0, duration: durationMs });
+  }
+
+  /** E2E / QA: exact bearing (degrees). */
+  setBearing(deg: number) {
+    this.map?.jumpTo({ bearing: deg });
+  }
+
+  /** Bearing updates while rotating and after rotate / move end. */
+  onBearingChange(cb: (bearing: number) => void): () => void {
+    const map = this.map;
+    if (!map) return () => undefined;
+    const fire = () => cb(map.getBearing());
+    map.on("rotate", fire);
+    map.on("moveend", fire);
+    return () => {
+      map.off("rotate", fire);
+      map.off("moveend", fire);
+    };
   }
 
   setDiscoverPins(pins: DiscoverPinInput[]) {
