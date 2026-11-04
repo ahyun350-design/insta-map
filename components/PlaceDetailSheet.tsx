@@ -76,6 +76,17 @@ type Props = {
 
 const LIGHT_PIN_CATEGORIES = new Set(["카페", "쇼핑", "숙소", "놀거리", "여행지"]);
 
+/** 상가 층정보: "1" → 1층, "지"/"B1" → 지하, others as given. */
+function formatSanggaFloor(raw: string | null | undefined): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return `${s}층`;
+  if (s === "지" || s === "지하") return "지하";
+  const b = /^(?:B|지하)\s*(\d+)$/i.exec(s);
+  if (b) return `지하 ${b[1]}층`;
+  return s;
+}
+
 function PlaceDetailCurationImages({
   entries,
   onImageSelect,
@@ -171,10 +182,14 @@ export function PlaceDetailSheet({
   const lat = parseFloat(String(place.y ?? ""));
   const lng = parseFloat(String(place.x ?? ""));
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
+  // Basemap-label taps exist only on the (admin) MapLibre expanded map.
+  const isMapTap = place._placeSource === "map";
   const adminPoiPhone =
     showAdminMapExtras && place._placeSource === "poi"
       ? displayablePhone(place._poiPhone)
-      : null;
+      : isMapTap
+        ? displayablePhone(place.phone)
+        : null;
   const adminClosedMonth =
     showAdminMapExtras && place._placeSource === "poi"
       ? formatPoiClosedAtMonthLabel(place._poiClosedAt)
@@ -327,6 +342,8 @@ export function PlaceDetailSheet({
                 </ul>
               ) : null}
             </div>
+          ) : isMapTap && place._mapCategoryLabel ? (
+            <p className="placeDetailSheetCategory">{place._mapCategoryLabel}</p>
           ) : currentCategory ? (
             <p className="placeDetailSheetCategory">{categoryLabel}</p>
           ) : null}
@@ -359,6 +376,31 @@ export function PlaceDetailSheet({
             <span className="placeDetailSheetValue">{place.road_address_name}</span>
           </div>
         )}
+        {isMapTap && (place._mapFloor || place._mapBuildingNo) ? (
+          <div className="placeDetailSheetRow" data-testid="map-place-floor">
+            <span className="placeDetailSheetLabel">위치</span>
+            <span className="placeDetailSheetValue">
+              {[
+                formatSanggaFloor(place._mapFloor),
+                place._mapBuildingNo ? `건물 ${place._mapBuildingNo}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </div>
+        ) : null}
+        {isMapTap ? (
+          <div className="placeDetailSheetRow" data-testid="map-place-saves">
+            <span className="placeDetailSheetLabel">핀맵</span>
+            <span className="placeDetailSheetValue">
+              {place._mapDetailLoading
+                ? "정보 불러오는 중…"
+                : typeof place._mapSaveCount === "number"
+                  ? `${place._mapSaveCount}명이 저장`
+                  : "저장 정보 없음"}
+            </span>
+          </div>
+        ) : null}
         {showAdminMapExtras
           ? adminPoiPhone && (
               <div className="placeDetailSheetRow placeDetailSheetRowCenter">
@@ -381,7 +423,7 @@ export function PlaceDetailSheet({
             카카오맵에서 영업시간 보기
           </a>
         )}
-        {showAdminMapExtras && hasCoordinates && onOpenExternalMapUrl ? (
+        {(showAdminMapExtras || isMapTap) && hasCoordinates && onOpenExternalMapUrl ? (
           <div className="placeDetailSheetExternalMaps">
             <button
               type="button"
@@ -406,15 +448,18 @@ export function PlaceDetailSheet({
             >
               네이버 지도에서 보기
             </button>
-            <button
-              type="button"
-              className="placeDetailSheetExternalMapBtn"
-              onClick={() =>
-                onOpenExternalMapUrl(buildKakaoTransitUrl(place.place_name, lat, lng))
-              }
-            >
-              대중교통 길찾기
-            </button>
+            {/* Bottom 대중교통 mode button already opens Kakao transit — no duplicate. */}
+            {!(showDirections && onOpenTransit) ? (
+              <button
+                type="button"
+                className="placeDetailSheetExternalMapBtn"
+                onClick={() =>
+                  onOpenExternalMapUrl(buildKakaoTransitUrl(place.place_name, lat, lng))
+                }
+              >
+                대중교통 길찾기
+              </button>
+            ) : null}
           </div>
         ) : null}
 

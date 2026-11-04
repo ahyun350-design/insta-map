@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "scripts" / "localdata" / "raw_sangga"
 OUT_DIR = Path(os.environ.get("OUT_DIR", str(ROOT / "build" / "tiles")))
 SEQ_PATH = OUT_DIR / "sangga.geojsonseq"
-PMTILES = OUT_DIR / "korea-sangga.pmtiles"
+PMTILES = OUT_DIR / os.environ.get("PMTILES_NAME", "korea-sangga-v2.pmtiles")
 SUMMARY = OUT_DIR / "sangga-build-summary.json"
 
 # 대분류 전체 제외
@@ -43,6 +43,7 @@ EXCLUDE_DAE = frozenset(
 REPAIR_INCLUDE_JUNG = frozenset({"이용·미용", "세탁", "욕탕·신체관리"})
 
 # 소매 중 제외(부품·가정용연료·담배·중고차 등). 주유·LPG·충전은 map_category에서 별도 포함.
+# HIDDEN_RETAIL_JUNG 에 있는 중분류는 z17+ 전용 class 로 먼저 매핑된다.
 RETAIL_EXCLUDE_JUNG = frozenset(
     {
         "자동차 부품 소매",
@@ -73,6 +74,37 @@ def clean_name(mutual: str, branch: str) -> str | None:
     return m if len(m) >= 2 else None
 
 
+# Street-level services shown only at z17+ (lowest rank → placed last).
+HIDDEN_REPAIR_JUNG = {
+    "자동차 수리·세차": ("car_repair", None, 90),
+    "모터사이클 수리": ("car_repair", "motorcycle", 92),
+    "가전제품 수리": ("repair", None, 91),
+    "컴퓨터 수리": ("repair", None, 92),
+    "통신장비 수리": ("repair", None, 93),
+    "기타 가정용품 수리": ("repair", None, 94),
+    "장례식장": ("misc_service", None, 96),
+    "기타 개인": ("misc_service", None, 97),
+}
+HIDDEN_RETAIL_JUNG = {
+    "철물·건설자재 소매": ("hardware", None, 91),
+    "자동차 부품 소매": ("car_repair", "parts", 93),
+    "모터사이클 소매": ("car_repair", "motorcycle", 94),
+    "중고 상품 소매": ("second_hand", None, 92),
+    "담배 소매": ("misc_service", "tobacco", 97),
+}
+HIDDEN_CLASSES = frozenset(
+    c for c, _s, _r in [*HIDDEN_REPAIR_JUNG.values(), *HIDDEN_RETAIL_JUNG.values()]
+)
+
+
+def map_hidden_repair(jung: str) -> tuple[str, str | None, int] | None:
+    return HIDDEN_REPAIR_JUNG.get(jung)
+
+
+def map_hidden_retail(jung: str) -> tuple[str, str | None, int] | None:
+    return HIDDEN_RETAIL_JUNG.get(jung)
+
+
 def map_category(
     dae: str, jung: str, so: str
 ) -> tuple[str, str | None, int] | None:
@@ -83,6 +115,9 @@ def map_category(
         return None
 
     if dae == "수리·개인":
+        hidden = map_hidden_repair(jung)
+        if hidden:
+            return hidden
         if jung not in REPAIR_INCLUDE_JUNG:
             return None
         if jung == "이용·미용":
@@ -132,6 +167,9 @@ def map_category(
             if "충전" in so or "LPG" in so.upper() or "전기" in so:
                 return ("fuel", None, 48)
             return None
+        hidden = map_hidden_retail(jung)
+        if hidden:
+            return hidden
         if jung in RETAIL_EXCLUDE_JUNG:
             return None
         if jung == "종합 소매":

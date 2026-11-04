@@ -280,6 +280,12 @@ import {
 } from "@/lib/useEdgeSwipeBack";
 import { pushInAppRoute } from "@/lib/safeRouterBack";
 import {
+  mapTapBadge,
+  mapTapCategoryLabel,
+  type MapPoiTap,
+} from "@/lib/mapSurface/mapPoiTap";
+import type { ExpandedMapSurface } from "@/lib/mapSurface";
+import {
   adminMapGlOverrideLabel,
   createCompactMapLibreShim,
   createExpandedMapLibreShim,
@@ -472,6 +478,8 @@ const EMPTY_CATEGORY_COUNTS = Object.fromEntries(
 /** 카카오/검색 `category_name` 기반 자동 카테고리 */
 function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): Category {
   const n = categoryName ?? "";
+  // Admin map-tap cards carry an app category verbatim (Kakao names are paths).
+  if ((FEED_POST_CATEGORIES as readonly string[]).includes(n)) return n as Category;
   if (n.includes("> 술집 >")) return "술집";
   if (n.includes("카페")) return "카페";
   if (n.includes("음식") || n.includes("맛집")) return "맛집";
@@ -498,6 +506,29 @@ function inferCategoryFromKakaoCategoryName(categoryName: string | undefined): C
   }
   return "쇼핑";
 }
+/** Admin map-tap card: app category + fine label from the tapped label's class. */
+function mapTapCategory(tap: MapPoiTap): { category: Category; sub: string | null } {
+  const c = tap.cls ?? "";
+  if (tap.kind === "station") return { category: "여행지", sub: "지하철역" };
+  if (tap.kind === "bus") return { category: "여행지", sub: "버스정류장" };
+  if (tap.kind === "park" || c === "park" || c === "playground") {
+    return { category: "여행지", sub: "공원" };
+  }
+  if (["cafe", "bakery", "ice_cream", "pastry", "confectionery"].includes(c)) {
+    return { category: "카페", sub: null };
+  }
+  if (["restaurant", "fast_food"].includes(c)) return { category: "맛집", sub: null };
+  if (["bar", "beer", "pub", "alcohol", "wine"].includes(c)) return { category: "술집", sub: null };
+  if (["lodging", "hotel"].includes(c)) return { category: "숙소", sub: null };
+  if (["cinema", "theatre", "theater", "sports", "stadium"].includes(c)) {
+    return { category: "놀거리", sub: null };
+  }
+  if (tap.kind === "landmark" || (tap.kind === "tour" && c !== "shop")) {
+    return { category: "여행지", sub: null };
+  }
+  return { category: "쇼핑", sub: null };
+}
+
 type Place = {
   id: string;
   name: string;
@@ -2834,6 +2865,10 @@ function HomePageContent() {
       document.querySelector<HTMLElement>(".placeDetailSheetEmbedded") ||
       document.querySelector<HTMLElement>(".placeDetailSheet");
     const h = el?.getBoundingClientRect().height ?? 0;
+    // Expanded MapLibre corner credit rides on the card's top edge (CSS var).
+    if (h > 80) {
+      document.documentElement.style.setProperty("--pindmap-expanded-card-h", `${Math.round(h)}px`);
+    }
     if (h > 80) return Math.round(h + 24);
     return 280;
   }, []);
@@ -8265,6 +8300,7 @@ function HomePageContent() {
       lng: number,
       category: Category,
       listPresetId?: string | null,
+      badge?: { key: string; svg: string; fill: string } | null,
     ) => {
       if (scope === "main" && isCompactMapLibre(map)) {
         const fillColor = resolveListColor(listPresetId) ?? resolvePinColor(category);
@@ -8281,13 +8317,15 @@ function HomePageContent() {
         return;
       }
       if (scope === "expanded" && isExpandedMapLibre(map)) {
-        const fillColor = resolveListColor(listPresetId) ?? resolvePinColor(category);
+        const fillColor =
+          badge?.fill ?? resolveListColor(listPresetId) ?? resolvePinColor(category);
         void map.adapter.setFocusMarker({
           id: FOCUS_PLACE_MARKER_ID,
           lat,
           lng,
           category,
           fillColor,
+          ...(badge ? { badge: { key: badge.key, svg: badge.svg } } : {}),
         });
         focusPlaceMarkerRef.current.expanded = {
           setMap: () => map.adapter.clearFocusMarker(),
@@ -8349,7 +8387,13 @@ function HomePageContent() {
 
   /** 저장 핀과 별도 임시 강조 마커 (미니맵 + 확장 웹 + 네이티브) */
   const showFocusPlaceMarker = useCallback(
-    (lat: number, lng: number, category: Category, listPresetId?: string | null) => {
+    (
+      lat: number,
+      lng: number,
+      category: Category,
+      listPresetId?: string | null,
+      badge?: { key: string; svg: string; fill: string } | null,
+    ) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       focusPlaceCoordsRef.current = { lat, lng, category, listPresetId: listPresetId ?? null };
       if (mapRef.current) {
@@ -8363,6 +8407,7 @@ function HomePageContent() {
           lng,
           category,
           listPresetId,
+          badge,
         );
       }
       syncFocusPlaceMarkerToNative(lat, lng, category, listPresetId);
@@ -12396,6 +12441,93 @@ function HomePageContent() {
   }, [showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom]);
   const openExpandedSearchPlaceCardRef = useRef(openExpandedSearchPlaceCard);
   openExpandedSearchPlaceCardRef.current = openExpandedSearchPlaceCard;
+
+  /**
+   * Admin MapLibre: tapped basemap label → same place card as search hits.
+   * Opens at once from the label, then fills 상가 address/floor, Kakao phone/link
+   * (display only — never stored) and the PindMap save count from /api/admin/map-place.
+   */
+  const mapPoiRequestRef = useRef(0);
+  const openMapPoiPlaceCard = useCallback((tap: MapPoiTap) => {
+    const reqId = ++mapPoiRequestRef.current;
+    const { category, sub } = mapTapCategory(tap);
+    const base: PlaceSheetData = {
+      place_name: tap.name,
+      category_name: category,
+      subcategory: sub,
+      road_address_name: "",
+      address_name: "",
+      phone: "",
+      place_url: "",
+      y: String(tap.lat),
+      x: String(tap.lng),
+      _placeSource: "map",
+      _mapBuildingNo: tap.buildingNo,
+      _mapCategoryLabel: mapTapCategoryLabel(tap),
+      _mapDetailLoading: true,
+    };
+    const ref = placeRefFromKakaoPlace(base);
+    setIsMapSearchSheetOpen(false);
+    setSelectedPlace({
+      ...base,
+      _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, ref),
+      _placeRef: ref,
+    });
+    showFocusPlaceMarker(tap.lat, tap.lng, category, null, mapTapBadge(tap));
+    // Keep the user's zoom; only pan so the place sits above the card.
+    const level = getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? 3;
+    const applyPaddedCamera = () => {
+      const pad = measureExpandedPlaceCardPaddingBottom();
+      applyExpandedMapCameraLatLng(tap.lat, tap.lng, level, { paddingBottom: pad });
+    };
+    scheduleExpandedMapCamera(applyPaddedCamera);
+    window.setTimeout(applyPaddedCamera, 140);
+
+    void (async () => {
+      type Detail = {
+        sangga: { roadAddress: string | null; floor: string | null; indS: string | null } | null;
+        kakao: { phone: string | null; placeUrl: string | null } | null;
+        savedUsers: number | null;
+      };
+      let detail: Detail | null = null;
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          const res = await fetch("/api/admin/map-place", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ name: tap.name, lat: tap.lat, lng: tap.lng, kind: tap.kind }),
+          });
+          if (res.ok) detail = (await res.json()) as Detail;
+        }
+      } catch {
+        detail = null;
+      }
+      if (reqId !== mapPoiRequestRef.current) return;
+      setSelectedPlace((prev: PlaceSheetData | null) => {
+        if (!prev || prev._placeSource !== "map" || prev.place_name !== tap.name) return prev;
+        return {
+          ...prev,
+          road_address_name: detail?.sangga?.roadAddress || "",
+          subcategory: detail?.sangga?.indS || prev.subcategory || null,
+          phone: detail?.kakao?.phone || "",
+          place_url: detail?.kakao?.placeUrl || "",
+          _mapFloor: detail?.sangga?.floor || null,
+          _mapSaveCount: detail?.savedUsers ?? null,
+          _mapDetailLoading: false,
+        };
+      });
+      // Card grew with the detail rows — keep the corner credit on its top edge.
+      window.setTimeout(() => measureExpandedPlaceCardPaddingBottom(), 80);
+    })();
+  }, [showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom]);
+  const openMapPoiPlaceCardRef = useRef(openMapPoiPlaceCard);
+  openMapPoiPlaceCardRef.current = openMapPoiPlaceCard;
   const toSelectedFromSavedPlaceRef = useRef(toSelectedFromSavedPlace);
   toSelectedFromSavedPlaceRef.current = toSelectedFromSavedPlace;
 
@@ -13459,6 +13591,9 @@ function HomePageContent() {
           onDiscoverPinClick: (poiId) => {
             void openDiscoverPlaceSheetRef.current(poiId);
           },
+          onMapPoiClick: (tap) => {
+            openMapPoiPlaceCardRef.current(tap);
+          },
           onCourseStopClick: (stopId) => {
             const hit =
               courseResult?.find((p, idx) => p.id === stopId || stopId === `course-${idx}`) ??
@@ -13515,6 +13650,10 @@ function HomePageContent() {
                     height: number;
                     width: number;
                   } | null;
+                  findMapPoi?: (
+                    kinds: Parameters<ExpandedMapSurface["findRenderedMapPoi"]>[0],
+                  ) => ReturnType<ExpandedMapSurface["findRenderedMapPoi"]>;
+                  jumpToZoom?: (lat: number, lng: number, zoom: number) => void;
                 };
               };
               const prev = w.__PINDMAP_EXPANDED_GL__;
@@ -13546,6 +13685,11 @@ function HomePageContent() {
                     width: r.width,
                   };
                 },
+                findMapPoi: (kinds) =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.findRenderedMapPoi(kinds) ??
+                  null,
+                jumpToZoom: (lat, lng, zoom) =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.jumpToZoom(lat, lng, zoom),
               };
             } catch {
               /* noop */

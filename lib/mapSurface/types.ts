@@ -14,6 +14,8 @@ export type CompactPinInput = {
   postCount?: number;
   /** Admin MapLibre: dim pin when poi.closed_at is set (~45% opacity) */
   closed?: boolean;
+  /** Focus pin only: POI / subway badge SVG drawn in the head instead of the emoji. */
+  badge?: { key: string; svg: string };
 };
 
 export type CompactRouteMode = "car" | "walk" | "course" | "preview";
@@ -108,6 +110,12 @@ export type ExpandedMapSurface = CompactMapSurface & {
   } | null;
   project: (lat: number, lng: number) => { x: number; y: number } | null;
   unproject: (x: number, y: number) => MapLatLng | null;
+  /** E2E / QA: screen point (map px) of a rendered place label of these kinds. */
+  findRenderedMapPoi: (
+    kinds: Array<"shop" | "sangga" | "tour" | "landmark" | "park" | "station" | "bus">,
+  ) => { x: number; y: number; name: string; kind: string } | null;
+  /** E2E / QA: exact MapLibre zoom jump (no Kakao level rounding). */
+  jumpToZoom: (lat: number, lng: number, zoom: number) => void;
   setSearchPins: (pins: SearchPinInput[]) => void;
   clearSearchPins: () => void;
   /** Admin discover layer (WebGL). Empty / missing data → clear. */

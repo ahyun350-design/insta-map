@@ -50,6 +50,7 @@ import {
 import { attachEmptyBasemapWatchdog } from "@/lib/mapSurface/emptyBasemapWatchdog";
 import { installShopZoomCap } from "@/lib/mapSurface/shopZoomCap";
 import { installLabelDupHide } from "@/lib/mapSurface/labelDupHide";
+import { installSanggaShopDedupe } from "@/lib/mapSurface/sanggaShopDedupe";
 import {
   isSelfTilesBroken,
   prefetchSelfTilesZ14Around,
@@ -425,6 +426,7 @@ export default function PreviewGlMap({
     let disposeEmptyWatchFn: (() => void) | null = null;
     let disposeShopCapFn: (() => void) | null = null;
     let disposeLabelDupFn: (() => void) | null = null;
+    let disposeSourceDedupeFn: (() => void) | null = null;
 
     (async () => {
       try {
@@ -604,6 +606,10 @@ export default function PreviewGlMap({
         disposeEmptyWatchFn = attachEmptyBasemapWatchdog(map, "expanded");
         disposeShopCapFn = installShopZoomCap(map);
         disposeLabelDupFn = installLabelDupHide(map);
+        // ?dedupe=0 — A/B capture of cross-source shop twins (preview only).
+        if (new URLSearchParams(window.location.search).get("dedupe") !== "0") {
+          disposeSourceDedupeFn = installSanggaShopDedupe(map);
+        }
 
         map.on("error", (ev) => {
           const msg = String(ev.error?.message ?? "");
@@ -763,6 +769,8 @@ export default function PreviewGlMap({
       disposeShopCapFn = null;
       disposeLabelDupFn?.();
       disposeLabelDupFn = null;
+      disposeSourceDedupeFn?.();
+      disposeSourceDedupeFn = null;
       releaseMapGlSlot("preview");
       if (window.__PINDMAP_PREVIEW_MAP__ === mapRef.current) {
         window.__PINDMAP_PREVIEW_MAP__ = null;

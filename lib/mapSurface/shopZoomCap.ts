@@ -11,6 +11,12 @@
  */
 
 import type { Map as MaplibreMap } from "maplibre-gl";
+import {
+  clearLayerFilterOwner,
+  getLayerBaseFilter,
+  setLayerFilterPart,
+} from "./layerFilterParts";
+import { isShopNameDeduped } from "./sanggaShopDedupe";
 
 type CapBand = {
   minZoom: number;
@@ -44,10 +50,43 @@ export const SHOP_ZOOM_CAP_LAYER_IDS: ReadonlySet<string> = new Set(
 const MAX_ROUNDS = 10;
 /**
  * Pre-placement guess (screen px) so most picks survive collision on the first
- * round: keep clear of already-placed labels and of each other (text-padding 14).
+ * round. Label boxes are estimated from name length (icon + ~11px per glyph,
+ * wrapping at ~7 glyphs); a pick may hang its text left or right of the icon.
  */
-const CLEAR_OF_LABEL = { dx: 70, dy: 24 };
-const CLEAR_OF_SHOP = { dx: 130, dy: 40 };
+const GLYPH_PX = 11;
+const WRAP_GLYPHS = 7;
+const ICON_HALF_PX = 12;
+/** Shop text-padding at z14–15 (style) + a little slack. */
+const SHOP_PAD_PX = 16;
+const LABEL_PAD_PX = 6;
+
+type Rect = { l: number; r: number; t: number; b: number };
+
+function textBox(nameLen: number): { w: number; h: number } {
+  const n = Math.max(1, nameLen);
+  return { w: Math.min(n, WRAP_GLYPHS) * GLYPH_PX, h: n > WRAP_GLYPHS ? 30 : 16 };
+}
+
+/** Icon + text on one side of the anchor. */
+function sideRect(x: number, y: number, nameLen: number, side: "left" | "right"): Rect {
+  const { w, h } = textBox(nameLen);
+  const t = y - Math.max(h, 2 * ICON_HALF_PX) / 2;
+  const b = y + Math.max(h, 2 * ICON_HALF_PX) / 2;
+  return side === "right"
+    ? { l: x - ICON_HALF_PX, r: x + ICON_HALF_PX + 3 + w, t, b }
+    : { l: x - ICON_HALF_PX - 3 - w, r: x + ICON_HALF_PX, t, b };
+}
+
+/** Placed label whose side is unknown → both sides. */
+function bothSidesRect(x: number, y: number, nameLen: number): Rect {
+  const r = sideRect(x, y, nameLen, "right");
+  const l = sideRect(x, y, nameLen, "left");
+  return { l: l.l, r: r.r, t: r.t, b: r.b };
+}
+
+function overlaps(a: Rect, b: Rect, pad: number): boolean {
+  return a.l - pad < b.r && a.r + pad > b.l && a.t - pad < b.b && a.b + pad > b.t;
+}
 /** Same-name points closer than this are one shop (tile-buffer copies, OMT+상가). */
 const SAME_PLACE_M = 40;
 /** Same name elsewhere within this screen margin would double-render → skip name. */
@@ -88,10 +127,6 @@ type Candidate = {
   y: number;
 };
 
-function near(a: { x: number; y: number }, b: { x: number; y: number }, box: { dx: number; dy: number }) {
-  return Math.abs(a.x - b.x) < box.dx && Math.abs(a.y - b.y) < box.dy;
-}
-
 function rawName(p: Record<string, unknown> | null | undefined): string {
   return String(p?.["name:ko"] || p?.name || "");
 }
@@ -111,12 +146,14 @@ function bandForZoom(z: number): CapBand | null {
   return SHOP_ZOOM_CAP_BANDS.find((b) => z >= b.minZoom && z < b.maxZoom) ?? null;
 }
 
-function allowFilter(base: unknown, allow: string[]): unknown {
-  return ["all", base, ["in", NAME_EXPR, ["literal", allow]]];
+const OWNER = "shopZoomCap";
+
+function allowPart(allow: string[]): unknown {
+  return ["in", NAME_EXPR, ["literal", allow]];
 }
 
 export function installShopZoomCap(map: MaplibreMap): () => void {
-  const baseFilterByLayer = new Map<string, unknown>();
+  const seenLayers = new Set<string>();
   let viewKey = "";
   /** Allowed names in priority order; each name is shown from one layer only. */
   let allow: Candidate[] = [];
@@ -135,34 +172,16 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
     allow = next;
     allowBand = band;
     for (const id of layerIds) {
-      if (!map.getLayer(id)) continue;
-      try {
-        map.setFilter(
-          id,
-          allowFilter(baseFilterByLayer.get(id) ?? true, namesFor(id)) as never,
-        );
-      } catch {
-        /* ignore */
-      }
+      setLayerFilterPart(map, id, OWNER, allowPart(namesFor(id)));
     }
   };
 
-  /** Capture base filters; new layers start hidden until the first reconcile. */
+  /** New cap layers start hidden until the first reconcile. */
   const ensureBase = () => {
     for (const id of SHOP_ZOOM_CAP_LAYER_IDS) {
-      if (baseFilterByLayer.has(id) || !map.getLayer(id)) continue;
-      let base: unknown = true;
-      try {
-        base = map.getFilter(id) ?? true;
-      } catch {
-        base = true;
-      }
-      baseFilterByLayer.set(id, base);
-      try {
-        map.setFilter(id, allowFilter(base, namesFor(id)) as never);
-      } catch {
-        /* ignore */
-      }
+      if (seenLayers.has(id) || !map.getLayer(id)) continue;
+      seenLayers.add(id);
+      setLayerFilterPart(map, id, OWNER, allowPart(namesFor(id)));
     }
   };
 
@@ -182,7 +201,7 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
       try {
         feats = map.querySourceFeatures(layer.source, {
           sourceLayer: layer.sourceLayer,
-          filter: (baseFilterByLayer.get(layerId) ?? true) as never,
+          filter: getLayerBaseFilter(map, layerId) as never,
         });
       } catch {
         return;
@@ -205,6 +224,8 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
         if (!list.some((q) => haversineM(q, c) <= SAME_PLACE_M)) list.push(c);
         places.set(name, list);
         if (p.x < 0 || p.y < 0 || p.x > w || p.y > h) continue;
+        // Cross-source dedupe hides this copy (e.g. OMT twin of a 상가 shop).
+        if (isShopNameDeduped(map, layerId, name)) continue;
         const cls = String(f.properties?.class ?? "");
         const sub = String(f.properties?.subclass ?? "");
         const cand: Candidate = {
@@ -237,7 +258,7 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
   };
 
   /** Point labels placed ahead of this band's shops (later style layers win). */
-  const placedLabelPoints = (band: CapBand): Array<{ x: number; y: number }> => {
+  const placedLabelRects = (band: CapBand): Rect[] => {
     const styleLayers = map.getStyle()?.layers ?? [];
     const bandIdx = Math.min(
       ...band.layerIds
@@ -255,17 +276,18 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
       )
       .map((l) => l.id);
     if (!ids.length) return [];
-    const pts: Array<{ x: number; y: number }> = [];
+    const rects: Rect[] = [];
     try {
       for (const f of map.queryRenderedFeatures({ layers: ids })) {
         const g = f.geometry;
         if (!g || g.type !== "Point") continue;
-        pts.push(map.project(g.coordinates as [number, number]));
+        const p = map.project(g.coordinates as [number, number]);
+        rects.push(bothSidesRect(p.x, p.y, [...rawName(f.properties)].length));
       }
     } catch {
       /* ignore */
     }
-    return pts;
+    return rects;
   };
 
   const reconcile = (fromIdle: boolean) => {
@@ -300,12 +322,16 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
     } catch {
       /* ignore */
     }
+    // Only collision top-ups consume rounds; re-picks caused by tile loads or the
+    // dedupe pass changing the candidate set must not exhaust the budget.
     if (fromIdle && allowBand === band && rounds < MAX_ROUNDS) {
-      for (const c of allow) if (!rendered.has(c.name)) skip.add(c.name);
+      const before = skip.size;
+      for (const c of allow) if (!rendered.has(c.name)) skip.add(`${c.layerOrder}|${c.name}`);
+      if (skip.size > before) rounds += 1;
     }
 
     const candidates = collectCandidates(band);
-    const pool = candidates.filter((c) => !skip.has(c.name));
+    const pool = candidates.filter((c) => !skip.has(`${c.layerOrder}|${c.name}`));
     const sameSlot = (a: Candidate, c: Candidate) =>
       a.name === c.name && a.layerOrder === c.layerOrder;
     // Keep shops that already won placement (no flicker across top-up rounds).
@@ -317,11 +343,19 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
           allow.some((a) => sameSlot(a, c)),
       )
       .slice(0, band.max);
-    const obstacles = placedLabelPoints(band);
+    const obstacles = placedLabelRects(band);
+    const glyphs = (c: Candidate) => [...c.name].length;
+    const shopRect = (c: Candidate) => bothSidesRect(c.x, c.y, glyphs(c));
     const clearOfShops = (c: Candidate) =>
-      !chosen.some((s) => near(s, c, CLEAR_OF_SHOP));
+      !chosen.some((s) => overlaps(shopRect(s), shopRect(c), SHOP_PAD_PX));
+    // A side is free when its box misses every placed label.
+    const freeSide = (c: Candidate) =>
+      (["right", "left"] as const).some((side) => {
+        const r = sideRect(c.x, c.y, glyphs(c), side);
+        return !obstacles.some((o) => overlaps(o, r, LABEL_PAD_PX));
+      });
     const passes: Array<(c: Candidate) => boolean> = [
-      (c) => clearOfShops(c) && !obstacles.some((o) => near(o, c, CLEAR_OF_LABEL)),
+      (c) => clearOfShops(c) && freeSide(c),
       clearOfShops,
       () => true,
     ];
@@ -339,7 +373,6 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
       chosen.length !== allow.length ||
       chosen.some((c) => !prevKeys.has(slotKey(c)));
     if (changed) {
-      rounds += 1;
       applyAllow(band, layerIds, chosen);
     }
 
@@ -392,13 +425,7 @@ export function installShopZoomCap(map: MaplibreMap): () => void {
     map.off("idle", onIdle);
     map.off("moveend", onMoveEnd);
     map.off("styledata", onStyleData);
-    for (const [id, base] of baseFilterByLayer) {
-      try {
-        if (map.getLayer(id)) map.setFilter(id, base as never);
-      } catch {
-        /* ignore */
-      }
-    }
-    baseFilterByLayer.clear();
+    clearLayerFilterOwner(map, OWNER);
+    seenLayers.clear();
   };
 }

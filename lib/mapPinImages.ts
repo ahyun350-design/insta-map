@@ -56,6 +56,25 @@ export function focusMarkerSvg(
   return `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58"><defs><filter id="s" x="-40%" y="-30%" width="180%" height="180%">${shadow}</filter></defs><path filter="url(#s)" d="M24 1C11.3 1 1 11.3 1 24c0 17.5 23 33 23 33s23-15.5 23-33C47 11.3 36.7 1 24 1z" fill="${fillColor}" stroke="${stroke}" stroke-width="2.5"/><circle cx="24" cy="24" r="15" fill="white" opacity="0.95"/><text x="24" y="30" text-anchor="middle" font-size="16">${emoji}</text></svg>`;
 }
 
+/**
+ * Focus pin with a POI / subway badge (24×24 SVG) in the head instead of an emoji.
+ * Admin MapLibre basemap-label taps only.
+ */
+export function focusBadgeMarkerSvg(
+  badgeSvg: string,
+  fillColor: string,
+  opts?: { stroke?: string; glow?: boolean },
+): string {
+  const stroke = opts?.stroke ?? "#1a2a7a";
+  const shadow = opts?.glow
+    ? `<feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#ffffff" flood-opacity="0.4"/><feDropShadow dx="0" dy="1.4" stdDeviation="1.2" flood-color="#000000" flood-opacity="0.35"/>`
+    : `<feDropShadow dx="0" dy="1.4" stdDeviation="1.2" flood-color="#000000" flood-opacity="0.3"/>`;
+  const badge = badgeSvg
+    .replace(/^\s*<svg\b[^>]*>/, `<svg x="10" y="10" width="28" height="28" viewBox="0 0 24 24">`)
+    .trim();
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="58" viewBox="0 0 48 58"><defs><filter id="s" x="-40%" y="-30%" width="180%" height="180%">${shadow}</filter></defs><path filter="url(#s)" d="M24 1C11.3 1 1 11.3 1 24c0 17.5 23 33 23 33s23-15.5 23-33C47 11.3 36.7 1 24 1z" fill="${fillColor}" stroke="${stroke}" stroke-width="2.5"/><circle cx="24" cy="24" r="15" fill="white" opacity="0.95"/>${badge}</svg>`;
+}
+
 /** Native my-location ring (~27 pt). */
 export function myLocationMarkerSvg(): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="27" height="27" viewBox="0 0 27 27"><circle cx="13.5" cy="13.5" r="11" fill="#1a2a7a" stroke="white" stroke-width="2.5"/><circle cx="13.5" cy="13.5" r="4.5" fill="white"/></svg>`;

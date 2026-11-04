@@ -8278,11 +8278,14 @@ select:focus-visible {
   text-underline-offset: 1px;
 }
 .expandedMapLibreStage.is-sheet-open .expandedMapLibreAttrib {
-  /* Sit above embedded place / search sheet (same band as locate) */
-  bottom: max(
-    8px,
-    calc(env(safe-area-inset-bottom, 0px) + min(60vh, 420px) + 12px)
-  );
+  /* Small credit on the card's top-right edge (height measured by the page). */
+  left: auto;
+  right: max(8px, env(safe-area-inset-right, 0px));
+  bottom: calc(var(--pindmap-expanded-card-h, min(60vh, 420px)) + 3px);
+  font-size: 8px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Admin MapLibre fullscreen — my location (bottom-right; attrib stays bottom-left) */

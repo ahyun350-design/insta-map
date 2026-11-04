@@ -11,6 +11,7 @@
 
 import type { Map as MaplibreMap } from "maplibre-gl";
 import { normalizeLabelName, haversineMeters } from "./labelNameDedup";
+import { clearLayerFilterOwner, setLayerFilterPart } from "./layerFilterParts";
 
 const MIN_ZOOM = 14;
 /** POI vs POI with short (generic-prone) names. */
@@ -55,33 +56,21 @@ type Placed = {
   lat: number;
 };
 
+const OWNER = "labelDupHide";
+
 export function installLabelDupHide(map: MaplibreMap): () => void {
-  const baseFilterByLayer = new Map<string, unknown>();
   /** layerId → raw names hidden in that layer. */
   let hidden = new Map<string, Set<string>>();
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const applyLayer = (layerId: string) => {
-    if (!map.getLayer(layerId)) return;
-    if (!baseFilterByLayer.has(layerId)) {
-      try {
-        baseFilterByLayer.set(layerId, map.getFilter(layerId) ?? true);
-      } catch {
-        baseFilterByLayer.set(layerId, true);
-      }
-    }
-    const base = baseFilterByLayer.get(layerId) ?? true;
     const names = [...(hidden.get(layerId) ?? [])];
-    try {
-      map.setFilter(
-        layerId,
-        (names.length
-          ? ["all", base, ["!", ["in", NAME_EXPR, ["literal", names]]]]
-          : base) as never,
-      );
-    } catch {
-      /* ignore */
-    }
+    setLayerFilterPart(
+      map,
+      layerId,
+      OWNER,
+      names.length ? ["!", ["in", NAME_EXPR, ["literal", names]]] : null,
+    );
   };
 
   const sameSet = (a: Set<string> | undefined, b: Set<string> | undefined) => {
@@ -204,13 +193,6 @@ export function installLabelDupHide(map: MaplibreMap): () => void {
     if (timer) clearTimeout(timer);
     map.off("idle", schedule);
     map.off("moveend", schedule);
-    for (const [id, base] of baseFilterByLayer) {
-      try {
-        if (map.getLayer(id)) map.setFilter(id, base as never);
-      } catch {
-        /* ignore */
-      }
-    }
-    baseFilterByLayer.clear();
+    clearLayerFilterOwner(map, OWNER);
   };
 }

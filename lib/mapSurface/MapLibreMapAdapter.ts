@@ -17,6 +17,7 @@ import {
   MAP_PIN_WIDTH,
   MY_LOCATION_IMAGE_ID,
   clampMapPinDpr,
+  focusBadgeMarkerSvg,
   focusMarkerSvg,
   loadMapImageFromSvg,
   myLocationMarkerSvg,
@@ -90,7 +91,12 @@ import {
 import type { DirectionsRouteThemeId } from "./directionsRouteTheme";
 import { installMapLibreCornerAttribution } from "./mapAttribution";
 import { installSanggaShopDedupe } from "./sanggaShopDedupe";
-import { installTourSanggaDedupe } from "./tourSanggaDedupe";
+import {
+  findRenderedMapPoi,
+  pickMapPoiAt,
+  type MapPoiKind,
+  type MapPoiTap,
+} from "./mapPoiTap";
 import { installShopZoomCap } from "./shopZoomCap";
 import { installLabelDupHide } from "./labelDupHide";
 import {
@@ -163,6 +169,8 @@ export type CreateCompactMapLibreOptions = {
   onCourseStopClick?: (stopId: string) => void;
   /** Admin discover layer — poi id as string. */
   onDiscoverPinClick?: (poiId: string) => void;
+  /** Expanded only: basemap place label tapped (no pin under the tap). */
+  onMapPoiClick?: (tap: MapPoiTap) => void;
   onMapClickEmpty?: () => void;
   onReady?: () => void;
   onFallback?: (reason: string) => void;
@@ -237,6 +245,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private onSearchPinClick: ((id: string) => void) | null = null;
   private onCourseStopClick: ((id: string) => void) | null = null;
   private onDiscoverPinClick: ((id: string) => void) | null = null;
+  private onMapPoiClick: ((tap: MapPoiTap) => void) | null = null;
   private onMapClickEmpty: (() => void) | null = null;
   private onViewIdle: ((view: { lat: number; lng: number; level: number }) => void) | null =
     null;
@@ -281,6 +290,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     adapter.onSearchPinClick = options.onSearchPinClick ?? null;
     adapter.onCourseStopClick = options.onCourseStopClick ?? null;
     adapter.onDiscoverPinClick = options.onDiscoverPinClick ?? null;
+    adapter.onMapPoiClick =
+      adapter.mode === "expanded" ? (options.onMapPoiClick ?? null) : null;
     adapter.onMapClickEmpty = options.onMapClickEmpty ?? null;
     adapter.onViewIdle = options.onViewIdle ?? null;
     adapter.onAttributionClick = options.onAttributionClick ?? null;
@@ -585,7 +596,6 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       }
       if (readSelfTilesEnabled() && !isSelfTilesBroken()) {
         this.touchCleanups.push(installSanggaShopDedupe(map));
-        this.touchCleanups.push(installTourSanggaDedupe(map));
       }
       this.touchCleanups.push(installShopZoomCap(map));
       this.touchCleanups.push(installLabelDupHide(map));
@@ -1260,6 +1270,13 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
           else if (bestLayer === COURSE_CIRCLE_LAYER) this.onCourseStopClick?.(bestId);
           else if (bestLayer === DISCOVER_CIRCLE_LAYER) this.onDiscoverPinClick?.(bestId);
           else this.onPinClick?.(bestId);
+          return;
+        }
+      }
+      if (this.onMapPoiClick && !this.directionsChromeActive) {
+        const tap = pickMapPoiAt(map, e.point);
+        if (tap) {
+          this.onMapPoiClick(tap);
           return;
         }
       }
@@ -1990,15 +2007,16 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private async applyFocusMarker(pin: CompactPinInput) {
     const map = this.map;
     if (!map?.getSource(FOCUS_SOURCE)) return;
-    const icon = pinImageKey("focus", pin.category, pin.fillColor) + (this.theme === "neon" ? ":neon" : "");
+    const neon = this.theme === "neon" ? { stroke: "#ffffff", glow: true } : undefined;
+    const icon = pin.badge
+      ? `focus-badge:${pin.badge.key}:${pin.fillColor.toLowerCase()}${neon ? ":neon" : ""}`
+      : pinImageKey("focus", pin.category, pin.fillColor) + (neon ? ":neon" : "");
     await loadMapImageFromSvg(
       map,
       icon,
-      focusMarkerSvg(
-        pin.category,
-        pin.fillColor,
-        this.theme === "neon" ? { stroke: "#ffffff", glow: true } : undefined,
-      ),
+      pin.badge
+        ? focusBadgeMarkerSvg(pin.badge.svg, pin.fillColor, neon)
+        : focusMarkerSvg(pin.category, pin.fillColor, neon),
       MAP_FOCUS_PIN_WIDTH,
       MAP_FOCUS_PIN_HEIGHT,
       this.imageDpr,
@@ -2102,6 +2120,15 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     if (!this.map) return null;
     const ll = this.map.unproject([x, y]);
     return { lat: ll.lat, lng: ll.lng };
+  }
+
+  findRenderedMapPoi(kinds: MapPoiKind[]) {
+    if (!this.map) return null;
+    return findRenderedMapPoi(this.map, kinds);
+  }
+
+  jumpToZoom(lat: number, lng: number, zoom: number) {
+    this.map?.jumpTo({ center: [lng, lat], zoom });
   }
 
   setDiscoverPins(pins: DiscoverPinInput[]) {
