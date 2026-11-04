@@ -2371,6 +2371,43 @@ function softenLowZoomWidth(width: unknown): unknown {
   return out;
 }
 
+/**
+ * Paper street-zoom fill widths (z17 px; Kakao-like steps). z15 / z16 / z18 keep
+ * the same ratios between classes. Casing adds a thin border except on service.
+ */
+const PAPER_STREET_FILL_Z17: Partial<Record<RoadKind, number>> = {
+  motorway: 16,
+  trunk: 16,
+  primary: 13,
+  secondary: 10,
+  tertiary: 8,
+  minor: 5,
+  service: 3,
+};
+const PAPER_STREET_ZOOM_SCALE: Array<[number, number]> = [
+  [15, 0.45],
+  [16, 0.68],
+  [17, 1],
+  [18, 1.4],
+];
+
+/** Keep the expression's own stops below z15, then the paper street ladder. */
+function paperStreetWidth(base: unknown, kind: RoadKind, casing: boolean): unknown {
+  const z17 = PAPER_STREET_FILL_Z17[kind];
+  if (z17 == null || !Array.isArray(base) || base[0] !== "interpolate") return base;
+  const out: unknown[] = base.slice(0, 3);
+  for (let i = 3; i + 1 < base.length; i += 2) {
+    if (Number(base[i]) < 15) out.push(base[i], base[i + 1]);
+  }
+  for (const [z, s] of PAPER_STREET_ZOOM_SCALE) {
+    const fill = z17 * s;
+    // Border ≈1–1.2px each side; service draws no visible border.
+    const w = casing && kind !== "service" ? fill + (z >= 17 ? 2.4 : 2) : fill;
+    out.push(z, Number(w.toFixed(2)));
+  }
+  return out;
+}
+
 function roadFillColor(
   theme: MapPreviewTheme,
   kind: RoadKind,
@@ -2383,6 +2420,7 @@ function roadFillColor(
       return paperArterialColor("#FBDDB5", "#F9C78A");
     }
     if (kind === "primary") return paperArterialColor("#FDF0C8", "#FCE3A0");
+    if (kind === "secondary") return "#FFF6D6";
     return "#FFFFFF";
   }
   if (theme.id === "white") {
@@ -2411,7 +2449,10 @@ function roadCasingColor(
     }
     if (kind === "primary") return paperArterialColor("#EEDDA6", "#E9C878");
     if (arterial) return "#C8C8C8";
-    if (kind === "secondary" || kind === "tertiary") return "#D0D0D0";
+    if (kind === "secondary") return "#E8DCAE";
+    if (kind === "tertiary") return "#D0D0D0";
+    // Service / alleys: casing = fill colour + same width → no visible border.
+    if (kind === "service") return "#FFFFFF";
     return "#D8D8D8";
   }
   if (theme.id === "white") {
@@ -2443,7 +2484,9 @@ function applyGuideRoadStyle(
       casing ? roadCasingColor(theme, colorKind) : roadFillColor(theme, colorKind),
     );
     paintSet(layer, "line-opacity", 1);
-    const width = casing ? roadCasingWidth(kind) : roadFillWidth(kind);
+    const baseWidth = casing ? roadCasingWidth(kind) : roadFillWidth(kind);
+    const width =
+      theme.id === "paper" ? paperStreetWidth(baseWidth, kind, casing) : baseWidth;
     paintSet(
       layer,
       "line-width",

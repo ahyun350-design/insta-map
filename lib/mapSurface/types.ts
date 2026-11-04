@@ -116,6 +116,14 @@ export type ExpandedMapSurface = CompactMapSurface & {
   ) => { x: number; y: number; name: string; kind: string } | null;
   /** E2E / QA: exact MapLibre zoom jump (no Kakao level rounding). */
   jumpToZoom: (lat: number, lng: number, zoom: number) => void;
+  /** Map rotation (degrees, 0 = north up). */
+  getBearing: () => number;
+  /** Compass: ease back to north. */
+  resetNorth: (durationMs?: number) => void;
+  /** E2E / QA: set bearing instantly. */
+  setBearing: (deg: number) => void;
+  /** Subscribe to bearing changes; returns unsubscribe. */
+  onBearingChange: (cb: (bearing: number) => void) => () => void;
   setSearchPins: (pins: SearchPinInput[]) => void;
   clearSearchPins: () => void;
   /** Admin discover layer (WebGL). Empty / missing data → clear. */
