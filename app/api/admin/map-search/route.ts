@@ -12,7 +12,11 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/adminRouteGate";
 import {
   QUERY_MAX_LEN,
+  RPC_CANDIDATES,
+  chainAliasQuery,
   looksLikeRoadAddress,
+  rerankPlaceHits,
+  unionPlaceHits,
   type MapSearchApiResponse,
   type OurAddressHit,
   type OurPlaceHit,
@@ -162,24 +166,34 @@ export async function POST(req: Request) {
 
   const t0 = Date.now();
   const admin = getSupabaseAdmin();
-  const dbStart = Date.now();
-  const dbPromise = admin
-    .rpc("search_map_admin", {
-      p_q: q,
-      p_lat: hasCenter ? lat : null,
-      p_lng: hasCenter ? lng : null,
-      p_limit: limit,
-    })
-    .then((r) => ({ ...r, ms: Date.now() - dbStart }));
+  const rpc = (p_q: string) => {
+    const start = Date.now();
+    return admin
+      .rpc("search_map_admin", {
+        p_q,
+        p_lat: hasCenter ? lat : null,
+        p_lng: hasCenter ? lng : null,
+        p_limit: RPC_CANDIDATES,
+      })
+      .then((r) => ({ ...r, ms: Date.now() - start }));
+  };
+  // Chain alias ("메가커피" → registered "메가엠지씨커피"): at most one extra RPC.
+  const aliasQ = chainAliasQuery(q);
   const jusoStart = Date.now();
   const jusoPromise = looksLikeRoadAddress(q)
     ? jusoSearch(q).then((r) => ({ ...r, ms: Date.now() - jusoStart }))
     : Promise.resolve(null);
 
-  const [db, juso] = await Promise.all([dbPromise, jusoPromise]);
-  const places = db.error
-    ? []
-    : ((db.data ?? []) as RpcRow[]).map(toPlaceHit).filter((h): h is OurPlaceHit => h != null);
+  const [db, dbAlias, juso] = await Promise.all([
+    rpc(q),
+    aliasQ ? rpc(aliasQ) : Promise.resolve(null),
+    jusoPromise,
+  ]);
+  const toHits = (r: { data: unknown; error: unknown } | null) =>
+    !r || r.error
+      ? []
+      : ((r.data ?? []) as RpcRow[]).map(toPlaceHit).filter((h): h is OurPlaceHit => h != null);
+  const places = rerankPlaceHits(unionPlaceHits(toHits(db), toHits(dbAlias)), q);
   const addresses = juso?.hits ?? [];
   // Address-looking queries: the juso rows lead; place rows follow.
   const hits = [...addresses, ...places].slice(0, Math.max(limit, addresses.length));
@@ -188,7 +202,7 @@ export async function POST(req: Request) {
     hits,
     diag: {
       ms: Date.now() - t0,
-      dbMs: db.ms,
+      dbMs: Math.max(db.ms, dbAlias?.ms ?? 0),
       jusoMs: juso ? juso.ms : null,
       dbError: db.error ? "rpc_failed" : null,
       jusoError: juso?.error ?? null,

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   KAKAO_FILL_BELOW,
   RECENT_MAX,
+  chainAliasQuery,
+  unionPlaceHits,
   clearRecentSearches,
   dedupeRows,
   hitToMapPoiTap,
@@ -10,6 +12,7 @@ import {
   mergeOursWithKakao,
   pushRecentSearch,
   readRecentSearches,
+  rerankPlaceHits,
   searchEventMeta,
   toSearchRow,
   type OurPlaceHit,
@@ -77,6 +80,32 @@ test("hitToMapPoiTap: sangga keeps poi class, station keeps lines", () => {
   const t = hitToMapPoiTap(place({ source: "tour", name: "경복궁", branch: null, category: "관광명소" }));
   assert.equal(t.kind, "tour");
   assert.equal(t.tourType, "12");
+});
+
+test("rerank: famous place beats a same-name shop, …역 prefers the station", () => {
+  const shop = place({ id: "s", name: "경복궁", branch: "서교점", score: 319, distM: 500 });
+  const tour = place({ id: "t", source: "tour", name: "경복궁", branch: null, score: 309.6, distM: 5177 });
+  assert.deepEqual(rerankPlaceHits([shop, tour], "경복궁").map((h) => h.id), ["t", "s"]);
+  const tourGangnam = place({ id: "tg", source: "tour", name: "강남", branch: null, score: 300.6, distM: 9700 });
+  const station = place({ id: "st", source: "station", name: "강남역", branch: null, score: 300, distM: 11314 });
+  assert.deepEqual(rerankPlaceHits([tourGangnam, station], "강남역").map((h) => h.id), ["st", "tg"]);
+  assert.deepEqual(rerankPlaceHits([tourGangnam, station], "강남").map((h) => h.id), ["tg", "st"]);
+});
+
+test("chainAliasQuery: first word (or two) → registered 상호, rest kept", () => {
+  assert.equal(chainAliasQuery("메가커피 성수"), "메가엠지씨커피 성수");
+  assert.equal(chainAliasQuery("메가 커피"), "메가엠지씨커피");
+  assert.equal(chainAliasQuery("KFC 강남"), "케이에프씨 강남");
+  assert.equal(chainAliasQuery("gs25"), "지에스25");
+  assert.equal(chainAliasQuery("스타벅스 홍대"), null);
+  assert.equal(chainAliasQuery("이디야커피 망원"), null);
+});
+
+test("unionPlaceHits keeps the first copy of each id", () => {
+  const a = place({ id: "x", score: 300 });
+  const b = place({ id: "x", score: 1 });
+  const c = place({ id: "y" });
+  assert.deepEqual(unionPlaceHits([a], [b, c]).map((h) => [h.id, h.score]), [["x", 300], ["y", 335]]);
 });
 
 test("searchEventMeta never carries the query text", () => {

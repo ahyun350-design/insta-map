@@ -56,6 +56,9 @@ const QUERIES = [
   { q: "세종대로 175", addr: "세종대로 175", type: "도로명주소" },
   { q: "스타벅수", name: /스타벅스/, at: near(CENTER.lat, CENTER.lng, 1000), type: "오타 1글자" },
   { q: "경복구", name: /경복궁/, at: near(37.5796, 126.977, 600), type: "오타 1글자" },
+  { q: "빽다방", name: /빽다방/, at: near(CENTER.lat, CENTER.lng, 1000), type: "체인(추가)" },
+  { q: "컴포즈커피", name: /컴포즈/, at: near(CENTER.lat, CENTER.lng, 1000), type: "체인(추가)" },
+  { q: "이디야커피 망원", name: /이디야/, at: near(37.556, 126.9101, 1000), type: "체인+지역(추가)" },
 ];
 
 function distM(a, b) {
@@ -82,6 +85,7 @@ async function ours(t) {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-pindmap-e2e": E2E },
     body: JSON.stringify({ q: t.q, lat: CENTER.lat, lng: CENTER.lng, limit: 8 }),
+    // limit only trims the response; the route always ranks RPC_CANDIDATES (20) rows.
   });
   const ms = performance.now() - t0;
   if (!res.ok) return { ms, top: null, n: 0, diag: { status: res.status } };

@@ -13,9 +13,11 @@ DB URL from .db_url only, never printed. Output: counts only.
 
   scripts/localdata/.venv/bin/python scripts/localdata/load_map_search_catalog.py --dry-run
   scripts/localdata/.venv/bin/python scripts/localdata/load_map_search_catalog.py
+  scripts/localdata/.venv/bin/python scripts/localdata/load_map_search_catalog.py --streets
 
 Rollback:
   DELETE FROM public.map_search_catalog;
+  DELETE FROM public.map_search_catalog WHERE id LIKE 'street:%';   (streets only)
 """
 
 from __future__ import annotations
@@ -131,6 +133,40 @@ def major_rows():
             yield (f"major:{i}", "landmark", name, "산" if kind == "mountain" else "랜드마크", lat, lng)
 
 
+STREET_END = re.compile(r"(길|거리|골목)$")
+STREET_SKIP = {"가는길"}
+
+
+def street_rows():
+    """Short street names from Tour titles: "신사동 가로수길" → "가로수길" (same point).
+
+    The full title is already a tour row; this lets a plain "가로수길" prefix-match.
+    """
+    rows = json.loads((HERE / "out" / "tourapi" / "tourapi_slim.json").read_text(encoding="utf-8"))
+    for r in rows:
+        ctype = str(r.get("contentTypeId"))
+        if ctype not in TOUR_CATEGORY:
+            continue
+        title = clean_title(r.get("title") or "")
+        if " " not in title or not STREET_END.search(title):
+            continue
+        if ctype == "38" and not re.search(r"(거리|골목)$", title):
+            continue
+        short = title.split(" ")[-1]
+        if len(short) < 3 or short in STREET_SKIP:
+            continue
+        lat, lng = float(r["mapy"]), float(r["mapx"])
+        if valid_ll(lat, lng):
+            yield (f"street:{r['contentid']}", "landmark", short, "거리", lat, lng)
+
+
+def collect_streets():
+    out = []
+    for rid, source, name, category, lat, lng in street_rows():
+        out.append((rid, source, name, norm(name), category, round(lat, 7), round(lng, 7)))
+    return out
+
+
 def collect():
     out = []
     seen = set()
@@ -150,9 +186,18 @@ def collect():
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--streets",
+        action="store_true",
+        help="append short street-name rows (street:*) to a loaded table; existing ids are skipped",
+    )
     args = ap.parse_args()
 
-    rows, stats = collect()
+    if args.streets:
+        rows, stats = collect_streets(), Counter()
+        stats["street"] = len(rows)
+    else:
+        rows, stats = collect()
     print(dict(stats), "total", len(rows), flush=True)
     if args.dry_run:
         return 0
@@ -169,14 +214,15 @@ def main() -> int:
             cur.execute("SELECT count(*) FROM public.map_search_catalog")
             existing = int(cur.fetchone()[0])
         conn.commit()
-        if existing:
+        if existing and not args.streets:
             print(f"map_search_catalog not empty (rows={existing}); aborting", flush=True)
             return 2
         for i in range(0, len(rows), BATCH):
             with conn.cursor() as cur:
                 execute_values(
                     cur,
-                    "INSERT INTO public.map_search_catalog (id, source, name, name_norm, category, lat, lng) VALUES %s",
+                    "INSERT INTO public.map_search_catalog (id, source, name, name_norm, category, lat, lng) VALUES %s"
+                    " ON CONFLICT (id) DO NOTHING",
                     rows[i : i + BATCH],
                     page_size=BATCH,
                 )

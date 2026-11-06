@@ -2,7 +2,7 @@
 """D-2: DB blocks read per search_map_admin call (EXPLAIN ANALYZE BUFFERS on the function).
 
 Also checks that sangga_places saw no sequential scan (pg_stat seq_scan before/after).
-Same 20 generic queries / map center as scripts/measure-d2-search.mjs.
+Same generic queries / map center / RPC limit (20) as the admin search API.
 .db_url is read, never printed. Output: e2e/artifacts/d2/blocks.json
 
   scripts/localdata/.venv/bin/python scripts/localdata/measure_d2_blocks.py
@@ -28,7 +28,10 @@ QUERIES = [
     "홍대입구역", "망원역", "강남역", "한강진", "경복궁",
     "남산서울타워", "북촌한옥마을", "코엑스", "가로수길", "연남동",
     "마포구", "망원로4길 3", "세종대로 175", "스타벅수", "경복구",
+    "빽다방", "컴포즈커피", "이디야커피 망원",
 ]
+# The API makes a second RPC for chain aliases (lib/adminMapSearch.ts CHAIN_ALIASES).
+ALIAS_RPC = {"메가커피 성수": "메가엠지씨커피 성수"}
 BUF = re.compile(r"Buffers: shared(?: hit=(\d+))?(?: read=(\d+))?")
 
 
@@ -45,17 +48,26 @@ def main() -> int:
 
     before = seq_scans()
     rows = []
-    for q in QUERIES:
+    def one(q: str) -> tuple[int, int, float]:
         cur.execute(
-            "EXPLAIN (ANALYZE, BUFFERS, TIMING OFF) SELECT * FROM public.search_map_admin(%s, %s, %s, 8)",
+            "EXPLAIN (ANALYZE, BUFFERS, TIMING OFF) SELECT * FROM public.search_map_admin(%s, %s, %s, 20)",
             (q, CENTER[0], CENTER[1]),
         )
         text = "\n".join(r[0] for r in cur.fetchall())
         m = BUF.search(text)
-        hit = int(m.group(1) or 0) if m else 0
-        read = int(m.group(2) or 0) if m else 0
         ex = re.search(r"Execution Time: ([\d.]+) ms", text)
-        rows.append({"q": q, "blocks": hit + read, "hit": hit, "read": read, "ms": float(ex.group(1)) if ex else None})
+        return (
+            int(m.group(1) or 0) if m else 0,
+            int(m.group(2) or 0) if m else 0,
+            float(ex.group(1)) if ex else 0.0,
+        )
+
+    for q in QUERIES:
+        hit, read, ms = one(q)
+        if q in ALIAS_RPC:
+            h2, r2, ms2 = one(ALIAS_RPC[q])
+            hit, read, ms = hit + h2, read + r2, ms + ms2
+        rows.append({"q": q, "blocks": hit + read, "hit": hit, "read": read, "ms": round(ms, 3)})
     time.sleep(2)
     after = seq_scans()
     cur.close()

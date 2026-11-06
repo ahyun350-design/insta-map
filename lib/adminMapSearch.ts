@@ -205,6 +205,84 @@ export function mergeOursWithKakao<K extends KakaoLike>(
   return dedupeRows<AdminSearchRow | K>([...base, ...kakao]).slice(0, limit);
 }
 
+/** Famous places beat same-name shops (경복궁 vs 식당 "경복궁 서교점"). */
+const CATALOG_BONUS: Partial<Record<OurSource, number>> = { tour: 30, landmark: 30, station: 30 };
+const STATION_QUERY_BONUS = 40;
+/** RPC candidates fetched before re-ranking. */
+export const RPC_CANDIDATES = 20;
+
+/** Re-rank RPC rows: catalog bonus, "…역" queries prefer stations; stable on ties by distance. */
+export function rerankPlaceHits(hits: OurPlaceHit[], query: string): OurPlaceHit[] {
+  const stationQuery = /역$/.test(query.replace(/\s+/g, ""));
+  const adjusted = hits.map((h, i) => ({
+    h,
+    i,
+    s: h.score + (CATALOG_BONUS[h.source] ?? 0) + (stationQuery && h.source === "station" ? STATION_QUERY_BONUS : 0),
+  }));
+  adjusted.sort(
+    (a, b) => b.s - a.s || (a.h.distM ?? Infinity) - (b.h.distM ?? Infinity) || a.i - b.i,
+  );
+  return adjusted.map((x) => x.h);
+}
+
+/**
+ * Common chain name → the 상호 actually registered in 상가 data (checked with
+ * name-prefix counts). Only names a plain prefix search would miss.
+ * Keys: lower-case, no spaces.
+ */
+export const CHAIN_ALIASES: Readonly<Record<string, string>> = {
+  메가커피: "메가엠지씨커피",
+  메가mgc커피: "메가엠지씨커피",
+  맥도날드: "한국맥도날드",
+  올리브영: "씨제이올리브영",
+  매머드커피: "매머드익스프레스",
+  서브웨이: "써브웨이",
+  kfc: "케이에프씨",
+  케이에프씨: "KFC",
+  bbq: "비비큐",
+  비비큐: "BBQ",
+  bhc: "비에이치씨",
+  비에이치씨: "BHC",
+  cu: "씨유",
+  씨유: "CU",
+  gs25: "지에스25",
+  지에스25: "GS25",
+  세븐일레븐: "7-ELEVEN",
+  파리바게뜨: "파리바게트",
+  파리바게트: "파리바게뜨",
+  배스킨라빈스: "베스킨라빈스",
+  베스킨라빈스: "배스킨라빈스",
+  던킨도너츠: "던킨",
+  엔젤리너스: "엔제리너스",
+  스벅: "스타벅스",
+  탐탐: "탐앤탐스",
+};
+
+/** "메가커피 성수" → "메가엠지씨커피 성수" (first word only); null when no alias. */
+export function chainAliasQuery(query: string): string | null {
+  const words = query.trim().split(/\s+/);
+  for (let n = Math.min(2, words.length); n >= 1; n--) {
+    const head = words.slice(0, n).join("").toLowerCase();
+    const real = CHAIN_ALIASES[head];
+    if (real) return [real, ...words.slice(n)].join(" ");
+  }
+  return null;
+}
+
+/** Union of RPC hit lists by id (first occurrence wins). */
+export function unionPlaceHits(...lists: OurPlaceHit[][]): OurPlaceHit[] {
+  const seen = new Set<string>();
+  const out: OurPlaceHit[] = [];
+  for (const list of lists) {
+    for (const h of list) {
+      if (seen.has(h.id)) continue;
+      seen.add(h.id);
+      out.push(h);
+    }
+  }
+  return out;
+}
+
 const TOUR_TYPE_BY_CATEGORY: Record<string, string> = {
   관광명소: "12",
   문화시설: "14",
