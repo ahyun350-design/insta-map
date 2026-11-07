@@ -136,6 +136,7 @@ test("D-2 search: autocomplete → card (rotation kept), recent, Enter list, roa
   const firstRow = dialog.locator(".mapSearchResultsSheetItem").first();
   await expect(firstRow).toBeVisible({ timeout: 20_000 });
   await expect(firstRow).toContainText("경복궁");
+  await expect(firstRow.locator(".mapSearchResultsSheetItemName"), "경복궁 (관광) above 경복궁역").toHaveText("경복궁");
   const sheet = dialog.locator(".mapSearchResultsSheet");
   await expect(sheet).not.toContainText("주소 없음");
   const gyeongbokRows = sheet
