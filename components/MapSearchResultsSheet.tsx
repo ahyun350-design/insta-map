@@ -25,6 +25,8 @@ type Props = {
    * does not swallow the first tap. Kakao expanded keeps click-only.
    */
   preferPointerSelect?: boolean;
+  /** Admin MapLibre: rows without an address omit the line (no "주소 없음"). */
+  hideEmptyAddress?: boolean;
 };
 
 function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -61,6 +63,7 @@ export function MapSearchResultsSheet({
   onClose,
   keyboardHeight = 0,
   preferPointerSelect = false,
+  hideEmptyAddress = false,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [dragDelta, setDragDelta] = useState(0);
@@ -171,7 +174,8 @@ export function MapSearchResultsSheet({
             distanceLabel = formatDistanceMeters(distanceMeters(userLocation.lat, userLocation.lng, lat, lng));
           }
           const categoryPath = formatCategoryPath(place.category_name);
-          const address = place.road_address_name || place.address_name || "주소 없음";
+          const address =
+            place.road_address_name || place.address_name || (hideEmptyAddress ? "" : "주소 없음");
 
           return (
             <li key={place.id || `${place.place_name}-${place.y}-${place.x}`}>
@@ -190,7 +194,7 @@ export function MapSearchResultsSheet({
               >
                 <div className="mapSearchResultsSheetItemMain">
                   <p className="mapSearchResultsSheetItemName">{place.place_name}</p>
-                  <p className="mapSearchResultsSheetItemAddress">{address}</p>
+                  {address ? <p className="mapSearchResultsSheetItemAddress">{address}</p> : null}
                   {categoryPath && <p className="mapSearchResultsSheetItemCategory">{categoryPath}</p>}
                 </div>
                 {distanceLabel && <span className="mapSearchResultsSheetItemDistance">{distanceLabel}</span>}

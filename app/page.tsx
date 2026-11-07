@@ -264,6 +264,22 @@ import {
   type PlacePostsListData,
 } from "@/components/PlacePostsListScreen";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
+import { AdminMapSearchSuggest } from "@/components/AdminMapSearchSuggest";
+import {
+  RESULT_LIMIT as ADMIN_SEARCH_RESULT_LIMIT,
+  KAKAO_FILL_BELOW as ADMIN_SEARCH_KAKAO_FILL_BELOW,
+  areaLevel as adminSearchAreaLevel,
+  clearRecentSearches as clearAdminRecentSearches,
+  hitToMapPoiTap as adminSearchHitToTap,
+  mergeOursWithKakao as mergeAdminSearchWithKakao,
+  pushRecentSearch as pushAdminRecentSearch,
+  readRecentSearches as readAdminRecentSearches,
+  searchEventMeta as adminSearchEventMeta,
+  toSearchRow as adminSearchHitToRow,
+  type AdminSearchRow,
+  type MapSearchApiResponse,
+  type OurHit,
+} from "@/lib/adminMapSearch";
 import {
   buildKakaoKeywordSearchOpts,
   rankKakaoPlaceSearchResults,
@@ -284,6 +300,7 @@ import {
   mapTapCategoryLabel,
   type MapPoiTap,
 } from "@/lib/mapSurface/mapPoiTap";
+import { ADDRESS_BADGE_COLOR, addressBadgeSvg } from "@/lib/mapSurface/poiCategoryIcons";
 import type { ExpandedMapSurface } from "@/lib/mapSurface";
 import {
   adminMapGlOverrideLabel,
@@ -1994,6 +2011,9 @@ function HomePageContent() {
   mapSearchResultsRef.current = mapSearchResults;
   const [mapSearchLabel, setMapSearchLabel] = useState("");
   const [isMapSearchSheetOpen, setIsMapSearchSheetOpen] = useState(false);
+  /** Admin MapLibre search: field focus (autocomplete) + this device's recent queries. */
+  const [adminSearchFocused, setAdminSearchFocused] = useState(false);
+  const [adminRecentSearches, setAdminRecentSearches] = useState<string[]>([]);
   /** Admin MapLibre discover layer — session-only, default off. */
   const [discoverLayerOn, setDiscoverLayerOn] = useState(false);
   /** Admin: show 인기 장소 chip on MapLibre fullscreen (default off). */
@@ -12451,7 +12471,7 @@ function HomePageContent() {
    * (display only — never stored) and the PindMap save count from /api/admin/map-place.
    */
   const mapPoiRequestRef = useRef(0);
-  const openMapPoiPlaceCard = useCallback((tap: MapPoiTap) => {
+  const openMapPoiPlaceCard = useCallback((tap: MapPoiTap, opts?: { level?: number }) => {
     const reqId = ++mapPoiRequestRef.current;
     const { category, sub } = mapTapCategory(tap);
     const base: PlaceSheetData = {
@@ -12477,8 +12497,8 @@ function HomePageContent() {
       _placeRef: ref,
     });
     showFocusPlaceMarker(tap.lat, tap.lng, category, null, mapTapBadge(tap));
-    // Keep the user's zoom; only pan so the place sits above the card.
-    const level = getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? 3;
+    // Label tap keeps the user's zoom (search passes a level); only pan so the place sits above the card.
+    const level = opts?.level ?? getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? 3;
     const applyPaddedCamera = () => {
       const pad = measureExpandedPlaceCardPaddingBottom();
       applyExpandedMapCameraLatLng(tap.lat, tap.lng, level, { paddingBottom: pad });
@@ -12514,10 +12534,12 @@ function HomePageContent() {
       if (reqId !== mapPoiRequestRef.current) return;
       setSelectedPlace((prev: PlaceSheetData | null) => {
         if (!prev || prev._placeSource !== "map" || prev.place_name !== tap.name) return prev;
+        const indS = detail?.sangga?.indS || prev.subcategory || null;
         return {
           ...prev,
           road_address_name: detail?.sangga?.roadAddress || "",
-          subcategory: detail?.sangga?.indS || prev.subcategory || null,
+          // "카페 · 카페": a fine label equal to the category is shown once.
+          subcategory: indS && indS !== prev.category_name ? indS : null,
           phone: detail?.kakao?.phone || "",
           place_url: detail?.kakao?.placeUrl || "",
           _mapFloor: detail?.sangga?.floor || null,
@@ -12584,6 +12606,211 @@ function HomePageContent() {
     });
   }, [handleFullscreenNativePlaceDetail]);
 
+  useEffect(() => {
+    setAdminRecentSearches(readAdminRecentSearches(typeof window !== "undefined" ? window.localStorage : null));
+  }, []);
+
+  const rememberAdminSearch = useCallback((q: string) => {
+    setAdminRecentSearches(pushAdminRecentSearch(window.localStorage, q));
+  }, []);
+
+  /** Admin MapLibre: our data (DB + 도로명주소) around the expanded map center. */
+  const fetchAdminSearchHits = useCallback(
+    async (q: string, limit: number, signal?: AbortSignal): Promise<OurHit[] | null> => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.access_token) return null;
+        const c = expandedMapRef.current?.getCenter?.();
+        const lat = typeof c?.getLat === "function" ? Number(c.getLat()) : null;
+        const lng = typeof c?.getLng === "function" ? Number(c.getLng()) : null;
+        const res = await fetch("/api/admin/map-search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ q, lat, lng, limit }),
+          signal,
+        });
+        if (!res.ok) return null;
+        const data = (await res.json()) as MapSearchApiResponse;
+        return Array.isArray(data.hits) ? data.hits : [];
+      } catch {
+        return null;
+      }
+    },
+    [],
+  );
+
+  /** Our hit → D-1 card (places) / map move (동·구·시) / geocode then card (도로명주소). */
+  const openAdminSearchHit = useCallback(
+    async (hit: OurHit, source: string) => {
+      try {
+        expandedMapSearchInputRef.current?.blur();
+      } catch {
+        /* noop */
+      }
+      if (hit.kind === "address") {
+        let point: { lat: number; lng: number } | null = null;
+        try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          if (session?.access_token) {
+            const res = await fetch("/api/admin/map-geocode", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({ address: hit.roadAddr }),
+            });
+            if (res.ok) point = (await res.json()) as { lat: number; lng: number };
+          }
+        } catch {
+          point = null;
+        }
+        if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) {
+          showToast("주소 위치를 찾지 못했어요", "info");
+          return;
+        }
+        const { lat: aLat, lng: aLng } = point;
+        const addrPlace: PlaceSheetData = {
+          place_name: hit.buildingName || hit.roadAddr,
+          category_name: "도로명주소",
+          road_address_name: hit.roadAddr,
+          address_name: hit.jibunAddr ?? "",
+          phone: "",
+          place_url: "",
+          y: String(aLat),
+          x: String(aLng),
+        };
+        const addrRef = placeRefFromKakaoPlace(addrPlace);
+        devLog("[PindMap:expandedMap] open address card", source);
+        setIsMapSearchSheetOpen(false);
+        setSelectedPlace({
+          ...addrPlace,
+          _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, addrRef),
+          _placeRef: addrRef,
+        });
+        showFocusPlaceMarker(aLat, aLng, "여행지", null, {
+          key: "admin-address",
+          svg: addressBadgeSvg(),
+          fill: ADDRESS_BADGE_COLOR,
+        });
+        // Kakao level 2 = MapLibre z17: buildings + street labels around the address stay readable.
+        const applyAddrCamera = () => {
+          const pad = measureExpandedPlaceCardPaddingBottom();
+          applyExpandedMapCameraLatLng(aLat, aLng, 2, { paddingBottom: pad });
+        };
+        scheduleExpandedMapCamera(applyAddrCamera);
+        window.setTimeout(applyAddrCamera, 140);
+        return;
+      }
+      const area = adminSearchAreaLevel(hit);
+      if (area != null) {
+        setIsMapSearchSheetOpen(false);
+        setSelectedPlace(null);
+        applyExpandedMapCameraLatLng(hit.lat, hit.lng, area, { paddingBottom: 0 });
+        return;
+      }
+      openMapPoiPlaceCardRef.current(adminSearchHitToTap(hit), { level: 3 });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [showToast, showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom],
+  );
+
+  /** Results sheet / pin tap: our rows open the D-1 card, Kakao rows keep the Kakao card. */
+  const openAdminSearchRow = useCallback(
+    (place: AdminSearchRow | MapSearchPlaceResult, source: string) => {
+      const hit = (place as AdminSearchRow)._pindHit;
+      if (hit) {
+        void openAdminSearchHit(hit, source);
+        return;
+      }
+      openExpandedSearchPlaceCardRef.current(place, source);
+    },
+    [openAdminSearchHit],
+  );
+  const openAdminSearchRowRef = useRef(openAdminSearchRow);
+  openAdminSearchRowRef.current = openAdminSearchRow;
+
+  /**
+   * Admin MapLibre Enter search: ours first; Kakao keyword only when ours are
+   * few (same place = name + 50m kept once). Kakao rows are display-only.
+   */
+  const runAdminMergedSearch = useCallback(
+    async (trimmed: string) => {
+      mapSearchKeywordRef.current = trimmed;
+      setShowMapResearchButton(false);
+      pendingSearchCenterSyncRef.current = true;
+      rememberAdminSearch(trimmed);
+      const c = expandedMapRef.current?.getCenter?.();
+      const centerLat = typeof c?.getLat === "function" ? Number(c.getLat()) : 37.5665;
+      const centerLng = typeof c?.getLng === "function" ? Number(c.getLng()) : 126.978;
+      lastSearchCenterRef.current = { lat: centerLat, lng: centerLng };
+
+      const ours = (await fetchAdminSearchHits(trimmed, ADMIN_SEARCH_RESULT_LIMIT)) ?? [];
+      const ourRows = ours.map(adminSearchHitToRow);
+      let kakaoRows: any[] = [];
+      if (ourRows.length < ADMIN_SEARCH_KAKAO_FILL_BELOW && window.kakao?.maps?.services) {
+        kakaoRows = await new Promise<any[]>((resolve) => {
+          const tid = window.setTimeout(() => resolve([]), 4000);
+          try {
+            const ps = new window.kakao.maps.services.Places();
+            ps.keywordSearch(
+              trimmed,
+              (data: any[], st: string) => {
+                window.clearTimeout(tid);
+                resolve(
+                  st === window.kakao.maps.services.Status.OK
+                    ? rankKakaoPlaceSearchResults(trimmed, data ?? [])
+                    : [],
+                );
+              },
+              buildKakaoKeywordSearchOpts(
+                window.kakao.maps,
+                trimmed,
+                { lat: centerLat, lng: centerLng },
+                window.kakao.maps.LatLng,
+                true,
+              ),
+            );
+          } catch {
+            window.clearTimeout(tid);
+            resolve([]);
+          }
+        });
+      }
+      const merged = mergeAdminSearchWithKakao(ourRows, kakaoRows);
+      track("admin_map_search", adminSearchEventMeta(trimmed, merged.length, merged.length ? "ok" : "empty"));
+      if (!merged.length) {
+        showToast("검색 결과가 없어요", "info");
+        pendingSearchCenterSyncRef.current = false;
+        return;
+      }
+      clearSearchResultPins();
+      const pinned = merged.filter((p) => Number.isFinite(parseFloat(String(p.y ?? ""))));
+      addSearchResultPins(pinned, (place) => openAdminSearchRow(place, "marker-admin-search"));
+      setMapSearchResults(merged as MapSearchPlaceResult[]);
+      setMapSearchLabel(trimmed);
+      setIsMapSearchSheetOpen(true);
+      prefetchTilesForSearchResults(pinned, 3);
+      const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+      const pts = pinned.slice(0, 3).map((p) => ({ lat: parseFloat(String(p.y)), lng: parseFloat(String(p.x)) }));
+      if (gl && pts.length === 1) {
+        gl.goToSearchResult(pts[0]!.lat, pts[0]!.lng, 3);
+      } else if (gl && pts.length > 1) {
+        gl.fitPoints(pts, { top: 108, right: 28, bottom: 280, left: 28 });
+      }
+      setSearchQuery("");
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [addSearchResultPins, clearSearchResultPins, fetchAdminSearchHits, openAdminSearchRow, rememberAdminSearch, showToast],
+  );
+
   /** 확장 지도 검색 — 지도 center 기준 (GPS 아님) */
   const getExpandedMapSearchCenter = useCallback(() => {
     const mapNow = expandedMapRef.current;
@@ -12598,6 +12825,11 @@ function HomePageContent() {
       devLog("[PindMap:search] search invoked", { query: trimmed });
       if (!trimmed) {
         devLog("[PindMap:search] search blocked - reason: empty_query");
+        return;
+      }
+      // Admin expanded MapLibre only (rollout 0 → never for general users): our data first.
+      if (isExpandedMapLibre(expandedMapRef.current)) {
+        void runAdminMergedSearch(trimmed);
         return;
       }
       if (!window.kakao?.maps) {
@@ -12771,6 +13003,7 @@ function HomePageContent() {
       clearSearchResultPins,
       getExpandedMapSearchCenter,
       openExpandedSearchPlaceCard,
+      runAdminMergedSearch,
       showToast,
     ],
   );
@@ -13589,7 +13822,7 @@ function HomePageContent() {
           },
           onSearchPinClick: (pinId) => {
             const place = searchPinPlaceByIdRef.current.get(pinId);
-            if (place) openExpandedSearchPlaceCardRef.current(place, "maplibre-search-pin");
+            if (place) openAdminSearchRowRef.current(place, "maplibre-search-pin");
           },
           onDiscoverPinClick: (poiId) => {
             void openDiscoverPlaceSheetRef.current(poiId);
@@ -13666,6 +13899,7 @@ function HomePageContent() {
                   setBearing?: (deg: number) => void;
                   getBearing?: () => number;
                   getCenter?: () => { lat: number; lng: number } | null;
+                  getLevel?: () => number | null;
                 };
               };
               const prev = w.__PINDMAP_EXPANDED_GL__;
@@ -13706,6 +13940,8 @@ function HomePageContent() {
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getBearing() ?? 0,
                 getCenter: () =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getCenter() ?? null,
+                getLevel: () =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? null,
                 jumpToZoom: (lat, lng, zoom) =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.jumpToZoom(lat, lng, zoom),
               };
@@ -18427,7 +18663,10 @@ function HomePageContent() {
                                   className="expandedMapLibreSearchInput"
                                   placeholder="장소 검색"
                                   value={searchQuery}
+                                  data-testid="expanded-maplibre-search-input"
                                   onChange={(e) => setSearchQuery(e.target.value)}
+                                  onFocus={() => setAdminSearchFocused(true)}
+                                  onBlur={() => setAdminSearchFocused(false)}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                       e.preventDefault();
@@ -18457,6 +18696,26 @@ function HomePageContent() {
                                   </svg>
                                 </button>
                               </div>
+                              <AdminMapSearchSuggest
+                                query={searchQuery}
+                                active={adminSearchFocused && !isMapSearchSheetOpen}
+                                recent={adminRecentSearches}
+                                fetchHits={fetchAdminSearchHits}
+                                onPickHit={(hit, q) => {
+                                  rememberAdminSearch(q);
+                                  track("admin_map_search", adminSearchEventMeta(q, 1, "suggest"));
+                                  setSearchQuery("");
+                                  void openAdminSearchHit(hit, "suggest-tap");
+                                }}
+                                onPickRecent={(q) => {
+                                  setSearchQuery(q);
+                                  runExpandedMapSearch(q);
+                                }}
+                                onClearRecent={() => {
+                                  clearAdminRecentSearches(window.localStorage);
+                                  setAdminRecentSearches([]);
+                                }}
+                              />
                               {showAdminMapExtras && discoverChipEnabled ? (
                                 <div className="expandedMapLibreDiscoverRow">
                                   <button
@@ -18769,9 +19028,14 @@ function HomePageContent() {
                           userLocation={myLocationLatLngRef.current}
                           keyboardHeight={keyboardHeight}
                           preferPointerSelect={useMapLibreExpandedChrome}
+                          hideEmptyAddress={useMapLibreExpandedChrome}
                           onSelect={(place) => {
                             // Focus pin + card + padded camera (see openExpandedSearchPlaceCard)
-                            openExpandedSearchPlaceCard(place, "sheet-list-tap");
+                            if ((place as AdminSearchRow)._pindHit) {
+                              openAdminSearchRow(place, "sheet-list-tap");
+                            } else {
+                              openExpandedSearchPlaceCard(place, "sheet-list-tap");
+                            }
                             const py = parseFloat(String(place.y ?? ""));
                             const px = parseFloat(String(place.x ?? ""));
                             if (Number.isFinite(py) && Number.isFinite(px)) {
