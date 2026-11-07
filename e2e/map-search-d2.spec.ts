@@ -138,10 +138,19 @@ test("D-2 search: autocomplete → card (rotation kept), recent, Enter list, roa
   await expect(firstRow).toContainText("경복궁");
   const sheet = dialog.locator(".mapSearchResultsSheet");
   await expect(sheet).not.toContainText("주소 없음");
+  const gyeongbokRows = sheet
+    .locator(".mapSearchResultsSheetItem")
+    .filter({ has: page.locator(".mapSearchResultsSheetItemName", { hasText: /^경복궁$/ }) });
   await expect(
-    sheet.locator(".mapSearchResultsSheetItemName").filter({ hasText: /^경복궁$/ }),
-    "경복궁 관광+랜드마크 shown once",
+    gyeongbokRows.filter({
+      has: page.locator(".mapSearchResultsSheetItemCategory", { hasText: /^(관광명소|랜드마크|지하철역)$/ }),
+    }),
+    "경복궁 관광+랜드마크 shown once (same-name 상가 shops are separate places)",
   ).toHaveCount(1);
+  const gyeongbokKinds = await gyeongbokRows.evaluateAll((els) =>
+    els.map((el) => (el.querySelector(".mapSearchResultsSheetItemAddress") ? "shop" : "catalog")),
+  );
+  expect(gyeongbokKinds.indexOf("catalog"), "관광지 경복궁 above 상가 경복궁 shops").toBe(0);
   await page.screenshot({ path: path.join(OUT, "results.png") });
   await firstRow.click();
   await expect(card).toBeVisible({ timeout: 15_000 });

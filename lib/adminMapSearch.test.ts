@@ -111,14 +111,16 @@ test("unionPlaceHits keeps the first copy of each id", () => {
 
 test("collapseSamePlaces: 경복궁 관광+랜드마크 → one landmark row with the tour category", () => {
   const station = place({ id: "station:1", source: "station", name: "경복궁역", branch: null, category: "지하철역", lat: 37.5758, lng: 126.9735 });
-  const tour = place({ id: "tour:1", source: "tour", name: "경복궁", branch: null, category: "관광명소", lat: 37.5796, lng: 126.977, score: 309.6 });
-  const lm1 = place({ id: "landmark:1", source: "landmark", name: "경복궁", branch: null, category: "랜드마크", lat: 37.5797, lng: 126.9769, score: 309.3 });
+  const tour = place({ id: "tour:1", source: "tour", name: "경복궁", branch: null, category: "관광명소", lat: 37.5760307, lng: 126.9767219, score: 309.6 });
+  const lm1 = place({ id: "landmark:1", source: "landmark", name: "경복궁", branch: null, category: "랜드마크", lat: 37.5795, lng: 126.977, score: 309.3 });
   const lm2 = place({ id: "major:1", source: "landmark", name: "경복궁", branch: null, category: "랜드마크", lat: 37.5800, lng: 126.9772, score: 309.2 });
   const far = place({ id: "tour:2", source: "tour", name: "경복궁", branch: null, category: "관광명소", lat: 35.0, lng: 129.0 });
   const shopA = place({ id: "s1", name: "이디야커피", branch: null, lat: 37.55, lng: 126.92 });
   const shopB = place({ id: "s2", name: "이디야커피", branch: null, lat: 37.5501, lng: 126.9201 });
-  const out = collapseSamePlaces([station, tour, lm1, lm2, far, shopA, shopB]);
-  assert.deepEqual(out.map((h) => h.id), ["station:1", "landmark:1", "tour:2", "s1", "s2"]);
+  const dongA = place({ id: "d1", source: "dong", name: "신사동", branch: null, lat: 37.52, lng: 127.02 });
+  const dongB = place({ id: "d2", source: "dong", name: "신사동", branch: null, lat: 37.5201, lng: 127.0201 });
+  const out = collapseSamePlaces([station, tour, lm1, lm2, far, shopA, shopB, dongA, dongB]);
+  assert.deepEqual(out.map((h) => h.id), ["station:1", "landmark:1", "tour:2", "s1", "s2", "d1", "d2"]);
   assert.equal(out[1]!.category, "관광명소");
   assert.equal(out[1]!.score, 309.6);
 });

@@ -225,21 +225,22 @@ export function rerankPlaceHits(hits: OurPlaceHit[], query: string): OurPlaceHit
   return adjusted.map((x) => x.h);
 }
 
-export const SAME_PLACE_RADIUS_M = 300;
+export const SAME_PLACE_RADIUS_M = 500;
 const KEEP_PRIORITY: Partial<Record<OurSource, number>> = { landmark: 0, tour: 1, station: 2 };
 
 /**
- * One row per real place among catalog hits: same normalised name within 300m
- * (e.g. 경복궁 as 관광 + 랜드마크). The landmark row is kept (at the group's first
- * position); a tour member's category is used when there is one. 상가 rows are
- * never merged (different shops can share a name nearby).
+ * One row per real place among 관광·랜드마크·역 hits: same normalised name within
+ * 500m (경복궁 관광 and 랜드마크 points are ~390m apart). The landmark row is kept
+ * (at the group's first position); a tour member's category is used when there is
+ * one. 상가 rows are never merged (different shops can share a name nearby);
+ * 동·구·시 rows pass through.
  */
 export function collapseSamePlaces(hits: OurPlaceHit[]): OurPlaceHit[] {
   type Group = { at: number; members: OurPlaceHit[] };
   const groups: Group[] = [];
   const out: Array<OurPlaceHit | Group> = [];
   for (const h of hits) {
-    if (h.source === "sangga") {
+    if (KEEP_PRIORITY[h.source] === undefined) {
       out.push(h);
       continue;
     }
