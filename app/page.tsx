@@ -265,6 +265,16 @@ import {
 } from "@/components/PlacePostsListScreen";
 import { MapSearchResultsSheet, type MapSearchPlaceResult } from "@/components/MapSearchResultsSheet";
 import { AdminMapSearchSuggest } from "@/components/AdminMapSearchSuggest";
+import { AdminMapCategoryChips } from "@/components/AdminMapCategoryChips";
+import {
+  categoryChip,
+  categoryEventMeta,
+  defaultSortMode,
+  hasKakaoRows,
+  type CategoryChipId,
+  type KakaoPlaceDoc,
+  type SortMode,
+} from "@/lib/adminMapCategory";
 import {
   RESULT_LIMIT as ADMIN_SEARCH_RESULT_LIMIT,
   KAKAO_FILL_BELOW as ADMIN_SEARCH_KAKAO_FILL_BELOW,
@@ -2014,6 +2024,16 @@ function HomePageContent() {
   mapSearchResultsRef.current = mapSearchResults;
   const [mapSearchLabel, setMapSearchLabel] = useState("");
   const [isMapSearchSheetOpen, setIsMapSearchSheetOpen] = useState(false);
+  /** Admin MapLibre category chip behind the current results (null = name search). */
+  const [activeCategoryChip, setActiveCategoryChip] = useState<CategoryChipId | null>(null);
+  const activeCategoryChipRef = useRef<CategoryChipId | null>(null);
+  const [categoryLoading, setCategoryLoading] = useState<CategoryChipId | null>(null);
+  const categoryRequestRef = useRef(0);
+  const [mapSearchSortMode, setMapSearchSortMode] = useState<SortMode>("accuracy");
+  const mapSearchSortModeRef = useRef<SortMode>("accuracy");
+  mapSearchSortModeRef.current = mapSearchSortMode;
+  /** Search result pins currently drawn (Kakao credit while Kakao rows are pinned). */
+  const [searchPinsShown, setSearchPinsShown] = useState(false);
   /** Admin MapLibre search: field focus (autocomplete) + this device's recent queries. */
   const [adminSearchFocused, setAdminSearchFocused] = useState(false);
   const [adminRecentSearches, setAdminRecentSearches] = useState<string[]>([]);
@@ -2792,6 +2812,7 @@ function HomePageContent() {
   const clearSearchResultPins = useCallback(() => {
     const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
     if (gl) gl.clearSearchPins();
+    setSearchPinsShown(false);
     mapSearchResultPinsRef.current.forEach((m) => {
       try {
         m.setMap(null);
@@ -2850,6 +2871,7 @@ function HomePageContent() {
           };
         }).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
         gl.setSearchPins(pins);
+        setSearchPinsShown(pins.length > 0);
         mapSearchResultPinsRef.current = [{ setMap: () => gl.clearSearchPins() }];
         lastExpandedSearchPlacesRef.current = places.slice();
         return;
@@ -2875,6 +2897,10 @@ function HomePageContent() {
     setSearchQuery("");
     clearSearchResultPins();
     if (!selectedPlaceRef.current) clearAdminSearchMapPinsRef.current();
+    categoryRequestRef.current += 1;
+    activeCategoryChipRef.current = null;
+    setActiveCategoryChip(null);
+    setCategoryLoading(null);
     setMapSearchResults([]);
     setMapSearchLabel("");
     setIsMapSearchSheetOpen(false);
@@ -12769,6 +12795,11 @@ function HomePageContent() {
       // A new search replaces the previous one: its pins (incl. the address house) and card go.
       setSelectedPlace(null);
       clearAdminSearchMapPins();
+      categoryRequestRef.current += 1;
+      activeCategoryChipRef.current = null;
+      setActiveCategoryChip(null);
+      setCategoryLoading(null);
+      setMapSearchSortMode(defaultSortMode("name"));
       mapSearchKeywordRef.current = trimmed;
       setShowMapResearchButton(false);
       pendingSearchCenterSyncRef.current = true;
@@ -12836,6 +12867,84 @@ function HomePageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [addSearchResultPins, clearSearchResultPins, clearAdminSearchMapPins, fetchAdminSearchHits, openAdminSearchRow, rememberAdminSearch, showToast],
   );
+
+  /**
+   * Admin MapLibre category chip: Kakao category search in the visible map (1km circle when
+   * zoomed out), live per tap — results are only shown (pins + list), never kept.
+   */
+  const runCategoryChipSearch = useCallback(
+    async (chipId: CategoryChipId, sort: SortMode = defaultSortMode("category")) => {
+      const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+      const chip = categoryChip(chipId);
+      const center = gl?.getCenter();
+      if (!gl || !chip || !center) return;
+      const bounds = gl.getBounds();
+      const reqId = ++categoryRequestRef.current;
+      try {
+        expandedMapSearchInputRef.current?.blur();
+      } catch {
+        /* noop */
+      }
+      setSelectedPlace(null);
+      clearAdminSearchMapPins();
+      mapSearchKeywordRef.current = "";
+      activeCategoryChipRef.current = chipId;
+      setActiveCategoryChip(chipId);
+      setCategoryLoading(chipId);
+      setMapSearchSortMode(sort);
+      setSearchQuery("");
+
+      let docs: KakaoPlaceDoc[] = [];
+      let code = "ok";
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("no_session");
+        const sw = bounds?.getSouthWest();
+        const ne = bounds?.getNorthEast();
+        const res = await fetch("/api/admin/map-category", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            chip: chipId,
+            lat: center.lat,
+            lng: center.lng,
+            sw: sw ? { lat: sw.lat, lng: sw.lng } : null,
+            ne: ne ? { lat: ne.lat, lng: ne.lng } : null,
+            sort,
+          }),
+        });
+        if (res.ok) docs = ((await res.json()) as { docs?: KakaoPlaceDoc[] }).docs ?? [];
+        else code = `http_${res.status}`;
+      } catch {
+        code = "fetch_failed";
+      }
+      if (reqId !== categoryRequestRef.current) return;
+      setCategoryLoading(null);
+      track("admin_map_category", categoryEventMeta(chipId, docs.length, docs.length ? "ok" : code === "ok" ? "empty" : code));
+      lastSearchCenterRef.current = { lat: center.lat, lng: center.lng };
+      pendingSearchCenterSyncRef.current = false;
+      setShowMapResearchButton(false);
+      if (!docs.length) {
+        setMapSearchResults([]);
+        setIsMapSearchSheetOpen(false);
+        showToast(code === "ok" ? "이 지역에 결과가 없어요" : "카테고리 검색에 실패했어요", "info");
+        return;
+      }
+      addSearchResultPins(docs, (place) => openAdminSearchRow(place, "marker-category"));
+      setMapSearchResults(docs as MapSearchPlaceResult[]);
+      setMapSearchLabel(chip.label);
+      setIsMapSearchSheetOpen(true);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [addSearchResultPins, clearAdminSearchMapPins, openAdminSearchRow, showToast],
+  );
+  const runCategoryChipSearchRef = useRef(runCategoryChipSearch);
+  runCategoryChipSearchRef.current = runCategoryChipSearch;
 
   /** 확장 지도 검색 — 지도 center 기준 (GPS 아님) */
   const getExpandedMapSearchCenter = useCallback(() => {
@@ -13040,6 +13149,11 @@ function HomePageContent() {
   };
 
   const handleResearchThisArea = useCallback(() => {
+    const chip = activeCategoryChipRef.current;
+    if (chip && isExpandedMapLibre(expandedMapRef.current)) {
+      void runCategoryChipSearchRef.current(chip, mapSearchSortModeRef.current);
+      return;
+    }
     const keyword = mapSearchKeywordRef.current.trim();
     if (!keyword) return;
     runExpandedMapSearch(keyword);
@@ -15881,6 +15995,16 @@ function HomePageContent() {
     expandedMapIsMapLibre,
     mapExpanded,
   ]);
+
+  // Admin MapLibre corner credit " · 카카오" while Kakao data is on screen: Kakao rows in the
+  // list / on pins, or a card carrying Kakao details (place_url from Kakao).
+  useEffect(() => {
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (!gl) return;
+    const rows = (isMapSearchSheetOpen || searchPinsShown) && hasKakaoRows(mapSearchResults as Array<{ _pindHit?: unknown }>);
+    const card = /kakao\.com/i.test(String((selectedPlace as PlaceSheetData | null)?.place_url ?? ""));
+    gl.setKakaoCredit(rows || card);
+  }, [mapSearchResults, isMapSearchSheetOpen, searchPinsShown, selectedPlace, expandedMapIsMapLibre]);
 
   const renderPlaceCard = () => {
     if (!selectedPlace) return null;
@@ -18746,6 +18870,19 @@ function HomePageContent() {
                                   setAdminRecentSearches([]);
                                 }}
                               />
+                              {!adminSearchFocused && (
+                                <AdminMapCategoryChips
+                                  active={activeCategoryChip}
+                                  loading={categoryLoading}
+                                  onPick={(id) => {
+                                    if (activeCategoryChipRef.current === id) {
+                                      handleClearMapSearch();
+                                      return;
+                                    }
+                                    void runCategoryChipSearch(id);
+                                  }}
+                                />
+                              )}
                               {showAdminMapExtras && discoverChipEnabled ? (
                                 <div className="expandedMapLibreDiscoverRow">
                                   <button
@@ -19059,6 +19196,17 @@ function HomePageContent() {
                           keyboardHeight={keyboardHeight}
                           preferPointerSelect={useMapLibreExpandedChrome}
                           hideEmptyAddress={useMapLibreExpandedChrome}
+                          {...(useMapLibreExpandedChrome
+                            ? {
+                                sortMode: mapSearchSortMode,
+                                sortDistanceOnClient: !activeCategoryChip,
+                                onSortModeChange: (mode: SortMode) => {
+                                  const chip = activeCategoryChipRef.current;
+                                  if (chip) void runCategoryChipSearch(chip, mode);
+                                  else setMapSearchSortMode(mode);
+                                },
+                              }
+                            : {})}
                           onSelect={(place) => {
                             // Focus pin + card + padded camera (see openExpandedSearchPlaceCard)
                             if ((place as AdminSearchRow)._pindHit) {
