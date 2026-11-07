@@ -70,6 +70,7 @@ export {
   resetMapGlAutoOffForTests,
   type MapGlAutoOffCode,
 } from "./mapGlAutoOff";
+export { isWebGlSupportedOnce, shouldUseMapLibreOnce, webGlSupportProbeCount } from "./webGlSupport";
 export {
   SELF_TILES_STORAGE_KEY,
   SELF_GLYPHS_URL,

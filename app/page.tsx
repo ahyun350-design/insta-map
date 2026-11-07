@@ -347,6 +347,7 @@ import {
   noteMapGlWebGlRecoverFail,
   resetMapGlAutoOffForTests,
   activateMapGlAutoOffForTests,
+  webGlSupportProbeCount,
   prefetchAdminMapGlAssets,
   prefetchTilesForSearchResults,
   prefetchZ14Around,
@@ -1688,6 +1689,7 @@ function HomePageContent() {
         resetAutoOff: () => void;
         activateAutoOff: () => void;
         setRemoteForTests: (v: boolean | null) => void;
+        webGlProbes: () => number;
       };
     };
     w.__PINDMAP_MAP_GL_GATE__ = {
@@ -1700,6 +1702,7 @@ function HomePageContent() {
       resetAutoOff: () => resetMapGlAutoOffForTests(),
       activateAutoOff: () => activateMapGlAutoOffForTests(),
       setRemoteForTests: (v) => setMapGlRemoteEnabledForTests(v),
+      webGlProbes: () => webGlSupportProbeCount(),
     };
     return () => {
       delete w.__PINDMAP_MAP_GL_GATE__;

@@ -1,9 +1,7 @@
-import {
-  type AdminMapGlOverride,
-  shouldUseMapLibre,
-} from "./rollout";
+import type { AdminMapGlOverride } from "./rollout";
 import { isMapGlAutoOffActive } from "./mapGlAutoOff";
 import { isMapGlRemoteAllowed } from "./mapGlKillSwitch";
+import { shouldUseMapLibreOnce } from "./webGlSupport";
 
 export const COMPACT_MAPLIBRE_STORAGE_KEY = "pindmap_admin_compact_maplibre";
 
@@ -60,6 +58,7 @@ export function writeCompactMapLibreFlag(enabled: boolean): void {
  * Compact MapLibre gate.
  * Remote kill / unread / auto-off → Kakao (incl. admin force).
  * Then: session fallback > admin override > rollout.
+ * Called during render — WebGL is probed once per session (webGlSupport.ts).
  */
 export function shouldUseCompactMapLibre(
   isAdmin: boolean,
@@ -67,7 +66,7 @@ export function shouldUseCompactMapLibre(
 ): boolean {
   if (isMapGlAutoOffActive()) return false;
   if (!isMapGlRemoteAllowed()) return false;
-  return shouldUseMapLibre({
+  return shouldUseMapLibreOnce({
     isAdmin,
     userId,
     sessionForceKakao,
