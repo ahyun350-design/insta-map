@@ -174,6 +174,22 @@ test("D-2 search: autocomplete → card (rotation kept), recent, Enter list, roa
     .toBe(2);
   await page.waitForTimeout(3000);
   await page.screenshot({ path: path.join(OUT, "address.png") });
+  await card.getByRole("button", { name: "닫기" }).click();
+  await expect(card).toBeHidden({ timeout: 10_000 });
+
+  // 6) Chain name → nearest store first (not an exact-name store far away)
+  await input.click();
+  await input.fill("이디야");
+  await input.press("Enter");
+  const ediyaFirst = dialog.locator(".mapSearchResultsSheetItem").first();
+  await expect(ediyaFirst).toBeVisible({ timeout: 20_000 });
+  await expect(ediyaFirst.locator(".mapSearchResultsSheetItemName")).toContainText("이디야");
+  await expect(
+    ediyaFirst.locator(".mapSearchResultsSheetItemDistance"),
+    "nearest 이디야 first (within 1km of the map)",
+  ).toHaveText(/^\d+m$/);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: path.join(OUT, "results-ediya.png") });
 
   await context.close();
 });

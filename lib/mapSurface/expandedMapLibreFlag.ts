@@ -1,9 +1,7 @@
-import {
-  type AdminMapGlOverride,
-  shouldUseMapLibre,
-} from "./rollout";
+import type { AdminMapGlOverride } from "./rollout";
 import { isMapGlAutoOffActive } from "./mapGlAutoOff";
 import { isMapGlRemoteAllowed } from "./mapGlKillSwitch";
+import { isWebGlSupportedOnce, shouldUseMapLibreOnce } from "./webGlSupport";
 
 export const EXPANDED_MAPLIBRE_STORAGE_KEY = "pindmap_admin_expanded_maplibre";
 
@@ -74,8 +72,9 @@ export function isE2eForceExpandedMapLibre(): boolean {
 /**
  * Expanded MapLibre gate.
  * Remote kill / unread / auto-off → Kakao (incl. admin force).
- * E2E force still requires remote allow (set __PINDMAP_E2E_MAP_GL_REMOTE__=true).
+ * E2E force still requires remote allow (set __PINDMAP_E2E_MAP_GL_REMOTE__=true) and WebGL.
  * Then: e2e force > session fallback > admin override > rollout.
+ * Called during render — WebGL is probed once per session (webGlSupport.ts).
  */
 export function shouldUseExpandedMapLibre(
   isAdmin: boolean,
@@ -83,8 +82,8 @@ export function shouldUseExpandedMapLibre(
 ): boolean {
   if (isMapGlAutoOffActive()) return false;
   if (!isMapGlRemoteAllowed()) return false;
-  if (isE2eForceExpandedMapLibre()) return true;
-  return shouldUseMapLibre({
+  if (isE2eForceExpandedMapLibre()) return isWebGlSupportedOnce();
+  return shouldUseMapLibreOnce({
     isAdmin,
     userId,
     sessionForceKakao: sessionForceKakaoExpanded,
