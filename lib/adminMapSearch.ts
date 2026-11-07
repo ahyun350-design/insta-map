@@ -38,7 +38,20 @@ export type OurAddressHit = {
   buildingName: string | null;
 };
 
-export type OurHit = OurPlaceHit | OurAddressHit;
+/** Kakao keyword result (live, display only — never stored). */
+export type KakaoKeywordHit = {
+  kind: "kakao";
+  id: string;
+  name: string;
+  category: string | null;
+  address: string | null;
+  phone: string | null;
+  placeUrl: string | null;
+  lat: number;
+  lng: number;
+};
+
+export type OurHit = OurPlaceHit | OurAddressHit | KakaoKeywordHit;
 
 export type MapSearchApiResponse = {
   hits: OurHit[];
@@ -48,7 +61,14 @@ export type MapSearchApiResponse = {
     jusoMs: number | null;
     dbError: string | null;
     jusoError: string | null;
+    /** "이디야 강남": the 동·역·구 point the query names (distance origin for ranking). */
+    anchor?: { lat: number; lng: number } | null;
   };
+};
+
+export type MapKakaoSearchApiResponse = {
+  hits: KakaoKeywordHit[];
+  diag: { ms: number; error: string | null };
 };
 
 /** Kakao-shaped row for the existing results sheet / pins, plus our hit. */
@@ -58,9 +78,12 @@ export type AdminSearchRow = {
   category_name?: string;
   road_address_name?: string;
   address_name?: string;
+  phone?: string;
+  place_url?: string;
   y?: string;
   x?: string;
-  _pindHit?: OurHit;
+  /** Our place / address hit (Kakao rows have none). */
+  _pindHit?: OurPlaceHit | OurAddressHit;
 };
 
 export const SUGGEST_LIMIT = 8;
@@ -68,6 +91,8 @@ export const SUGGEST_DEBOUNCE_MS = 200;
 export const RESULT_LIMIT = 15;
 /** Kakao keyword is called only when ours return fewer rows than this. */
 export const KAKAO_FILL_BELOW = 5;
+/** Name search: Kakao keyword slower than this (from the search start) → ours only. */
+export const KAKAO_KEYWORD_TIMEOUT_MS = 800;
 export const DEDUPE_RADIUS_M = 50;
 export const QUERY_MAX_LEN = 40;
 
@@ -76,12 +101,12 @@ export function looksLikeRoadAddress(q: string): boolean {
   return /[가-힣0-9](로|길)\s*\d+(-\d+)?(\s|$)/.test(q.trim());
 }
 
-export function placeDisplayName(hit: OurPlaceHit): string {
-  return hit.branch ? `${hit.name} ${hit.branch}` : hit.name;
+export function placeDisplayName(hit: OurPlaceHit | KakaoKeywordHit): string {
+  return hit.kind === "place" && hit.branch ? `${hit.name} ${hit.branch}` : hit.name;
 }
 
 export function hitLatLng(hit: OurHit): { lat: number; lng: number } | null {
-  if (hit.kind !== "place") return null;
+  if (hit.kind === "address") return null;
   return Number.isFinite(hit.lat) && Number.isFinite(hit.lng) ? { lat: hit.lat, lng: hit.lng } : null;
 }
 
@@ -137,10 +162,27 @@ export function hitCategoryLabel(hit: OurPlaceHit): string {
 
 export function hitSubtitle(hit: OurHit): string {
   if (hit.kind === "address") return hit.buildingName ? `도로명주소 · ${hit.buildingName}` : "도로명주소";
+  if (hit.kind === "kakao") {
+    const cat = hit.category?.split(">").pop()?.trim() || null;
+    return [cat, hit.address].filter(Boolean).join(" · ");
+  }
   return [hitCategoryLabel(hit), hit.address].filter(Boolean).join(" · ");
 }
 
 export function toSearchRow(hit: OurHit): AdminSearchRow {
+  if (hit.kind === "kakao") {
+    return {
+      id: `kakao-${hit.id}`,
+      place_name: hit.name,
+      category_name: hit.category ?? "",
+      road_address_name: hit.address ?? "",
+      address_name: "",
+      phone: hit.phone ?? "",
+      place_url: hit.placeUrl ?? "",
+      y: String(hit.lat),
+      x: String(hit.lng),
+    };
+  }
   if (hit.kind === "address") {
     return {
       id: hit.id,
@@ -349,6 +391,117 @@ export function chainAliasQuery(query: string): string | null {
     if (real) return [real, ...words.slice(n)].join(" ");
   }
   return null;
+}
+
+/** Kakao keyword document → display-only hit (null without coordinates). */
+export function kakaoDocToHit(doc: {
+  id?: string;
+  place_name?: string;
+  category_name?: string;
+  road_address_name?: string;
+  address_name?: string;
+  phone?: string;
+  place_url?: string;
+  x?: string;
+  y?: string;
+}): KakaoKeywordHit | null {
+  const lat = parseFloat(String(doc.y ?? ""));
+  const lng = parseFloat(String(doc.x ?? ""));
+  if (!doc.id || !doc.place_name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    kind: "kakao",
+    id: doc.id,
+    name: doc.place_name,
+    category: doc.category_name || null,
+    address: doc.road_address_name || doc.address_name || null,
+    phone: doc.phone || null,
+    placeUrl: doc.place_url || null,
+    lat,
+    lng,
+  };
+}
+
+/** Name key for tiering: lower-case, no spaces / symbols, chain names mapped to the 상호. */
+function matchKey(s: string): string {
+  const k = s.toLowerCase().replace(/[\s()[\]{}（）·.,'"\-_/&+]/g, "");
+  const alias = CHAIN_ALIASES[k];
+  return alias ? alias.toLowerCase().replace(/[\s\-]/g, "") : k;
+}
+
+export type NameTier = 1 | 2 | 3;
+
+/**
+ * 1 = exact name, 2 = name starts with the query, 3 = anything else (similar).
+ * `names`: the place's own name(s); `queries`: the query (+ its chain alias / name part).
+ */
+export function nameMatchTier(queries: string[], names: string[]): NameTier {
+  const qs = queries.map(matchKey).filter((q) => q.length > 0);
+  const ns = names.map(matchKey).filter((n) => n.length > 0);
+  if (ns.some((n) => qs.includes(n))) return 1;
+  if (ns.some((n) => qs.some((q) => n.startsWith(q)))) return 2;
+  return 3;
+}
+
+/** Query forms a name may match: the query, its chain alias, and the name part before an area word. */
+export function rankQueries(query: string): string[] {
+  const q = query.trim();
+  const out = [q];
+  const alias = chainAliasQuery(q);
+  if (alias) out.push(alias);
+  const words = q.split(/\s+/);
+  if (words.length >= 2) {
+    const head = words.slice(0, -1).join(" ");
+    out.push(head);
+    const headAlias = chainAliasQuery(head);
+    if (headAlias) out.push(headAlias);
+  }
+  return out;
+}
+
+function hitNames(hit: OurPlaceHit | KakaoKeywordHit): string[] {
+  if (hit.kind === "place") return [hit.name, placeDisplayName(hit)];
+  // Kakao names carry the branch: "스타벅스 홍대역점" → also "스타벅스".
+  const head = hit.name.split(/\s+/)[0] ?? hit.name;
+  return [hit.name, head];
+}
+
+/**
+ * Our hits + Kakao keyword hits → one list. 도로명주소 rows lead; places are ranked by name
+ * tier (exact > prefix > similar), then our 관광·랜드마크·역·지역 rows before shops (same-name
+ * shops never outrank the place itself), then distance from `origin`. A Kakao hit that is the
+ * same place as one of ours is dropped — ours win.
+ */
+export function rankMergedHits(
+  ours: OurHit[],
+  kakao: KakaoKeywordHit[],
+  query: string,
+  origin: { lat: number; lng: number } | null,
+  limit: number = RESULT_LIMIT,
+): OurHit[] {
+  const addresses = ours.filter((h): h is OurAddressHit => h.kind === "address");
+  const places = ours.filter((h): h is OurPlaceHit => h.kind === "place");
+  // Same place: matching name within 50m (shops) / 500m (관광·랜드마크·역·지역 — big areas).
+  const kakaoOnly = kakao.filter(
+    (k) =>
+      !places.some(
+        (p) =>
+          placeNamesMatch(placeDisplayName(p), k.name) &&
+          distanceMeters(p.lat, p.lng, k.lat, k.lng) <=
+            (p.source === "sangga" ? DEDUPE_RADIUS_M : SAME_PLACE_RADIUS_M),
+      ),
+  );
+  const qs = rankQueries(query);
+  const ranked = [...places, ...kakaoOnly]
+    .map((h, i) => ({
+      h,
+      i,
+      tier: nameMatchTier(qs, hitNames(h)),
+      catalog: h.kind === "place" && h.source !== "sangga" ? 0 : 1,
+      d: origin ? distanceMeters(origin.lat, origin.lng, h.lat, h.lng) : (h.kind === "place" ? h.distM ?? Infinity : Infinity),
+    }))
+    .sort((a, b) => a.tier - b.tier || a.catalog - b.catalog || a.d - b.d || a.i - b.i)
+    .map((x) => x.h);
+  return [...addresses, ...ranked].slice(0, Math.max(limit, addresses.length));
 }
 
 /** Union of RPC hit lists by id (first occurrence wins). */

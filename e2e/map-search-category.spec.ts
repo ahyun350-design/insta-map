@@ -137,7 +137,13 @@ test("category chips: 카페 → pins + list (distance), 정확도순, 재검색
   await expect(sort.getByRole("button", { name: "정확도순" })).toHaveAttribute("aria-pressed", "true");
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await expect(dialog.locator('[data-chip="cafe"]')).toHaveAttribute("aria-pressed", "false");
-  await expect(credit).not.toContainText("카카오");
+  // Name search now merges Kakao keyword rows: the credit follows whether any are shown.
+  await expect(dialog.getByTestId("map-search-loading")).toHaveCount(0, { timeout: 10_000 });
+  const kakaoUsed = await page.evaluate(
+    () => (window as unknown as { __PINDMAP_SEARCH_TIMING__?: { kakaoUsed: boolean } }).__PINDMAP_SEARCH_TIMING__?.kakaoUsed,
+  );
+  if (kakaoUsed) await expect(credit).toContainText("카카오");
+  else await expect(credit).not.toContainText("카카오");
   await page.screenshot({ path: path.join(OUT, "name-search-accuracy.png") });
 
   // 5) Clear → chips back, nothing pinned

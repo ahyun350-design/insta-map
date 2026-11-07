@@ -185,10 +185,11 @@ export async function POST(req: Request) {
     ? jusoSearch(q).then((r) => ({ ...r, ms: Date.now() - jusoStart }))
     : Promise.resolve(null);
 
-  const [db, dbAlias, juso] = await Promise.all([
+  const [db, dbAlias, juso, anchor] = await Promise.all([
     rpc(q),
     aliasQ ? rpc(aliasQ) : Promise.resolve(null),
     jusoPromise,
+    areaAnchor(admin, q, hasCenter ? { lat, lng } : null),
   ]);
   const toHits = (r: { data: unknown; error: unknown } | null) =>
     !r || r.error
@@ -207,7 +208,44 @@ export async function POST(req: Request) {
       jusoMs: juso ? juso.ms : null,
       dbError: db.error ? "rpc_failed" : null,
       jusoError: juso?.error ?? null,
+      anchor,
     },
   };
   return NextResponse.json(payload);
+}
+
+/**
+ * "이디야 강남": the 역·동·구·시 the last word names — same pick as search_map_admin's area token
+ * (exact name, then "…동", then nearest). Small catalog table, name_norm prefix only.
+ */
+async function areaAnchor(
+  admin: ReturnType<typeof getSupabaseAdmin>,
+  q: string,
+  center: { lat: number; lng: number } | null,
+): Promise<{ lat: number; lng: number } | null> {
+  const words = q.split(" ");
+  if (words.length < 2) return null;
+  let tok = words[words.length - 1]!.toLowerCase().replace(/[\s·.,'"\-_/()]+/g, "");
+  if (/역$/.test(tok) && tok.length > 2) tok = tok.slice(0, -1);
+  if (tok.length < 2 || /[%_\\]/.test(tok)) return null;
+  const { data, error } = await admin
+    .from("map_search_catalog")
+    .select("name_norm, lat, lng")
+    .in("source", ["station", "dong", "gu", "si"])
+    .like("name_norm", `${tok}%`)
+    .limit(20);
+  if (error || !data?.length) return null;
+  const rows = (data as Array<{ name_norm: string; lat: number; lng: number }>).filter(
+    (r) => r.name_norm.length <= tok.length + 2,
+  );
+  const near = (r: { lat: number; lng: number }) =>
+    center ? Math.abs(r.lat - center.lat) + Math.abs(r.lng - center.lng) : 0;
+  rows.sort(
+    (a, b) =>
+      Number(b.name_norm === tok) - Number(a.name_norm === tok) ||
+      Number(b.name_norm === `${tok}동`) - Number(a.name_norm === `${tok}동`) ||
+      near(a) - near(b),
+  );
+  const top = rows[0];
+  return top && Number.isFinite(top.lat) && Number.isFinite(top.lng) ? { lat: top.lat, lng: top.lng } : null;
 }
