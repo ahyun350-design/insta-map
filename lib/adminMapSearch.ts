@@ -8,7 +8,7 @@
  */
 
 import type { MapPoiKind, MapPoiTap } from "@/lib/mapSurface/mapPoiTap";
-import { distanceMeters, placeNamesMatch } from "@/lib/mapPlaceMatch";
+import { distanceMeters, normalizePlaceName, placeNamesMatch } from "@/lib/mapPlaceMatch";
 
 export type OurSource = "sangga" | "tour" | "landmark" | "station" | "dong" | "gu" | "si";
 
@@ -223,6 +223,55 @@ export function rerankPlaceHits(hits: OurPlaceHit[], query: string): OurPlaceHit
     (a, b) => b.s - a.s || (a.h.distM ?? Infinity) - (b.h.distM ?? Infinity) || a.i - b.i,
   );
   return adjusted.map((x) => x.h);
+}
+
+export const SAME_PLACE_RADIUS_M = 300;
+const KEEP_PRIORITY: Partial<Record<OurSource, number>> = { landmark: 0, tour: 1, station: 2 };
+
+/**
+ * One row per real place among catalog hits: same normalised name within 300m
+ * (e.g. 경복궁 as 관광 + 랜드마크). The landmark row is kept (at the group's first
+ * position); a tour member's category is used when there is one. 상가 rows are
+ * never merged (different shops can share a name nearby).
+ */
+export function collapseSamePlaces(hits: OurPlaceHit[]): OurPlaceHit[] {
+  type Group = { at: number; members: OurPlaceHit[] };
+  const groups: Group[] = [];
+  const out: Array<OurPlaceHit | Group> = [];
+  for (const h of hits) {
+    if (h.source === "sangga") {
+      out.push(h);
+      continue;
+    }
+    const key = normalizePlaceName(h.name);
+    const g = groups.find((x) => {
+      const head = x.members[0]!;
+      return (
+        normalizePlaceName(head.name) === key &&
+        distanceMeters(head.lat, head.lng, h.lat, h.lng) <= SAME_PLACE_RADIUS_M
+      );
+    });
+    if (g) {
+      g.members.push(h);
+      continue;
+    }
+    const ng: Group = { at: out.length, members: [h] };
+    groups.push(ng);
+    out.push(ng);
+  }
+  return out.map((x) => {
+    if (!("members" in x)) return x;
+    if (x.members.length === 1) return x.members[0]!;
+    const keep = [...x.members].sort(
+      (a, b) => (KEEP_PRIORITY[a.source] ?? 9) - (KEEP_PRIORITY[b.source] ?? 9),
+    )[0]!;
+    const tour = x.members.find((m) => m.source === "tour");
+    return {
+      ...keep,
+      category: tour?.category ?? keep.category,
+      score: Math.max(...x.members.map((m) => m.score)),
+    };
+  });
 }
 
 /**

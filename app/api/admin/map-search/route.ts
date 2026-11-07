@@ -14,6 +14,7 @@ import {
   QUERY_MAX_LEN,
   RPC_CANDIDATES,
   chainAliasQuery,
+  collapseSamePlaces,
   looksLikeRoadAddress,
   rerankPlaceHits,
   unionPlaceHits,
@@ -193,7 +194,7 @@ export async function POST(req: Request) {
     !r || r.error
       ? []
       : ((r.data ?? []) as RpcRow[]).map(toPlaceHit).filter((h): h is OurPlaceHit => h != null);
-  const places = rerankPlaceHits(unionPlaceHits(toHits(db), toHits(dbAlias)), q);
+  const places = collapseSamePlaces(rerankPlaceHits(unionPlaceHits(toHits(db), toHits(dbAlias)), q));
   const addresses = juso?.hits ?? [];
   // Address-looking queries: the juso rows lead; place rows follow.
   const hits = [...addresses, ...places].slice(0, Math.max(limit, addresses.length));

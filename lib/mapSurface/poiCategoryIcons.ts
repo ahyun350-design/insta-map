@@ -152,6 +152,17 @@ function busGlyphInner(badge: string): string {
   return `<rect x="5" y="3.5" width="14" height="15" rx="3" fill="#fff"/><rect x="7" y="6.4" width="10" height="5.2" rx="1" fill="${badge}"/><circle cx="8.6" cy="15" r="1.2" fill="${badge}"/><circle cx="15.4" cy="15" r="1.2" fill="${badge}"/><rect x="6.4" y="18" width="2.8" height="2.6" rx="0.8" fill="${badge}"/><rect x="14.8" y="18" width="2.8" height="2.6" rx="0.8" fill="${badge}"/>`;
 }
 
+/** Admin search 도로명주소 pin: house glyph on a slate badge (same badge/glyph geometry). */
+export const ADDRESS_BADGE_COLOR = "#4A5A6E";
+
+export function addressBadgeSvg(): string {
+  const fill = ADDRESS_BADGE_COLOR;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  ${circleBadge(fill)}
+  <g transform="translate(12 12) scale(0.64) translate(-12 -12)"><path fill="#fff" d="M12 3.4 21.2 11.2h-2.6v9.4H5.4v-9.4H2.8z"/><rect x="10" y="14.4" width="4" height="6.2" rx="0.6" fill="${fill}"/></g>
+</svg>`;
+}
+
 export function poiCategoryIconSvg(cat: PoiCategoryId): string {
   if (cat === "bus") {
     const fill = BUS_BADGE_COLOR;

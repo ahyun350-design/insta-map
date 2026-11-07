@@ -19,6 +19,7 @@ type GlDebug = {
   jumpToZoom?: (lat: number, lng: number, zoom: number) => void;
   setBearing?: (deg: number) => void;
   getBearing?: () => number;
+  getLevel?: () => number | null;
 };
 
 const evalGl = <T,>(page: Page, fn: keyof GlDebug, ...args: unknown[]) =>
@@ -110,6 +111,9 @@ test("D-2 search: autocomplete → card (rotation kept), recent, Enter list, roa
   await expect(suggest).toHaveCount(0);
   await page.waitForTimeout(1200);
   expect(Math.round(await evalGl<number>(page, "getBearing")), "search camera keeps the rotation").toBe(30);
+  await expect(card.locator(".placeDetailSheetLabel").filter({ hasText: "주소" })).toBeVisible({ timeout: 15_000 });
+  await expect(card.locator(".placeDetailSheetCategory")).not.toHaveText(/^(.+) · \1$/);
+  await page.waitForTimeout(1500);
   await page.screenshot({ path: path.join(OUT, "card.png") });
   await card.getByRole("button", { name: "닫기" }).click();
   await expect(card).toBeHidden({ timeout: 10_000 });
@@ -132,6 +136,12 @@ test("D-2 search: autocomplete → card (rotation kept), recent, Enter list, roa
   const firstRow = dialog.locator(".mapSearchResultsSheetItem").first();
   await expect(firstRow).toBeVisible({ timeout: 20_000 });
   await expect(firstRow).toContainText("경복궁");
+  const sheet = dialog.locator(".mapSearchResultsSheet");
+  await expect(sheet).not.toContainText("주소 없음");
+  await expect(
+    sheet.locator(".mapSearchResultsSheetItemName").filter({ hasText: /^경복궁$/ }),
+    "경복궁 관광+랜드마크 shown once",
+  ).toHaveCount(1);
   await page.screenshot({ path: path.join(OUT, "results.png") });
   await firstRow.click();
   await expect(card).toBeVisible({ timeout: 15_000 });
@@ -149,6 +159,10 @@ test("D-2 search: autocomplete → card (rotation kept), recent, Enter list, roa
   await addr.click();
   await expect(card).toBeVisible({ timeout: 15_000 });
   await expect(card).toContainText("망원로4길 3");
+  await expect
+    .poll(() => evalGl<number | null>(page, "getLevel"), { timeout: 8_000, message: "address camera: Kakao level 2 = MapLibre z17" })
+    .toBe(2);
+  await page.waitForTimeout(3000);
   await page.screenshot({ path: path.join(OUT, "address.png") });
 
   await context.close();

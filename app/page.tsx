@@ -300,6 +300,7 @@ import {
   mapTapCategoryLabel,
   type MapPoiTap,
 } from "@/lib/mapSurface/mapPoiTap";
+import { ADDRESS_BADGE_COLOR, addressBadgeSvg } from "@/lib/mapSurface/poiCategoryIcons";
 import type { ExpandedMapSurface } from "@/lib/mapSurface";
 import {
   adminMapGlOverrideLabel,
@@ -12533,10 +12534,12 @@ function HomePageContent() {
       if (reqId !== mapPoiRequestRef.current) return;
       setSelectedPlace((prev: PlaceSheetData | null) => {
         if (!prev || prev._placeSource !== "map" || prev.place_name !== tap.name) return prev;
+        const indS = detail?.sangga?.indS || prev.subcategory || null;
         return {
           ...prev,
           road_address_name: detail?.sangga?.roadAddress || "",
-          subcategory: detail?.sangga?.indS || prev.subcategory || null,
+          // "카페 · 카페": a fine label equal to the category is shown once.
+          subcategory: indS && indS !== prev.category_name ? indS : null,
           phone: detail?.kakao?.phone || "",
           place_url: detail?.kakao?.placeUrl || "",
           _mapFloor: detail?.sangga?.floor || null,
@@ -12673,20 +12676,37 @@ function HomePageContent() {
           showToast("주소 위치를 찾지 못했어요", "info");
           return;
         }
-        openExpandedSearchPlaceCardRef.current(
-          {
-            id: hit.id,
-            place_name: hit.buildingName || hit.roadAddr,
-            category_name: "도로명주소",
-            road_address_name: hit.roadAddr,
-            address_name: hit.jibunAddr ?? "",
-            phone: "",
-            place_url: "",
-            y: String(point.lat),
-            x: String(point.lng),
-          },
-          source,
-        );
+        const { lat: aLat, lng: aLng } = point;
+        const addrPlace: PlaceSheetData = {
+          place_name: hit.buildingName || hit.roadAddr,
+          category_name: "도로명주소",
+          road_address_name: hit.roadAddr,
+          address_name: hit.jibunAddr ?? "",
+          phone: "",
+          place_url: "",
+          y: String(aLat),
+          x: String(aLng),
+        };
+        const addrRef = placeRefFromKakaoPlace(addrPlace);
+        devLog("[PindMap:expandedMap] open address card", source);
+        setIsMapSearchSheetOpen(false);
+        setSelectedPlace({
+          ...addrPlace,
+          _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, addrRef),
+          _placeRef: addrRef,
+        });
+        showFocusPlaceMarker(aLat, aLng, "여행지", null, {
+          key: "admin-address",
+          svg: addressBadgeSvg(),
+          fill: ADDRESS_BADGE_COLOR,
+        });
+        // Kakao level 2 = MapLibre z17: buildings + street labels around the address stay readable.
+        const applyAddrCamera = () => {
+          const pad = measureExpandedPlaceCardPaddingBottom();
+          applyExpandedMapCameraLatLng(aLat, aLng, 2, { paddingBottom: pad });
+        };
+        scheduleExpandedMapCamera(applyAddrCamera);
+        window.setTimeout(applyAddrCamera, 140);
         return;
       }
       const area = adminSearchAreaLevel(hit);
@@ -12699,7 +12719,7 @@ function HomePageContent() {
       openMapPoiPlaceCardRef.current(adminSearchHitToTap(hit), { level: 3 });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [showToast],
+    [showToast, showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom],
   );
 
   /** Results sheet / pin tap: our rows open the D-1 card, Kakao rows keep the Kakao card. */
@@ -13879,6 +13899,7 @@ function HomePageContent() {
                   setBearing?: (deg: number) => void;
                   getBearing?: () => number;
                   getCenter?: () => { lat: number; lng: number } | null;
+                  getLevel?: () => number | null;
                 };
               };
               const prev = w.__PINDMAP_EXPANDED_GL__;
@@ -13919,6 +13940,8 @@ function HomePageContent() {
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getBearing() ?? 0,
                 getCenter: () =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getCenter() ?? null,
+                getLevel: () =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? null,
                 jumpToZoom: (lat, lng, zoom) =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.jumpToZoom(lat, lng, zoom),
               };
@@ -19005,6 +19028,7 @@ function HomePageContent() {
                           userLocation={myLocationLatLngRef.current}
                           keyboardHeight={keyboardHeight}
                           preferPointerSelect={useMapLibreExpandedChrome}
+                          hideEmptyAddress={useMapLibreExpandedChrome}
                           onSelect={(place) => {
                             // Focus pin + card + padded camera (see openExpandedSearchPlaceCard)
                             if ((place as AdminSearchRow)._pindHit) {

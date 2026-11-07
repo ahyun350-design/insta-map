@@ -4,6 +4,7 @@ import {
   KAKAO_FILL_BELOW,
   RECENT_MAX,
   chainAliasQuery,
+  collapseSamePlaces,
   unionPlaceHits,
   clearRecentSearches,
   dedupeRows,
@@ -106,6 +107,20 @@ test("unionPlaceHits keeps the first copy of each id", () => {
   const b = place({ id: "x", score: 1 });
   const c = place({ id: "y" });
   assert.deepEqual(unionPlaceHits([a], [b, c]).map((h) => [h.id, h.score]), [["x", 300], ["y", 335]]);
+});
+
+test("collapseSamePlaces: 경복궁 관광+랜드마크 → one landmark row with the tour category", () => {
+  const station = place({ id: "station:1", source: "station", name: "경복궁역", branch: null, category: "지하철역", lat: 37.5758, lng: 126.9735 });
+  const tour = place({ id: "tour:1", source: "tour", name: "경복궁", branch: null, category: "관광명소", lat: 37.5796, lng: 126.977, score: 309.6 });
+  const lm1 = place({ id: "landmark:1", source: "landmark", name: "경복궁", branch: null, category: "랜드마크", lat: 37.5797, lng: 126.9769, score: 309.3 });
+  const lm2 = place({ id: "major:1", source: "landmark", name: "경복궁", branch: null, category: "랜드마크", lat: 37.5800, lng: 126.9772, score: 309.2 });
+  const far = place({ id: "tour:2", source: "tour", name: "경복궁", branch: null, category: "관광명소", lat: 35.0, lng: 129.0 });
+  const shopA = place({ id: "s1", name: "이디야커피", branch: null, lat: 37.55, lng: 126.92 });
+  const shopB = place({ id: "s2", name: "이디야커피", branch: null, lat: 37.5501, lng: 126.9201 });
+  const out = collapseSamePlaces([station, tour, lm1, lm2, far, shopA, shopB]);
+  assert.deepEqual(out.map((h) => h.id), ["station:1", "landmark:1", "tour:2", "s1", "s2"]);
+  assert.equal(out[1]!.category, "관광명소");
+  assert.equal(out[1]!.score, 309.6);
 });
 
 test("searchEventMeta never carries the query text", () => {
