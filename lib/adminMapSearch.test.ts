@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CHAIN_ALIASES,
   KAKAO_FILL_BELOW,
   RECENT_MAX,
   chainAliasQuery,
@@ -99,7 +100,43 @@ test("chainAliasQuery: first word (or two) → registered 상호, rest kept", ()
   assert.equal(chainAliasQuery("KFC 강남"), "케이에프씨 강남");
   assert.equal(chainAliasQuery("gs25"), "지에스25");
   assert.equal(chainAliasQuery("스타벅스 홍대"), null);
-  assert.equal(chainAliasQuery("이디야커피 망원"), null);
+  assert.equal(chainAliasQuery("이디야커피 망원"), "이디야 망원");
+  assert.equal(chainAliasQuery("컴포즈커피"), "컴포즈");
+  assert.equal(chainAliasQuery("투썸 플레이스"), "투썸");
+  assert.equal(chainAliasQuery("매머드커피 강남"), "매머드 강남");
+  assert.equal(chainAliasQuery("백다방"), "빽다방");
+  assert.equal(chainAliasQuery("빽다방"), null);
+  assert.equal(chainAliasQuery("이디야 강남"), null);
+});
+
+test("CHAIN_ALIASES: 20+ chains, keys normalised, no self-maps", () => {
+  const keys = Object.keys(CHAIN_ALIASES);
+  assert.ok(keys.length >= 20);
+  for (const k of keys) {
+    assert.equal(k, k.toLowerCase().replace(/\s+/g, ""));
+    assert.notEqual(CHAIN_ALIASES[k]!.toLowerCase().replace(/\s+/g, ""), k);
+  }
+});
+
+test("rerank: 경복궁 (no 역) puts the same-name 관광/랜드마크 before the station", () => {
+  const st = place({ id: "st", source: "station", name: "경복궁역", branch: null, category: "지하철역", score: 310.6, distM: 4724 });
+  const t = place({ id: "t", source: "tour", name: "경복궁", branch: null, category: "관광명소", score: 309.6, distM: 4992 });
+  const lm = place({ id: "lm", source: "landmark", name: "경복궁", branch: null, category: "랜드마크", score: 309.3, distM: 5185 });
+  const shop = place({ id: "s", name: "경복궁", branch: "서교점", score: 319, distM: 500 });
+  assert.deepEqual(rerankPlaceHits([st, t, lm, shop], "경복궁").map((h) => h.id), ["t", "st", "lm", "s"]);
+  assert.deepEqual(rerankPlaceHits([st, t, lm, shop], "경복궁역").map((h) => h.id), ["st", "t", "lm", "s"]);
+  assert.deepEqual(
+    collapseSamePlaces(rerankPlaceHits([st, t, lm, shop], "경복궁")).map((h) => h.source),
+    ["landmark", "station", "sangga"],
+  );
+});
+
+test("rerank: station stays ahead when the 관광 hit is a weaker match, or names differ", () => {
+  const st = place({ id: "st", source: "station", name: "한강진역", branch: null, score: 315, distM: 3000 });
+  const weak = place({ id: "t", source: "tour", name: "한강진", branch: null, score: 205, distM: 3100 });
+  assert.deepEqual(rerankPlaceHits([st, weak], "한강진").map((h) => h.id), ["st", "t"]);
+  const other = place({ id: "o", source: "tour", name: "한강진카페거리", branch: null, score: 309, distM: 3100 });
+  assert.deepEqual(rerankPlaceHits([st, other], "한강진").map((h) => h.id), ["st", "o"]);
 });
 
 test("unionPlaceHits keeps the first copy of each id", () => {

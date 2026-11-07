@@ -208,10 +208,17 @@ export function mergeOursWithKakao<K extends KakaoLike>(
 /** Famous places beat same-name shops (경복궁 vs 식당 "경복궁 서교점"). */
 const CATALOG_BONUS: Partial<Record<OurSource, number>> = { tour: 30, landmark: 30, station: 30 };
 const STATION_QUERY_BONUS = 40;
+/** search_map_admin's distance bonus is 0–20; scores closer than this differ only by distance. */
+const DISTANCE_BONUS_MAX = 20;
 /** RPC candidates fetched before re-ranking. */
 export const RPC_CANDIDATES = 20;
 
-/** Re-rank RPC rows: catalog bonus, "…역" queries prefer stations; stable on ties by distance. */
+/**
+ * Re-rank RPC rows: catalog bonus, "…역" queries prefer stations; stable on ties by distance.
+ * Other queries: a station whose name (minus 역) equals a 관광·랜드마크 hit and differs from
+ * it only by the distance bonus goes right after it (경복궁 before 경복궁역 — catalog
+ * station names carry no 역, so both are exact matches).
+ */
 export function rerankPlaceHits(hits: OurPlaceHit[], query: string): OurPlaceHit[] {
   const stationQuery = /역$/.test(query.replace(/\s+/g, ""));
   const adjusted = hits.map((h, i) => ({
@@ -222,6 +229,22 @@ export function rerankPlaceHits(hits: OurPlaceHit[], query: string): OurPlaceHit
   adjusted.sort(
     (a, b) => b.s - a.s || (a.h.distM ?? Infinity) - (b.h.distM ?? Infinity) || a.i - b.i,
   );
+  if (stationQuery) return adjusted.map((x) => x.h);
+  for (let i = 0; i < adjusted.length; i++) {
+    const st = adjusted[i]!;
+    if (st.h.source !== "station") continue;
+    const key = normalizePlaceName(st.h.name).replace(/역$/, "");
+    const j = adjusted.findIndex(
+      (x, k) =>
+        k > i &&
+        (x.h.source === "tour" || x.h.source === "landmark") &&
+        normalizePlaceName(x.h.name) === key &&
+        st.s - x.s <= DISTANCE_BONUS_MAX,
+    );
+    if (j < 0) continue;
+    adjusted.splice(i, 0, ...adjusted.splice(j, 1));
+    i++;
+  }
   return adjusted.map((x) => x.h);
 }
 
@@ -277,15 +300,21 @@ export function collapseSamePlaces(hits: OurPlaceHit[]): OurPlaceHit[] {
 
 /**
  * Common chain name → the 상호 actually registered in 상가 data (checked with
- * name-prefix counts). Only names a plain prefix search would miss.
+ * name-prefix counts, scripts/localdata/probe_chain_aliases.py). Only names a plain
+ * prefix search would miss; a shorter target ("이디야") also covers the long form.
  * Keys: lower-case, no spaces.
  */
 export const CHAIN_ALIASES: Readonly<Record<string, string>> = {
   메가커피: "메가엠지씨커피",
   메가mgc커피: "메가엠지씨커피",
+  이디야커피: "이디야",
+  컴포즈커피: "컴포즈",
+  할리스커피: "할리스",
+  투썸플레이스: "투썸",
+  백다방: "빽다방",
   맥도날드: "한국맥도날드",
   올리브영: "씨제이올리브영",
-  매머드커피: "매머드익스프레스",
+  매머드커피: "매머드",
   서브웨이: "써브웨이",
   kfc: "케이에프씨",
   케이에프씨: "KFC",
@@ -302,8 +331,11 @@ export const CHAIN_ALIASES: Readonly<Record<string, string>> = {
   파리바게트: "파리바게뜨",
   배스킨라빈스: "베스킨라빈스",
   베스킨라빈스: "배스킨라빈스",
+  뚜레주르: "뚜레쥬르",
+  뚜레쥬르: "뚜레주르",
   던킨도너츠: "던킨",
   엔젤리너스: "엔제리너스",
+  엔제리너스: "엔젤리너스",
   스벅: "스타벅스",
   탐탐: "탐앤탐스",
 };
