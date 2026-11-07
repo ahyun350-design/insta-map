@@ -1,3 +1,5 @@
+import type { PoiCategoryId } from "./poiCategoryIcons";
+
 export type MapLatLng = { lat: number; lng: number };
 
 export type CompactPinInput = {
@@ -16,6 +18,8 @@ export type CompactPinInput = {
   closed?: boolean;
   /** Focus pin only: POI / subway badge SVG drawn in the head instead of the emoji. */
   badge?: { key: string; svg: string };
+  /** Focus pin only: draw as the selected search result pin (1.2×) with this badge. */
+  searchResult?: PoiCategoryId;
 };
 
 export type CompactRouteMode = "car" | "walk" | "course" | "preview";
@@ -24,6 +28,10 @@ export type SearchPinInput = {
   id: string;
   lat: number;
   lng: number;
+  /** Badge inside the result pin (map POI icon set). */
+  category?: PoiCategoryId;
+  /** Name under the pin — only for the top few results. */
+  label?: string | null;
 };
 
 /** Admin MapLibre "발견" layer (place_popularity). */
@@ -127,7 +135,7 @@ export type ExpandedMapSurface = CompactMapSurface & {
   setSearchPins: (pins: SearchPinInput[]) => void;
   clearSearchPins: () => void;
   /** E2E / QA: search result pins on the map + the focus pin's image id (null = none). */
-  searchPinState: () => { search: number; focus: string | null };
+  searchPinState: () => { search: number; focus: string | null; dimmed: boolean; onTop: boolean };
   /** Corner credit " · 카카오" while Kakao search results are on screen. */
   setKakaoCredit: (on: boolean) => void;
   /** Admin discover layer (WebGL). Empty / missing data → clear. */

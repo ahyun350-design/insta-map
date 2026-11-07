@@ -16,6 +16,7 @@ import {
   placeDisplayName,
   rankMergedHits,
   rankQueries,
+  searchRowPoiCategory,
   type KakaoKeywordHit,
   type OurHit,
   mergeOursWithKakao,
@@ -245,6 +246,16 @@ test("merge: '…역' query puts the station before a same-tier 관광 name", ()
   const origin = { lat: 37.5563, lng: 126.9236 };
   assert.deepEqual(rankMergedHits([tour, st], [], "강남역", origin).map((h) => h.id), ["st", "t"]);
   assert.deepEqual(rankMergedHits([tour, st], [], "강남", origin).map((h) => h.id), ["t", "st"]);
+});
+
+test("result pin badge: our source / 상가 class, Kakao category text", () => {
+  assert.equal(searchRowPoiCategory(toSearchRow(place({ category: "cafe" }))), "cafe");
+  assert.equal(searchRowPoiCategory(toSearchRow(place({ category: "doctors" }))), "hospital");
+  assert.equal(searchRowPoiCategory(toSearchRow(place({ source: "station", category: "지하철역" }))), "subway");
+  assert.equal(searchRowPoiCategory(toSearchRow(place({ source: "tour", category: "관광명소" }))), "landmark");
+  assert.equal(searchRowPoiCategory({ id: "k", place_name: "x", category_name: "음식점 > 카페 > 커피전문점" }), "cafe");
+  assert.equal(searchRowPoiCategory({ id: "k", place_name: "x", category_name: "음식점 > 술집 > 호프,요리주점" }), "bar");
+  assert.equal(searchRowPoiCategory({ id: "k", place_name: "x", category_name: "가정,생활 > 패션잡화" }), "shop");
 });
 
 test("kakaoDocToHit: display-only fields, null without coordinates", () => {

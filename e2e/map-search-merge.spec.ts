@@ -108,6 +108,11 @@ test("name search merges Kakao; camera fits nearby; 재검색 rule", async ({ br
   expect(distM(after!, MANGWON), "map stays near the search point").toBeLessThan(2000);
   expect(distM(after!, MYEONGDONG), "not moved to 명동").toBeGreaterThan(4000);
   timings["메가커피"] = await timing(page);
+  // D: result pins on top of every layer, other POIs faded while results show
+  const pinsShown = (await call(page, "searchPinState")) as { search: number; dimmed: boolean; onTop: boolean };
+  expect(pinsShown.search).toBeGreaterThan(0);
+  expect(pinsShown.onTop, "result pin layers above all POI / label layers").toBe(true);
+  expect(pinsShown.dimmed, "other POIs faded while results show").toBe(true);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.screenshot({ path: path.join(OUT, "megacoffee.png") });
 

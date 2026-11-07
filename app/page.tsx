@@ -284,6 +284,8 @@ import {
   hitToMapPoiTap as adminSearchHitToTap,
   pushRecentSearch as pushAdminRecentSearch,
   rankMergedHits,
+  RESULT_PIN_LABEL_TOP as ADMIN_RESULT_PIN_LABEL_TOP,
+  searchRowPoiCategory as adminSearchRowPoiCategory,
   readRecentSearches as readAdminRecentSearches,
   searchEventMeta as adminSearchEventMeta,
   toSearchRow as adminSearchHitToRow,
@@ -314,7 +316,7 @@ import {
   mapTapCategoryLabel,
   type MapPoiTap,
 } from "@/lib/mapSurface/mapPoiTap";
-import { ADDRESS_BADGE_COLOR, addressBadgeSvg } from "@/lib/mapSurface/poiCategoryIcons";
+import { ADDRESS_BADGE_COLOR, addressBadgeSvg, type PoiCategoryId } from "@/lib/mapSurface/poiCategoryIcons";
 import type { ExpandedMapSurface } from "@/lib/mapSurface";
 import {
   adminMapGlOverrideLabel,
@@ -2840,7 +2842,7 @@ function HomePageContent() {
   }, []);
 
   const addSearchResultPins = useCallback(
-    (places: any[], onMarkerClick: (place: any) => void) => {
+    (places: any[], onMarkerClick: (place: any) => void, opts?: { chipIcon?: PoiCategoryId }) => {
       if (
         isNativeMapAvailable() &&
         expandedNativeMapEnabled &&
@@ -2879,6 +2881,8 @@ function HomePageContent() {
             id,
             lat: Number(place.y),
             lng: Number(place.x),
+            category: opts?.chipIcon ?? adminSearchRowPoiCategory(place),
+            label: index < ADMIN_RESULT_PIN_LABEL_TOP ? String(place.place_name ?? "") : null,
           };
         }).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
         gl.setSearchPins(pins);
@@ -8380,6 +8384,7 @@ function HomePageContent() {
       category: Category,
       listPresetId?: string | null,
       badge?: { key: string; svg: string; fill: string } | null,
+      searchResult?: PoiCategoryId | null,
     ) => {
       if (scope === "main" && isCompactMapLibre(map)) {
         const fillColor = resolveListColor(listPresetId) ?? resolvePinColor(category);
@@ -8405,6 +8410,7 @@ function HomePageContent() {
           category,
           fillColor,
           ...(badge ? { badge: { key: badge.key, svg: badge.svg } } : {}),
+          ...(searchResult && !badge ? { searchResult } : {}),
         });
         focusPlaceMarkerRef.current.expanded = {
           setMap: () => map.adapter.clearFocusMarker(),
@@ -8472,6 +8478,8 @@ function HomePageContent() {
       category: Category,
       listPresetId?: string | null,
       badge?: { key: string; svg: string; fill: string } | null,
+      /** Admin MapLibre: the card came from a search / chip result — selected result pin. */
+      searchResult?: PoiCategoryId | null,
     ) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       focusPlaceCoordsRef.current = { lat, lng, category, listPresetId: listPresetId ?? null };
@@ -8487,6 +8495,7 @@ function HomePageContent() {
           category,
           listPresetId,
           badge,
+          searchResult,
         );
       }
       syncFocusPlaceMarkerToNative(lat, lng, category, listPresetId);
@@ -12506,12 +12515,13 @@ function HomePageContent() {
       _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, expandedRef),
       _placeRef: expandedRef,
     });
-    if (isExpandedMapLibre(expandedMapRef.current)) clearSearchResultPins();
+    const fromAdminResults = isExpandedMapLibre(expandedMapRef.current);
+    if (fromAdminResults) clearSearchResultPins();
     const py = parseFloat(String(place.y ?? ""));
     const px = parseFloat(String(place.x ?? ""));
     if (!Number.isFinite(py) || !Number.isFinite(px)) return;
     const cat = inferCategoryFromKakaoCategoryName(place.category_name);
-    showFocusPlaceMarker(py, px, cat);
+    showFocusPlaceMarker(py, px, cat, null, null, fromAdminResults ? adminSearchRowPoiCategory(place) : null);
     // Card paints after setState — measure padding then center pin in the band above it.
     const applyPaddedCamera = () => {
       const pad = measureExpandedPlaceCardPaddingBottom();
@@ -12529,7 +12539,7 @@ function HomePageContent() {
    * (display only — never stored) and the PindMap save count from /api/admin/map-place.
    */
   const mapPoiRequestRef = useRef(0);
-  const openMapPoiPlaceCard = useCallback((tap: MapPoiTap, opts?: { level?: number }) => {
+  const openMapPoiPlaceCard = useCallback((tap: MapPoiTap, opts?: { level?: number; searchResult?: PoiCategoryId }) => {
     const reqId = ++mapPoiRequestRef.current;
     const { category, sub } = mapTapCategory(tap);
     const base: PlaceSheetData = {
@@ -12555,7 +12565,8 @@ function HomePageContent() {
       _placeRef: ref,
     });
     if (isExpandedMapLibre(expandedMapRef.current)) clearSearchResultPins();
-    showFocusPlaceMarker(tap.lat, tap.lng, category, null, mapTapBadge(tap));
+    if (opts?.searchResult) showFocusPlaceMarker(tap.lat, tap.lng, category, null, null, opts.searchResult);
+    else showFocusPlaceMarker(tap.lat, tap.lng, category, null, mapTapBadge(tap));
     // Label tap keeps the user's zoom (search passes a level); only pan so the place sits above the card.
     const level = opts?.level ?? getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? 3;
     const applyPaddedCamera = () => {
@@ -12845,7 +12856,10 @@ function HomePageContent() {
         applyExpandedMapCameraLatLng(hit.lat, hit.lng, area, { paddingBottom: 0 });
         return;
       }
-      openMapPoiPlaceCardRef.current(adminSearchHitToTap(hit), { level: 3 });
+      openMapPoiPlaceCardRef.current(adminSearchHitToTap(hit), {
+        level: 3,
+        searchResult: adminSearchRowPoiCategory(adminSearchHitToRow(hit)),
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [showToast, showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom, clearSearchResultPins, clearAdminSearchMapPins],
@@ -13053,7 +13067,7 @@ function HomePageContent() {
         showToast(code === "ok" ? "이 지역에 결과가 없어요" : "카테고리 검색에 실패했어요", "info");
         return;
       }
-      addSearchResultPins(docs, (place) => openAdminSearchRow(place, "marker-category"));
+      addSearchResultPins(docs, (place) => openAdminSearchRow(place, "marker-category"), { chipIcon: chip.icon });
       setMapSearchResults(docs as MapSearchPlaceResult[]);
       setMapSearchLabel(chip.label);
       setIsMapSearchSheetOpen(true);
@@ -14159,7 +14173,7 @@ function HomePageContent() {
                   getBearing?: () => number;
                   getCenter?: () => { lat: number; lng: number } | null;
                   getLevel?: () => number | null;
-                  searchPinState?: () => { search: number; focus: string | null } | null;
+                  searchPinState?: () => { search: number; focus: string | null; dimmed: boolean; onTop: boolean } | null;
                 };
               };
               const prev = w.__PINDMAP_EXPANDED_GL__;

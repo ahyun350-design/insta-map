@@ -8,6 +8,7 @@
  */
 
 import type { MapPoiKind, MapPoiTap } from "@/lib/mapSurface/mapPoiTap";
+import type { PoiCategoryId } from "@/lib/mapSurface/poiCategoryIcons";
 import { distanceMeters, normalizePlaceName, placeNamesMatch } from "@/lib/mapPlaceMatch";
 
 export type OurSource = "sangga" | "tour" | "landmark" | "station" | "dong" | "gu" | "si";
@@ -557,6 +558,56 @@ const TOUR_TYPE_BY_CATEGORY: Record<string, string> = {
   레포츠: "28",
   시장: "38",
 };
+
+const SANGGA_PIN_CATEGORY: Record<string, PoiCategoryId> = {
+  cafe: "cafe",
+  restaurant: "restaurant",
+  fast_food: "fast_food",
+  bakery: "bakery",
+  bar: "bar",
+  pharmacy: "pharmacy",
+  hospital: "hospital",
+  doctors: "hospital",
+  lodging: "lodging",
+  grocery: "grocery",
+  hairdresser: "beauty",
+  fuel: "fuel",
+};
+
+/** Kakao category text ("음식점 > 카페 > …") → map POI badge; most specific words first. */
+const KAKAO_PIN_CATEGORY: Array<[RegExp, PoiCategoryId]> = [
+  [/카페/, "cafe"],
+  [/술집|주점|호프|포차|와인바|칵테일/, "bar"],
+  [/제과|베이커리|디저트|도넛|아이스크림/, "bakery"],
+  [/편의점/, "convenience"],
+  [/약국/, "pharmacy"],
+  [/병원|의원|치과|한의원/, "hospital"],
+  [/은행/, "bank"],
+  [/주차장/, "parking"],
+  [/주유소|충전소/, "fuel"],
+  [/숙박|호텔|모텔|펜션|게스트하우스/, "lodging"],
+  [/관광|명소|공원|문화시설|박물관|미술관/, "landmark"],
+  [/마트|슈퍼|시장/, "grocery"],
+  [/패스트푸드|햄버거|치킨|피자/, "fast_food"],
+  [/음식점/, "restaurant"],
+  [/미용|헤어|네일/, "beauty"],
+];
+
+/** Badge for a result pin: our hit by source / 상가 class, a Kakao row by its category text. */
+export function searchRowPoiCategory(row: AdminSearchRow): PoiCategoryId {
+  const hit = row._pindHit;
+  if (hit?.kind === "place") {
+    if (hit.source === "station") return "subway";
+    if (hit.source === "tour" || hit.source === "landmark") return "landmark";
+    if (hit.source !== "sangga") return "town_hall";
+    return SANGGA_PIN_CATEGORY[hit.category ?? ""] ?? "shop";
+  }
+  const text = row.category_name ?? "";
+  return KAKAO_PIN_CATEGORY.find(([re]) => re.test(text))?.[1] ?? "shop";
+}
+
+/** Names shown under result pins: only the top few. */
+export const RESULT_PIN_LABEL_TOP = 5;
 
 /** Our place hit → the same tap shape a basemap label uses (D-1 card). */
 export function hitToMapPoiTap(hit: OurPlaceHit): MapPoiTap {
