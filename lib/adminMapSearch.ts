@@ -491,18 +491,51 @@ export function rankMergedHits(
       ),
   );
   const qs = rankQueries(query);
+  const stationQuery = /역$/.test(query.replace(/\s+/g, ""));
   const ranked = [...places, ...kakaoOnly]
-    .map((h, i) => ({
-      h,
-      i,
-      tier: nameMatchTier(qs, hitNames(h)),
-      catalog: h.kind === "place" && h.source !== "sangga" ? 0 : 1,
-      d: origin ? distanceMeters(origin.lat, origin.lng, h.lat, h.lng) : (h.kind === "place" ? h.distM ?? Infinity : Infinity),
-    }))
-    .sort((a, b) => a.tier - b.tier || a.catalog - b.catalog || a.d - b.d || a.i - b.i)
-    .map((x) => x.h);
-  return [...addresses, ...ranked].slice(0, Math.max(limit, addresses.length));
+    .map((h, i) => {
+      const byName = nameMatchTier(qs, hitNames(h));
+      // search_map_admin scores exact names (and chain stores like "컴포즈커피홍대 서교점") 300.
+      const tier: NameTier = h.kind === "place" && h.score >= EXACT_SCORE_MIN ? 1 : byName;
+      return {
+        h,
+        i,
+        tier,
+        // "…역" queries: the station first; then our 관광·랜드마크·지역; then shops.
+        catalog:
+          h.kind === "place" && h.source !== "sangga"
+            ? stationQuery && h.source === "station"
+              ? 0
+              : 1
+            : 2,
+        d: origin ? distanceMeters(origin.lat, origin.lng, h.lat, h.lng) : (h.kind === "place" ? h.distM ?? Infinity : Infinity),
+      };
+    })
+    .sort((a, b) => a.tier - b.tier || a.catalog - b.catalog || a.d - b.d || a.i - b.i);
+  // Same tier: a station named like a 관광·랜드마크 goes right after it unless the query ends in 역.
+  if (!stationQuery) {
+    for (let i = 0; i < ranked.length; i++) {
+      const st = ranked[i]!;
+      if (st.h.kind !== "place" || st.h.source !== "station") continue;
+      const key = normalizePlaceName(st.h.name).replace(/역$/, "");
+      const j = ranked.findIndex(
+        (x, k) =>
+          k > i &&
+          x.tier === st.tier &&
+          x.h.kind === "place" &&
+          (x.h.source === "tour" || x.h.source === "landmark") &&
+          normalizePlaceName(x.h.name) === key,
+      );
+      if (j < 0) continue;
+      ranked.splice(i, 0, ...ranked.splice(j, 1));
+      i++;
+    }
+  }
+  return [...addresses, ...ranked.map((x) => x.h)].slice(0, Math.max(limit, addresses.length));
 }
+
+/** search_map_admin: 300 = exact name or same-chain store; prefix matches stay below 240. */
+const EXACT_SCORE_MIN = 290;
 
 /** Union of RPC hit lists by id (first occurrence wins). */
 export function unionPlaceHits(...lists: OurPlaceHit[][]): OurPlaceHit[] {

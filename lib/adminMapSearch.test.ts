@@ -215,11 +215,36 @@ test("merge: Kakao 경복궁 ~300m from our landmark point is the same place (ke
   assert.equal(rankMergedHits([shop], k2, "경복궁", MANGWON).length, 2);
 });
 
+test("merge: our chain store scored 300 by the RPC ranks with Kakao exact names (nearest first)", () => {
+  const glued = place({ id: "near", name: "컴포즈커피홍대", branch: "서교점", score: 318, lat: 37.5571, lng: 126.9233 });
+  const k = [kakao("kfar", "컴포즈커피 합정점", 37.5495, 126.9135)];
+  assert.deepEqual(rankMergedHits([glued], k, "컴포즈커피", { lat: 37.5563, lng: 126.9236 }).map((h) => h.id), ["near", "kfar"]);
+  const prefixOnly = place({ id: "gro", name: "지구샵그로서리", branch: null, score: 217, lat: 37.5646, lng: 126.9216 });
+  assert.equal(nameMatchTier(rankQueries("지구샵"), ["지구샵그로서리"]), 2);
+  assert.equal(rankMergedHits([prefixOnly], [kakao("j", "지구샵", 37.5585, 126.9061)], "지구샵", MANGWON)[0]!.id, "j");
+});
+
+test("merge: typo query (all similar) keeps 경복궁 before 경복궁역", () => {
+  const st = place({ id: "st", source: "station", name: "경복궁역", branch: null, category: "지하철역", score: 88, lat: 37.5758, lng: 126.9735 });
+  const lm = place({ id: "lm", source: "landmark", name: "경복궁", branch: null, category: "관광명소", score: 87, lat: 37.5795, lng: 126.977 });
+  const shop = place({ id: "s", name: "경복궁", branch: "서교점", score: 80, lat: 37.5576, lng: 126.9182 });
+  assert.deepEqual(rankMergedHits([st, lm, shop], [], "경복구", { lat: 37.5563, lng: 126.9236 }).map((h) => h.id), ["lm", "st", "s"]);
+  assert.deepEqual(rankMergedHits([st, lm], [], "경복궁역", { lat: 37.5563, lng: 126.9236 }).map((h) => h.id), ["st", "lm"]);
+});
+
 test("merge: Kakao timeout → ours only, still tiered by name then distance", () => {
-  const a = place({ id: "a", name: "이디야커피", branch: "망원점", lat: 37.5565, lng: 126.9105 });
-  const b = place({ id: "b", name: "이디야", branch: "안산점", lat: 37.32, lng: 126.83 });
-  const c = place({ id: "c", name: "이디야음악", branch: null, lat: 37.5561, lng: 126.9102 });
+  const a = place({ id: "a", name: "이디야커피", branch: "망원점", score: 319, lat: 37.5565, lng: 126.9105 });
+  const b = place({ id: "b", name: "이디야", branch: "안산점", score: 300, lat: 37.32, lng: 126.83 });
+  const c = place({ id: "c", name: "이디야음악", branch: null, score: 220, lat: 37.5561, lng: 126.9102 });
   assert.deepEqual(rankMergedHits([b, c, a], [], "이디야", MANGWON).map((h) => h.id), ["a", "b", "c"]);
+});
+
+test("merge: '…역' query puts the station before a same-tier 관광 name", () => {
+  const tour = place({ id: "t", source: "tour", name: "강남", branch: null, score: 300.6, lat: 37.5172, lng: 127.0473 });
+  const st = place({ id: "st", source: "station", name: "강남역", branch: null, score: 300, lat: 37.4979, lng: 127.0276 });
+  const origin = { lat: 37.5563, lng: 126.9236 };
+  assert.deepEqual(rankMergedHits([tour, st], [], "강남역", origin).map((h) => h.id), ["st", "t"]);
+  assert.deepEqual(rankMergedHits([tour, st], [], "강남", origin).map((h) => h.id), ["t", "st"]);
 });
 
 test("kakaoDocToHit: display-only fields, null without coordinates", () => {
