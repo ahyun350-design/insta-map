@@ -8,6 +8,7 @@ import {
   defaultSortMode,
   hasKakaoRows,
   mergeKakaoPages,
+  resultDistanceOrigin,
   sortRowsByDistance,
   type KakaoPlaceDoc,
 } from "./adminMapCategory";
@@ -65,6 +66,33 @@ test("client distance sort keeps rows without coords last", () => {
     ["near", "far", "none"],
   );
   assert.deepEqual(sortRowsByDistance(rows, null).map((r) => r.id), ["far", "none", "near"]);
+});
+
+test("distance origin: user within 1km of the search centre → user", () => {
+  const center = { lat: 37.5563, lng: 126.9236 }; // 홍대
+  const user = { lat: 37.5572, lng: 126.9245 }; // ~130m away
+  assert.deepEqual(resultDistanceOrigin(user, center), user);
+  const rows = [
+    { id: "a", y: "37.5560", x: "126.9230" }, // nearer the centre
+    { id: "b", y: "37.5574", x: "126.9247" }, // next to the user
+  ];
+  assert.deepEqual(sortRowsByDistance(rows, resultDistanceOrigin(user, center)).map((r) => r.id), ["b", "a"]);
+});
+
+test("distance origin: user farther than 1km (or unknown) → search centre", () => {
+  const center = { lat: 37.556, lng: 126.9101 }; // 망원
+  const user = { lat: 37.5563, lng: 126.9236 }; // 홍대, ~1.2km
+  assert.deepEqual(resultDistanceOrigin(user, center), center);
+  assert.deepEqual(resultDistanceOrigin(null, center), center);
+  assert.deepEqual(resultDistanceOrigin(user, null), user);
+  const rows = [
+    { id: "nearUser", y: "37.5564", x: "126.9230" },
+    { id: "nearCenter", y: "37.5561", x: "126.9105" },
+  ];
+  assert.deepEqual(
+    sortRowsByDistance(rows, resultDistanceOrigin(user, center)).map((r) => r.id),
+    ["nearCenter", "nearUser"],
+  );
 });
 
 test("Kakao credit only when a row is not ours; event meta has no query text", () => {

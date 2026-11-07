@@ -271,6 +271,7 @@ import {
   categoryEventMeta,
   defaultSortMode,
   hasKakaoRows,
+  resultDistanceOrigin,
   type CategoryChipId,
   type KakaoPlaceDoc,
   type SortMode,
@@ -2030,6 +2031,8 @@ function HomePageContent() {
   const [categoryLoading, setCategoryLoading] = useState<CategoryChipId | null>(null);
   const categoryRequestRef = useRef(0);
   const [mapSearchSortMode, setMapSearchSortMode] = useState<SortMode>("accuracy");
+  /** Map centre when the current admin results were fetched (distance origin rule). */
+  const [mapSearchCenter, setMapSearchCenter] = useState<{ lat: number; lng: number } | null>(null);
   const mapSearchSortModeRef = useRef<SortMode>("accuracy");
   mapSearchSortModeRef.current = mapSearchSortMode;
   /** Search result pins currently drawn (Kakao credit while Kakao rows are pinned). */
@@ -12808,6 +12811,7 @@ function HomePageContent() {
       const centerLat = typeof c?.getLat === "function" ? Number(c.getLat()) : 37.5665;
       const centerLng = typeof c?.getLng === "function" ? Number(c.getLng()) : 126.978;
       lastSearchCenterRef.current = { lat: centerLat, lng: centerLng };
+      setMapSearchCenter({ lat: centerLat, lng: centerLng });
 
       const ours = (await fetchAdminSearchHits(trimmed, ADMIN_SEARCH_RESULT_LIMIT)) ?? [];
       const ourRows = ours.map(adminSearchHitToRow);
@@ -12927,6 +12931,7 @@ function HomePageContent() {
       setCategoryLoading(null);
       track("admin_map_category", categoryEventMeta(chipId, docs.length, docs.length ? "ok" : code === "ok" ? "empty" : code));
       lastSearchCenterRef.current = { lat: center.lat, lng: center.lng };
+      setMapSearchCenter({ lat: center.lat, lng: center.lng });
       pendingSearchCenterSyncRef.current = false;
       setShowMapResearchButton(false);
       if (!docs.length) {
@@ -19195,14 +19200,18 @@ function HomePageContent() {
                           open={isMapSearchSheetOpen}
                           queryLabel={mapSearchLabel}
                           results={mapSearchResults}
-                          userLocation={myLocationLatLngRef.current}
+                          userLocation={
+                            useMapLibreExpandedChrome
+                              ? resultDistanceOrigin(myLocationLatLngRef.current, mapSearchCenter)
+                              : myLocationLatLngRef.current
+                          }
                           keyboardHeight={keyboardHeight}
                           preferPointerSelect={useMapLibreExpandedChrome}
                           hideEmptyAddress={useMapLibreExpandedChrome}
                           {...(useMapLibreExpandedChrome
                             ? {
                                 sortMode: mapSearchSortMode,
-                                sortDistanceOnClient: !activeCategoryChip,
+                                sortDistanceOnClient: true,
                                 onSortModeChange: (mode: SortMode) => {
                                   const chip = activeCategoryChipRef.current;
                                   if (chip) void runCategoryChipSearch(chip, mode);

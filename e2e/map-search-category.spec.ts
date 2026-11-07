@@ -119,6 +119,10 @@ test("category chips: 카페 → pins + list (distance), 정확도순, 재검색
   await expect.poll(() => categoryCalls, { timeout: 10_000 }).toBe(4);
   await expect(rows.first()).toBeVisible({ timeout: 15_000 });
   await expect(dialog.locator('[data-chip="cafe"]')).toHaveAttribute("aria-pressed", "true");
+  // User (홍대) is >1km from the new search point (망원): order + labels from the map centre.
+  const far = (await sheet.locator(".mapSearchResultsSheetItemDistance").allTextContents()).map(meters);
+  expect(far[0]!, "labels measured from the 망원 map centre").toBeLessThan(500);
+  for (let i = 1; i < far.length; i++) expect(far[i]! + 15, "distance order (map centre)").toBeGreaterThanOrEqual(far[i - 1]!);
   await page.waitForTimeout(1200);
   await page.screenshot({ path: path.join(OUT, "cafe-research-mangwon.png") });
 

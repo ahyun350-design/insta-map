@@ -131,6 +131,18 @@ export function mergeKakaoPages(
   return out.slice(0, limit);
 }
 
+/** The user counts as "at" the search point within this distance. */
+export const USER_ORIGIN_MAX_M = 1000;
+
+/**
+ * One origin for both the distance order and the distance labels: the user when within 1km
+ * of the search centre (map centre at search time), otherwise the search centre.
+ */
+export function resultDistanceOrigin(user: LatLng | null, searchCenter: LatLng | null): LatLng | null {
+  if (user && searchCenter && distanceM(user, searchCenter) <= USER_ORIGIN_MAX_M) return user;
+  return searchCenter ?? user;
+}
+
 /** Client re-order of displayed rows by distance from `origin` (rows without coords last). */
 export function sortRowsByDistance<T extends { y?: string | number; x?: string | number }>(
   rows: readonly T[],
