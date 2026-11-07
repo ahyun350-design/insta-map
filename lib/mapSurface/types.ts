@@ -128,6 +128,8 @@ export type ExpandedMapSurface = CompactMapSurface & {
   clearSearchPins: () => void;
   /** E2E / QA: search result pins on the map + the focus pin's image id (null = none). */
   searchPinState: () => { search: number; focus: string | null };
+  /** Corner credit " · 카카오" while Kakao search results are on screen. */
+  setKakaoCredit: (on: boolean) => void;
   /** Admin discover layer (WebGL). Empty / missing data → clear. */
   setDiscoverPins: (pins: DiscoverPinInput[]) => void;
   clearDiscoverPins: () => void;

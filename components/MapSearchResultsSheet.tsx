@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { sortRowsByDistance, type SortMode } from "@/lib/adminMapCategory";
 
 export type MapSearchPlaceResult = {
   id: string;
@@ -27,6 +28,13 @@ type Props = {
   preferPointerSelect?: boolean;
   /** Admin MapLibre: rows without an address omit the line (no "주소 없음"). */
   hideEmptyAddress?: boolean;
+  /** Admin MapLibre: "거리순 / 정확도순" toggle (shown only with a change handler). */
+  sortMode?: SortMode;
+  onSortModeChange?: (mode: SortMode) => void;
+  /** Re-order the given rows here by distance (else the caller already sorted them). */
+  sortDistanceOnClient?: boolean;
+  /** Origin for the client distance order (defaults to the user location). */
+  sortOrigin?: { lat: number; lng: number } | null;
 };
 
 function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -64,8 +72,19 @@ export function MapSearchResultsSheet({
   keyboardHeight = 0,
   preferPointerSelect = false,
   hideEmptyAddress = false,
+  sortMode,
+  onSortModeChange,
+  sortDistanceOnClient = false,
+  sortOrigin,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const shownResults = useMemo(
+    () =>
+      sortDistanceOnClient && sortMode === "distance"
+        ? sortRowsByDistance(results, sortOrigin ?? userLocation ?? null)
+        : results,
+    [results, sortDistanceOnClient, sortMode, sortOrigin, userLocation],
+  );
   const [dragDelta, setDragDelta] = useState(0);
   const dragStartRef = useRef<{ y: number; wasExpanded: boolean } | null>(null);
   const lastSelectAtRef = useRef(0);
@@ -160,13 +179,34 @@ export function MapSearchResultsSheet({
         <h2 className="mapSearchResultsSheetTitle">
           <span className="mapSearchResultsSheetQuery">{queryLabel}</span> 검색 결과 {results.length}개
         </h2>
+        {onSortModeChange && sortMode ? (
+          <div
+            className="mapSearchResultsSheetSort"
+            role="group"
+            aria-label="정렬"
+            data-testid="map-search-sort"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {(["distance", "accuracy"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={`mapSearchResultsSheetSortBtn${sortMode === m ? " is-on" : ""}`}
+                aria-pressed={sortMode === m}
+                onClick={() => sortMode !== m && onSortModeChange(m)}
+              >
+                {m === "distance" ? "거리순" : "정확도순"}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <button type="button" className="mapSearchResultsSheetCloseBtn" aria-label="닫기" onClick={onClose}>
           ✕
         </button>
       </div>
 
       <ul className="mapSearchResultsSheetList">
-        {results.map((place) => {
+        {shownResults.map((place) => {
           const lat = parseFloat(String(place.y ?? ""));
           const lng = parseFloat(String(place.x ?? ""));
           let distanceLabel: string | null = null;

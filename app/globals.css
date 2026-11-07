@@ -2635,6 +2635,33 @@ select:focus-visible {
   font-weight: 600;
 }
 
+/* Admin MapLibre: 거리순 / 정확도순 */
+.mapSearchResultsSheetSort {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin: 0 6px 0 8px;
+  padding: 2px;
+  border-radius: 14px;
+  background: #f1f2f4;
+}
+.mapSearchResultsSheetSortBtn {
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #6b7079;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.mapSearchResultsSheetSortBtn.is-on {
+  background: #ffffff;
+  color: #1a2a7a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
 .mapSearchResultsSheetCloseBtn {
   border: none;
   background: transparent;
@@ -8258,6 +8285,47 @@ select:focus-visible {
   max-width: 100%;
 }
 
+/* Admin MapLibre category chips (below search pill, horizontal scroll) */
+.adminMapCategoryChips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 2px 2px 4px;
+  margin-right: -12px;
+}
+.adminMapCategoryChips::-webkit-scrollbar {
+  display: none;
+}
+.adminMapCategoryChip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 12px 0 7px;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+  color: #1a1a1a;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+}
+.adminMapCategoryChip.is-on {
+  background: #1a2a7a;
+  border-color: #1a2a7a;
+  color: #ffffff;
+}
+.adminMapCategoryChip[aria-busy="true"] {
+  opacity: 0.6;
+}
+
 /* Admin MapLibre discover chip (below search pill) */
 .expandedMapLibreDiscoverRow {
   display: flex;
@@ -8306,9 +8374,9 @@ select:focus-visible {
 .expandedMapLibreTopChromeFlow .expandedMapLibreDiscoverChip {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
-/* Research: search bottom (safe+12+44) + 10 = safe+66 */
+/* Research: search bottom (safe+12+44) + 10 = safe+66; + category chips row (6 gap + 38) */
 .expandedMapLibreStage .mapResearchAreaBtn {
-  top: calc(66px + env(safe-area-inset-top, 0px));
+  top: calc(110px + env(safe-area-inset-top, 0px));
 }
 .expandedMapLibreStage .expandedMapLibreRouteLoading {
   top: calc(66px + env(safe-area-inset-top, 0px)) !important;

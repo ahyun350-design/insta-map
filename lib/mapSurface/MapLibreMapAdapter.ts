@@ -89,7 +89,7 @@ import {
   clearDirectionsBasemap,
 } from "./directionsBasemap";
 import type { DirectionsRouteThemeId } from "./directionsRouteTheme";
-import { installMapLibreCornerAttribution } from "./mapAttribution";
+import { installMapLibreCornerAttribution, setCornerAttributionKakao } from "./mapAttribution";
 import { installSanggaShopDedupe } from "./sanggaShopDedupe";
 import {
   findRenderedMapPoi,
@@ -2223,6 +2223,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   searchPinState() {
     return { search: this.searchPinCount, focus: this.focusPinIcon };
+  }
+
+  setKakaoCredit(on: boolean) {
+    setCornerAttributionKakao(this.containerEl, on);
   }
 
   setCourseStops(stops: CourseStopInput[], opts?: SetCourseStopsOptions) {

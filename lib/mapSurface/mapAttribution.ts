@@ -27,6 +27,21 @@ export type InstallMapLibreAttributionOptions = {
   includeSangga?: boolean;
 };
 
+/** Appends / removes " · 카카오" on the corner credit while Kakao results are on screen. */
+export function setCornerAttributionKakao(container: HTMLElement | null, on: boolean): void {
+  const credit = container?.querySelector<HTMLElement>('[data-testid="maplibre-corner-attribution"]');
+  if (!credit) return;
+  let tag = credit.querySelector<HTMLElement>('[data-testid="maplibre-attrib-kakao"]');
+  if (on && !tag) {
+    tag = document.createElement("span");
+    tag.setAttribute("data-testid", "maplibre-attrib-kakao");
+    tag.textContent = " · 카카오";
+    credit.appendChild(tag);
+  } else if (!on && tag) {
+    tag.remove();
+  }
+}
+
 /** Imperative corner credit for MapLibreMapAdapter. Returns cleanup. */
 export function installMapLibreCornerAttribution(
   container: HTMLElement,
