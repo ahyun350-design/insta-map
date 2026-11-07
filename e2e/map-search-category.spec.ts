@@ -103,20 +103,24 @@ test("category chips: 카페 → pins + list (distance), 정확도순, 재검색
   await page.screenshot({ path: path.join(OUT, "cafe-hongdae.png") });
 
   // 2) 정확도순 → live re-query (no cache)
+  const chipDone = () => expect(dialog.locator('[data-chip="cafe"]')).toHaveAttribute("aria-busy", "false", { timeout: 15_000 });
   await sort.getByRole("button", { name: "정확도순" }).click();
   await expect.poll(() => categoryCalls, { timeout: 10_000 }).toBe(2);
+  await chipDone();
   await expect(sort.getByRole("button", { name: "정확도순" })).toHaveAttribute("aria-pressed", "true");
   await expect(rows.first()).toBeVisible({ timeout: 15_000 });
 
   // 3) Move the map → "이 지역에서 재검색" re-runs the chip there
   await sort.getByRole("button", { name: "거리순" }).click();
   await expect.poll(() => categoryCalls, { timeout: 10_000 }).toBe(3);
+  await chipDone();
   await expect(rows.first()).toBeVisible({ timeout: 15_000 });
   await gl(page, "jumpToZoom", MANGWON.lat, MANGWON.lng, 16);
   const research = dialog.getByRole("button", { name: "이 지역에서 재검색" });
   await expect(research).toBeVisible({ timeout: 10_000 });
   await research.click();
   await expect.poll(() => categoryCalls, { timeout: 10_000 }).toBe(4);
+  await chipDone();
   await expect(rows.first()).toBeVisible({ timeout: 15_000 });
   await expect(dialog.locator('[data-chip="cafe"]')).toHaveAttribute("aria-pressed", "true");
   // User (홍대) is >1km from the new search point (망원): order + labels from the map centre.
