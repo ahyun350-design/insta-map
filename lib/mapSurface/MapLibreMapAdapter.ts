@@ -268,6 +268,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private emptyBasemapWatchDispose: (() => void) | null = null;
   private lastSelfPrefetchKey = "";
   private fallbackReported = false;
+  private searchPinCount = 0;
+  private focusPinIcon: string | null = null;
   private courseSelectedOrder: number | null = null;
   /** Admin directions chrome (paint basemap + hide clutter pins). */
   private directionsChromeActive = false;
@@ -2034,6 +2036,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         },
       ],
     });
+    this.focusPinIcon = icon;
   }
 
   clearFocusMarker() {
@@ -2043,6 +2046,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       type: "FeatureCollection",
       features: [],
     });
+    this.focusPinIcon = null;
   }
 
   panTo(lat: number, lng: number) {
@@ -2210,10 +2214,15 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         geometry: { type: "Point", coordinates: [p.lng, p.lat] },
       })),
     });
+    this.searchPinCount = pins.length;
   }
 
   clearSearchPins() {
     this.setSearchPins([]);
+  }
+
+  searchPinState() {
+    return { search: this.searchPinCount, focus: this.focusPinIcon };
   }
 
   setCourseStops(stops: CourseStopInput[], opts?: SetCourseStopsOptions) {

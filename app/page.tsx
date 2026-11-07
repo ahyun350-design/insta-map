@@ -2874,6 +2874,7 @@ function HomePageContent() {
   const handleClearMapSearch = useCallback(() => {
     setSearchQuery("");
     clearSearchResultPins();
+    if (!selectedPlaceRef.current) clearAdminSearchMapPinsRef.current();
     setMapSearchResults([]);
     setMapSearchLabel("");
     setIsMapSearchSheetOpen(false);
@@ -8318,6 +8319,19 @@ function HomePageContent() {
     }
   }, []);
 
+  /**
+   * Admin expanded MapLibre only: drop search result pins and the focus pin (incl. the
+   * 도로명주소 house) so the map shows at most the open card's pin. Saved pins / my
+   * location are separate layers and stay.
+   */
+  const clearAdminSearchMapPins = useCallback(() => {
+    if (!isExpandedMapLibre(expandedMapRef.current)) return;
+    clearSearchResultPins();
+    clearFocusPlaceMarker();
+  }, [clearSearchResultPins, clearFocusPlaceMarker]);
+  const clearAdminSearchMapPinsRef = useRef(clearAdminSearchMapPins);
+  clearAdminSearchMapPinsRef.current = clearAdminSearchMapPins;
+
   const applyFocusPlaceMarkerOnMap = useCallback(
     (
       map: any,
@@ -11441,6 +11455,7 @@ function HomePageContent() {
       placeRefFromPlace(place, markerLat, markerLng),
     );
     placeSheetReturnRef.current = null;
+    clearAdminSearchMapPins();
     setSelectedPlace(toSelectedFromSavedPlace(place, relatedPosts, markerLat, markerLng));
     void ensurePoiPhoneOnSelectedPlace(place);
   };
@@ -12452,6 +12467,7 @@ function HomePageContent() {
       _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, expandedRef),
       _placeRef: expandedRef,
     });
+    if (isExpandedMapLibre(expandedMapRef.current)) clearSearchResultPins();
     const py = parseFloat(String(place.y ?? ""));
     const px = parseFloat(String(place.x ?? ""));
     if (!Number.isFinite(py) || !Number.isFinite(px)) return;
@@ -12464,7 +12480,7 @@ function HomePageContent() {
     };
     scheduleExpandedMapCamera(applyPaddedCamera);
     window.setTimeout(applyPaddedCamera, 140);
-  }, [showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom]);
+  }, [showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom, clearSearchResultPins]);
   const openExpandedSearchPlaceCardRef = useRef(openExpandedSearchPlaceCard);
   openExpandedSearchPlaceCardRef.current = openExpandedSearchPlaceCard;
 
@@ -12499,6 +12515,7 @@ function HomePageContent() {
       _feedPosts: getRelatedPostsForPlaceSheet(feedPostsRef.current, ref),
       _placeRef: ref,
     });
+    if (isExpandedMapLibre(expandedMapRef.current)) clearSearchResultPins();
     showFocusPlaceMarker(tap.lat, tap.lng, category, null, mapTapBadge(tap));
     // Label tap keeps the user's zoom (search passes a level); only pan so the place sits above the card.
     const level = opts?.level ?? getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? 3;
@@ -12553,7 +12570,7 @@ function HomePageContent() {
       // Card grew with the detail rows — keep the corner credit on its top edge.
       window.setTimeout(() => measureExpandedPlaceCardPaddingBottom(), 80);
     })();
-  }, [showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom]);
+  }, [showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom, clearSearchResultPins]);
   const openMapPoiPlaceCardRef = useRef(openMapPoiPlaceCard);
   openMapPoiPlaceCardRef.current = openMapPoiPlaceCard;
   const toSelectedFromSavedPlaceRef = useRef(toSelectedFromSavedPlace);
@@ -12655,6 +12672,8 @@ function HomePageContent() {
       } catch {
         /* noop */
       }
+      // Picking a result: other result pins go; the new card's focus pin replaces the old one.
+      clearSearchResultPins();
       if (hit.kind === "address") {
         let point: { lat: number; lng: number } | null = null;
         try {
@@ -12716,13 +12735,14 @@ function HomePageContent() {
       if (area != null) {
         setIsMapSearchSheetOpen(false);
         setSelectedPlace(null);
+        clearAdminSearchMapPins();
         applyExpandedMapCameraLatLng(hit.lat, hit.lng, area, { paddingBottom: 0 });
         return;
       }
       openMapPoiPlaceCardRef.current(adminSearchHitToTap(hit), { level: 3 });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [showToast, showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom],
+    [showToast, showFocusPlaceMarker, measureExpandedPlaceCardPaddingBottom, clearSearchResultPins, clearAdminSearchMapPins],
   );
 
   /** Results sheet / pin tap: our rows open the D-1 card, Kakao rows keep the Kakao card. */
@@ -12746,6 +12766,9 @@ function HomePageContent() {
    */
   const runAdminMergedSearch = useCallback(
     async (trimmed: string) => {
+      // A new search replaces the previous one: its pins (incl. the address house) and card go.
+      setSelectedPlace(null);
+      clearAdminSearchMapPins();
       mapSearchKeywordRef.current = trimmed;
       setShowMapResearchButton(false);
       pendingSearchCenterSyncRef.current = true;
@@ -12811,7 +12834,7 @@ function HomePageContent() {
       setSearchQuery("");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [addSearchResultPins, clearSearchResultPins, fetchAdminSearchHits, openAdminSearchRow, rememberAdminSearch, showToast],
+    [addSearchResultPins, clearSearchResultPins, clearAdminSearchMapPins, fetchAdminSearchHits, openAdminSearchRow, rememberAdminSearch, showToast],
   );
 
   /** 확장 지도 검색 — 지도 center 기준 (GPS 아님) */
@@ -13903,6 +13926,7 @@ function HomePageContent() {
                   getBearing?: () => number;
                   getCenter?: () => { lat: number; lng: number } | null;
                   getLevel?: () => number | null;
+                  searchPinState?: () => { search: number; focus: string | null } | null;
                 };
               };
               const prev = w.__PINDMAP_EXPANDED_GL__;
@@ -13947,6 +13971,8 @@ function HomePageContent() {
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? null,
                 jumpToZoom: (lat, lng, zoom) =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.jumpToZoom(lat, lng, zoom),
+                searchPinState: () =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.searchPinState() ?? null,
               };
             } catch {
               /* noop */
@@ -15883,6 +15909,7 @@ function HomePageContent() {
           }
           setSelectedPlace(null);
           setSelectedMapPlace(null);
+          clearAdminSearchMapPins();
         }}
         onToggleSave={() => {
           void togglePlaceSheetSave(placeData, () => {
