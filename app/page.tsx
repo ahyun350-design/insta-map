@@ -14170,7 +14170,10 @@ function HomePageContent() {
                 }
               }
             }
-            if (!lastSearchCenterRef.current || !mapSearchKeywordRef.current.trim()) {
+            if (
+              !lastSearchCenterRef.current ||
+              (!mapSearchKeywordRef.current.trim() && !activeCategoryChipRef.current)
+            ) {
               setShowMapResearchButton(false);
               return;
             }
