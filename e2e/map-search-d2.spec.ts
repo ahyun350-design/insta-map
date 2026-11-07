@@ -177,7 +177,10 @@ test("D-2 search: autocomplete → card (rotation kept), recent, Enter list, roa
   await card.getByRole("button", { name: "닫기" }).click();
   await expect(card).toBeHidden({ timeout: 10_000 });
 
-  // 6) Chain name → nearest store first (not an exact-name store far away)
+  // 6) Chain name → nearest store first (not an exact-name store far away).
+  // Search is centred on the map, distances on the user — put the map back on the user.
+  await evalGl(page, "jumpToZoom", HONGDAE.lat, HONGDAE.lng, 15);
+  await page.waitForTimeout(2000);
   await input.click();
   await input.fill("이디야");
   await input.press("Enter");
