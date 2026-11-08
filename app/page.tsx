@@ -321,6 +321,7 @@ import {
 } from "@/lib/mapSurface/mapPoiTap";
 import { ADDRESS_BADGE_COLOR, addressBadgeSvg, type PoiCategoryId } from "@/lib/mapSurface/poiCategoryIcons";
 import type { SearchPinCategory } from "@/lib/mapSurface/types";
+import { visibleSheetInset } from "@/lib/mapSurface/cameraPadding";
 import type { ExpandedMapSurface } from "@/lib/mapSurface";
 import {
   adminMapGlOverrideLabel,
@@ -13046,12 +13047,18 @@ function HomePageContent() {
         final.pinned.map((p) => ({ lat: parseFloat(String(p.y)), lng: parseFloat(String(p.x)) })),
         origin,
       );
+      // Only the sheet on screen now shapes the view; a closed card's inset must not linger.
+      const sheetInset = visibleSheetInset(
+        mapExpandedRef.current?.getBoundingClientRect() ?? null,
+        mapExpandedRef.current?.closest('[aria-label="전체 지도"]')
+          ?.querySelector<HTMLElement>(".mapSearchResultsSheet")
+          ?.getBoundingClientRect() ?? null,
+      );
+      const one = plan.kind === "fit" && plan.points.length === 1 ? plan.points[0]! : plan.kind === "goto" ? plan.point : null;
       if (gl && plan.kind === "fit" && plan.points.length > 1) {
-        gl.fitPoints(plan.points, { top: 108, right: 28, bottom: 280, left: 28 });
-      } else if (gl && plan.kind === "fit") {
-        gl.goToSearchResult(plan.points[0]!.lat, plan.points[0]!.lng, 3);
-      } else if (gl && plan.kind === "goto") {
-        gl.goToSearchResult(plan.point.lat, plan.point.lng, 3);
+        gl.fitSearchResults(plan.points, sheetInset);
+      } else if (gl && one) {
+        gl.goToSearchResult(one.lat, one.lng, 3, { paddingBottom: sheetInset > 0 ? sheetInset + 20 : 0 });
       } else {
         pendingSearchCenterSyncRef.current = false;
       }

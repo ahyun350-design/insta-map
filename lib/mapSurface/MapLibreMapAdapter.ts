@@ -39,7 +39,7 @@ import {
   mapLibreZoomToKakaoLevel,
 } from "./kakaoZoom";
 import { haversineMeters } from "./tilePrefetch";
-import { resultCameraPadding } from "./cameraPadding";
+import { fitSearchResultsOn, resultCameraPadding, searchFitPadding } from "./cameraPadding";
 import type {
   CompactMapSurface,
   CompactPinInput,
@@ -2352,6 +2352,12 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   clearSearchPins() {
     this.setSearchPins([]);
+  }
+
+  fitSearchResults(points: MapLatLng[], sheetInsetPx: number) {
+    const map = this.map;
+    if (!map) return;
+    fitSearchResultsOn(map, points, searchFitPadding(sheetInsetPx));
   }
 
   searchPinPoints() {

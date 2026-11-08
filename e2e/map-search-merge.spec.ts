@@ -207,6 +207,7 @@ test("exact address alone + its pin opens it; pin ↔ card by id; 재검색 only
   // 1) 메가커피 (fresh map, no card yet): every pin opens the row it was drawn for; sort toggle
   //    only when the orders differ
   await search("메가커피");
+  const freshFitLevel = (await call(page, "getLevel")) as number;
   const sheetTop = (await sheet.boundingBox())!.y - (await mapBox()).y;
   const names = await rows.locator(".mapSearchResultsSheetItemName").allInnerTexts();
   const sort = sheet.getByTestId("map-search-sort");
@@ -272,5 +273,15 @@ test("exact address alone + its pin opens it; pin ↔ card by id; 재검색 only
   await expect(card).toContainText("도로명주소");
   await page.waitForTimeout(2000);
   await expect(research, "card camera is the app's move").toHaveCount(0);
+
+  // 3) Search right after a card: the card's bottom inset must not shrink / shift the fit
+  await search("메가커피");
+  expect((await call(page, "getLevel")) as number, "same fit as with no card before").toBe(freshFitLevel);
+  const afterCardPins = await pins();
+  const nearPins = afterCardPins.filter((p) => p.y > 0 && p.y < sheetTop);
+  expect(nearPins.length, "fitted pins sit in the open map above the sheet").toBeGreaterThan(0);
+  const box2 = await mapBox();
+  const cy = nearPins.reduce((s, p) => s + p.y, 0) / nearPins.length;
+  expect(cy, "fit centred in the open band, not pushed up by a card inset").toBeGreaterThan((108 + sheetTop) / 2 - box2.height * 0.15);
   await context.close();
 });

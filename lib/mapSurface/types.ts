@@ -140,6 +140,8 @@ export type ExpandedMapSurface = CompactMapSurface & {
   clearSearchPins: () => void;
   /** E2E / QA: search result pins on the map + the focus pin's image id (null = none). */
   searchPinState: () => { search: number; focus: string | null; dimmed: boolean; onTop: boolean };
+  /** Fit several search results above the given sheet inset; an earlier card's inset is cleared. */
+  fitSearchResults: (points: MapLatLng[], sheetInsetPx: number) => void;
   /** E2E: each result pin's id and its anchor (pin tip) in container pixels. */
   searchPinPoints: () => Array<{ id: string; x: number; y: number }>;
   /** Corner credit " · 카카오" while Kakao search results are on screen. */
