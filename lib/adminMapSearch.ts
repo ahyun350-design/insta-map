@@ -422,12 +422,50 @@ export function kakaoDocToHit(doc: {
   };
 }
 
-/** Name key for tiering: lower-case, no spaces / symbols, chain names mapped to the 상호. */
-function matchKey(s: string): string {
-  const k = s.toLowerCase().replace(/[\s()[\]{}（）·.,'"\-_/&+]/g, "");
-  const alias = CHAIN_ALIASES[k];
-  return alias ? alias.toLowerCase().replace(/[\s\-]/g, "") : k;
+const squashName = (s: string) => s.toLowerCase().replace(/[\s()[\]{}（）·.,'"\-_/&+]/g, "");
+
+/**
+ * Chain alias groups (메가커피 / 메가엠지씨커피 / 메가MGC커피, 파리바게뜨 ↔ 파리바게트 …) →
+ * [spelling, one canonical spelling], longest spelling first.
+ */
+const CHAIN_CANONICAL: Array<[string, string]> = (() => {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    const p = parent.get(x) ?? x;
+    if (p === x) return x;
+    const root = find(p);
+    parent.set(x, root);
+    return root;
+  };
+  for (const [k, v] of Object.entries(CHAIN_ALIASES)) {
+    const a = find(squashName(k));
+    const b = find(squashName(v));
+    if (a !== b) parent.set(a < b ? b : a, a < b ? a : b);
+    else parent.set(a, a);
+  }
+  return [...parent.keys()]
+    .map((m) => [m, find(m)] as [string, string])
+    .sort((x, y) => y[0].length - x[0].length);
+})();
+
+/**
+ * Name key shared by ranking and duplicate checks: lower-case, no spaces / symbols, and a
+ * leading chain name in its canonical spelling ("메가MGC커피 망원역점" ≡ "메가엠지씨커피망원역점").
+ */
+export function canonicalPlaceName(s: string): string {
+  const k = squashName(s);
+  for (const [spelling, canonical] of CHAIN_CANONICAL) {
+    if (k.startsWith(spelling)) return canonical + k.slice(spelling.length);
+  }
+  return k;
 }
+
+/** Same name for duplicate checks, chain spellings unified (contains-match ≥3 chars). */
+export function chainAwareNamesMatch(a: string, b: string): boolean {
+  return placeNamesMatch(canonicalPlaceName(a), canonicalPlaceName(b));
+}
+
+const matchKey = canonicalPlaceName;
 
 export type NameTier = 1 | 2 | 3;
 
@@ -486,7 +524,7 @@ export function rankMergedHits(
     (k) =>
       !places.some(
         (p) =>
-          placeNamesMatch(placeDisplayName(p), k.name) &&
+          chainAwareNamesMatch(placeDisplayName(p), k.name) &&
           distanceMeters(p.lat, p.lng, k.lat, k.lng) <=
             (p.source === "sangga" ? DEDUPE_RADIUS_M : SAME_PLACE_RADIUS_M),
       ),

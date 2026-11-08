@@ -9,6 +9,8 @@ import {
   unionPlaceHits,
   clearRecentSearches,
   dedupeRows,
+  canonicalPlaceName,
+  chainAwareNamesMatch,
   hitToMapPoiTap,
   kakaoDocToHit,
   looksLikeRoadAddress,
@@ -231,6 +233,27 @@ test("merge: typo query (all similar) keeps 경복궁 before 경복궁역", () =
   const shop = place({ id: "s", name: "경복궁", branch: "서교점", score: 80, lat: 37.5576, lng: 126.9182 });
   assert.deepEqual(rankMergedHits([st, lm, shop], [], "경복구", { lat: 37.5563, lng: 126.9236 }).map((h) => h.id), ["lm", "st", "s"]);
   assert.deepEqual(rankMergedHits([st, lm], [], "경복궁역", { lat: 37.5563, lng: 126.9236 }).map((h) => h.id), ["st", "lm"]);
+});
+
+test("merge: same store under two chain spellings is kept once (메가엠지씨커피 ↔ 메가MGC커피)", () => {
+  const ours = place({ id: "o", name: "메가엠지씨커피망원우체국", branch: "사거리점", score: 319, lat: 37.5584, lng: 126.9096 });
+  const dup = kakao("kdup", "메가MGC커피 망원우체국사거리점", 37.55842, 126.90962); // same spot
+  const other = kakao("kother", "메가MGC커피 망원역점", 37.5562, 126.9103);
+  const out = rankMergedHits([ours], [dup, other], "메가커피", MANGWON);
+  assert.deepEqual(out.map((h) => h.id).sort(), ["kother", "o"]);
+  // a different store next door is not a duplicate
+  const nextDoor = kakao("knext", "메가MGC커피 망원역점", 37.55845, 126.90965);
+  assert.equal(rankMergedHits([ours], [nextDoor], "메가커피", MANGWON).length, 2);
+});
+
+test("canonicalPlaceName: one spelling per chain group, branch kept", () => {
+  assert.equal(canonicalPlaceName("메가MGC커피 망원역점"), canonicalPlaceName("메가엠지씨커피망원역점"));
+  assert.equal(canonicalPlaceName("메가커피"), canonicalPlaceName("메가엠지씨커피"));
+  assert.equal(canonicalPlaceName("CU 망원점"), canonicalPlaceName("씨유 망원점"));
+  assert.equal(canonicalPlaceName("파리바게뜨 합정점"), canonicalPlaceName("파리바게트 합정점"));
+  assert.notEqual(canonicalPlaceName("메가MGC커피 망원역점"), canonicalPlaceName("메가MGC커피 합정점"));
+  assert.equal(chainAwareNamesMatch("메가엠지씨커피망원우체국 사거리점", "메가MGC커피 망원우체국사거리점"), true);
+  assert.equal(chainAwareNamesMatch("스타벅스 홍대역점", "투썸플레이스 홍대역점"), false);
 });
 
 test("merge: Kakao timeout → ours only, still tiered by name then distance", () => {
