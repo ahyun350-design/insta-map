@@ -9,8 +9,18 @@ import {
   unionPlaceHits,
   clearRecentSearches,
   dedupeRows,
+  canonicalPlaceName,
+  chainAwareNamesMatch,
   hitToMapPoiTap,
+  kakaoDocToHit,
   looksLikeRoadAddress,
+  nameMatchTier,
+  placeDisplayName,
+  rankMergedHits,
+  rankQueries,
+  searchRowPoiCategory,
+  type KakaoKeywordHit,
+  type OurHit,
   mergeOursWithKakao,
   pushRecentSearch,
   readRecentSearches,
@@ -160,6 +170,122 @@ test("collapseSamePlaces: 경복궁 관광+랜드마크 → one landmark row wit
   assert.deepEqual(out.map((h) => h.id), ["station:1", "landmark:1", "tour:2", "s1", "s2", "d1", "d2"]);
   assert.equal(out[1]!.category, "관광명소");
   assert.equal(out[1]!.score, 309.6);
+});
+
+const MANGWON = { lat: 37.556, lng: 126.9101 };
+const kakao = (id: string, name: string, lat: number, lng: number): KakaoKeywordHit => ({
+  kind: "kakao", id, name, category: "가정,생활 > 패션잡화", address: null, phone: null, placeUrl: null, lat, lng,
+});
+
+test("merge: exact Kakao-only name beats our prefix match (지구샵 vs 지구샵그로서리)", () => {
+  const ours = [
+    place({ id: "g1", name: "지구샵그로서리", branch: null, lat: 37.5646, lng: 126.9216, distM: 1381 }),
+    place({ id: "g2", name: "지구샵네일", branch: null, lat: 36.6, lng: 127.3, distM: 111960 }),
+    place({ id: "g3", name: "지구", branch: null, lat: 37.45, lng: 127.0, distM: 15413 }),
+  ];
+  const k = [kakao("k1", "지구샵", 37.5585, 126.9061), kakao("k2", "지구샵네일", 36.6001, 127.3001)];
+  const out = rankMergedHits(ours, k, "지구샵", MANGWON);
+  assert.equal(out[0]!.kind, "kakao");
+  assert.equal((out[0] as KakaoKeywordHit).name, "지구샵");
+  assert.equal(out.filter((h) => h.kind !== "address" && placeDisplayName(h as never) === "지구샵네일").length, 1, "same place kept once (ours)");
+  assert.equal(out.find((h) => h.kind !== "address" && placeDisplayName(h as never) === "지구샵네일")!.kind, "place");
+});
+
+test("merge: same tier → our 관광 before a same-name shop, then distance; addresses lead", () => {
+  const tour = place({ id: "t", source: "tour", name: "경복궁", branch: null, category: "관광명소", lat: 37.5796, lng: 126.977 });
+  const shop = place({ id: "s", name: "경복궁", branch: null, lat: 37.5576, lng: 126.9182 });
+  const addr: OurHit = { kind: "address", id: "juso:1", roadAddr: "서울특별시 종로구 사직로 161", jibunAddr: null, buildingName: null };
+  const out = rankMergedHits([shop, tour, addr], [], "경복궁", { lat: 37.5563, lng: 126.9236 });
+  assert.deepEqual(out.map((h) => h.id), ["juso:1", "t", "s"]);
+});
+
+test("merge: chain aliases share a tier, so the nearest store wins (메가커피)", () => {
+  const farExact = place({ id: "far", name: "메가커피", branch: "수색자이", lat: 37.58, lng: 126.89 });
+  const aliasNear = place({ id: "mid", name: "메가엠지씨커피", branch: "망원우체국 사거리점", lat: 37.5585, lng: 126.9095 });
+  const k = [kakao("kk", "메가MGC커피 망원역점", 37.5562, 126.9103)];
+  assert.deepEqual(rankMergedHits([farExact, aliasNear], k, "메가커피", MANGWON).map((h) => h.id), ["kk", "mid", "far"]);
+  assert.equal(nameMatchTier(rankQueries("메가커피"), ["메가MGC커피 망원역점", "메가MGC커피"]), 1);
+  assert.equal(nameMatchTier(rankQueries("지구샵"), ["지구샵그로서리"]), 2);
+  assert.equal(nameMatchTier(rankQueries("지구샵"), ["지구"]), 3);
+});
+
+test("merge: Kakao 경복궁 ~300m from our landmark point is the same place (kept once)", () => {
+  const lm = place({ id: "lm", source: "landmark", name: "경복궁", branch: null, category: "관광명소", lat: 37.5795, lng: 126.977 });
+  const k = [kakao("kp", "경복궁", 37.5768, 126.9768)];
+  assert.deepEqual(rankMergedHits([lm], k, "경복궁", MANGWON).map((h) => h.id), ["lm"]);
+  const shop = place({ id: "s", name: "경복궁", branch: null, lat: 37.5576, lng: 126.9182 });
+  const k2 = [kakao("ks", "경복궁", 37.5585, 126.9182)]; // same name, ~100m: a different shop
+  assert.equal(rankMergedHits([shop], k2, "경복궁", MANGWON).length, 2);
+});
+
+test("merge: our chain store scored 300 by the RPC ranks with Kakao exact names (nearest first)", () => {
+  const glued = place({ id: "near", name: "컴포즈커피홍대", branch: "서교점", score: 318, lat: 37.5571, lng: 126.9233 });
+  const k = [kakao("kfar", "컴포즈커피 합정점", 37.5495, 126.9135)];
+  assert.deepEqual(rankMergedHits([glued], k, "컴포즈커피", { lat: 37.5563, lng: 126.9236 }).map((h) => h.id), ["near", "kfar"]);
+  const prefixOnly = place({ id: "gro", name: "지구샵그로서리", branch: null, score: 217, lat: 37.5646, lng: 126.9216 });
+  assert.equal(nameMatchTier(rankQueries("지구샵"), ["지구샵그로서리"]), 2);
+  assert.equal(rankMergedHits([prefixOnly], [kakao("j", "지구샵", 37.5585, 126.9061)], "지구샵", MANGWON)[0]!.id, "j");
+});
+
+test("merge: typo query (all similar) keeps 경복궁 before 경복궁역", () => {
+  const st = place({ id: "st", source: "station", name: "경복궁역", branch: null, category: "지하철역", score: 88, lat: 37.5758, lng: 126.9735 });
+  const lm = place({ id: "lm", source: "landmark", name: "경복궁", branch: null, category: "관광명소", score: 87, lat: 37.5795, lng: 126.977 });
+  const shop = place({ id: "s", name: "경복궁", branch: "서교점", score: 80, lat: 37.5576, lng: 126.9182 });
+  assert.deepEqual(rankMergedHits([st, lm, shop], [], "경복구", { lat: 37.5563, lng: 126.9236 }).map((h) => h.id), ["lm", "st", "s"]);
+  assert.deepEqual(rankMergedHits([st, lm], [], "경복궁역", { lat: 37.5563, lng: 126.9236 }).map((h) => h.id), ["st", "lm"]);
+});
+
+test("merge: same store under two chain spellings is kept once (메가엠지씨커피 ↔ 메가MGC커피)", () => {
+  const ours = place({ id: "o", name: "메가엠지씨커피망원우체국", branch: "사거리점", score: 319, lat: 37.5584, lng: 126.9096 });
+  const dup = kakao("kdup", "메가MGC커피 망원우체국사거리점", 37.55842, 126.90962); // same spot
+  const other = kakao("kother", "메가MGC커피 망원역점", 37.5562, 126.9103);
+  const out = rankMergedHits([ours], [dup, other], "메가커피", MANGWON);
+  assert.deepEqual(out.map((h) => h.id).sort(), ["kother", "o"]);
+  // a different store next door is not a duplicate
+  const nextDoor = kakao("knext", "메가MGC커피 망원역점", 37.55845, 126.90965);
+  assert.equal(rankMergedHits([ours], [nextDoor], "메가커피", MANGWON).length, 2);
+});
+
+test("canonicalPlaceName: one spelling per chain group, branch kept", () => {
+  assert.equal(canonicalPlaceName("메가MGC커피 망원역점"), canonicalPlaceName("메가엠지씨커피망원역점"));
+  assert.equal(canonicalPlaceName("메가커피"), canonicalPlaceName("메가엠지씨커피"));
+  assert.equal(canonicalPlaceName("CU 망원점"), canonicalPlaceName("씨유 망원점"));
+  assert.equal(canonicalPlaceName("파리바게뜨 합정점"), canonicalPlaceName("파리바게트 합정점"));
+  assert.notEqual(canonicalPlaceName("메가MGC커피 망원역점"), canonicalPlaceName("메가MGC커피 합정점"));
+  assert.equal(chainAwareNamesMatch("메가엠지씨커피망원우체국 사거리점", "메가MGC커피 망원우체국사거리점"), true);
+  assert.equal(chainAwareNamesMatch("스타벅스 홍대역점", "투썸플레이스 홍대역점"), false);
+});
+
+test("merge: Kakao timeout → ours only, still tiered by name then distance", () => {
+  const a = place({ id: "a", name: "이디야커피", branch: "망원점", score: 319, lat: 37.5565, lng: 126.9105 });
+  const b = place({ id: "b", name: "이디야", branch: "안산점", score: 300, lat: 37.32, lng: 126.83 });
+  const c = place({ id: "c", name: "이디야음악", branch: null, score: 220, lat: 37.5561, lng: 126.9102 });
+  assert.deepEqual(rankMergedHits([b, c, a], [], "이디야", MANGWON).map((h) => h.id), ["a", "b", "c"]);
+});
+
+test("merge: '…역' query puts the station before a same-tier 관광 name", () => {
+  const tour = place({ id: "t", source: "tour", name: "강남", branch: null, score: 300.6, lat: 37.5172, lng: 127.0473 });
+  const st = place({ id: "st", source: "station", name: "강남역", branch: null, score: 300, lat: 37.4979, lng: 127.0276 });
+  const origin = { lat: 37.5563, lng: 126.9236 };
+  assert.deepEqual(rankMergedHits([tour, st], [], "강남역", origin).map((h) => h.id), ["st", "t"]);
+  assert.deepEqual(rankMergedHits([tour, st], [], "강남", origin).map((h) => h.id), ["t", "st"]);
+});
+
+test("result pin badge: our source / 상가 class, Kakao category text", () => {
+  assert.equal(searchRowPoiCategory(toSearchRow(place({ category: "cafe" }))), "cafe");
+  assert.equal(searchRowPoiCategory(toSearchRow(place({ category: "doctors" }))), "hospital");
+  assert.equal(searchRowPoiCategory(toSearchRow(place({ source: "station", category: "지하철역" }))), "subway");
+  assert.equal(searchRowPoiCategory(toSearchRow(place({ source: "tour", category: "관광명소" }))), "landmark");
+  assert.equal(searchRowPoiCategory({ id: "k", place_name: "x", category_name: "음식점 > 카페 > 커피전문점" }), "cafe");
+  assert.equal(searchRowPoiCategory({ id: "k", place_name: "x", category_name: "음식점 > 술집 > 호프,요리주점" }), "bar");
+  assert.equal(searchRowPoiCategory({ id: "k", place_name: "x", category_name: "가정,생활 > 패션잡화" }), "shop");
+});
+
+test("kakaoDocToHit: display-only fields, null without coordinates", () => {
+  const h = kakaoDocToHit({ id: "1", place_name: "지구샵", x: "126.9", y: "37.5", place_url: "http://place.map.kakao.com/1" });
+  assert.equal(h?.kind, "kakao");
+  assert.equal(toSearchRow(h!)._pindHit, undefined);
+  assert.equal(kakaoDocToHit({ id: "2", place_name: "x" }), null);
 });
 
 test("searchEventMeta never carries the query text", () => {

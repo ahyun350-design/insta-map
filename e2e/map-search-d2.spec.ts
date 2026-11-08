@@ -72,7 +72,7 @@ test("D-2 search: autocomplete → card (rotation kept), recent, Enter list, roa
   await suppressCoachmarks(context);
   const page = await context.newPage();
   const token = computeMapPreviewE2eToken();
-  for (const p of ["**/api/admin/map-place", "**/api/admin/map-search", "**/api/admin/map-geocode"]) {
+  for (const p of ["**/api/admin/map-place", "**/api/admin/map-search", "**/api/admin/map-geocode", "**/api/admin/map-kakao-search"]) {
     await page.route(p, (route) =>
       route.continue({ headers: { ...route.request().headers(), "x-pindmap-e2e": token } }),
     );

@@ -35,6 +35,8 @@ type Props = {
   sortDistanceOnClient?: boolean;
   /** Origin for the client distance order (defaults to the user location). */
   sortOrigin?: { lat: number; lng: number } | null;
+  /** Search still running: open right away with a "검색 중" line under any rows so far. */
+  loading?: boolean;
 };
 
 function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -76,6 +78,7 @@ export function MapSearchResultsSheet({
   onSortModeChange,
   sortDistanceOnClient = false,
   sortOrigin,
+  loading = false,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const shownResults = useMemo(
@@ -144,7 +147,7 @@ export function MapSearchResultsSheet({
     finishDrag();
   };
 
-  if (!open || results.length === 0) return null;
+  if (!open || (results.length === 0 && !loading)) return null;
 
   /* Native searchResultsSheetHeight = 260pt; expanded keeps prior 70vh affordance */
   const sheetHeight = expanded ? "70vh" : "260px";
@@ -177,7 +180,8 @@ export function MapSearchResultsSheet({
         onPointerCancel={onHandlePointerUp}
       >
         <h2 className="mapSearchResultsSheetTitle">
-          <span className="mapSearchResultsSheetQuery">{queryLabel}</span> 검색 결과 {results.length}개
+          <span className="mapSearchResultsSheetQuery">{queryLabel}</span>{" "}
+          {loading && results.length === 0 ? "검색 중…" : `검색 결과 ${results.length}개`}
         </h2>
         {onSortModeChange && sortMode ? (
           <div
@@ -243,6 +247,11 @@ export function MapSearchResultsSheet({
           );
         })}
       </ul>
+      {loading ? (
+        <p className="mapSearchResultsSheetLoading" role="status" data-testid="map-search-loading">
+          검색 중…
+        </p>
+      ) : null}
     </div>
   );
 }

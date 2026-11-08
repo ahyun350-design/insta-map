@@ -16,6 +16,9 @@ import {
   MAP_PIN_ICON_SIZE,
   MAP_PIN_WIDTH,
   MY_LOCATION_IMAGE_ID,
+  SEARCH_RESULT_PIN_HEIGHT,
+  SEARCH_RESULT_PIN_SELECTED_SCALE,
+  SEARCH_RESULT_PIN_WIDTH,
   clampMapPinDpr,
   focusBadgeMarkerSvg,
   focusMarkerSvg,
@@ -23,6 +26,7 @@ import {
   myLocationMarkerSvg,
   pinImageKey,
   pinMarkerSvg,
+  searchResultPinSvg,
 } from "@/lib/mapPinImages";
 import {
   buildPindmapStyle,
@@ -131,6 +135,10 @@ const COURSE_CIRCLE_LAYER = "compact-course-circles";
 const COURSE_NUMBER_LAYER = "compact-course-numbers";
 const COURSE_LABEL_LAYER = "compact-course-labels";
 const SEARCH_IMAGE_ID = "pindmap-search-pin";
+/** Faded while search results are on the map (stations / place names / roads excluded). */
+const RESULT_DIM_LAYER =
+  /^(shop_poi_label_|sangga_shop_label_|tour_poi_label_|korea_landmark_tier|label_korea_landmark_overlay|landmark_)/;
+const RESULT_DIM_OPACITY = 0.35;
 /** Discover dots only at MapLibre zoom ≥ 11. */
 const DISCOVER_MIN_ZOOM = 11;
 
@@ -269,6 +277,9 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private lastSelfPrefetchKey = "";
   private fallbackReported = false;
   private searchPinCount = 0;
+  private searchPinSeq = 0;
+  private resultDimOn = false;
+  private resultDimSaved = new Map<string, unknown>();
   private focusPinIcon: string | null = null;
   private courseSelectedOrder: number | null = null;
   /** Admin directions chrome (paint basemap + hide clutter pins). */
@@ -1129,10 +1140,24 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       type: "symbol",
       source: SEARCH_SOURCE,
       layout: {
-        "icon-image": SEARCH_IMAGE_ID,
+        "icon-image": ["coalesce", ["get", "icon"], SEARCH_IMAGE_ID],
         "icon-size": 1,
+        "icon-anchor": "bottom",
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
+        "symbol-sort-key": ["get", "rank"],
+        "text-field": ["coalesce", ["get", "label"], ""],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": 12,
+        "text-anchor": "top",
+        "text-offset": [0, 0.15],
+        "text-max-width": 8,
+        "text-optional": true,
+      },
+      paint: {
+        "text-color": MAP_BRAND_NAVY,
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.6,
       },
     });
 
@@ -2012,20 +2037,35 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     const map = this.map;
     if (!map?.getSource(FOCUS_SOURCE)) return;
     const neon = this.theme === "neon" ? { stroke: "#ffffff", glow: true } : undefined;
-    const icon = pin.badge
-      ? `focus-badge:${pin.badge.key}:${pin.fillColor.toLowerCase()}${neon ? ":neon" : ""}`
-      : pinImageKey("focus", pin.category, pin.fillColor) + (neon ? ":neon" : "");
-    await loadMapImageFromSvg(
-      map,
-      icon,
-      pin.badge
-        ? focusBadgeMarkerSvg(pin.badge.svg, pin.fillColor, neon)
-        : focusMarkerSvg(pin.category, pin.fillColor, neon),
-      MAP_FOCUS_PIN_WIDTH,
-      MAP_FOCUS_PIN_HEIGHT,
-      this.imageDpr,
-    );
+    let icon: string;
+    if (pin.searchResult && !pin.badge) {
+      icon = `search-pin-selected:${pin.searchResult}`;
+      const { poiCategoryIconSvg } = await import("./poiCategoryIcons");
+      await loadMapImageFromSvg(
+        map,
+        icon,
+        searchResultPinSvg(poiCategoryIconSvg(pin.searchResult), MAP_BRAND_NAVY, { selected: true }),
+        SEARCH_RESULT_PIN_WIDTH * SEARCH_RESULT_PIN_SELECTED_SCALE,
+        SEARCH_RESULT_PIN_HEIGHT * SEARCH_RESULT_PIN_SELECTED_SCALE,
+        this.imageDpr,
+      );
+    } else {
+      icon = pin.badge
+        ? `focus-badge:${pin.badge.key}:${pin.fillColor.toLowerCase()}${neon ? ":neon" : ""}`
+        : pinImageKey("focus", pin.category, pin.fillColor) + (neon ? ":neon" : "");
+      await loadMapImageFromSvg(
+        map,
+        icon,
+        pin.badge
+          ? focusBadgeMarkerSvg(pin.badge.svg, pin.fillColor, neon)
+          : focusMarkerSvg(pin.category, pin.fillColor, neon),
+        MAP_FOCUS_PIN_WIDTH,
+        MAP_FOCUS_PIN_HEIGHT,
+        this.imageDpr,
+      );
+    }
     if (this.destroyed || !this.map) return;
+    this.raiseResultLayers();
     (this.map.getSource(FOCUS_SOURCE) as GeoJSONSource).setData({
       type: "FeatureCollection",
       features: [
@@ -2206,15 +2246,96 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   setSearchPins(pins: SearchPinInput[]) {
     const map = this.map;
     if (!map?.getSource(SEARCH_SOURCE)) return;
-    (map.getSource(SEARCH_SOURCE) as GeoJSONSource).setData({
-      type: "FeatureCollection",
-      features: pins.map((p) => ({
-        type: "Feature",
-        properties: { id: p.id },
-        geometry: { type: "Point", coordinates: [p.lng, p.lat] },
-      })),
-    });
     this.searchPinCount = pins.length;
+    const seq = ++this.searchPinSeq;
+    const write = () => {
+      if (this.destroyed || this.map !== map || seq !== this.searchPinSeq) return;
+      (map.getSource(SEARCH_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: pins.map((p, rank) => ({
+          type: "Feature",
+          properties: {
+            id: p.id,
+            rank,
+            ...(p.category ? { icon: `search-pin:${p.category}` } : {}),
+            ...(p.label ? { label: p.label } : {}),
+          },
+          geometry: { type: "Point", coordinates: [p.lng, p.lat] },
+        })),
+      });
+      this.raiseResultLayers();
+      this.setResultDim(pins.length > 0);
+    };
+    const cats = [...new Set(pins.map((p) => p.category).filter((c): c is NonNullable<typeof c> => !!c))];
+    if (!cats.length) {
+      write();
+      return;
+    }
+    void import("./poiCategoryIcons")
+      .then(({ poiCategoryIconSvg }) =>
+        Promise.all(
+          cats.map((cat) =>
+            loadMapImageFromSvg(
+              map,
+              `search-pin:${cat}`,
+              searchResultPinSvg(poiCategoryIconSvg(cat), MAP_BRAND_NAVY),
+              SEARCH_RESULT_PIN_WIDTH,
+              SEARCH_RESULT_PIN_HEIGHT,
+              this.imageDpr,
+            ).catch(() => undefined),
+          ),
+        ),
+      )
+      .catch(() => undefined)
+      .then(write);
+  }
+
+  /** Search results + the selected one stay above every POI / label layer. */
+  private raiseResultLayers() {
+    const map = this.map;
+    if (!map) return;
+    for (const id of [SEARCH_LAYER, FOCUS_LAYER]) {
+      try {
+        if (map.getLayer(id)) map.moveLayer(id);
+      } catch {
+        /* style reloading */
+      }
+    }
+  }
+
+  /**
+   * While results are shown, shop / 상가 / 관광 / landmark icons and labels fade to 0.35;
+   * stations, place names and roads keep their look. Off restores the saved paint values.
+   */
+  private setResultDim(on: boolean) {
+    const map = this.map;
+    if (!map || on === this.resultDimOn) return;
+    this.resultDimOn = on;
+    const layers = map.getStyle()?.layers ?? [];
+    for (const layer of layers) {
+      if (!RESULT_DIM_LAYER.test(layer.id)) continue;
+      const props =
+        layer.type === "symbol"
+          ? (["icon-opacity", "text-opacity"] as const)
+          : layer.type === "circle"
+            ? (["circle-opacity", "circle-stroke-opacity"] as const)
+            : null;
+      if (!props) continue;
+      for (const prop of props) {
+        const key = `${layer.id}|${prop}`;
+        try {
+          if (on) {
+            this.resultDimSaved.set(key, map.getPaintProperty(layer.id, prop));
+            map.setPaintProperty(layer.id, prop, RESULT_DIM_OPACITY);
+          } else if (this.resultDimSaved.has(key)) {
+            map.setPaintProperty(layer.id, prop, this.resultDimSaved.get(key) as never);
+          }
+        } catch {
+          /* layer gone */
+        }
+      }
+    }
+    if (!on) this.resultDimSaved.clear();
   }
 
   clearSearchPins() {
@@ -2222,7 +2343,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   }
 
   searchPinState() {
-    return { search: this.searchPinCount, focus: this.focusPinIcon };
+    const ids = (this.map?.getStyle()?.layers ?? []).map((l) => l.id);
+    const top = ids.slice(-2);
+    return {
+      search: this.searchPinCount,
+      focus: this.focusPinIcon,
+      dimmed: this.resultDimOn,
+      onTop: top.includes(SEARCH_LAYER) && top.includes(FOCUS_LAYER),
+    };
   }
 
   setKakaoCredit(on: boolean) {

@@ -2635,6 +2635,13 @@ select:focus-visible {
   font-weight: 600;
 }
 
+.mapSearchResultsSheetLoading {
+  margin: 0;
+  padding: 10px 20px 14px;
+  font-size: 13px;
+  color: #8a8f98;
+}
+
 /* Admin MapLibre: 거리순 / 정확도순 */
 .mapSearchResultsSheetSort {
   display: inline-flex;

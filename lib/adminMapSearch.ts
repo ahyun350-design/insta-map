@@ -8,6 +8,7 @@
  */
 
 import type { MapPoiKind, MapPoiTap } from "@/lib/mapSurface/mapPoiTap";
+import type { PoiCategoryId } from "@/lib/mapSurface/poiCategoryIcons";
 import { distanceMeters, normalizePlaceName, placeNamesMatch } from "@/lib/mapPlaceMatch";
 
 export type OurSource = "sangga" | "tour" | "landmark" | "station" | "dong" | "gu" | "si";
@@ -38,7 +39,20 @@ export type OurAddressHit = {
   buildingName: string | null;
 };
 
-export type OurHit = OurPlaceHit | OurAddressHit;
+/** Kakao keyword result (live, display only — never stored). */
+export type KakaoKeywordHit = {
+  kind: "kakao";
+  id: string;
+  name: string;
+  category: string | null;
+  address: string | null;
+  phone: string | null;
+  placeUrl: string | null;
+  lat: number;
+  lng: number;
+};
+
+export type OurHit = OurPlaceHit | OurAddressHit | KakaoKeywordHit;
 
 export type MapSearchApiResponse = {
   hits: OurHit[];
@@ -48,7 +62,14 @@ export type MapSearchApiResponse = {
     jusoMs: number | null;
     dbError: string | null;
     jusoError: string | null;
+    /** "이디야 강남": the 동·역·구 point the query names (distance origin for ranking). */
+    anchor?: { lat: number; lng: number } | null;
   };
+};
+
+export type MapKakaoSearchApiResponse = {
+  hits: KakaoKeywordHit[];
+  diag: { ms: number; error: string | null };
 };
 
 /** Kakao-shaped row for the existing results sheet / pins, plus our hit. */
@@ -58,9 +79,12 @@ export type AdminSearchRow = {
   category_name?: string;
   road_address_name?: string;
   address_name?: string;
+  phone?: string;
+  place_url?: string;
   y?: string;
   x?: string;
-  _pindHit?: OurHit;
+  /** Our place / address hit (Kakao rows have none). */
+  _pindHit?: OurPlaceHit | OurAddressHit;
 };
 
 export const SUGGEST_LIMIT = 8;
@@ -68,6 +92,8 @@ export const SUGGEST_DEBOUNCE_MS = 200;
 export const RESULT_LIMIT = 15;
 /** Kakao keyword is called only when ours return fewer rows than this. */
 export const KAKAO_FILL_BELOW = 5;
+/** Name search: Kakao keyword slower than this (from the search start) → ours only. */
+export const KAKAO_KEYWORD_TIMEOUT_MS = 800;
 export const DEDUPE_RADIUS_M = 50;
 export const QUERY_MAX_LEN = 40;
 
@@ -76,12 +102,12 @@ export function looksLikeRoadAddress(q: string): boolean {
   return /[가-힣0-9](로|길)\s*\d+(-\d+)?(\s|$)/.test(q.trim());
 }
 
-export function placeDisplayName(hit: OurPlaceHit): string {
-  return hit.branch ? `${hit.name} ${hit.branch}` : hit.name;
+export function placeDisplayName(hit: OurPlaceHit | KakaoKeywordHit): string {
+  return hit.kind === "place" && hit.branch ? `${hit.name} ${hit.branch}` : hit.name;
 }
 
 export function hitLatLng(hit: OurHit): { lat: number; lng: number } | null {
-  if (hit.kind !== "place") return null;
+  if (hit.kind === "address") return null;
   return Number.isFinite(hit.lat) && Number.isFinite(hit.lng) ? { lat: hit.lat, lng: hit.lng } : null;
 }
 
@@ -137,10 +163,27 @@ export function hitCategoryLabel(hit: OurPlaceHit): string {
 
 export function hitSubtitle(hit: OurHit): string {
   if (hit.kind === "address") return hit.buildingName ? `도로명주소 · ${hit.buildingName}` : "도로명주소";
+  if (hit.kind === "kakao") {
+    const cat = hit.category?.split(">").pop()?.trim() || null;
+    return [cat, hit.address].filter(Boolean).join(" · ");
+  }
   return [hitCategoryLabel(hit), hit.address].filter(Boolean).join(" · ");
 }
 
 export function toSearchRow(hit: OurHit): AdminSearchRow {
+  if (hit.kind === "kakao") {
+    return {
+      id: `kakao-${hit.id}`,
+      place_name: hit.name,
+      category_name: hit.category ?? "",
+      road_address_name: hit.address ?? "",
+      address_name: "",
+      phone: hit.phone ?? "",
+      place_url: hit.placeUrl ?? "",
+      y: String(hit.lat),
+      x: String(hit.lng),
+    };
+  }
   if (hit.kind === "address") {
     return {
       id: hit.id,
@@ -351,6 +394,188 @@ export function chainAliasQuery(query: string): string | null {
   return null;
 }
 
+/** Kakao keyword document → display-only hit (null without coordinates). */
+export function kakaoDocToHit(doc: {
+  id?: string;
+  place_name?: string;
+  category_name?: string;
+  road_address_name?: string;
+  address_name?: string;
+  phone?: string;
+  place_url?: string;
+  x?: string;
+  y?: string;
+}): KakaoKeywordHit | null {
+  const lat = parseFloat(String(doc.y ?? ""));
+  const lng = parseFloat(String(doc.x ?? ""));
+  if (!doc.id || !doc.place_name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    kind: "kakao",
+    id: doc.id,
+    name: doc.place_name,
+    category: doc.category_name || null,
+    address: doc.road_address_name || doc.address_name || null,
+    phone: doc.phone || null,
+    placeUrl: doc.place_url || null,
+    lat,
+    lng,
+  };
+}
+
+const squashName = (s: string) => s.toLowerCase().replace(/[\s()[\]{}（）·.,'"\-_/&+]/g, "");
+
+/**
+ * Chain alias groups (메가커피 / 메가엠지씨커피 / 메가MGC커피, 파리바게뜨 ↔ 파리바게트 …) →
+ * [spelling, one canonical spelling], longest spelling first.
+ */
+const CHAIN_CANONICAL: Array<[string, string]> = (() => {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    const p = parent.get(x) ?? x;
+    if (p === x) return x;
+    const root = find(p);
+    parent.set(x, root);
+    return root;
+  };
+  for (const [k, v] of Object.entries(CHAIN_ALIASES)) {
+    const a = find(squashName(k));
+    const b = find(squashName(v));
+    if (a !== b) parent.set(a < b ? b : a, a < b ? a : b);
+    else parent.set(a, a);
+  }
+  return [...parent.keys()]
+    .map((m) => [m, find(m)] as [string, string])
+    .sort((x, y) => y[0].length - x[0].length);
+})();
+
+/**
+ * Name key shared by ranking and duplicate checks: lower-case, no spaces / symbols, and a
+ * leading chain name in its canonical spelling ("메가MGC커피 망원역점" ≡ "메가엠지씨커피망원역점").
+ */
+export function canonicalPlaceName(s: string): string {
+  const k = squashName(s);
+  for (const [spelling, canonical] of CHAIN_CANONICAL) {
+    if (k.startsWith(spelling)) return canonical + k.slice(spelling.length);
+  }
+  return k;
+}
+
+/** Same name for duplicate checks, chain spellings unified (contains-match ≥3 chars). */
+export function chainAwareNamesMatch(a: string, b: string): boolean {
+  return placeNamesMatch(canonicalPlaceName(a), canonicalPlaceName(b));
+}
+
+const matchKey = canonicalPlaceName;
+
+export type NameTier = 1 | 2 | 3;
+
+/**
+ * 1 = exact name, 2 = name starts with the query, 3 = anything else (similar).
+ * `names`: the place's own name(s); `queries`: the query (+ its chain alias / name part).
+ */
+export function nameMatchTier(queries: string[], names: string[]): NameTier {
+  const qs = queries.map(matchKey).filter((q) => q.length > 0);
+  const ns = names.map(matchKey).filter((n) => n.length > 0);
+  if (ns.some((n) => qs.includes(n))) return 1;
+  if (ns.some((n) => qs.some((q) => n.startsWith(q)))) return 2;
+  return 3;
+}
+
+/** Query forms a name may match: the query, its chain alias, and the name part before an area word. */
+export function rankQueries(query: string): string[] {
+  const q = query.trim();
+  const out = [q];
+  const alias = chainAliasQuery(q);
+  if (alias) out.push(alias);
+  const words = q.split(/\s+/);
+  if (words.length >= 2) {
+    const head = words.slice(0, -1).join(" ");
+    out.push(head);
+    const headAlias = chainAliasQuery(head);
+    if (headAlias) out.push(headAlias);
+  }
+  return out;
+}
+
+function hitNames(hit: OurPlaceHit | KakaoKeywordHit): string[] {
+  if (hit.kind === "place") return [hit.name, placeDisplayName(hit)];
+  // Kakao names carry the branch: "스타벅스 홍대역점" → also "스타벅스".
+  const head = hit.name.split(/\s+/)[0] ?? hit.name;
+  return [hit.name, head];
+}
+
+/**
+ * Our hits + Kakao keyword hits → one list. 도로명주소 rows lead; places are ranked by name
+ * tier (exact > prefix > similar), then our 관광·랜드마크·역·지역 rows before shops (same-name
+ * shops never outrank the place itself), then distance from `origin`. A Kakao hit that is the
+ * same place as one of ours is dropped — ours win.
+ */
+export function rankMergedHits(
+  ours: OurHit[],
+  kakao: KakaoKeywordHit[],
+  query: string,
+  origin: { lat: number; lng: number } | null,
+  limit: number = RESULT_LIMIT,
+): OurHit[] {
+  const addresses = ours.filter((h): h is OurAddressHit => h.kind === "address");
+  const places = ours.filter((h): h is OurPlaceHit => h.kind === "place");
+  // Same place: matching name within 50m (shops) / 500m (관광·랜드마크·역·지역 — big areas).
+  const kakaoOnly = kakao.filter(
+    (k) =>
+      !places.some(
+        (p) =>
+          chainAwareNamesMatch(placeDisplayName(p), k.name) &&
+          distanceMeters(p.lat, p.lng, k.lat, k.lng) <=
+            (p.source === "sangga" ? DEDUPE_RADIUS_M : SAME_PLACE_RADIUS_M),
+      ),
+  );
+  const qs = rankQueries(query);
+  const stationQuery = /역$/.test(query.replace(/\s+/g, ""));
+  const ranked = [...places, ...kakaoOnly]
+    .map((h, i) => {
+      const byName = nameMatchTier(qs, hitNames(h));
+      // search_map_admin scores exact names (and chain stores like "컴포즈커피홍대 서교점") 300.
+      const tier: NameTier = h.kind === "place" && h.score >= EXACT_SCORE_MIN ? 1 : byName;
+      return {
+        h,
+        i,
+        tier,
+        // "…역" queries: the station first; then our 관광·랜드마크·지역; then shops.
+        catalog:
+          h.kind === "place" && h.source !== "sangga"
+            ? stationQuery && h.source === "station"
+              ? 0
+              : 1
+            : 2,
+        d: origin ? distanceMeters(origin.lat, origin.lng, h.lat, h.lng) : (h.kind === "place" ? h.distM ?? Infinity : Infinity),
+      };
+    })
+    .sort((a, b) => a.tier - b.tier || a.catalog - b.catalog || a.d - b.d || a.i - b.i);
+  // Same tier: a station named like a 관광·랜드마크 goes right after it unless the query ends in 역.
+  if (!stationQuery) {
+    for (let i = 0; i < ranked.length; i++) {
+      const st = ranked[i]!;
+      if (st.h.kind !== "place" || st.h.source !== "station") continue;
+      const key = normalizePlaceName(st.h.name).replace(/역$/, "");
+      const j = ranked.findIndex(
+        (x, k) =>
+          k > i &&
+          x.tier === st.tier &&
+          x.h.kind === "place" &&
+          (x.h.source === "tour" || x.h.source === "landmark") &&
+          normalizePlaceName(x.h.name) === key,
+      );
+      if (j < 0) continue;
+      ranked.splice(i, 0, ...ranked.splice(j, 1));
+      i++;
+    }
+  }
+  return [...addresses, ...ranked.map((x) => x.h)].slice(0, Math.max(limit, addresses.length));
+}
+
+/** search_map_admin: 300 = exact name or same-chain store; prefix matches stay below 240. */
+const EXACT_SCORE_MIN = 290;
+
 /** Union of RPC hit lists by id (first occurrence wins). */
 export function unionPlaceHits(...lists: OurPlaceHit[][]): OurPlaceHit[] {
   const seen = new Set<string>();
@@ -371,6 +596,56 @@ const TOUR_TYPE_BY_CATEGORY: Record<string, string> = {
   레포츠: "28",
   시장: "38",
 };
+
+const SANGGA_PIN_CATEGORY: Record<string, PoiCategoryId> = {
+  cafe: "cafe",
+  restaurant: "restaurant",
+  fast_food: "fast_food",
+  bakery: "bakery",
+  bar: "bar",
+  pharmacy: "pharmacy",
+  hospital: "hospital",
+  doctors: "hospital",
+  lodging: "lodging",
+  grocery: "grocery",
+  hairdresser: "beauty",
+  fuel: "fuel",
+};
+
+/** Kakao category text ("음식점 > 카페 > …") → map POI badge; most specific words first. */
+const KAKAO_PIN_CATEGORY: Array<[RegExp, PoiCategoryId]> = [
+  [/카페/, "cafe"],
+  [/술집|주점|호프|포차|와인바|칵테일/, "bar"],
+  [/제과|베이커리|디저트|도넛|아이스크림/, "bakery"],
+  [/편의점/, "convenience"],
+  [/약국/, "pharmacy"],
+  [/병원|의원|치과|한의원/, "hospital"],
+  [/은행/, "bank"],
+  [/주차장/, "parking"],
+  [/주유소|충전소/, "fuel"],
+  [/숙박|호텔|모텔|펜션|게스트하우스/, "lodging"],
+  [/관광|명소|공원|문화시설|박물관|미술관/, "landmark"],
+  [/마트|슈퍼|시장/, "grocery"],
+  [/패스트푸드|햄버거|치킨|피자/, "fast_food"],
+  [/음식점/, "restaurant"],
+  [/미용|헤어|네일/, "beauty"],
+];
+
+/** Badge for a result pin: our hit by source / 상가 class, a Kakao row by its category text. */
+export function searchRowPoiCategory(row: AdminSearchRow): PoiCategoryId {
+  const hit = row._pindHit;
+  if (hit?.kind === "place") {
+    if (hit.source === "station") return "subway";
+    if (hit.source === "tour" || hit.source === "landmark") return "landmark";
+    if (hit.source !== "sangga") return "town_hall";
+    return SANGGA_PIN_CATEGORY[hit.category ?? ""] ?? "shop";
+  }
+  const text = row.category_name ?? "";
+  return KAKAO_PIN_CATEGORY.find(([re]) => re.test(text))?.[1] ?? "shop";
+}
+
+/** Names shown under result pins: only the top few. */
+export const RESULT_PIN_LABEL_TOP = 5;
 
 /** Our place hit → the same tap shape a basemap label uses (D-1 card). */
 export function hitToMapPoiTap(hit: OurPlaceHit): MapPoiTap {

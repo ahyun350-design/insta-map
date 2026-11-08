@@ -95,13 +95,20 @@ test("search pins: address house cleared by the next search; only the open card'
   expect(housePins(after), "house pins after the next search + tap").toBe(0);
   expect(after?.search, "other result pins cleared on tap").toBe(0);
   expect((after?.search ?? 0) + (after?.focus ? 1 : 0), "search pins on the map = the open card's").toBe(1);
+  expect(after?.focus ?? "", "selected result drawn as the (1.2×) result pin").toMatch(/^search-pin-selected:/);
   await page.waitForTimeout(1500);
   await page.screenshot({ path: path.join(OUT, "after.png") });
 
   // 4) Close the card → no search pin left
   await card.getByRole("button", { name: "닫기" }).click();
   await expect(card).toBeHidden({ timeout: 10_000 });
-  await expect.poll(() => pinState(page), { timeout: 8_000 }).toEqual({ search: 0, focus: null });
+  await expect
+    .poll(async () => {
+      const s = await pinState(page);
+      return s ? { search: s.search, focus: s.focus } : null;
+    }, { timeout: 8_000 })
+    .toEqual({ search: 0, focus: null });
+  expect((await pinState(page) as { dimmed?: boolean } | null)?.dimmed, "POIs back to normal once results close").toBe(false);
 
   await context.close();
 });
