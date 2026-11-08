@@ -9,6 +9,7 @@ import {
   hasKakaoRows,
   mergeKakaoPages,
   resultDistanceOrigin,
+  sortOrdersIdentical,
   sortRowsByDistance,
   type KakaoPlaceDoc,
 } from "./adminMapCategory";
@@ -99,4 +100,18 @@ test("Kakao credit only when a row is not ours; event meta has no query text", (
   assert.equal(hasKakaoRows([{ _pindHit: {} }]), false);
   assert.equal(hasKakaoRows([{ _pindHit: {} }, {}]), true);
   assert.deepEqual(categoryEventMeta("cafe", 30, "ok"), { chip: "cafe", n: 30, code: "ok" });
+});
+
+test("정렬 toggle: hidden when the 정확도 list is already in distance order (both sorts identical)", () => {
+  const o = { lat: 37.556, lng: 126.9101 };
+  const at = (id: string, dLat: number) => ({ id, y: String(o.lat + dLat), x: String(o.lng) });
+  const same = [at("a", 0.001), at("b", 0.002), at("c", 0.004)];
+  assert.equal(sortOrdersIdentical(same, o), true);
+  assert.equal(sortOrdersIdentical([same[1]!, same[0]!, same[2]!], o), false);
+  // A row without coordinates sorts last by distance: only identical when it is already last.
+  const noPoint: { id: string; y?: string; x?: string } = { id: "addr" };
+  assert.equal(sortOrdersIdentical([...same, noPoint], o), true);
+  assert.equal(sortOrdersIdentical([noPoint, ...same], o), false);
+  // No origin → distance order is the given order.
+  assert.equal(sortOrdersIdentical([same[2]!, same[0]!], null), true);
 });

@@ -24,12 +24,15 @@ export type CompactPinInput = {
 
 export type CompactRouteMode = "car" | "walk" | "course" | "preview";
 
+/** Result pin badge: a map POI icon, or the house badge for a 도로명주소 result. */
+export type SearchPinCategory = PoiCategoryId | "address";
+
 export type SearchPinInput = {
   id: string;
   lat: number;
   lng: number;
-  /** Badge inside the result pin (map POI icon set). */
-  category?: PoiCategoryId;
+  /** Badge inside the result pin. */
+  category?: SearchPinCategory;
   /** Name under the pin — only for the top few results. */
   label?: string | null;
 };
@@ -123,7 +126,8 @@ export type ExpandedMapSurface = CompactMapSurface & {
     kinds: Array<"shop" | "sangga" | "tour" | "landmark" | "park" | "station" | "bus">,
   ) => { x: number; y: number; name: string; kind: string } | null;
   /** E2E / QA: exact MapLibre zoom jump (no Kakao level rounding). */
-  jumpToZoom: (lat: number, lng: number, zoom: number) => void;
+  /** `asUser`: E2E stand-in for a drag / pinch (the move counts as the user's own). */
+  jumpToZoom: (lat: number, lng: number, zoom: number, opts?: { asUser?: boolean }) => void;
   /** Map rotation (degrees, 0 = north up). */
   getBearing: () => number;
   /** Compass: ease back to north. */
@@ -136,6 +140,10 @@ export type ExpandedMapSurface = CompactMapSurface & {
   clearSearchPins: () => void;
   /** E2E / QA: search result pins on the map + the focus pin's image id (null = none). */
   searchPinState: () => { search: number; focus: string | null; dimmed: boolean; onTop: boolean };
+  /** Fit several search results above the given sheet inset; an earlier card's inset is cleared. */
+  fitSearchResults: (points: MapLatLng[], sheetInsetPx: number) => void;
+  /** E2E: each result pin's id and its anchor (pin tip) in container pixels. */
+  searchPinPoints: () => Array<{ id: string; x: number; y: number }>;
   /** Corner credit " · 카카오" while Kakao search results are on screen. */
   setKakaoCredit: (on: boolean) => void;
   /** Admin discover layer (WebGL). Empty / missing data → clear. */

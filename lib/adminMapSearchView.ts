@@ -60,3 +60,19 @@ export function shouldShowResearch(input: {
   const zoomed = Math.abs(input.now.level - input.searchView.level) >= RESEARCH_LEVEL_DELTA;
   return moved || zoomed;
 }
+
+/**
+ * After every camera stop: a move the app made (search fit, result / pin pick, card open, resize)
+ * becomes the new reference and hides the button; only the user's own drag / pinch can show it.
+ */
+export function researchOnIdle(input: {
+  hasResults: boolean;
+  searchView: ResearchView | null;
+  now: ResearchView;
+  byUser: boolean;
+  pendingSearchSync: boolean;
+}): { show: boolean; rebase: boolean } {
+  if (!input.hasResults || !input.searchView) return { show: false, rebase: false };
+  if (input.pendingSearchSync || !input.byUser) return { show: false, rebase: true };
+  return { show: shouldShowResearch(input), rebase: false };
+}

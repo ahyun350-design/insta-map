@@ -28,7 +28,96 @@ import {
   searchEventMeta,
   toSearchRow,
   type OurPlaceHit,
+  type OurAddressHit,
+  ADDRESS_PIN_TOP,
+  addressRowsToGeocode,
+  buildSearchPins,
+  exactAddressHits,
+  parseAddressQuery,
 } from "./adminMapSearch";
+
+const address = (id: string, roadAddr: string, jibunAddr: string | null = null): OurAddressHit => ({
+  kind: "address",
+  id,
+  roadAddr,
+  jibunAddr,
+  buildingName: null,
+});
+
+test("pins ↔ results: pin ids are the rows' own ids, rows without coordinates get none", () => {
+  const rows = [
+    toSearchRow(address("juso:1", "서울특별시 마포구 망원로4길 3")),
+    toSearchRow(place({ id: "s1", name: "망원로지", branch: null, lat: 37.5551, lng: 126.9047 })),
+    toSearchRow({ kind: "kakao", id: "k9", name: "다른 곳", category: null, address: null, phone: null, placeUrl: null, lat: 37.556, lng: 126.91 }),
+  ];
+  const { pins, byId } = buildSearchPins(rows, () => "shop", 5);
+  assert.deepEqual(pins.map((p) => p.id), ["search:pind-s1", "search:kakao-k9"]);
+  // A pin opens exactly the row it was drawn for, never the address row at list position 0.
+  for (const p of pins) assert.equal(byId.get(p.id)!.id, p.id.replace(/^search:/, ""));
+  assert.equal(byId.size, 2);
+  // Re-ranking keeps each pin bound to its row.
+  const again = buildSearchPins([rows[2]!, rows[1]!], () => "shop", 5);
+  assert.equal(again.byId.get("search:pind-s1"), rows[1]);
+});
+
+test("pins ↔ results: a geocoded address row gets its own pin; duplicate ids stay unique; labels top N", () => {
+  const addr = { ...toSearchRow(address("juso:1", "서울특별시 마포구 망원로4길 3")), y: "37.5549", x: "126.9061" };
+  const a = toSearchRow(place({ id: "x", lat: 37.55, lng: 126.9 }));
+  const { pins, byId } = buildSearchPins([addr, a, { ...a }], (r) => (r._pindHit?.kind === "address" ? "address" : "shop"), 2);
+  assert.deepEqual(pins.map((p) => p.id), ["search:juso:1", "search:pind-x", "search:pind-x#2"]);
+  assert.equal(pins[0]!.category, "address");
+  assert.equal(byId.get("search:juso:1"), addr);
+  assert.deepEqual(pins.map((p) => p.label != null), [true, true, false]);
+});
+
+test("pins ↔ results: list-time geocoding picks the top address rows without coordinates", () => {
+  const rows = [
+    toSearchRow(address("juso:1", "서울특별시 마포구 망원로4길 3")),
+    toSearchRow(place({ id: "p" })),
+    toSearchRow(address("juso:2", "서울특별시 마포구 망원로3길 4")),
+    toSearchRow(address("juso:3", "서울특별시 마포구 망원로5길 5")),
+  ];
+  assert.equal(ADDRESS_PIN_TOP, 2);
+  assert.deepEqual(addressRowsToGeocode(rows).map((r) => r.id), ["juso:1", "juso:2"]);
+  assert.deepEqual(addressRowsToGeocode([{ ...rows[0]!, y: "37.5" }, rows[2]!]).map((r) => r.id), ["juso:2"]);
+});
+
+test("address query: road + building number / lot number parsed; names are not", () => {
+  assert.deepEqual(parseAddressQuery("망원로4길 3")?.key, { kind: "road", name: "망원로4길", main: "3", sub: null, mountain: false });
+  assert.deepEqual(parseAddressQuery("마포구 망원로4길 3-1")?.prefix, ["마포구"]);
+  assert.equal(parseAddressQuery("마포구 망원로4길 3-1")?.key.sub, "1");
+  assert.deepEqual(parseAddressQuery("망원동 123-4")?.key, { kind: "jibun", name: "망원동", main: "123", sub: "4", mountain: false });
+  assert.equal(parseAddressQuery("메가커피"), null);
+  assert.equal(parseAddressQuery("망원로4길"), null);
+  assert.equal(parseAddressQuery("망원로4길 3 카페"), null);
+});
+
+test("address query: the exact address alone — no look-alike place or other number", () => {
+  const exact = address("juso:1", "서울특별시 마포구 망원로4길 3", "서울특별시 마포구 망원동 400-1");
+  const other = address("juso:2", "서울특별시 마포구 망원로3길 4");
+  const longer = address("juso:3", "서울특별시 마포구 망원로4길 30");
+  const lookAlike = place({ id: "s1", name: "망원로지", branch: null, address: "서울특별시 마포구 망원로7길 54", score: 120 });
+  const kakao: KakaoKeywordHit = { kind: "kakao", id: "k1", name: "망원로4길 카페", category: null, address: null, phone: null, placeUrl: null, lat: 37.55, lng: 126.9 };
+  const ours: OurHit[] = [exact, other, longer, lookAlike];
+  assert.deepEqual(rankMergedHits(ours, [kakao], "망원로4길 3", null), [exact]);
+  assert.deepEqual(rankMergedHits(ours, [kakao], "마포구 망원로4길 3", null), [exact]);
+  assert.deepEqual(rankMergedHits(ours, [], "망원로4길 30", null), [longer]);
+  assert.deepEqual(exactAddressHits("망원동 400-1", [exact, other]), [exact]);
+  // The query's district must appear in the address.
+  assert.deepEqual(exactAddressHits("강남구 망원로4길 3", [exact]), []);
+  // 3-1 ≠ 3; same address twice is kept once.
+  assert.deepEqual(exactAddressHits("망원로4길 3-1", [exact]), []);
+  assert.deepEqual(exactAddressHits("망원로4길 3", [exact, { ...exact, id: "juso:9" }]), [exact]);
+});
+
+test("address query: no exact address → the similar results as before", () => {
+  const other = address("juso:2", "서울특별시 마포구 망원로3길 4");
+  const lookAlike = place({ id: "s1", name: "망원로지", branch: null, score: 120 });
+  const out = rankMergedHits([other, lookAlike], [], "망원로4길 3", null);
+  assert.deepEqual(out.map((h) => h.id), ["juso:2", "s1"]);
+  // Non-address queries are untouched.
+  assert.equal(rankMergedHits([other, lookAlike], [], "망원로지", null).length, 2);
+});
 
 const place = (over: Partial<OurPlaceHit>): OurPlaceHit => ({
   kind: "place",

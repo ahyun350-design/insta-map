@@ -18,6 +18,7 @@ const MANGWON = { lat: 37.556, lng: 126.9101 };
 
 type GlDebug = {
   jumpToZoom?: (lat: number, lng: number, zoom: number) => void;
+  userMoveTo?: (lat: number, lng: number, zoom: number) => void;
   searchPinState?: () => { search: number; focus: string | null } | null;
 };
 const gl = <K extends keyof GlDebug>(page: Page, fn: K, ...args: unknown[]) =>
@@ -115,7 +116,7 @@ test("category chips: 카페 → pins + list (distance), 정확도순, 재검색
   await expect.poll(() => categoryCalls, { timeout: 10_000 }).toBe(3);
   await chipDone();
   await expect(rows.first()).toBeVisible({ timeout: 15_000 });
-  await gl(page, "jumpToZoom", MANGWON.lat, MANGWON.lng, 16);
+  await gl(page, "userMoveTo", MANGWON.lat, MANGWON.lng, 16);
   const research = dialog.getByRole("button", { name: "이 지역에서 재검색" });
   await expect(research).toBeVisible({ timeout: 10_000 });
   await research.click();
@@ -138,11 +139,18 @@ test("category chips: 카페 → pins + list (distance), 정확도순, 재검색
   await input.fill("이디야");
   await input.press("Enter");
   await expect(sheet).toContainText("이디야", { timeout: 20_000 });
-  await expect(sort.getByRole("button", { name: "정확도순" })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByTestId("map-search-loading")).toHaveCount(0, { timeout: 10_000 });
+  if (await sort.count()) {
+    await expect(sort.getByRole("button", { name: "정확도순" })).toHaveAttribute("aria-pressed", "true");
+  } else {
+    // Toggle hidden only when 정확도순 is already the distance order.
+    const d = (await sheet.locator(".mapSearchResultsSheetItemDistance").allTextContents()).map(meters);
+    expect(d.length).toBe(await sheet.locator(".mapSearchResultsSheetItem").count());
+    for (let i = 1; i < d.length; i++) expect(d[i]!, "no toggle → list already in distance order").toBeGreaterThanOrEqual(d[i - 1]!);
+  }
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await expect(dialog.locator('[data-chip="cafe"]')).toHaveAttribute("aria-pressed", "false");
   // Name search now merges Kakao keyword rows: the credit follows whether any are shown.
-  await expect(dialog.getByTestId("map-search-loading")).toHaveCount(0, { timeout: 10_000 });
   const kakaoUsed = await page.evaluate(
     () => (window as unknown as { __PINDMAP_SEARCH_TIMING__?: { kakaoUsed: boolean } }).__PINDMAP_SEARCH_TIMING__?.kakaoUsed,
   );
