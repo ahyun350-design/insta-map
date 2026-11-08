@@ -39,6 +39,7 @@ import {
   mapLibreZoomToKakaoLevel,
 } from "./kakaoZoom";
 import { haversineMeters } from "./tilePrefetch";
+import { resultCameraPadding } from "./cameraPadding";
 import type {
   CompactMapSurface,
   CompactPinInput,
@@ -189,7 +190,7 @@ export type CreateCompactMapLibreOptions = {
   onContextLost?: (info: { hidden: boolean }) => void;
   /** False while minimap is under fullscreen or tab is display:none. */
   isSurfaceVisible?: () => boolean;
-  onViewIdle?: (view: { lat: number; lng: number; level: number }) => void;
+  onViewIdle?: (view: { lat: number; lng: number; level: number; byUser: boolean }) => void;
   /**
    * Capacitor: corner credit opens the data-attribution modal.
    * Web: omit — OpenMapTiles / OSM names link to official pages.
@@ -255,7 +256,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private onDiscoverPinClick: ((id: string) => void) | null = null;
   private onMapPoiClick: ((tap: MapPoiTap) => void) | null = null;
   private onMapClickEmpty: (() => void) | null = null;
-  private onViewIdle: ((view: { lat: number; lng: number; level: number }) => void) | null =
+  private onViewIdle: ((view: { lat: number; lng: number; level: number; byUser: boolean }) => void) | null =
     null;
   private onAttributionClick: (() => void) | null = null;
   private imageDpr = 2;
@@ -277,7 +278,10 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   private lastSelfPrefetchKey = "";
   private fallbackReported = false;
   private searchPinCount = 0;
+  private searchPins: SearchPinInput[] = [];
   private searchPinSeq = 0;
+  /** Current camera move began with a user gesture (drag / pinch / wheel / dblclick). */
+  private moveByUser = false;
   private resultDimOn = false;
   private resultDimSaved = new Map<string, unknown>();
   private focusPinIcon: string | null = null;
@@ -519,13 +523,22 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       canvas.removeEventListener("webglcontextlost", onContextLost, false);
       if (this.contextLostHandler === onContextLost) this.contextLostHandler = null;
     });
+    map.on("movestart", (e: { originalEvent?: unknown }) => {
+      this.moveByUser = Boolean(e.originalEvent);
+    });
+    map.on("move", (e: { originalEvent?: unknown }) => {
+      if (e.originalEvent) this.moveByUser = true;
+    });
     map.on("moveend", () => {
       if (this.destroyed || !this.map) return;
       const c = this.map.getCenter();
+      const byUser = this.moveByUser;
+      this.moveByUser = false;
       this.onViewIdle?.({
         lat: c.lat,
         lng: c.lng,
         level: mapLibreZoomToKakaoLevel(this.map.getZoom()),
+        byUser,
       });
       this.refreshPhotoPins();
       this.pushPinGeoJson();
@@ -2107,25 +2120,20 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     if (!map) return;
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const zoom = kakaoLevelToMapLibreZoom(kakaoLevel);
-    const padBottom = Math.max(0, Math.round(opts?.paddingBottom ?? 0));
-    const padTop = Math.max(48, Math.round(opts?.paddingTop ?? 96));
-    const padding =
-      padBottom > 0
-        ? { top: padTop, right: 36, bottom: padBottom, left: 36 }
-        : undefined;
+    const padding = resultCameraPadding(opts);
     const c = map.getCenter();
     const dist = haversineMeters(c.lat, c.lng, lat, lng);
     if (dist <= 1000) {
-      map.easeTo({ center: [lng, lat], zoom, duration: 300, padding });
+      map.easeTo({ center: [lng, lat], zoom, duration: 300, ...padding });
       return;
     }
     // Instant relocate, then short zoom settle (feels fast; no long fly)
     map.jumpTo({
       center: [lng, lat],
       zoom: Math.max(1, zoom - 1),
-      padding,
+      ...padding,
     });
-    map.easeTo({ center: [lng, lat], zoom, duration: 200, padding });
+    map.easeTo({ center: [lng, lat], zoom, duration: 200, ...padding });
   }
 
   easeToView(
@@ -2173,8 +2181,11 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     return findRenderedMapPoi(this.map, kinds);
   }
 
-  jumpToZoom(lat: number, lng: number, zoom: number) {
-    this.map?.jumpTo({ center: [lng, lat], zoom });
+  jumpToZoom(lat: number, lng: number, zoom: number, opts?: { asUser?: boolean }) {
+    this.map?.jumpTo(
+      { center: [lng, lat], zoom },
+      opts?.asUser ? { originalEvent: new Event("e2e-user-move") } : undefined,
+    );
   }
 
   getBearing(): number {
@@ -2247,6 +2258,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     const map = this.map;
     if (!map?.getSource(SEARCH_SOURCE)) return;
     this.searchPinCount = pins.length;
+    this.searchPins = pins;
     const seq = ++this.searchPinSeq;
     const write = () => {
       if (this.destroyed || this.map !== map || seq !== this.searchPinSeq) return;
@@ -2272,13 +2284,13 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       return;
     }
     void import("./poiCategoryIcons")
-      .then(({ poiCategoryIconSvg }) =>
+      .then(({ poiCategoryIconSvg, addressBadgeSvg }) =>
         Promise.all(
           cats.map((cat) =>
             loadMapImageFromSvg(
               map,
               `search-pin:${cat}`,
-              searchResultPinSvg(poiCategoryIconSvg(cat), MAP_BRAND_NAVY),
+              searchResultPinSvg(cat === "address" ? addressBadgeSvg() : poiCategoryIconSvg(cat), MAP_BRAND_NAVY),
               SEARCH_RESULT_PIN_WIDTH,
               SEARCH_RESULT_PIN_HEIGHT,
               this.imageDpr,
@@ -2340,6 +2352,15 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
 
   clearSearchPins() {
     this.setSearchPins([]);
+  }
+
+  searchPinPoints() {
+    const map = this.map;
+    if (!map) return [];
+    return this.searchPins.map((p) => {
+      const pt = map.project([p.lng, p.lat]);
+      return { id: p.id, x: pt.x, y: pt.y };
+    });
   }
 
   searchPinState() {

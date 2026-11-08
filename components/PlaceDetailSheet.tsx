@@ -21,6 +21,7 @@ import {
   type FeedPostCategory,
 } from "@/lib/feedPost";
 import { formatCategoryWithSubcategory } from "@/lib/kakaoSubcategory";
+import { placeCardExternalLinks } from "@/lib/placeCardLinks";
 import {
   PlaceSheetPhotoViewer,
   type PlaceSheetPhotoViewerEntry,
@@ -72,6 +73,8 @@ type Props = {
   showAdminMapExtras?: boolean;
   /** Open Kakao/Naver URLs outside the WebView (same path as transit). */
   onOpenExternalMapUrl?: (url: string) => void;
+  /** Admin MapLibre expanded card: no "카카오맵에서 보기" / "네이버 지도에서 보기". */
+  hideExternalMapLinks?: boolean;
 };
 
 const LIGHT_PIN_CATEGORIES = new Set(["카페", "쇼핑", "숙소", "놀거리", "여행지"]);
@@ -173,6 +176,7 @@ export function PlaceDetailSheet({
   onClearRoute,
   showAdminMapExtras = false,
   onOpenExternalMapUrl,
+  hideExternalMapLinks = false,
 }: Props) {
   const relatedPosts: PlaceSheetFeedPost[] = place._feedPosts ?? [];
   const placeRef = placeRefFromPlaceSheet(place);
@@ -184,6 +188,13 @@ export function PlaceDetailSheet({
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
   // Basemap-label taps exist only on the (admin) MapLibre expanded map.
   const isMapTap = place._placeSource === "map";
+  const externalLinks = placeCardExternalLinks({
+    showAdminMapExtras,
+    isMapTap,
+    hasCoordinates,
+    hideExternalMapLinks,
+    bottomTransitButton: Boolean(showDirections && onOpenTransit),
+  });
   const adminPoiPhone =
     showAdminMapExtras && place._placeSource === "poi"
       ? displayablePhone(place._poiPhone)
@@ -423,33 +434,36 @@ export function PlaceDetailSheet({
             카카오맵에서 영업시간 보기
           </a>
         )}
-        {(showAdminMapExtras || isMapTap) && hasCoordinates && onOpenExternalMapUrl ? (
+        {externalLinks.length > 0 && onOpenExternalMapUrl ? (
           <div className="placeDetailSheetExternalMaps">
-            <button
-              type="button"
-              className="placeDetailSheetExternalMapBtn"
-              onClick={() =>
-                onOpenExternalMapUrl(buildKakaoMapViewUrl(place.place_name, lat, lng))
-              }
-            >
-              카카오맵에서 보기
-            </button>
-            <button
-              type="button"
-              className="placeDetailSheetExternalMapBtn"
-              onClick={() =>
-                onOpenExternalMapUrl(
-                  buildNaverMapSearchUrl(
-                    place.place_name,
-                    place.road_address_name || place.address_name,
-                  ),
-                )
-              }
-            >
-              네이버 지도에서 보기
-            </button>
-            {/* Bottom 대중교통 mode button already opens Kakao transit — no duplicate. */}
-            {!(showDirections && onOpenTransit) ? (
+            {externalLinks.includes("kakao") ? (
+              <button
+                type="button"
+                className="placeDetailSheetExternalMapBtn"
+                onClick={() =>
+                  onOpenExternalMapUrl(buildKakaoMapViewUrl(place.place_name, lat, lng))
+                }
+              >
+                카카오맵에서 보기
+              </button>
+            ) : null}
+            {externalLinks.includes("naver") ? (
+              <button
+                type="button"
+                className="placeDetailSheetExternalMapBtn"
+                onClick={() =>
+                  onOpenExternalMapUrl(
+                    buildNaverMapSearchUrl(
+                      place.place_name,
+                      place.road_address_name || place.address_name,
+                    ),
+                  )
+                }
+              >
+                네이버 지도에서 보기
+              </button>
+            ) : null}
+            {externalLinks.includes("transit") ? (
               <button
                 type="button"
                 className="placeDetailSheetExternalMapBtn"

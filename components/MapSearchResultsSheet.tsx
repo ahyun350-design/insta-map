@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { sortRowsByDistance, type SortMode } from "@/lib/adminMapCategory";
+import { sortOrdersIdentical, sortRowsByDistance, type SortMode } from "@/lib/adminMapCategory";
 
 export type MapSearchPlaceResult = {
   id: string;
@@ -35,6 +35,8 @@ type Props = {
   sortDistanceOnClient?: boolean;
   /** Origin for the client distance order (defaults to the user location). */
   sortOrigin?: { lat: number; lng: number } | null;
+  /** `results` are in 정확도 order: the toggle hides when the distance order is the same list. */
+  resultsInAccuracyOrder?: boolean;
   /** Search still running: open right away with a "검색 중" line under any rows so far. */
   loading?: boolean;
 };
@@ -78,6 +80,7 @@ export function MapSearchResultsSheet({
   onSortModeChange,
   sortDistanceOnClient = false,
   sortOrigin,
+  resultsInAccuracyOrder = false,
   loading = false,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
@@ -87,6 +90,10 @@ export function MapSearchResultsSheet({
         ? sortRowsByDistance(results, sortOrigin ?? userLocation ?? null)
         : results,
     [results, sortDistanceOnClient, sortMode, sortOrigin, userLocation],
+  );
+  const sortHidden = useMemo(
+    () => resultsInAccuracyOrder && sortOrdersIdentical(results, sortOrigin ?? userLocation ?? null),
+    [results, resultsInAccuracyOrder, sortOrigin, userLocation],
   );
   const [dragDelta, setDragDelta] = useState(0);
   const dragStartRef = useRef<{ y: number; wasExpanded: boolean } | null>(null);
@@ -183,7 +190,7 @@ export function MapSearchResultsSheet({
           <span className="mapSearchResultsSheetQuery">{queryLabel}</span>{" "}
           {loading && results.length === 0 ? "검색 중…" : `검색 결과 ${results.length}개`}
         </h2>
-        {onSortModeChange && sortMode ? (
+        {onSortModeChange && sortMode && !sortHidden ? (
           <div
             className="mapSearchResultsSheetSort"
             role="group"

@@ -518,6 +518,9 @@ export function rankMergedHits(
   limit: number = RESULT_LIMIT,
 ): OurHit[] {
   const addresses = ours.filter((h): h is OurAddressHit => h.kind === "address");
+  // "망원로4길 3" with that exact address in the list: it alone, no look-alike names / numbers.
+  const exact = exactAddressHits(query, addresses);
+  if (exact.length) return exact;
   const places = ours.filter((h): h is OurPlaceHit => h.kind === "place");
   // Same place: matching name within 50m (shops) / 500m (관광·랜드마크·역·지역 — big areas).
   const kakaoOnly = kakao.filter(
@@ -571,6 +574,118 @@ export function rankMergedHits(
     }
   }
   return [...addresses, ...ranked.map((x) => x.h)].slice(0, Math.max(limit, addresses.length));
+}
+
+type AddressKey = { kind: "road" | "jibun"; name: string; main: string; sub: string | null; mountain: boolean };
+
+const ROAD_KEY_RE = /([가-힣A-Za-z0-9·]+(?:대로|로|길))\s*(\d+)(?:\s*-\s*(\d+))?/g;
+const JIBUN_KEY_RE = /([가-힣A-Za-z0-9·]+(?:동|리|가))\s*(산\s*)?(\d+)(?:\s*-\s*(\d+))?/g;
+
+function lastMatch(re: RegExp, text: string): RegExpExecArray | null {
+  re.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  let last: RegExpExecArray | null = null;
+  while ((m = re.exec(text))) last = m;
+  return last;
+}
+
+/**
+ * "마포구 망원로4길 3" → road 망원로4길 / 3 (+ the words before it); "망원동 123-4" → jibun.
+ * Null unless the query ends in the building / lot number.
+ */
+export function parseAddressQuery(
+  query: string,
+): { key: AddressKey; prefix: string[] } | null {
+  const q = query.trim().replace(/\s+/g, " ");
+  const road = lastMatch(ROAD_KEY_RE, q);
+  if (road && road.index + road[0].length === q.length) {
+    return {
+      key: { kind: "road", name: road[1]!, main: road[2]!, sub: road[3] ?? null, mountain: false },
+      prefix: q.slice(0, road.index).split(" ").filter(Boolean),
+    };
+  }
+  const jibun = lastMatch(JIBUN_KEY_RE, q);
+  if (jibun && jibun.index + jibun[0].length === q.length) {
+    return {
+      key: { kind: "jibun", name: jibun[1]!, main: jibun[3]!, sub: jibun[4] ?? null, mountain: Boolean(jibun[2]) },
+      prefix: q.slice(0, jibun.index).split(" ").filter(Boolean),
+    };
+  }
+  return null;
+}
+
+function addressHasKey(address: string | null, key: AddressKey): boolean {
+  if (!address) return false;
+  const re = key.kind === "road" ? ROAD_KEY_RE : JIBUN_KEY_RE;
+  re.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(address))) {
+    const name = m[1]!;
+    const main = key.kind === "road" ? m[2] : m[3];
+    const sub = (key.kind === "road" ? m[3] : m[4]) ?? null;
+    const mountain = key.kind === "jibun" && Boolean(m[2]);
+    if (name === key.name && main === key.main && sub === key.sub && mountain === key.mountain) return true;
+  }
+  return false;
+}
+
+/** Address hits whose road (or lot) name + number equal the query's; the query's 시·구 words must appear too. */
+export function exactAddressHits(query: string, addresses: OurAddressHit[]): OurAddressHit[] {
+  const parsed = parseAddressQuery(query);
+  if (!parsed) return [];
+  const seen = new Set<string>();
+  return addresses.filter((a) => {
+    const text = parsed.key.kind === "road" ? a.roadAddr : a.jibunAddr;
+    if (!addressHasKey(text, parsed.key)) return false;
+    const full = `${a.roadAddr} ${a.jibunAddr ?? ""}`;
+    if (!parsed.prefix.every((w) => full.includes(w))) return false;
+    if (seen.has(a.roadAddr)) return false;
+    seen.add(a.roadAddr);
+    return true;
+  });
+}
+
+/** Address rows geocoded at list time so they get a pin too (Kakao address search, live per search). */
+export const ADDRESS_PIN_TOP = 2;
+/** The final list waits at most this long for those points. */
+export const ADDRESS_PIN_TIMEOUT_MS = 1200;
+
+export function addressRowsToGeocode<T extends { y?: string | number; _pindHit?: OurPlaceHit | OurAddressHit }>(
+  rows: readonly T[],
+  max: number = ADDRESS_PIN_TOP,
+): T[] {
+  return rows
+    .filter((r) => r._pindHit?.kind === "address" && !Number.isFinite(parseFloat(String(r.y ?? ""))))
+    .slice(0, max);
+}
+
+/**
+ * Result pins keyed by the row's own id (not its list position), so a pin always opens the row
+ * it was drawn for whatever else the list holds (rows without coordinates get no pin).
+ */
+export function buildSearchPins<T extends { id?: string | number; y?: string | number; x?: string | number; place_name?: string }, C>(
+  rows: readonly T[],
+  categoryOf: (row: T) => C,
+  labelTop: number = RESULT_PIN_LABEL_TOP,
+): { pins: Array<{ id: string; lat: number; lng: number; category: C; label: string | null }>; byId: Map<string, T> } {
+  const byId = new Map<string, T>();
+  const pins: Array<{ id: string; lat: number; lng: number; category: C; label: string | null }> = [];
+  rows.forEach((row, index) => {
+    const lat = parseFloat(String(row.y ?? ""));
+    const lng = parseFloat(String(row.x ?? ""));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    let id = row.id != null && String(row.id) ? `search:${row.id}` : `search-${index}`;
+    if (byId.has(id)) id = `${id}#${index}`;
+    byId.set(id, row);
+    pins.push({
+      id,
+      lat,
+      lng,
+      category: categoryOf(row),
+      label: pins.length < labelTop ? String(row.place_name ?? "") : null,
+    });
+  });
+  return { pins, byId };
 }
 
 /** search_map_admin: 300 = exact name or same-chain store; prefix matches stay below 240. */

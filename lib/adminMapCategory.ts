@@ -160,6 +160,18 @@ export function sortRowsByDistance<T extends { y?: string | number; x?: string |
     .map((x) => x.r);
 }
 
+/**
+ * The 거리순/정확도순 toggle is pointless when both orders are the same list. Only answerable
+ * while `rows` are in 정확도 order (keyword results always are; chips only in accuracy mode).
+ */
+export function sortOrdersIdentical<T extends { y?: string | number; x?: string | number }>(
+  rows: readonly T[],
+  origin: LatLng | null,
+): boolean {
+  const byDistance = sortRowsByDistance(rows, origin);
+  return byDistance.every((r, i) => r === rows[i]);
+}
+
 /** Rows with no `_pindHit` came from Kakao (display only; credit "카카오" while shown). */
 export function hasKakaoRows(rows: readonly { _pindHit?: unknown }[]): boolean {
   return rows.some((r) => !r._pindHit);

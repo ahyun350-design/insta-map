@@ -285,6 +285,9 @@ import {
   pushRecentSearch as pushAdminRecentSearch,
   rankMergedHits,
   RESULT_PIN_LABEL_TOP as ADMIN_RESULT_PIN_LABEL_TOP,
+  ADDRESS_PIN_TIMEOUT_MS as ADMIN_ADDRESS_PIN_TIMEOUT_MS,
+  addressRowsToGeocode as adminAddressRowsToGeocode,
+  buildSearchPins as buildAdminSearchPins,
   searchRowPoiCategory as adminSearchRowPoiCategory,
   readRecentSearches as readAdminRecentSearches,
   searchEventMeta as adminSearchEventMeta,
@@ -295,7 +298,7 @@ import {
   type MapSearchApiResponse,
   type OurHit,
 } from "@/lib/adminMapSearch";
-import { planSearchCamera, shouldShowResearch } from "@/lib/adminMapSearchView";
+import { planSearchCamera, researchOnIdle } from "@/lib/adminMapSearchView";
 import {
   buildKakaoKeywordSearchOpts,
   rankKakaoPlaceSearchResults,
@@ -317,6 +320,7 @@ import {
   type MapPoiTap,
 } from "@/lib/mapSurface/mapPoiTap";
 import { ADDRESS_BADGE_COLOR, addressBadgeSvg, type PoiCategoryId } from "@/lib/mapSurface/poiCategoryIcons";
+import type { SearchPinCategory } from "@/lib/mapSurface/types";
 import type { ExpandedMapSurface } from "@/lib/mapSurface";
 import {
   adminMapGlOverrideLabel,
@@ -2875,18 +2879,14 @@ function HomePageContent() {
 
       const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
       if (gl) {
-        searchPinPlaceByIdRef.current.clear();
-        const pins = places.map((place, index) => {
-          const id = `search-${index}`;
-          searchPinPlaceByIdRef.current.set(id, place);
-          return {
-            id,
-            lat: Number(place.y),
-            lng: Number(place.x),
-            category: opts?.chipIcon ?? adminSearchRowPoiCategory(place),
-            label: index < ADMIN_RESULT_PIN_LABEL_TOP ? String(place.place_name ?? "") : null,
-          };
-        }).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+        const { pins, byId } = buildAdminSearchPins(
+          places,
+          (place): SearchPinCategory =>
+            opts?.chipIcon ??
+            ((place as AdminSearchRow)._pindHit?.kind === "address" ? "address" : adminSearchRowPoiCategory(place)),
+          ADMIN_RESULT_PIN_LABEL_TOP,
+        );
+        searchPinPlaceByIdRef.current = byId;
         gl.setSearchPins(pins);
         setSearchPinsShown(pins.length > 0);
         mapSearchResultPinsRef.current = [{ setMap: () => gl.clearSearchPins() }];
@@ -12764,6 +12764,51 @@ function HomePageContent() {
     [],
   );
 
+  /**
+   * List-time pins for the top 도로명주소 rows: one live Kakao address lookup each (display only,
+   * dropped with the results). Missing / late points just leave that row without a pin.
+   */
+  const fetchAdminAddressPoints = useCallback(
+    async (rows: AdminSearchRow[], deadline: number): Promise<Map<string, { lat: number; lng: number }>> => {
+      const out = new Map<string, { lat: number; lng: number }>();
+      if (!rows.length) return out;
+      const ac = new AbortController();
+      const timer = window.setTimeout(() => ac.abort(), Math.max(0, deadline - performance.now()));
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.access_token) return out;
+        await Promise.all(
+          rows.map(async (row) => {
+            const hit = row._pindHit;
+            if (hit?.kind !== "address") return;
+            try {
+              const res = await fetch("/api/admin/map-geocode", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ address: hit.roadAddr }),
+                signal: ac.signal,
+              });
+              if (!res.ok) return;
+              const p = (await res.json()) as { lat?: number; lng?: number };
+              if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) out.set(row.id, { lat: p.lat!, lng: p.lng! });
+            } catch {
+              /* no pin for this row */
+            }
+          }),
+        );
+      } finally {
+        window.clearTimeout(timer);
+      }
+      return out;
+    },
+    [],
+  );
+
   /** Autocomplete: ours + Kakao keyword in parallel, ranked together (Kakao capped at 800ms). */
   const fetchAdminMergedHits = useCallback(
     async (q: string, limit: number, signal?: AbortSignal): Promise<OurHit[] | null> => {
@@ -12931,10 +12976,24 @@ function HomePageContent() {
       if (reqId !== adminSearchRequestRef.current) return;
       const origin = ours?.diag.anchor ?? resultDistanceOrigin(myLocationLatLngRef.current, center);
       const oursHits = ours?.hits ?? [];
+      // Address rows come from ours only, so the ones to pin are known before Kakao lands.
+      let addressPoints = new Map<string, { lat: number; lng: number }>();
+      const addressP = fetchAdminAddressPoints(
+        adminAddressRowsToGeocode(
+          rankMergedHits(oursHits, [], trimmed, origin, ADMIN_SEARCH_RESULT_LIMIT).map(adminSearchHitToRow),
+        ),
+        performance.now() + ADMIN_ADDRESS_PIN_TIMEOUT_MS,
+      ).then((points) => {
+        addressPoints = points;
+      });
 
       const show = (kakaoHits: KakaoKeywordHit[]) => {
         const ranked = rankMergedHits(oursHits, kakaoHits, trimmed, origin, ADMIN_SEARCH_RESULT_LIMIT);
-        const rows = ranked.map(adminSearchHitToRow);
+        const rows = ranked.map((hit) => {
+          const row = adminSearchHitToRow(hit);
+          const p = addressPoints.get(row.id);
+          return p ? { ...row, y: String(p.lat), x: String(p.lng) } : row;
+        });
         clearSearchResultPins();
         const pinned = rows.filter((p) => Number.isFinite(parseFloat(String(p.y ?? ""))));
         addSearchResultPins(pinned, (place) => openAdminSearchRow(place, "marker-admin-search"));
@@ -12951,11 +13010,12 @@ function HomePageContent() {
         // Ours first; Kakao (≤800ms) slots in — our rows keep their relative order.
         show([]);
         timing.firstRenderMs = await renderedAt();
-        const k = await kakaoP;
+        const [k] = await Promise.all([kakaoP, addressP]);
         if (reqId !== adminSearchRequestRef.current) return;
         final = k?.hits.length ? show(k.hits) : show([]);
       } else {
         const k = kakaoArrived !== undefined ? kakaoArrived : await kakaoP;
+        await addressP;
         if (reqId !== adminSearchRequestRef.current) return;
         final = show(k?.hits ?? []);
         timing.firstRenderMs = await renderedAt();
@@ -12997,7 +13057,7 @@ function HomePageContent() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [addSearchResultPins, clearSearchResultPins, clearAdminSearchMapPins, expandedMapCenterLatLng, fetchAdminKakaoSearch, fetchAdminOurSearch, openAdminSearchRow, rememberAdminSearch, showToast],
+    [addSearchResultPins, clearSearchResultPins, clearAdminSearchMapPins, expandedMapCenterLatLng, fetchAdminAddressPoints, fetchAdminKakaoSearch, fetchAdminOurSearch, openAdminSearchRow, rememberAdminSearch, showToast],
   );
 
   /**
@@ -14173,11 +14233,13 @@ function HomePageContent() {
                     kinds: Parameters<ExpandedMapSurface["findRenderedMapPoi"]>[0],
                   ) => ReturnType<ExpandedMapSurface["findRenderedMapPoi"]>;
                   jumpToZoom?: (lat: number, lng: number, zoom: number) => void;
+                  userMoveTo?: (lat: number, lng: number, zoom: number) => void;
                   setBearing?: (deg: number) => void;
                   getBearing?: () => number;
                   getCenter?: () => { lat: number; lng: number } | null;
                   getLevel?: () => number | null;
                   searchPinState?: () => { search: number; focus: string | null; dimmed: boolean; onTop: boolean } | null;
+                  searchPinPoints?: () => Array<{ id: string; x: number; y: number }>;
                 };
               };
               const prev = w.__PINDMAP_EXPANDED_GL__;
@@ -14222,8 +14284,12 @@ function HomePageContent() {
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? null,
                 jumpToZoom: (lat, lng, zoom) =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.jumpToZoom(lat, lng, zoom),
+                userMoveTo: (lat, lng, zoom) =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.jumpToZoom(lat, lng, zoom, { asUser: true }),
                 searchPinState: () =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.searchPinState() ?? null,
+                searchPinPoints: () =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.searchPinPoints() ?? [],
               };
             } catch {
               /* noop */
@@ -14288,7 +14354,7 @@ function HomePageContent() {
             if (mapContainerEl) mapContainerEl.innerHTML = "";
             // Stay on web portal until user closes — do not presentNative / remount Kakao mid-session.
           },
-          onViewIdle: () => {
+          onViewIdle: (view) => {
             const map = expandedMapRef.current;
             if (!map || !isExpandedMapLibre(map)) return;
             if (expandedMlFollowMyLocationRef.current) {
@@ -14314,30 +14380,24 @@ function HomePageContent() {
               setShowMapResearchButton(false);
               return;
             }
-            if (mapSearchResultsRef.current.length === 0) {
-              setShowMapResearchButton(false);
-              return;
-            }
-            if (pendingSearchCenterSyncRef.current) {
-              // The search's own camera move settled: that view is the reference.
-              const c = map.getCenter();
-              lastSearchCenterRef.current = { lat: c.getLat(), lng: c.getLng() };
-              lastSearchLevelRef.current = map.getLevel();
-              pendingSearchCenterSyncRef.current = false;
-              setShowMapResearchButton(false);
-              return;
-            }
             const center = map.getCenter();
-            setShowMapResearchButton(
-              shouldShowResearch({
-                hasResults: true,
-                searchView: {
-                  center: lastSearchCenterRef.current,
-                  level: lastSearchLevelRef.current ?? map.getLevel(),
-                },
-                now: { center: { lat: center.getLat(), lng: center.getLng() }, level: map.getLevel() },
-              }),
-            );
+            const now = { center: { lat: center.getLat(), lng: center.getLng() }, level: map.getLevel() };
+            const next = researchOnIdle({
+              hasResults: mapSearchResultsRef.current.length > 0,
+              searchView: {
+                center: lastSearchCenterRef.current,
+                level: lastSearchLevelRef.current ?? now.level,
+              },
+              now,
+              byUser: view.byUser,
+              pendingSearchSync: pendingSearchCenterSyncRef.current,
+            });
+            if (next.rebase) {
+              lastSearchCenterRef.current = now.center;
+              lastSearchLevelRef.current = now.level;
+              pendingSearchCenterSyncRef.current = false;
+            }
+            setShowMapResearchButton(next.show);
           },
           onFallback: (reason) => {
             if (cancelled) return;
@@ -16173,6 +16233,7 @@ function HomePageContent() {
         memo={savedMemo}
         showAdminMapExtras={showAdminMapExtras}
         onOpenExternalMapUrl={openExternalMapUrl}
+        hideExternalMapLinks={expandedMapIsMapLibre}
         onClose={() => {
           if (adminDirectionsChrome && directionsInfo) {
             setDirectionsSheetExpanded(false);
@@ -19174,7 +19235,11 @@ function HomePageContent() {
                           <span className="extendedNativeMapBadge">Kakao Native · 상단 50%</span>
                         </>
                       )}
-                      <MapResearchAreaButton visible={showMapResearchButton} onResearch={handleResearchThisArea} />
+                      <MapResearchAreaButton
+                        visible={showMapResearchButton}
+                        onResearch={handleResearchThisArea}
+                        belowSelector={useMapLibreExpandedChrome ? ".expandedMapLibreTopChromeFlow" : undefined}
+                      />
                       {adminExpandedMlPortal &&
                         (() => {
                           const b = ((expandedMlBearing % 360) + 360) % 360;
@@ -19352,6 +19417,7 @@ function HomePageContent() {
                             ? {
                                 sortMode: mapSearchSortMode,
                                 sortDistanceOnClient: true,
+                                resultsInAccuracyOrder: !activeCategoryChip || mapSearchSortMode === "accuracy",
                                 onSortModeChange: (mode: SortMode) => {
                                   const chip = activeCategoryChipRef.current;
                                   if (chip) void runCategoryChipSearch(chip, mode);
