@@ -2070,6 +2070,8 @@ function HomePageContent() {
   const lastSearchCenterRef = useRef<{ lat: number; lng: number } | null>(null);
   /** Kakao level of the search view (재검색 rule: ±1 level). */
   const lastSearchLevelRef = useRef<number | null>(null);
+  /** Camera level the opener chose for the expanded card at this point (card re-pad keeps it). */
+  const expandedCardCameraRef = useRef<{ lat: number; lng: number; level: number } | null>(null);
   /** Admin name search in flight (later searches supersede earlier ones). */
   const adminSearchRequestRef = useRef(0);
   const [mapSearchLoading, setMapSearchLoading] = useState(false);
@@ -12569,6 +12571,7 @@ function HomePageContent() {
     else showFocusPlaceMarker(tap.lat, tap.lng, category, null, mapTapBadge(tap));
     // Label tap keeps the user's zoom (search passes a level); only pan so the place sits above the card.
     const level = opts?.level ?? getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? 3;
+    expandedCardCameraRef.current = { lat: tap.lat, lng: tap.lng, level };
     const applyPaddedCamera = () => {
       const pad = measureExpandedPlaceCardPaddingBottom();
       applyExpandedMapCameraLatLng(tap.lat, tap.lng, level, { paddingBottom: pad });
@@ -12828,6 +12831,7 @@ function HomePageContent() {
         };
         const addrRef = placeRefFromKakaoPlace(addrPlace);
         devLog("[PindMap:expandedMap] open address card", source);
+        expandedCardCameraRef.current = { lat: aLat, lng: aLng, level: 2 };
         setIsMapSearchSheetOpen(false);
         setSelectedPlace({
           ...addrPlace,
@@ -14764,9 +14768,13 @@ function HomePageContent() {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     let ro: ResizeObserver | null = null;
     let timer: number | null = null;
+    // Keep the level the opener chose for this place (도로명주소 2, label tap = user zoom).
+    const chosen = expandedCardCameraRef.current;
+    const level =
+      chosen && Math.abs(chosen.lat - lat) < 1e-7 && Math.abs(chosen.lng - lng) < 1e-7 ? chosen.level : 3;
     const apply = () => {
       const pad = measureExpandedPlaceCardPaddingBottom();
-      applyExpandedMapCameraLatLng(lat, lng, 3, { paddingBottom: pad });
+      applyExpandedMapCameraLatLng(lat, lng, level, { paddingBottom: pad });
     };
     timer = window.setTimeout(() => {
       const el =
