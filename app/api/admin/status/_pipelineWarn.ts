@@ -2,6 +2,11 @@ import {
   claudeFailCodeAdminLabel,
   isClaudeFailCode,
 } from "@/app/api/extract/_claudeFailCode";
+import {
+  APIFY_AUTH_WARN_CODE,
+  APIFY_AUTH_WARN_REASON,
+  isApifyAuthFailureText,
+} from "@/app/api/extract/_apifyAuthAlert";
 
 export type PipelineWarn = {
   active: boolean;
@@ -13,6 +18,12 @@ export type PipelineWarn = {
 
 /** Top fail codes among recent failures (content + system), for the admin panel line. */
 export type FailCodeTopEntry = { code: string; count: number };
+
+export {
+  APIFY_AUTH_WARN_CODE,
+  APIFY_AUTH_WARN_REASON,
+  isApifyAuthFailureText,
+};
 
 /**
  * System / infra failures — eligible for the ≥7/10 same-code warn.
@@ -31,6 +42,7 @@ export const SYSTEM_FAIL_CODES: ReadonlySet<string> = new Set([
   "apify_failed",
   "apify_timeout",
   "apify_status_failed",
+  "apify_auth",
   "concurrent-runs-limit-exceeded",
   "server_error",
   "unknown",
@@ -93,6 +105,13 @@ export function computePipelineWarn(input: {
         active: true,
         code: head,
         reason: claudeFailCodeAdminLabel(head),
+      };
+    }
+    if (isApifyAuthFailureText(code)) {
+      return {
+        active: true,
+        code: APIFY_AUTH_WARN_CODE,
+        reason: APIFY_AUTH_WARN_REASON,
       };
     }
   }

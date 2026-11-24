@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  APIFY_AUTH_WARN_CODE,
+  APIFY_AUTH_WARN_REASON,
   computePipelineWarn,
   isSystemFailCode,
   topFailCodes,
@@ -24,6 +26,37 @@ describe("computePipelineWarn", () => {
     });
     assert.equal(w.active, true);
     assert.equal(w.code, "claude_auth");
+  });
+
+  it("warns immediately on a single Apify auth failure in last 30m", () => {
+    const w = computePipelineWarn({
+      failCodesLast30m: [
+        "kakao_unresolved",
+        'Apify 실행 실패: { "error": { "type": "user-or-token-not-found" } }',
+      ],
+      failCodesLast10: ["kakao_unresolved"],
+    });
+    assert.equal(w.active, true);
+    assert.equal(w.code, APIFY_AUTH_WARN_CODE);
+    assert.equal(w.reason, APIFY_AUTH_WARN_REASON);
+  });
+
+  it("warns on normalized apify_auth code like claude_auth", () => {
+    const w = computePipelineWarn({
+      failCodesLast30m: ["apify_auth"],
+      failCodesLast10: [],
+    });
+    assert.equal(w.active, true);
+    assert.equal(w.code, APIFY_AUTH_WARN_CODE);
+    assert.equal(w.reason, APIFY_AUTH_WARN_REASON);
+  });
+
+  it("does not immediate-warn on non-auth Apify failures", () => {
+    const w = computePipelineWarn({
+      failCodesLast30m: ["Apify 작업 실패", "apify_timeout"],
+      failCodesLast10: ["Apify 작업 실패"],
+    });
+    assert.equal(w.active, false);
   });
 
   it("warns when ≥7 of last 10 share the same system fail_code", () => {
