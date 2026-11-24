@@ -8773,28 +8773,60 @@ function HomePageContent() {
     [resolveTransitOrigin],
   );
 
-  const selectTransitRoute = useCallback((index: number) => {
-    setTransitUi((prev) => {
-      if (!prev || !prev.routes[index]) return prev;
-      const route = prev.routes[index]!;
-      const segments = transitRouteToMapSegments(route);
-      const stops = transitBoardAlightMarkers(route);
-      const ends = transitRouteEndpoints(route);
-      const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
-      if (gl && segments.length > 0) {
-        // Keep the normal bright basemap — do not enable directions chrome/theme.
-        gl.setDirectionsChrome?.({ active: false, restoreCamera: false });
-        gl.setTransitRoute({
-          segments,
-          stops,
-          start: ends?.start ?? null,
-          end: ends?.end ?? null,
-        });
-        gl.fitPoints(transitFitPoints(route), transitCameraFitPadding());
-      }
-      return { ...prev, selectedIndex: index };
+  const paintTransitRoute = useCallback((route: TransitRoute) => {
+    const segments = transitRouteToMapSegments(route);
+    const stops = transitBoardAlightMarkers(route);
+    const ends = transitRouteEndpoints(route);
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (!gl || segments.length === 0) return;
+    // Keep the normal bright basemap — do not enable directions chrome/theme.
+    gl.setDirectionsChrome?.({ active: false, restoreCamera: false });
+    gl.setTransitRoute({
+      segments,
+      stops,
+      start: ends?.start ?? null,
+      end: ends?.end ?? null,
     });
   }, []);
+
+  const transitFitKeyRef = useRef<string | null>(null);
+
+  const fitTransitCameraToPanel = useCallback((route: TransitRoute, panelHeightPx: number) => {
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    if (!gl) return;
+    const mapH =
+      mapExpandedRef.current?.clientHeight ??
+      (typeof document !== "undefined"
+        ? document.querySelector<HTMLElement>('[aria-label="전체 지도"] .kakaoMap')?.clientHeight
+        : null) ??
+      0;
+    gl.fitPoints(transitFitPoints(route), transitCameraFitPadding(panelHeightPx, mapH || undefined));
+  }, []);
+
+  const selectTransitRoute = useCallback(
+    (index: number) => {
+      transitFitKeyRef.current = null;
+      setTransitUi((prev) => {
+        if (!prev || !prev.routes[index]) return prev;
+        paintTransitRoute(prev.routes[index]!);
+        return { ...prev, selectedIndex: index };
+      });
+    },
+    [paintTransitRoute],
+  );
+
+  const onTransitPanelHeight = useCallback(
+    (heightPx: number) => {
+      if (!transitUi || transitUi.selectedIndex == null) return;
+      const route = transitUi.routes[transitUi.selectedIndex];
+      if (!route) return;
+      const key = `${transitUi.selectedIndex}:${Math.round(heightPx)}`;
+      if (transitFitKeyRef.current === key) return;
+      transitFitKeyRef.current = key;
+      fitTransitCameraToPanel(route, heightPx);
+    },
+    [transitUi, fitTransitCameraToPanel],
+  );
 
   const backTransitToList = useCallback(() => {
     const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
@@ -14454,6 +14486,7 @@ function HomePageContent() {
                   getBearing?: () => number;
                   getCenter?: () => { lat: number; lng: number } | null;
                   getLevel?: () => number | null;
+                  project?: (lat: number, lng: number) => { x: number; y: number } | null;
                   searchPinState?: () => { search: number; focus: string | null; dimmed: boolean; onTop: boolean } | null;
                   searchPinPoints?: () => Array<{ id: string; x: number; y: number }>;
                 };
@@ -14498,6 +14531,8 @@ function HomePageContent() {
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getCenter() ?? null,
                 getLevel: () =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? null,
+                project: (lat, lng) =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.project(lat, lng) ?? null,
                 jumpToZoom: (lat, lng, zoom) =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.jumpToZoom(lat, lng, zoom),
                 userMoveTo: (lat, lng, zoom) =>
@@ -19609,6 +19644,7 @@ function HomePageContent() {
                           selectedIndex={transitUi.selectedIndex}
                           onSelect={selectTransitRoute}
                           onBackToList={backTransitToList}
+                          onPanelHeight={onTransitPanelHeight}
                           onClose={() => {
                             clearRoute();
                           }}

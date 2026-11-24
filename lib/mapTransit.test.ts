@@ -182,10 +182,14 @@ test("transitBoardAlightMarkers + endpoints from Kakao path points", () => {
   assert.equal(ends!.end.label, "도착");
   assert.equal(ends!.start.lat, 37.556);
   assert.equal(ends!.end.lat, 37.557);
-  const pad = transitCameraFitPadding();
-  assert.ok(pad.bottom >= 280);
-  assert.ok(pad.bottom <= 380);
-  assert.equal(pad.top, 140);
+  const pad = transitCameraFitPadding(220);
+  assert.equal(pad.top, 40);
+  assert.equal(pad.right, 40);
+  assert.equal(pad.left, 40);
+  assert.equal(pad.bottom, 260); // 220 panel + 40
+  const padClamped = transitCameraFitPadding(500, 400);
+  assert.equal(padClamped.top, 40);
+  assert.ok(padClamped.bottom <= 400 - 40 - 80);
   const fit = transitFitPoints(route);
   assert.ok(fit.length >= route.steps.reduce((n, s) => n + s.path.length, 0));
 });

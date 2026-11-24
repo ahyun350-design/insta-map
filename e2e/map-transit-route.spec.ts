@@ -1,7 +1,7 @@
 /**
- * Admin MapLibre: in-app 대중교통.
+ * Admin MapLibre: in-app 대중교통 (Kakao publictraffic mocked — 실호출 0).
  * Screenshots 390×844 → e2e/artifacts/transit/
- * ① mock list  ② live Kakao 망원→홍대 select (≤1 live call)  ③ no results mock
+ * ① list  ② selected (출발·도착 in area above panel)  ③ no results
  */
 import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
@@ -11,13 +11,18 @@ import { gotoTab, suppressCoachmarks, dismissCoachmarks } from "./helpers/nav";
 import { EXPANDED_MAPLIBRE_STORAGE_KEY } from "../lib/mapSurface/expandedMapLibreFlag";
 import { computeMapPreviewE2eToken } from "./helpers/mapPreviewE2e";
 import { subwayRefColour } from "../lib/mapSurface/poiCategoryIcons";
-import { WALK_LINE_COLOUR, BUS_LINE_COLOUR } from "../lib/mapTransit";
+import {
+  TRANSIT_FIT_EDGE_PAD_PX,
+  WALK_LINE_COLOUR,
+  BUS_LINE_COLOUR,
+  transitRouteEndpoints,
+  type TransitRoute,
+} from "../lib/mapTransit";
 
 const OUT = path.join(process.cwd(), "e2e/artifacts/transit");
 
-/** 망원역 / 홍대입구역 (e2e jumps only — not printed in reports). */
+/** 망원역 일대 jump only — not printed in reports. */
 const MANGWON = { lat: 37.556023, lng: 126.910152 };
-const HONGDAE = { lat: 37.556759, lng: 126.923654 };
 
 type GlDebug = {
   createCount: number;
@@ -25,13 +30,14 @@ type GlDebug = {
     kinds: Array<"shop" | "sangga" | "tour" | "landmark" | "park" | "station" | "bus">,
   ) => { x: number; y: number; name: string; kind: string } | null;
   jumpToZoom?: (lat: number, lng: number, zoom: number) => void;
+  project?: (lat: number, lng: number) => { x: number; y: number } | null;
 };
 
 /**
- * Mock mirrors /api/admin/map-transit parsed shape from Kakao publictraffic
- * (망원=6호선 → 합정 환승 → 2호선 홍대입구). Path points ≈ real corridor.
+ * Mock mirrors /api/admin/map-transit parsed shape (망원=6호선 → 합정 → 2호선 홍대입구).
+ * Path spans far enough that a bad camera fit would leave 출발 off-screen.
  */
-const MOCK_ROUTES = {
+const MOCK_ROUTES: { status: string; routes: TransitRoute[] } = {
   status: "OK",
   routes: [
     {
@@ -173,6 +179,9 @@ const MOCK_ROUTES = {
   ],
 };
 
+const MOCK_ENDS = transitRouteEndpoints(MOCK_ROUTES.routes[0]!);
+if (!MOCK_ENDS) throw new Error("mock route endpoints missing");
+
 async function forceMapLibre(page: Page) {
   await page.addInitScript(({ expandedKey }) => {
     try {
@@ -251,7 +260,7 @@ async function tapStation(
   await page.touchscreen.tap(mapBox.x + hit.x, mapBox.y + hit.y);
 }
 
-test("map transit: list → live select → no results", async ({ browser }) => {
+test("map transit: list → select fit → no results (mock only)", async ({ browser }) => {
   fs.mkdirSync(OUT, { recursive: true });
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -273,7 +282,7 @@ test("map transit: list → live select → no results", async ({ browser }) => 
     await page.route(p, withE2e);
   }
 
-  let transitMode: "ok" | "empty" | "live" = "ok";
+  let transitMode: "ok" | "empty" = "ok";
   let mockHits = 0;
   let liveHits = 0;
   await page.route("**/api/admin/map-transit", async (route) => {
@@ -281,8 +290,13 @@ test("map transit: list → live select → no results", async ({ browser }) => 
       await route.continue();
       return;
     }
+    // Never hit the real Kakao upstream in this spec.
+    if (route.request().url().includes("dapi.kakao.com")) {
+      liveHits += 1;
+      throw new Error("live Kakao call forbidden in mock-only transit e2e");
+    }
+    mockHits += 1;
     if (transitMode === "empty") {
-      mockHits += 1;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -290,15 +304,6 @@ test("map transit: list → live select → no results", async ({ browser }) => 
       });
       return;
     }
-    if (transitMode === "live") {
-      liveHits += 1;
-      if (liveHits > 1) {
-        throw new Error(`live Kakao transit calls exceeded max 1, got ${liveHits}`);
-      }
-      await withE2e(route);
-      return;
-    }
-    mockHits += 1;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -317,7 +322,7 @@ test("map transit: list → live select → no results", async ({ browser }) => 
   const card = page.locator('[data-testid="expanded-place-detail-sheet"]');
   const panel = page.locator('[data-testid="transit-route-panel"]');
 
-  // ① mock list at 망원역
+  // ① mock list
   await jump(page, MANGWON.lat, MANGWON.lng, 16);
   await page.waitForTimeout(3500);
   await tapStation(page, dialog);
@@ -333,33 +338,58 @@ test("map transit: list → live select → no results", async ({ browser }) => 
   expect(liveHits).toBe(0);
   await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(OUT, "01-after-route-list.png") });
-  await panel.getByRole("button", { name: "닫기" }).click();
-  await expect(panel).toHaveCount(0);
 
-  // ② live: origin=망원(geo) → dest=홍대입구역, select first route
-  transitMode = "live";
-  await jump(page, HONGDAE.lat, HONGDAE.lng, 16);
-  await page.waitForTimeout(3500);
-  await tapStation(page, dialog);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.getByRole("button", { name: /대중교통/ }).click();
-  await expect(panel).toBeVisible({ timeout: 20_000 });
-  await expect(panel.locator('[data-testid="transit-route-list"]')).toBeVisible({ timeout: 20_000 });
-  const liveItems = panel.locator('[data-testid="transit-route-item"]');
-  await expect(liveItems.first()).toBeVisible({ timeout: 15_000 });
-  expect(liveHits).toBe(1);
-  // Prefer a subway itinerary when present (망원=6호선 corridor).
-  const subwayItem = liveItems.filter({ hasText: "호선" }).first();
-  if ((await subwayItem.count()) > 0) {
-    await subwayItem.click();
-  } else {
-    await liveItems.first().click();
-  }
+  // ② select mock route — 출발·도착 both in area above panel (40px inset)
+  await panel.locator('[data-testid="transit-route-item"]').first().click();
   await expect(panel.locator('[data-testid="transit-route-detail"]')).toBeVisible({ timeout: 10_000 });
-  await expect(panel.locator(".transitRouteStep").first()).toBeVisible();
-  // No directions-theme swap on transit
   await expect(dialog.locator(".expandedMapLibreStage.is-directions-chrome")).toHaveCount(0);
-  await page.waitForTimeout(1400);
+
+  await expect
+    .poll(
+      async () => {
+        const ok = await page.evaluate(
+          ({ start, end, edge }) => {
+            const gl = (window as unknown as { __PINDMAP_EXPANDED_GL__?: GlDebug })
+              .__PINDMAP_EXPANDED_GL__;
+            const mapEl = document.querySelector<HTMLElement>(
+              '[aria-label="전체 지도"] .kakaoMap',
+            );
+            const panelEl = document.querySelector<HTMLElement>(
+              '[data-testid="transit-route-panel"]',
+            );
+            if (!gl?.project || !mapEl || !panelEl) return "missing";
+            const map = mapEl.getBoundingClientRect();
+            const panelRect = panelEl.getBoundingClientRect();
+            const s = gl.project(start.lat, start.lng);
+            const e = gl.project(end.lat, end.lng);
+            if (!s || !e) return "no_project";
+            const left = map.left + edge;
+            const right = map.right - edge;
+            const top = map.top + edge;
+            const bottom = panelRect.top - edge;
+            const inArea = (p: { x: number; y: number }) => {
+              const x = map.left + p.x;
+              const y = map.top + p.y;
+              return x >= left && x <= right && y >= top && y <= bottom;
+            };
+            if (!inArea(s)) return "start_out";
+            if (!inArea(e)) return "end_out";
+            return "ok";
+          },
+          {
+            start: { lat: MOCK_ENDS.start.lat, lng: MOCK_ENDS.start.lng },
+            end: { lat: MOCK_ENDS.end.lat, lng: MOCK_ENDS.end.lng },
+            edge: TRANSIT_FIT_EDGE_PAD_PX,
+          },
+        );
+        return ok;
+      },
+      { timeout: 15_000, intervals: [300] },
+    )
+    .toBe("ok");
+
+  expect(liveHits).toBe(0);
+  await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(OUT, "02-route-selected.png") });
   await panel.getByRole("button", { name: "닫기" }).click();
   await expect(panel).toHaveCount(0);
@@ -374,7 +404,7 @@ test("map transit: list → live select → no results", async ({ browser }) => 
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await expect(panel.locator('[data-testid="transit-no-results"]')).toBeVisible({ timeout: 10_000 });
   await expect(panel.getByRole("button", { name: "도보" })).toBeVisible();
-  expect(liveHits).toBe(1);
+  expect(liveHits).toBe(0);
   await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(OUT, "03-no-results.png") });
 

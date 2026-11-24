@@ -342,16 +342,27 @@ export function transitRouteEndpoints(route: TransitRoute): {
   };
 }
 
-/** Padding so the full path sits above the bottom transit panel (~390×844). */
-export function transitCameraFitPadding(panelMaxPx = 360): {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-} {
-  // Top: search + chips; bottom: detail panel (not the full 52vh max).
-  const bottom = Math.min(Math.max(panelMaxPx, 280), 380);
-  return { top: 140, right: 40, bottom, left: 40 };
+/** Edge inset around the visible map area above the transit panel. */
+export const TRANSIT_FIT_EDGE_PAD_PX = 40;
+
+/**
+ * fitBounds padding: 40px on all sides of the area above the panel.
+ * `panelHeightPx` = measured panel height; bottom = panel + 40.
+ * Clamps when map is short so top+bottom padding cannot exceed the map.
+ */
+export function transitCameraFitPadding(
+  panelHeightPx: number,
+  mapHeightPx?: number,
+): { top: number; right: number; bottom: number; left: number } {
+  const edge = TRANSIT_FIT_EDGE_PAD_PX;
+  const panel = Math.max(0, Math.round(Number(panelHeightPx) || 0));
+  let bottom = panel + edge;
+  if (typeof mapHeightPx === "number" && mapHeightPx > 0) {
+    // Leave at least 80px of map for the route after top + bottom padding.
+    const maxBottom = Math.max(edge, Math.floor(mapHeightPx - edge - 80));
+    bottom = Math.min(bottom, maxBottom);
+  }
+  return { top: edge, right: edge, bottom, left: edge };
 }
 
 /** Points used to fit the camera (path + board/alight + endpoints). */

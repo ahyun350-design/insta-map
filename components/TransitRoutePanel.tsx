@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import {
   TRANSIT_NO_RESULTS_MESSAGE,
   formatTransitMinutes,
@@ -16,6 +17,8 @@ type Props = {
   onBackToList: () => void;
   onClose: () => void;
   onWalkFallback: () => void;
+  /** Measured panel height (px) for camera fit above the panel. */
+  onPanelHeight?: (heightPx: number) => void;
 };
 
 function LineBadge({ name, colour }: { name: string; colour: string }) {
@@ -36,7 +39,9 @@ export default function TransitRoutePanel({
   onBackToList,
   onClose,
   onWalkFallback,
+  onPanelHeight,
 }: Props) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const empty =
     !loading &&
     (error === "no_results" ||
@@ -47,8 +52,21 @@ export default function TransitRoutePanel({
 
   const selected = selectedIndex != null ? routes[selectedIndex] : null;
 
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || !onPanelHeight) return;
+    const report = () => {
+      const h = el.getBoundingClientRect().height;
+      if (Number.isFinite(h) && h > 0) onPanelHeight(h);
+    };
+    report();
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [onPanelHeight, selectedIndex, loading, empty, routes.length]);
+
   return (
-    <div className="transitRoutePanel" data-testid="transit-route-panel">
+    <div ref={rootRef} className="transitRoutePanel" data-testid="transit-route-panel">
       <div className="transitRoutePanelHeader">
         <p className="transitRoutePanelTitle">대중교통</p>
         <button type="button" className="transitRoutePanelClose" aria-label="닫기" onClick={onClose}>
