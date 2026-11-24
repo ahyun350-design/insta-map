@@ -300,6 +300,11 @@ import {
 } from "@/lib/adminMapSearch";
 import { planSearchCamera, researchOnIdle } from "@/lib/adminMapSearchView";
 import {
+  filterBuildingPlaces,
+  type BuildingPlaceCandidate,
+  type BuildingPlaceItem,
+} from "@/lib/buildingPlaces";
+import {
   buildKakaoKeywordSearchOpts,
   rankKakaoPlaceSearchResults,
   shouldApplyDestinationSearchRanking,
@@ -12874,8 +12879,12 @@ function HomePageContent() {
           place_url: "",
           y: String(aLat),
           x: String(aLng),
+          _buildingPlacesLoading: true,
+          _buildingPlaces: null,
         };
         const addrRef = placeRefFromKakaoPlace(addrPlace);
+        const addrRoad = hit.roadAddr;
+        const addrReqId = ++mapPoiRequestRef.current;
         devLog("[PindMap:expandedMap] open address card", source);
         expandedCardCameraRef.current = { lat: aLat, lng: aLng, level: 2 };
         setIsMapSearchSheetOpen(false);
@@ -12896,6 +12905,42 @@ function HomePageContent() {
         };
         scheduleExpandedMapCamera(applyAddrCamera);
         window.setTimeout(applyAddrCamera, 140);
+        void (async () => {
+          let candidates: BuildingPlaceCandidate[] = [];
+          try {
+            const {
+              data: { session },
+            } = await supabase.auth.getSession();
+            if (session?.access_token) {
+              const res = await fetch("/api/admin/map-building-places", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ lat: aLat, lng: aLng }),
+              });
+              if (res.ok) {
+                const json = (await res.json()) as { candidates?: BuildingPlaceCandidate[] };
+                candidates = Array.isArray(json.candidates) ? json.candidates : [];
+              }
+            }
+          } catch {
+            candidates = [];
+          }
+          if (addrReqId !== mapPoiRequestRef.current) return;
+          const items = filterBuildingPlaces(candidates, addrRoad);
+          setSelectedPlace((prev: PlaceSheetData | null) => {
+            if (!prev || prev.category_name !== "도로명주소") return prev;
+            if (prev.road_address_name !== addrRoad) return prev;
+            return {
+              ...prev,
+              _buildingPlacesLoading: false,
+              _buildingPlaces: items,
+            };
+          });
+          window.setTimeout(() => measureExpandedPlaceCardPaddingBottom(), 80);
+        })();
         return;
       }
       const area = adminSearchAreaLevel(hit);
@@ -16241,6 +16286,25 @@ function HomePageContent() {
         showAdminMapExtras={showAdminMapExtras}
         onOpenExternalMapUrl={openExternalMapUrl}
         hideExternalMapLinks={expandedMapIsMapLibre}
+        onBuildingPlaceClick={(item: BuildingPlaceItem) => {
+          openMapPoiPlaceCardRef.current(
+            {
+              kind: "sangga",
+              layerId: "building-places",
+              name: item.name,
+              lat: item.lat,
+              lng: item.lng,
+              cls: item.category,
+              subclass: null,
+              buildingNo: null,
+              lines: [],
+              lineColour: null,
+              lineRef: null,
+              tourType: null,
+            },
+            { level: 3 },
+          );
+        }}
         onClose={() => {
           if (adminDirectionsChrome && directionsInfo) {
             setDirectionsSheetExpanded(false);

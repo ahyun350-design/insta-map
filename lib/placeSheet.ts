@@ -52,6 +52,19 @@ export type PlaceSheetData = {
   _discoverSaveCount?: number | null;
   /** Admin discover layer: poi id for post-save pin removal */
   _discoverPoiId?: number | null;
+  /**
+   * Admin MapLibre address card: places in the same building (filtered client-side).
+   * Null/undefined = not loaded or N/A; [] = loaded empty (section hidden).
+   */
+  _buildingPlaces?: Array<{
+    id: string;
+    name: string;
+    category: string | null;
+    floorLabel: string | null;
+    lat: number;
+    lng: number;
+  }> | null;
+  _buildingPlacesLoading?: boolean;
 };
 
 /** "2026년 9월" from poi.closed_at — null if unparseable. */
