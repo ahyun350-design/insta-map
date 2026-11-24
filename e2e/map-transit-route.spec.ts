@@ -257,7 +257,9 @@ async function tapStation(
     .toBe("found");
   const mapBox = await dialog.locator(".kakaoMap").first().boundingBox();
   if (!mapBox || !hit) throw new Error("map/poi missing");
-  await page.touchscreen.tap(mapBox.x + hit.x, mapBox.y + hit.y);
+  // `hit` is assigned inside poll's async callback — TS does not narrow it after await.
+  const poi = hit as { x: number; y: number; name: string };
+  await page.touchscreen.tap(mapBox.x + poi.x, mapBox.y + poi.y);
 }
 
 test("map transit: list → select fit → no results (mock only)", async ({ browser }) => {
