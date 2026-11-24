@@ -1,8 +1,8 @@
 /**
  * Admin expanded MapLibre search (D-2): our data only.
  * - search_map_admin RPC (sangga_places + map_search_catalog; service role only)
- * - 도로명주소 검색 API (business.juso.go.kr) when the query looks like a road address.
- *   No coordinates there — the client geocodes a tapped address via /api/admin/map-geocode.
+ * - 도로명·지번 주소: juso first; if empty, Kakao address search (live display only — never stored).
+ *   No coordinates from juso — the client geocodes a tapped address via /api/admin/map-geocode.
  * Kakao keyword results are merged on the client, never here. Nothing is stored.
  */
 import { NextResponse } from "next/server";
@@ -15,7 +15,8 @@ import {
   RPC_CANDIDATES,
   chainAliasQuery,
   collapseSamePlaces,
-  looksLikeRoadAddress,
+  kakaoAddressDocToHit,
+  looksLikeAddressQuery,
   rerankPlaceHits,
   unionPlaceHits,
   type MapSearchApiResponse,
@@ -29,6 +30,8 @@ export const dynamic = "force-dynamic";
 
 const JUSO_TIMEOUT_MS = 2500;
 const JUSO_COUNT = 5;
+const KAKAO_ADDR_TIMEOUT_MS = 2500;
+const KAKAO_ADDR_COUNT = 5;
 const SOURCES: readonly OurSource[] = ["sangga", "tour", "landmark", "station", "dong", "gu", "si"];
 
 type Body = { q?: unknown; lat?: unknown; lng?: unknown; limit?: unknown };
@@ -145,6 +148,40 @@ async function jusoSearch(q: string): Promise<{ hits: OurAddressHit[]; error: st
   }
 }
 
+/** Live Kakao address search — display only, never stored / cached. */
+async function kakaoAddressSearch(q: string): Promise<{ hits: OurAddressHit[]; error: string | null }> {
+  const restKey = process.env.KAKAO_REST_API_KEY?.trim();
+  if (!restKey) return { hits: [], error: "no_key" };
+  const keyword = q.trim();
+  if (keyword.length < 2) return { hits: [], error: null };
+  const url = new URL("https://dapi.kakao.com/v2/local/search/address.json");
+  url.searchParams.set("query", keyword);
+  url.searchParams.set("size", String(KAKAO_ADDR_COUNT));
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `KakaoAK ${restKey}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(KAKAO_ADDR_TIMEOUT_MS),
+    });
+    if (!res.ok) return { hits: [], error: `http_${res.status}` };
+    const data = (await res.json()) as {
+      documents?: Array<{
+        address_name?: string;
+        address?: { address_name?: string } | null;
+        road_address?: { address_name?: string; building_name?: string } | null;
+        x?: string;
+        y?: string;
+      }>;
+    };
+    const hits = (data.documents ?? [])
+      .map((d, i) => kakaoAddressDocToHit(d, i))
+      .filter((h): h is OurAddressHit => h != null);
+    return { hits, error: null };
+  } catch {
+    return { hits: [], error: "fetch_failed" };
+  }
+}
+
 export async function POST(req: Request) {
   const gate = await requireAdmin(req);
   if (!gate.ok) {
@@ -180,8 +217,9 @@ export async function POST(req: Request) {
   };
   // Chain alias ("메가커피" → registered "메가엠지씨커피"): at most one extra RPC.
   const aliasQ = chainAliasQuery(q);
+  const wantAddress = looksLikeAddressQuery(q);
   const jusoStart = Date.now();
-  const jusoPromise = looksLikeRoadAddress(q)
+  const jusoPromise = wantAddress
     ? jusoSearch(q).then((r) => ({ ...r, ms: Date.now() - jusoStart }))
     : Promise.resolve(null);
 
@@ -196,8 +234,18 @@ export async function POST(req: Request) {
       ? []
       : ((r.data ?? []) as RpcRow[]).map(toPlaceHit).filter((h): h is OurPlaceHit => h != null);
   const places = collapseSamePlaces(rerankPlaceHits(unionPlaceHits(toHits(db), toHits(dbAlias)), q));
-  const addresses = juso?.hits ?? [];
-  // Address-looking queries: the juso rows lead; place rows follow.
+  let addresses = juso?.hits ?? [];
+  let jusoError = juso?.error ?? null;
+  let jusoMs = juso ? juso.ms : null;
+  // juso empty/unavailable → Kakao address (live only). Same gate as juso (road + jibun).
+  if (wantAddress && addresses.length === 0) {
+    const kakaoStart = Date.now();
+    const kakao = await kakaoAddressSearch(q);
+    addresses = kakao.hits;
+    jusoMs = (jusoMs ?? 0) + (Date.now() - kakaoStart);
+    if (kakao.error) jusoError = jusoError ? `${jusoError}|kakao_${kakao.error}` : `kakao_${kakao.error}`;
+  }
+  // Address-looking queries: the address rows lead; place rows follow.
   const hits = [...addresses, ...places].slice(0, Math.max(limit, addresses.length));
 
   const payload: MapSearchApiResponse = {
@@ -205,9 +253,9 @@ export async function POST(req: Request) {
     diag: {
       ms: Date.now() - t0,
       dbMs: Math.max(db.ms, dbAlias?.ms ?? 0),
-      jusoMs: juso ? juso.ms : null,
+      jusoMs,
       dbError: db.error ? "rpc_failed" : null,
-      jusoError: juso?.error ?? null,
+      jusoError,
       anchor,
     },
   };
