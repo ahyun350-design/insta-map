@@ -30,6 +30,7 @@ import {
   EDGE_SWIPE_PRIORITY,
   useEdgeSwipeBack,
 } from "@/lib/useEdgeSwipeBack";
+import type { BuildingPlaceItem } from "@/lib/buildingPlaces";
 
 type DirectionsMode = "car" | "walk";
 
@@ -75,6 +76,8 @@ type Props = {
   onOpenExternalMapUrl?: (url: string) => void;
   /** Admin MapLibre expanded card: no "카카오맵에서 보기" / "네이버 지도에서 보기" / "영업시간 보기". */
   hideExternalMapLinks?: boolean;
+  /** Admin address card: open a place from "이 건물의 장소". */
+  onBuildingPlaceClick?: (item: BuildingPlaceItem) => void;
 };
 
 const LIGHT_PIN_CATEGORIES = new Set(["카페", "쇼핑", "숙소", "놀거리", "여행지"]);
@@ -177,6 +180,7 @@ export function PlaceDetailSheet({
   showAdminMapExtras = false,
   onOpenExternalMapUrl,
   hideExternalMapLinks = false,
+  onBuildingPlaceClick,
 }: Props) {
   const relatedPosts: PlaceSheetFeedPost[] = place._feedPosts ?? [];
   const placeRef = placeRefFromPlaceSheet(place);
@@ -387,6 +391,41 @@ export function PlaceDetailSheet({
             <span className="placeDetailSheetValue">{place.road_address_name}</span>
           </div>
         )}
+        {place.category_name === "도로명주소" &&
+        (place._buildingPlacesLoading ||
+          (Array.isArray(place._buildingPlaces) && place._buildingPlaces.length > 0)) ? (
+          <div className="placeDetailSheetBuildingPlaces" data-testid="building-places">
+            <p className="placeDetailSheetBuildingPlacesTitle">이 건물의 장소</p>
+            {place._buildingPlacesLoading &&
+            !(Array.isArray(place._buildingPlaces) && place._buildingPlaces.length > 0) ? (
+              <p className="placeDetailSheetBuildingPlacesLoading">불러오는 중…</p>
+            ) : (
+              <ul className="placeDetailSheetBuildingPlacesList">
+                {(place._buildingPlaces ?? []).map((item) => {
+                  const meta = [item.category, item.floorLabel].filter(Boolean).join(" · ");
+                  return (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        className="placeDetailSheetBuildingPlacesItem"
+                        data-testid="building-places-item"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onBuildingPlaceClick?.(item);
+                        }}
+                      >
+                        <span className="placeDetailSheetBuildingPlacesName">{item.name}</span>
+                        {meta ? (
+                          <span className="placeDetailSheetBuildingPlacesMeta">{meta}</span>
+                        ) : null}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        ) : null}
         {isMapTap && (place._mapFloor || place._mapBuildingNo) ? (
           <div className="placeDetailSheetRow" data-testid="map-place-floor">
             <span className="placeDetailSheetLabel">위치</span>
