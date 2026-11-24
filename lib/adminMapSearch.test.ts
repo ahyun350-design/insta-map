@@ -13,7 +13,10 @@ import {
   chainAwareNamesMatch,
   hitToMapPoiTap,
   kakaoDocToHit,
+  kakaoAddressDocToHit,
   looksLikeRoadAddress,
+  looksLikeJibunAddress,
+  looksLikeAddressQuery,
   nameMatchTier,
   placeDisplayName,
   rankMergedHits,
@@ -87,9 +90,40 @@ test("address query: road + building number / lot number parsed; names are not",
   assert.deepEqual(parseAddressQuery("마포구 망원로4길 3-1")?.prefix, ["마포구"]);
   assert.equal(parseAddressQuery("마포구 망원로4길 3-1")?.key.sub, "1");
   assert.deepEqual(parseAddressQuery("망원동 123-4")?.key, { kind: "jibun", name: "망원동", main: "123", sub: "4", mountain: false });
+  assert.deepEqual(parseAddressQuery("망원동 413-5")?.key, { kind: "jibun", name: "망원동", main: "413", sub: "5", mountain: false });
+  assert.deepEqual(parseAddressQuery("마포구 망원동 413")?.key, { kind: "jibun", name: "망원동", main: "413", sub: null, mountain: false });
+  assert.deepEqual(parseAddressQuery("마포구 망원동 413")?.prefix, ["마포구"]);
+  assert.deepEqual(parseAddressQuery("서교동 395-166")?.key, { kind: "jibun", name: "서교동", main: "395", sub: "166", mountain: false });
   assert.equal(parseAddressQuery("메가커피"), null);
   assert.equal(parseAddressQuery("망원로4길"), null);
   assert.equal(parseAddressQuery("망원로4길 3 카페"), null);
+});
+
+test("looksLikeAddressQuery: road + jibun; names are not", () => {
+  assert.ok(looksLikeAddressQuery("망원로4길 3"));
+  assert.ok(looksLikeJibunAddress("망원동 413-5"));
+  assert.ok(looksLikeAddressQuery("마포구 망원동 413"));
+  assert.ok(looksLikeAddressQuery("서교동 395-166"));
+  assert.ok(!looksLikeRoadAddress("망원동 413-5"));
+  assert.ok(!looksLikeJibunAddress("망원로4길 3"));
+  assert.ok(!looksLikeAddressQuery("메가커피"));
+});
+
+test("kakaoAddressDocToHit: road + jibun fields; empty → null", () => {
+  const hit = kakaoAddressDocToHit(
+    {
+      address_name: "서울 마포구 망원동 413-5",
+      address: { address_name: "서울 마포구 망원동 413-5" },
+      road_address: { address_name: "서울 마포구 망원로11길 9", building_name: "" },
+      x: "126.9",
+      y: "37.5",
+    },
+    0,
+  );
+  assert.equal(hit?.kind, "address");
+  assert.equal(hit?.roadAddr, "서울 마포구 망원로11길 9");
+  assert.equal(hit?.jibunAddr, "서울 마포구 망원동 413-5");
+  assert.equal(kakaoAddressDocToHit({}), null);
 });
 
 test("address query: the exact address alone — no look-alike place or other number", () => {
@@ -103,6 +137,7 @@ test("address query: the exact address alone — no look-alike place or other nu
   assert.deepEqual(rankMergedHits(ours, [kakao], "마포구 망원로4길 3", null), [exact]);
   assert.deepEqual(rankMergedHits(ours, [], "망원로4길 30", null), [longer]);
   assert.deepEqual(exactAddressHits("망원동 400-1", [exact, other]), [exact]);
+  assert.deepEqual(rankMergedHits(ours, [kakao], "망원동 400-1", null), [exact]);
   // The query's district must appear in the address.
   assert.deepEqual(exactAddressHits("강남구 망원로4길 3", [exact]), []);
   // 3-1 ≠ 3; same address twice is kept once.

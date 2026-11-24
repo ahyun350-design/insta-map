@@ -102,6 +102,16 @@ export function looksLikeRoadAddress(q: string): boolean {
   return /[가-힣0-9](로|길)\s*\d+(-\d+)?(\s|$)/.test(q.trim());
 }
 
+/** 지번 + 본번 ("망원동 413-5", "마포구 망원동 413"). */
+export function looksLikeJibunAddress(q: string): boolean {
+  return parseAddressQuery(q)?.key.kind === "jibun";
+}
+
+/** 도로명 또는 지번 주소 검색 — juso / Kakao address API 게이트. */
+export function looksLikeAddressQuery(q: string): boolean {
+  return parseAddressQuery(q) != null;
+}
+
 export function placeDisplayName(hit: OurPlaceHit | KakaoKeywordHit): string {
   return hit.kind === "place" && hit.branch ? `${hit.name} ${hit.branch}` : hit.name;
 }
@@ -419,6 +429,35 @@ export function kakaoDocToHit(doc: {
     placeUrl: doc.place_url || null,
     lat,
     lng,
+  };
+}
+
+/**
+ * Kakao address-search document → OurAddressHit (display only, never stored).
+ * Prefers road_address; falls back to jibun address_name so geocode still works.
+ */
+export function kakaoAddressDocToHit(
+  doc: {
+    address_name?: string;
+    address?: { address_name?: string } | null;
+    road_address?: { address_name?: string; building_name?: string } | null;
+    x?: string;
+    y?: string;
+  },
+  index = 0,
+): OurAddressHit | null {
+  const road = String(doc.road_address?.address_name ?? "").trim();
+  const jibun = String(doc.address?.address_name ?? doc.address_name ?? "").trim();
+  const roadAddr = road || jibun;
+  if (!roadAddr) return null;
+  const x = String(doc.x ?? "").trim();
+  const y = String(doc.y ?? "").trim();
+  return {
+    kind: "address",
+    id: `kakao-addr:${x}:${y}:${index}`,
+    roadAddr,
+    jibunAddr: jibun || null,
+    buildingName: String(doc.road_address?.building_name ?? "").trim() || null,
   };
 }
 
