@@ -63,6 +63,10 @@ import {
 } from "@/app/api/extract/_timing";
 import { notifyExtractShareOutcome } from "@/app/api/extract/_shareNotify";
 import {
+  isApifyAuthFailureText,
+  notifyAdminApifyAuthFailure,
+} from "@/app/api/extract/_apifyAuthAlert";
+import {
   createOnceRunner,
   createOrderedAsyncQueue,
   saveJobDiagnostics,
@@ -444,6 +448,13 @@ export async function POST(req: Request) {
         timingApifyMs = Date.now() - scrapeT0;
         const scrapeMsg =
           scrapeErr instanceof Error ? scrapeErr.message : String(scrapeErr);
+        if (isApifyAuthFailureText(scrapeMsg)) {
+          // Admin alert only — must not change extract failure / user-facing path.
+          void notifyAdminApifyAuthFailure(db, {
+            jobId,
+            errorText: scrapeMsg,
+          });
+        }
         if (isNoCaptionScrapeError(scrapeMsg)) {
           void writeReelCache(db, job.instagram_url, {
             status: "failed",
