@@ -4,11 +4,11 @@ import { placeCardExternalLinks, showKakaoHoursLink } from "./placeCardLinks";
 
 const base = { showAdminMapExtras: true, isMapTap: false, hasCoordinates: true, hideExternalMapLinks: false, bottomTransitButton: true };
 
-test("place card: MapLibre expanded card has no 카카오맵/네이버 지도 buttons", () => {
+test("place card: MapLibre expanded card has no 카카오맵/네이버 지도/대중교통 길찾기", () => {
   assert.deepEqual(placeCardExternalLinks({ ...base, hideExternalMapLinks: true }), []);
   assert.deepEqual(placeCardExternalLinks({ ...base, isMapTap: true, hideExternalMapLinks: true }), []);
-  // Transit stays an external link when there is no bottom 대중교통 button.
-  assert.deepEqual(placeCardExternalLinks({ ...base, hideExternalMapLinks: true, bottomTransitButton: false }), ["transit"]);
+  // MapLibre: spare external transit link stays hidden even without the bottom button.
+  assert.deepEqual(placeCardExternalLinks({ ...base, hideExternalMapLinks: true, bottomTransitButton: false }), []);
 });
 
 test("place card: other paths keep their buttons as before", () => {

@@ -24,6 +24,33 @@ export type CompactPinInput = {
 
 export type CompactRouteMode = "car" | "walk" | "course" | "preview";
 
+/** Admin MapLibre transit legs (from lib/mapTransit). */
+export type TransitMapSegmentInput = {
+  kind: "walk" | "bus" | "subway";
+  colour: string;
+  path: MapLatLng[];
+};
+
+export type TransitStopMarkerInput = {
+  lat: number;
+  lng: number;
+  colour: string;
+  role?: "board" | "alight";
+};
+
+export type TransitEndpointMarkerInput = {
+  lat: number;
+  lng: number;
+  label: "출발" | "도착";
+};
+
+export type TransitRouteDrawInput = {
+  segments: TransitMapSegmentInput[];
+  stops?: TransitStopMarkerInput[];
+  start?: TransitEndpointMarkerInput | null;
+  end?: TransitEndpointMarkerInput | null;
+};
+
 /** Result pin badge: a map POI icon, or the house badge for a 도로명주소 result. */
 export type SearchPinCategory = PoiCategoryId | "address";
 
@@ -82,6 +109,9 @@ export type CompactMapSurface = {
   setMyLocation: (lat: number, lng: number) => void;
   clearMyLocation: () => void;
   setRoute: (path: MapLatLng[], mode: CompactRouteMode) => void;
+  /** Multi-colour transit path (walk dashed) + stop/endpoint markers. No theme change. */
+  setTransitRoute: (input: TransitRouteDrawInput | TransitMapSegmentInput[]) => void;
+  clearTransitRoute: () => void;
   clearRoute: () => void;
   setFocusMarker: (pin: CompactPinInput) => void;
   clearFocusMarker: () => void;

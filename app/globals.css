@@ -8851,3 +8851,163 @@ select:focus-visible {
     0 0 3px rgba(0, 0, 0, 0.55),
     0 1px 2px rgba(0, 0, 0, 0.4);
 }
+
+/* Admin MapLibre in-app transit panel */
+.transitRoutePanel {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  padding: 12px 14px 14px;
+  font-family: inherit;
+}
+.transitRoutePanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.transitRoutePanelTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #111;
+}
+.transitRoutePanelClose {
+  border: 0;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  color: #666;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.transitRoutePanelHint {
+  margin: 8px 0;
+  font-size: 13px;
+  color: #666;
+}
+.transitRouteEmpty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0 4px;
+}
+.transitRouteEmpty p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #333;
+}
+.transitRouteWalkBtn {
+  align-self: flex-start;
+  border: 0;
+  border-radius: 10px;
+  background: #111;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 18px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.transitRouteList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.transitRouteItem {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  background: #fafafa;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.transitRouteItemTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 13px;
+  color: #444;
+  margin-bottom: 6px;
+}
+.transitRouteItemTop strong {
+  color: #111;
+  font-size: 15px;
+}
+.transitRouteItemBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.transitRouteBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+.transitRouteDetailMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: #444;
+}
+.transitRouteDetailMeta strong {
+  color: #111;
+  font-size: 15px;
+}
+.transitRouteBack {
+  border: 0;
+  background: transparent;
+  color: #3366cc;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 0 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.transitRouteSteps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.transitRouteStep {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #222;
+}
+.transitRouteWalkDot {
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  border: 2px dashed #8a939c;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}

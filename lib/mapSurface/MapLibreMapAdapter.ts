@@ -48,6 +48,8 @@ import type {
   DiscoverPinInput,
   ExpandedMapSurface,
   MapLatLng,
+  TransitMapSegmentInput,
+  TransitRouteDrawInput,
   SearchPinInput,
   SetCourseStopsOptions,
 } from "./types";
@@ -121,6 +123,15 @@ const ROUTE_ORIGIN_LAYER = "compact-route-origin-circle";
 const ROUTE_DEST_SOURCE = "compact-route-dest";
 const ROUTE_DEST_LAYER = "compact-route-dest-circle";
 const ROUTE_DEST_HALO_LAYER = "compact-route-dest-halo";
+/** Multi-colour transit legs (walk dashed / bus·subway solid). */
+const TRANSIT_SOURCE = "compact-transit-route";
+const TRANSIT_WALK_LAYER = "compact-transit-walk";
+const TRANSIT_RIDE_LAYER = "compact-transit-ride";
+const TRANSIT_STOPS_SOURCE = "compact-transit-stops";
+const TRANSIT_STOPS_LAYER = "compact-transit-stops-circle";
+const TRANSIT_ENDS_SOURCE = "compact-transit-ends";
+const TRANSIT_ENDS_CIRCLE_LAYER = "compact-transit-ends-circle";
+const TRANSIT_ENDS_LABEL_LAYER = "compact-transit-ends-label";
 const FOCUS_SOURCE = "compact-focus";
 const FOCUS_LAYER = "compact-focus-symbol";
 const MYLOC_SOURCE = "compact-myloc";
@@ -937,6 +948,94 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       },
     });
 
+    map.addSource(TRANSIT_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: TRANSIT_WALK_LAYER,
+      type: "line",
+      source: TRANSIT_SOURCE,
+      filter: ["==", ["get", "kind"], "walk"],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ["get", "colour"],
+        "line-width": 4,
+        "line-opacity": 0.95,
+        "line-dasharray": [0.4, 1.6],
+      },
+    });
+    map.addLayer({
+      id: TRANSIT_RIDE_LAYER,
+      type: "line",
+      source: TRANSIT_SOURCE,
+      filter: ["!=", ["get", "kind"], "walk"],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ["get", "colour"],
+        "line-width": 5,
+        "line-opacity": 1,
+      },
+    });
+    map.addSource(TRANSIT_STOPS_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: TRANSIT_STOPS_LAYER,
+      type: "circle",
+      source: TRANSIT_STOPS_SOURCE,
+      paint: {
+        "circle-radius": 5,
+        "circle-color": ["get", "colour"],
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ffffff",
+        "circle-opacity": 1,
+      },
+    });
+    map.addSource(TRANSIT_ENDS_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: TRANSIT_ENDS_CIRCLE_LAYER,
+      type: "circle",
+      source: TRANSIT_ENDS_SOURCE,
+      paint: {
+        "circle-radius": 7,
+        "circle-color": [
+          "match",
+          ["get", "label"],
+          "출발",
+          "#111111",
+          "도착",
+          "#2BB24C",
+          "#111111",
+        ],
+        "circle-stroke-width": 2.5,
+        "circle-stroke-color": "#ffffff",
+        "circle-opacity": 1,
+      },
+    });
+    map.addLayer({
+      id: TRANSIT_ENDS_LABEL_LAYER,
+      type: "symbol",
+      source: TRANSIT_ENDS_SOURCE,
+      layout: {
+        "text-field": ["get", "label"],
+        "text-size": 13,
+        "text-font": ["Noto Sans Bold"],
+        "text-offset": [0, 1.45],
+        "text-anchor": "top",
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+      },
+      paint: {
+        "text-color": "#111111",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2,
+      },
+    });
     map.addSource(ROUTE_DEST_SOURCE, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
@@ -1718,6 +1817,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   setRoute(path: MapLatLng[], mode: CompactRouteMode) {
     const map = this.map;
     if (!map?.getSource(ROUTE_SOURCE) || path.length < 2) return;
+    this.clearTransitRoute();
     this.applyRoutePaint(mode);
     (map.getSource(ROUTE_SOURCE) as GeoJSONSource).setData({
       type: "FeatureCollection",
@@ -1744,6 +1844,92 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         this.setRouteDest(end.lat, end.lng);
         this.clearFocusMarker();
       }
+    }
+  }
+
+  /**
+   * Multi-leg transit polyline on the normal basemap (no directions chrome / theme swap).
+   * Walk = gray dashed; bus/subway = line colour solid; board/alight dots; 출발/도착 labels.
+   */
+  setTransitRoute(input: TransitRouteDrawInput | TransitMapSegmentInput[]) {
+    const map = this.map;
+    if (!map?.getSource(TRANSIT_SOURCE)) return;
+    const draw: TransitRouteDrawInput = Array.isArray(input) ? { segments: input } : input;
+    const segments = draw.segments ?? [];
+    // Never flip to directions route theme for transit.
+    if (this.directionsChromeActive) {
+      this.setDirectionsChrome({ active: false, restoreCamera: false });
+    }
+    // Hide car/walk single-line route + default origin/dest circles (transit has its own).
+    if (map.getSource(ROUTE_SOURCE)) {
+      (map.getSource(ROUTE_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+    this.clearRouteOrigin();
+    this.clearRouteDest();
+    this.clearFocusMarker();
+
+    const features = segments
+      .filter((s) => s.path.length >= 2)
+      .map((s) => ({
+        type: "Feature" as const,
+        properties: { kind: s.kind, colour: s.colour },
+        geometry: {
+          type: "LineString" as const,
+          coordinates: s.path.map((p) => [p.lng, p.lat]),
+        },
+      }));
+    (map.getSource(TRANSIT_SOURCE) as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features,
+    });
+
+    if (map.getSource(TRANSIT_STOPS_SOURCE)) {
+      (map.getSource(TRANSIT_STOPS_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: (draw.stops ?? []).map((s) => ({
+          type: "Feature" as const,
+          properties: { colour: s.colour, role: s.role ?? "board" },
+          geometry: { type: "Point" as const, coordinates: [s.lng, s.lat] },
+        })),
+      });
+    }
+
+    const ends = [draw.start, draw.end].filter(
+      (e): e is NonNullable<typeof e> => e != null && Number.isFinite(e.lat) && Number.isFinite(e.lng),
+    );
+    if (map.getSource(TRANSIT_ENDS_SOURCE)) {
+      (map.getSource(TRANSIT_ENDS_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: ends.map((e) => ({
+          type: "Feature" as const,
+          properties: { label: e.label },
+          geometry: { type: "Point" as const, coordinates: [e.lng, e.lat] },
+        })),
+      });
+    }
+  }
+
+  clearTransitRoute() {
+    const map = this.map;
+    if (!map?.getSource(TRANSIT_SOURCE)) return;
+    (map.getSource(TRANSIT_SOURCE) as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: [],
+    });
+    if (map.getSource(TRANSIT_STOPS_SOURCE)) {
+      (map.getSource(TRANSIT_STOPS_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+    if (map.getSource(TRANSIT_ENDS_SOURCE)) {
+      (map.getSource(TRANSIT_ENDS_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: [],
+      });
     }
   }
 
@@ -1847,6 +2033,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       type: "FeatureCollection",
       features: [],
     });
+    this.clearTransitRoute();
     this.clearRouteOrigin();
     this.clearRouteDest();
     this.clearDistanceLabel();
