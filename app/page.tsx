@@ -254,6 +254,11 @@ import { FeedPostMedia } from "@/components/FeedPostCard";
 import { FeedPostLinkedCourse } from "@/components/FeedPostLinkedCourse";
 import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import DirectionsMiniCard from "@/components/DirectionsMiniCard";
+import TransitRoutePanel from "@/components/TransitRoutePanel";
+import {
+  transitRouteToMapSegments,
+  type TransitRoute,
+} from "@/lib/mapTransit";
 import { AddToListSheet } from "@/components/AddToListSheet";
 import { PlaceMemoSheet } from "@/components/PlaceMemoSheet";
 import { MyListsScreen } from "@/components/MyListsScreen";
@@ -2178,6 +2183,15 @@ function HomePageContent() {
     useState<DirectionsRouteThemeId>("dark");
   /** When false, show floating mini card instead of full place sheet (admin directions). */
   const [directionsSheetExpanded, setDirectionsSheetExpanded] = useState(false);
+  /** Admin MapLibre in-app transit (Kakao publictraffic — live only, never stored). */
+  const [transitUi, setTransitUi] = useState<{
+    loading: boolean;
+    error: string | null;
+    routes: TransitRoute[];
+    selectedIndex: number | null;
+    destLat: number;
+    destLng: number;
+  } | null>(null);
   const directionsPathRef = useRef<{ lat: number; lng: number }[] | null>(null);
   const directionsModeRef = useRef(directionsMode);
   directionsModeRef.current = directionsMode;
@@ -8640,6 +8654,153 @@ function HomePageContent() {
     }
   }, []);
 
+  /** Admin MapLibre: my location, else expanded map center. */
+  const resolveTransitOrigin = useCallback(async (): Promise<{ lat: number; lng: number } | null> => {
+    const mine = await resolveDirectionsOrigin();
+    if (mine) return mine;
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    const c = gl?.getCenter?.();
+    if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) return { lat: c.lat, lng: c.lng };
+    return null;
+  }, [resolveDirectionsOrigin]);
+
+  const openInAppTransit = useCallback(
+    async (destLat: number, destLng: number) => {
+      if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+        showToast("이 장소는 위치 정보가 없어 길찾기를 할 수 없어요", "info");
+        return;
+      }
+      setDirectionsSheetExpanded(false);
+      setTransitUi({
+        loading: true,
+        error: null,
+        routes: [],
+        selectedIndex: null,
+        destLat,
+        destLng,
+      });
+      try {
+        const origin = await resolveTransitOrigin();
+        if (!origin) {
+          setTransitUi({
+            loading: false,
+            error: "no_origin",
+            routes: [],
+            selectedIndex: null,
+            destLat,
+            destLng,
+          });
+          return;
+        }
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          setTransitUi({
+            loading: false,
+            error: "unauthorized",
+            routes: [],
+            selectedIndex: null,
+            destLat,
+            destLng,
+          });
+          return;
+        }
+        const res = await fetch("/api/admin/map-transit", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            startLat: origin.lat,
+            startLng: origin.lng,
+            endLat: destLat,
+            endLng: destLng,
+          }),
+          cache: "no-store",
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          status?: string;
+          error?: string;
+          routes?: TransitRoute[];
+        };
+        if (!res.ok) {
+          setTransitUi({
+            loading: false,
+            error: data.error || "fetch_failed",
+            routes: [],
+            selectedIndex: null,
+            destLat,
+            destLng,
+          });
+          return;
+        }
+        if (data.error || data.status !== "OK" || !Array.isArray(data.routes) || data.routes.length === 0) {
+          setTransitUi({
+            loading: false,
+            error: data.error || "no_results",
+            routes: [],
+            selectedIndex: null,
+            destLat,
+            destLng,
+          });
+          return;
+        }
+        setTransitUi({
+          loading: false,
+          error: null,
+          routes: data.routes,
+          selectedIndex: null,
+          destLat,
+          destLng,
+        });
+      } catch {
+        setTransitUi({
+          loading: false,
+          error: "fetch_failed",
+          routes: [],
+          selectedIndex: null,
+          destLat,
+          destLng,
+        });
+      }
+    },
+    [resolveTransitOrigin],
+  );
+
+  const selectTransitRoute = useCallback(
+    (index: number) => {
+      setTransitUi((prev) => {
+        if (!prev || !prev.routes[index]) return prev;
+        const route = prev.routes[index]!;
+        const segments = transitRouteToMapSegments(route);
+        const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+        if (gl && segments.length > 0) {
+          const pts = segments.flatMap((s) => s.path);
+          gl.setDirectionsChrome({
+            active: true,
+            routeTheme: directionsRouteTheme,
+            path: pts,
+            mode: "walk",
+            distanceKm: null,
+          });
+          gl.setTransitRoute(segments);
+          gl.fitPoints(pts, { top: 80, right: 40, bottom: 280, left: 40 });
+        }
+        return { ...prev, selectedIndex: index };
+      });
+    },
+    [directionsRouteTheme],
+  );
+
+  const backTransitToList = useCallback(() => {
+    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+    gl?.clearTransitRoute?.();
+    gl?.setDirectionsChrome({ active: false });
+    setTransitUi((prev) => (prev ? { ...prev, selectedIndex: null } : prev));
+  }, []);
+
   /** 장소 시트 → 전체화면 지도. 컴팩트에서 이동수단을 고른 뒤면 준비 후 자동 길찾기 */
   const expandPlaceSheetToFullscreen = useCallback(
     (placeData: PlaceSheetData, opts?: { runDirections?: boolean }) => {
@@ -12152,6 +12313,7 @@ function HomePageContent() {
     if (glExp) {
       glExp.setDirectionsChrome({ active: false });
       glExp.clearRoute();
+      glExp.clearTransitRoute?.();
       glExp.clearCourseStops();
     }
     if (routePolylineRef.current) { routePolylineRef.current.setMap(null); routePolylineRef.current = null; }
@@ -12167,6 +12329,7 @@ function HomePageContent() {
     setDirectionsSheetExpanded(false);
     setDirectionsInfo(null);
     setDirectionsChosen(false);
+    setTransitUi(null);
   };
 
   const applyWebCourseRoutePath = useCallback((
@@ -16349,9 +16512,15 @@ function HomePageContent() {
           setDirectionsMode(mode);
           drawRoute(parseFloat(selectedPlace.y), parseFloat(selectedPlace.x), mode);
         }}
-        onOpenTransit={() =>
-          openTransitInKakaoMap(selectedPlace.place_name, parseFloat(selectedPlace.y), parseFloat(selectedPlace.x))
-        }
+        onOpenTransit={() => {
+          const lat = parseFloat(selectedPlace.y);
+          const lng = parseFloat(selectedPlace.x);
+          if (expandedMapIsMapLibre) {
+            void openInAppTransit(lat, lng);
+            return;
+          }
+          openTransitInKakaoMap(selectedPlace.place_name, lat, lng);
+        }}
         onClearRoute={clearRoute}
       />
     );
@@ -19431,7 +19600,28 @@ function HomePageContent() {
                           onPanelMetrics={handleCourseNavPanelMetrics}
                         />
                       )}
-                      {adminDirectionsMiniCard &&
+                      {transitUi ? (
+                        <TransitRoutePanel
+                          loading={transitUi.loading}
+                          error={transitUi.error}
+                          routes={transitUi.routes}
+                          selectedIndex={transitUi.selectedIndex}
+                          onSelect={selectTransitRoute}
+                          onBackToList={backTransitToList}
+                          onClose={() => {
+                            clearRoute();
+                          }}
+                          onWalkFallback={() => {
+                            const lat = transitUi.destLat;
+                            const lng = transitUi.destLng;
+                            setTransitUi(null);
+                            setDirectionsMode("walk");
+                            void drawRoute(lat, lng, "walk");
+                          }}
+                        />
+                      ) : null}
+                      {!transitUi &&
+                      adminDirectionsMiniCard &&
                       selectedPlace &&
                       directionsInfo &&
                       !directionsSheetExpanded ? (
@@ -19448,13 +19638,13 @@ function HomePageContent() {
                           }}
                           onModeChange={(m) => {
                             if (m === "transit") {
-                              openTransitInKakaoMap(
-                                selectedPlace.place_name,
+                              void openInAppTransit(
                                 parseFloat(selectedPlace.y),
                                 parseFloat(selectedPlace.x),
                               );
                               return;
                             }
+                            setTransitUi(null);
                             setDirectionsMode(m);
                             void drawRoute(
                               parseFloat(selectedPlace.y),
@@ -19465,6 +19655,7 @@ function HomePageContent() {
                         />
                       ) : null}
                       {selectedPlace &&
+                        !transitUi &&
                         !(
                           adminDirectionsMiniCard &&
                           !directionsSheetExpanded

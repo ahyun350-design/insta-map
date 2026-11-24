@@ -40,6 +40,7 @@ import {
 } from "./kakaoZoom";
 import { haversineMeters } from "./tilePrefetch";
 import { fitSearchResultsOn, resultCameraPadding, searchFitPadding } from "./cameraPadding";
+import type { TransitMapSegment } from "@/lib/mapTransit";
 import type {
   CompactMapSurface,
   CompactPinInput,
@@ -121,6 +122,10 @@ const ROUTE_ORIGIN_LAYER = "compact-route-origin-circle";
 const ROUTE_DEST_SOURCE = "compact-route-dest";
 const ROUTE_DEST_LAYER = "compact-route-dest-circle";
 const ROUTE_DEST_HALO_LAYER = "compact-route-dest-halo";
+/** Multi-colour transit legs (walk dashed / bus·subway solid). */
+const TRANSIT_SOURCE = "compact-transit-route";
+const TRANSIT_WALK_LAYER = "compact-transit-walk";
+const TRANSIT_RIDE_LAYER = "compact-transit-ride";
 const FOCUS_SOURCE = "compact-focus";
 const FOCUS_LAYER = "compact-focus-symbol";
 const MYLOC_SOURCE = "compact-myloc";
@@ -937,6 +942,35 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       },
     });
 
+    map.addSource(TRANSIT_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: TRANSIT_WALK_LAYER,
+      type: "line",
+      source: TRANSIT_SOURCE,
+      filter: ["==", ["get", "kind"], "walk"],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ["get", "colour"],
+        "line-width": 4,
+        "line-opacity": 0.95,
+        "line-dasharray": [0.4, 1.6],
+      },
+    });
+    map.addLayer({
+      id: TRANSIT_RIDE_LAYER,
+      type: "line",
+      source: TRANSIT_SOURCE,
+      filter: ["!=", ["get", "kind"], "walk"],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": ["get", "colour"],
+        "line-width": 5,
+        "line-opacity": 1,
+      },
+    });
     map.addSource(ROUTE_DEST_SOURCE, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
@@ -1718,6 +1752,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   setRoute(path: MapLatLng[], mode: CompactRouteMode) {
     const map = this.map;
     if (!map?.getSource(ROUTE_SOURCE) || path.length < 2) return;
+    this.clearTransitRoute();
     this.applyRoutePaint(mode);
     (map.getSource(ROUTE_SOURCE) as GeoJSONSource).setData({
       type: "FeatureCollection",
@@ -1745,6 +1780,50 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         this.clearFocusMarker();
       }
     }
+  }
+
+  /** Multi-leg transit polyline (walk dashed, ride solid + line colour). */
+  setTransitRoute(segments: TransitMapSegment[]) {
+    const map = this.map;
+    if (!map?.getSource(TRANSIT_SOURCE)) return;
+    // Hide car/walk single-line route while transit legs are shown.
+    if (map.getSource(ROUTE_SOURCE)) {
+      (map.getSource(ROUTE_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+    const features = segments
+      .filter((s) => s.path.length >= 2)
+      .map((s) => ({
+        type: "Feature" as const,
+        properties: { kind: s.kind, colour: s.colour },
+        geometry: {
+          type: "LineString" as const,
+          coordinates: s.path.map((p) => [p.lng, p.lat]),
+        },
+      }));
+    (map.getSource(TRANSIT_SOURCE) as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features,
+    });
+    if (features.length > 0) {
+      const first = segments[0]!.path[0]!;
+      const lastSeg = segments[segments.length - 1]!;
+      const last = lastSeg.path[lastSeg.path.length - 1]!;
+      this.setRouteOrigin(first.lat, first.lng);
+      this.setRouteDest(last.lat, last.lng);
+      if (this.directionsChromeActive) this.clearFocusMarker();
+    }
+  }
+
+  clearTransitRoute() {
+    const map = this.map;
+    if (!map?.getSource(TRANSIT_SOURCE)) return;
+    (map.getSource(TRANSIT_SOURCE) as GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features: [],
+    });
   }
 
   private applyRoutePaint(mode: CompactRouteMode) {
@@ -1847,6 +1926,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       type: "FeatureCollection",
       features: [],
     });
+    this.clearTransitRoute();
     this.clearRouteOrigin();
     this.clearRouteDest();
     this.clearDistanceLabel();

@@ -11,7 +11,8 @@ export function placeCardExternalLinks(opts: {
 }): PlaceCardExternalLink[] {
   if (!(opts.showAdminMapExtras || opts.isMapTap) || !opts.hasCoordinates) return [];
   const links: PlaceCardExternalLink[] = opts.hideExternalMapLinks ? [] : ["kakao", "naver"];
-  if (!opts.bottomTransitButton) links.push("transit");
+  // MapLibre: in-app transit only — never the spare "대중교통 길찾기" external link.
+  if (!opts.hideExternalMapLinks && !opts.bottomTransitButton) links.push("transit");
   return links;
 }
 
