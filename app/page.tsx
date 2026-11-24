@@ -256,6 +256,10 @@ import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import DirectionsMiniCard from "@/components/DirectionsMiniCard";
 import TransitRoutePanel from "@/components/TransitRoutePanel";
 import {
+  transitBoardAlightMarkers,
+  transitCameraFitPadding,
+  transitFitPoints,
+  transitRouteEndpoints,
   transitRouteToMapSegments,
   type TransitRoute,
 } from "@/lib/mapTransit";
@@ -8769,35 +8773,32 @@ function HomePageContent() {
     [resolveTransitOrigin],
   );
 
-  const selectTransitRoute = useCallback(
-    (index: number) => {
-      setTransitUi((prev) => {
-        if (!prev || !prev.routes[index]) return prev;
-        const route = prev.routes[index]!;
-        const segments = transitRouteToMapSegments(route);
-        const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
-        if (gl && segments.length > 0) {
-          const pts = segments.flatMap((s) => s.path);
-          gl.setDirectionsChrome({
-            active: true,
-            routeTheme: directionsRouteTheme,
-            path: pts,
-            mode: "walk",
-            distanceKm: null,
-          });
-          gl.setTransitRoute(segments);
-          gl.fitPoints(pts, { top: 80, right: 40, bottom: 280, left: 40 });
-        }
-        return { ...prev, selectedIndex: index };
-      });
-    },
-    [directionsRouteTheme],
-  );
+  const selectTransitRoute = useCallback((index: number) => {
+    setTransitUi((prev) => {
+      if (!prev || !prev.routes[index]) return prev;
+      const route = prev.routes[index]!;
+      const segments = transitRouteToMapSegments(route);
+      const stops = transitBoardAlightMarkers(route);
+      const ends = transitRouteEndpoints(route);
+      const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
+      if (gl && segments.length > 0) {
+        // Keep the normal bright basemap — do not enable directions chrome/theme.
+        gl.setDirectionsChrome?.({ active: false, restoreCamera: false });
+        gl.setTransitRoute({
+          segments,
+          stops,
+          start: ends?.start ?? null,
+          end: ends?.end ?? null,
+        });
+        gl.fitPoints(transitFitPoints(route), transitCameraFitPadding());
+      }
+      return { ...prev, selectedIndex: index };
+    });
+  }, []);
 
   const backTransitToList = useCallback(() => {
     const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
     gl?.clearTransitRoute?.();
-    gl?.setDirectionsChrome({ active: false });
     setTransitUi((prev) => (prev ? { ...prev, selectedIndex: null } : prev));
   }, []);
 

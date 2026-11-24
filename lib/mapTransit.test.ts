@@ -10,6 +10,10 @@ import {
   mapTransitStatusToError,
   parseKakaoPublicTraffic,
   subwayRefFromVehicleName,
+  transitBoardAlightMarkers,
+  transitCameraFitPadding,
+  transitFitPoints,
+  transitRouteEndpoints,
   transitRouteToMapSegments,
   transitStepColour,
 } from "./mapTransit";
@@ -158,4 +162,30 @@ test("formatTransitStepLabel + map segments", () => {
   assert.equal(segs[1]!.kind, "subway");
   assert.equal(segs[1]!.colour, subwayRefColour("2"));
   assert.ok(TRANSIT_NO_RESULTS_MESSAGE.includes("도보"));
+});
+
+test("transitBoardAlightMarkers + endpoints from Kakao path points", () => {
+  const r = parseKakaoPublicTraffic(sampleOk);
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  const route = r.routes[0]!;
+  const stops = transitBoardAlightMarkers(route);
+  assert.equal(stops.length, 2);
+  assert.equal(stops[0]!.role, "board");
+  assert.equal(stops[1]!.role, "alight");
+  assert.equal(stops[0]!.lat, 37.5561);
+  assert.equal(stops[1]!.lat, 37.5567);
+  assert.equal(stops[0]!.colour, subwayRefColour("2"));
+  const ends = transitRouteEndpoints(route);
+  assert.ok(ends);
+  assert.equal(ends!.start.label, "출발");
+  assert.equal(ends!.end.label, "도착");
+  assert.equal(ends!.start.lat, 37.556);
+  assert.equal(ends!.end.lat, 37.557);
+  const pad = transitCameraFitPadding();
+  assert.ok(pad.bottom >= 280);
+  assert.ok(pad.bottom <= 380);
+  assert.equal(pad.top, 140);
+  const fit = transitFitPoints(route);
+  assert.ok(fit.length >= route.steps.reduce((n, s) => n + s.path.length, 0));
 });

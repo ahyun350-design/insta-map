@@ -288,6 +288,20 @@ export type TransitMapSegment = {
   path: Array<{ lat: number; lng: number }>;
 };
 
+export type TransitStopMarker = {
+  lat: number;
+  lng: number;
+  colour: string;
+  role: "board" | "alight";
+};
+
+export type TransitEndpointMarker = {
+  lat: number;
+  lng: number;
+  label: "출발" | "도착";
+};
+
+/** Kakao step.path points → map segments (walk dashed / ride solid). */
 export function transitRouteToMapSegments(route: TransitRoute): TransitMapSegment[] {
   return route.steps
     .filter((s) => s.path.length >= 2)
@@ -296,6 +310,65 @@ export function transitRouteToMapSegments(route: TransitRoute): TransitMapSegmen
       colour: s.colour,
       path: s.path,
     }));
+}
+
+/** Board/alight circles = first & last path point of each bus/subway step. */
+export function transitBoardAlightMarkers(route: TransitRoute): TransitStopMarker[] {
+  const out: TransitStopMarker[] = [];
+  for (const s of route.steps) {
+    if (s.type === "WALKING" || s.path.length < 1) continue;
+    const first = s.path[0]!;
+    const last = s.path[s.path.length - 1]!;
+    out.push({ lat: first.lat, lng: first.lng, colour: s.colour, role: "board" });
+    if (last.lat !== first.lat || last.lng !== first.lng) {
+      out.push({ lat: last.lat, lng: last.lng, colour: s.colour, role: "alight" });
+    }
+  }
+  return out;
+}
+
+export function transitRouteEndpoints(route: TransitRoute): {
+  start: TransitEndpointMarker;
+  end: TransitEndpointMarker;
+} | null {
+  const segs = transitRouteToMapSegments(route);
+  if (segs.length === 0) return null;
+  const startPt = segs[0]!.path[0]!;
+  const lastSeg = segs[segs.length - 1]!;
+  const endPt = lastSeg.path[lastSeg.path.length - 1]!;
+  return {
+    start: { lat: startPt.lat, lng: startPt.lng, label: "출발" },
+    end: { lat: endPt.lat, lng: endPt.lng, label: "도착" },
+  };
+}
+
+/** Padding so the full path sits above the bottom transit panel (~390×844). */
+export function transitCameraFitPadding(panelMaxPx = 360): {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+} {
+  // Top: search + chips; bottom: detail panel (not the full 52vh max).
+  const bottom = Math.min(Math.max(panelMaxPx, 280), 380);
+  return { top: 140, right: 40, bottom, left: 40 };
+}
+
+/** Points used to fit the camera (path + board/alight + endpoints). */
+export function transitFitPoints(route: TransitRoute): Array<{ lat: number; lng: number }> {
+  const pts: Array<{ lat: number; lng: number }> = [];
+  for (const s of transitRouteToMapSegments(route)) {
+    for (const p of s.path) pts.push(p);
+  }
+  for (const s of transitBoardAlightMarkers(route)) {
+    pts.push({ lat: s.lat, lng: s.lng });
+  }
+  const ends = transitRouteEndpoints(route);
+  if (ends) {
+    pts.push({ lat: ends.start.lat, lng: ends.start.lng });
+    pts.push({ lat: ends.end.lat, lng: ends.end.lng });
+  }
+  return pts;
 }
 
 export const TRANSIT_NO_RESULTS_MESSAGE =
