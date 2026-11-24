@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { placeCardExternalLinks } from "./placeCardLinks";
+import { placeCardExternalLinks, showKakaoHoursLink } from "./placeCardLinks";
 
 const base = { showAdminMapExtras: true, isMapTap: false, hasCoordinates: true, hideExternalMapLinks: false, bottomTransitButton: true };
 
@@ -16,4 +16,12 @@ test("place card: other paths keep their buttons as before", () => {
   assert.deepEqual(placeCardExternalLinks({ ...base, bottomTransitButton: false }), ["kakao", "naver", "transit"]);
   assert.deepEqual(placeCardExternalLinks({ ...base, showAdminMapExtras: false }), []);
   assert.deepEqual(placeCardExternalLinks({ ...base, hasCoordinates: false }), []);
+});
+
+test("place card: 카카오맵에서 영업시간 보기 — gone on the MapLibre card, kept elsewhere", () => {
+  const url = "https://place.map.kakao.com/1";
+  assert.equal(showKakaoHoursLink({ placeUrl: url, hideExternalMapLinks: true }), false);
+  assert.equal(showKakaoHoursLink({ placeUrl: url, hideExternalMapLinks: false }), true);
+  assert.equal(showKakaoHoursLink({ placeUrl: "", hideExternalMapLinks: false }), false);
+  assert.equal(showKakaoHoursLink({ placeUrl: undefined, hideExternalMapLinks: false }), false);
 });

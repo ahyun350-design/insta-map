@@ -239,6 +239,7 @@ test("exact address alone + its pin opens it; pin ↔ card by id; 재검색 only
   expect(want.includes(cardTitle) || cardTitle.includes(want), `pin opened its own row (${placePins.indexOf(visible[0]!)})`).toBe(true);
   // 4) MapLibre card: no 카카오맵 / 네이버 지도 buttons (대중교통 stays)
   await expect(card.getByRole("button", { name: /카카오맵에서 보기|네이버 지도에서 보기/ })).toHaveCount(0);
+  await expect(card.getByText("카카오맵에서 영업시간 보기")).toHaveCount(0);
   await expect(card.getByRole("button", { name: /대중교통/ })).toHaveCount(1);
   // 5) Picking moved the camera: no 재검색 button
   await page.waitForTimeout(2000);

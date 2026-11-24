@@ -14,3 +14,8 @@ export function placeCardExternalLinks(opts: {
   if (!opts.bottomTransitButton) links.push("transit");
   return links;
 }
+
+/** "카카오맵에서 영업시간 보기": cards with a Kakao place page, except the admin MapLibre card. */
+export function showKakaoHoursLink(opts: { placeUrl: string | null | undefined; hideExternalMapLinks: boolean }): boolean {
+  return Boolean(opts.placeUrl) && !opts.hideExternalMapLinks;
+}

@@ -21,7 +21,7 @@ import {
   type FeedPostCategory,
 } from "@/lib/feedPost";
 import { formatCategoryWithSubcategory } from "@/lib/kakaoSubcategory";
-import { placeCardExternalLinks } from "@/lib/placeCardLinks";
+import { placeCardExternalLinks, showKakaoHoursLink } from "@/lib/placeCardLinks";
 import {
   PlaceSheetPhotoViewer,
   type PlaceSheetPhotoViewerEntry,
@@ -73,7 +73,7 @@ type Props = {
   showAdminMapExtras?: boolean;
   /** Open Kakao/Naver URLs outside the WebView (same path as transit). */
   onOpenExternalMapUrl?: (url: string) => void;
-  /** Admin MapLibre expanded card: no "카카오맵에서 보기" / "네이버 지도에서 보기". */
+  /** Admin MapLibre expanded card: no "카카오맵에서 보기" / "네이버 지도에서 보기" / "영업시간 보기". */
   hideExternalMapLinks?: boolean;
 };
 
@@ -429,7 +429,7 @@ export function PlaceDetailSheet({
                 </a>
               </div>
             )}
-        {place.place_url && (
+        {showKakaoHoursLink({ placeUrl: place.place_url, hideExternalMapLinks }) && (
           <a className="placeDetailSheetKakaoBtn" href={place.place_url} target="_blank" rel="noreferrer">
             카카오맵에서 영업시간 보기
           </a>
