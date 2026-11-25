@@ -1027,8 +1027,21 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         "text-field": ["get", "label"],
         "text-size": 13,
         "text-font": ["Noto Sans Bold"],
-        "text-offset": [0, 1.45],
-        "text-anchor": "top",
+        // 출발 below / 도착 above — avoids overlap when endpoints are close.
+        "text-offset": [
+          "match",
+          ["get", "label"],
+          "도착",
+          ["literal", [0, -1.55]],
+          ["literal", [0, 1.45]],
+        ],
+        "text-anchor": [
+          "match",
+          ["get", "label"],
+          "도착",
+          "bottom",
+          "top",
+        ],
         "text-allow-overlap": true,
         "text-ignore-placement": true,
       },
@@ -1505,6 +1518,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   fitPoints(
     points: MapLatLng[],
     padding?: { top: number; right: number; bottom: number; left: number },
+    opts?: { minZoom?: number; maxZoom?: number },
   ) {
     const pad =
       padding ??
@@ -1513,16 +1527,83 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         : COMPACT_ROUTE_FIT_PADDING);
     const map = this.map;
     if (!map || points.length === 0) return;
+    const maxZoom = opts?.maxZoom ?? 16;
+    const minZoom = opts?.minZoom;
     if (points.length === 1) {
       map.jumpTo({
         center: [points[0]!.lng, points[0]!.lat],
-        zoom: kakaoLevelToMapLibreZoom(4),
+        zoom: Math.max(minZoom ?? 0, kakaoLevelToMapLibreZoom(4)),
       });
       return;
     }
     const bounds = new maplibregl.LngLatBounds();
-    for (const p of points) bounds.extend([p.lng, p.lat]);
-    map.fitBounds(bounds, { padding: pad, maxZoom: 16, duration: 0 });
+    let n = 0;
+    for (const p of points) {
+      if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
+      if (p.lat === 0 && p.lng === 0) continue;
+      bounds.extend([p.lng, p.lat]);
+      n += 1;
+    }
+    if (n === 0) return;
+    if (n === 1) {
+      const only = points.find(
+        (p) =>
+          Number.isFinite(p.lat) &&
+          Number.isFinite(p.lng) &&
+          !(p.lat === 0 && p.lng === 0),
+      );
+      if (!only) return;
+      map.jumpTo({
+        center: [only.lng, only.lat],
+        zoom: Math.max(minZoom ?? 0, kakaoLevelToMapLibreZoom(4)),
+      });
+      return;
+    }
+    const mapH = map.getContainer()?.clientHeight || 0;
+    const mapW = map.getContainer()?.clientWidth || 0;
+    // Honor large bottom pads (transit panel ~60–90%). Only leave ≥100px content window.
+    const minContent = 100;
+    const safePad = {
+      top: Math.max(0, Math.min(pad.top, Math.max(0, mapH - minContent))),
+      right: Math.max(0, Math.min(pad.right, Math.max(0, Math.floor(mapW * 0.35)))),
+      bottom: Math.max(0, Math.min(pad.bottom, Math.max(0, mapH - minContent))),
+      left: Math.max(0, Math.min(pad.left, Math.max(0, Math.floor(mapW * 0.35)))),
+    };
+    if (mapH > 0 && safePad.top + safePad.bottom > mapH - minContent) {
+      safePad.bottom = Math.max(0, mapH - safePad.top - minContent);
+    }
+    try {
+      const cam = map.cameraForBounds(bounds, { padding: safePad, maxZoom });
+      if (!cam || cam.center == null || cam.zoom == null) {
+        map.fitBounds(bounds, { padding: safePad, maxZoom, duration: 0 });
+        return;
+      }
+      let zoom = cam.zoom;
+      let center: maplibregl.LngLatLike = cam.center;
+      // Raise zoom when pathologically zoomed out, then re-anchor so the route
+      // sits in the padded (above-panel) band instead of the raw map center.
+      if (typeof minZoom === "number" && zoom < minZoom) {
+        zoom = minZoom;
+        const mid = bounds.getCenter();
+        map.jumpTo({ center: [mid.lng, mid.lat], zoom, bearing: 0, pitch: 0 });
+        // Visual mid of padded area is above the container mid when bottom pad is large.
+        const offsetY = (safePad.bottom - safePad.top) / 2;
+        const projected = map.project(mid);
+        center = map.unproject([projected.x, projected.y + offsetY]);
+      }
+      map.jumpTo({
+        center,
+        zoom,
+        bearing: 0,
+        pitch: 0,
+      });
+    } catch {
+      const c = bounds.getCenter();
+      map.jumpTo({
+        center: [c.lng, c.lat],
+        zoom: Math.max(minZoom ?? 12, 12),
+      });
+    }
   }
 
   setPins(pins: CompactPinInput[]) {

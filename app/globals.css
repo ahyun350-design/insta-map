@@ -8873,7 +8873,14 @@ select:focus-visible {
   overscroll-behavior: contain;
   touch-action: pan-y;
 }
-.transitRoutePanel.is-expanded {
+/* Detail: start at ~60vh; drag-up → 90vh */
+.transitRoutePanel.is-detail {
+  max-height: min(60vh, 520px);
+}
+.transitRoutePanel.is-detail.is-expanded {
+  max-height: min(90vh, 760px);
+}
+.transitRoutePanel.is-expanded:not(.is-detail) {
   max-height: min(88vh, 720px);
 }
 .transitRoutePanelHandle {
@@ -8948,6 +8955,15 @@ select:focus-visible {
 .transitRouteModeTab.is-active span,
 .transitRouteModeTab.is-active strong {
   color: #fff;
+}
+.transitRouteModeTab.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.transitRouteModeTab.is-disabled strong {
+  font-size: 10px;
+  font-weight: 600;
+  color: #888;
 }
 .transitRoutePanelClose {
   border: 0;
@@ -9056,19 +9072,20 @@ select:focus-visible {
 }
 .transitRouteRideLine {
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: #222;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px 0;
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
 }
 .transitRouteRidePart,
 .transitRouteRideAlight {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
+  display: inline;
+  white-space: normal;
+}
+.transitRouteRideSep {
+  white-space: pre;
 }
 .transitRouteRideBoard {
   font-weight: 600;
@@ -9121,24 +9138,65 @@ select:focus-visible {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 .transitRouteStep {
+  display: grid;
+  grid-template-columns: 42px 22px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: stretch;
+  min-height: 36px;
+}
+.transitRouteStepClock {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #888;
+  padding-top: 2px;
+  text-align: right;
+}
+.transitRouteStepRailCol {
+  position: relative;
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 13px;
-  line-height: 1.45;
-  color: #222;
+  flex-direction: column;
+  align-items: center;
+  width: 22px;
+}
+.transitRouteStepBody {
+  min-width: 0;
+  padding-bottom: 14px;
+}
+.transitRouteStepPrimary {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #111;
+}
+.transitRouteStepSecondary {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: #8a939c;
+}
+.transitRouteStep.is-muted .transitRouteStepBody {
+  padding-top: 1px;
 }
 .transitRouteWalkDot,
 .transitRoutePlaceDot,
-.transitRouteAlightDot {
-  width: 22px;
-  height: 22px;
-  border-radius: 11px;
+.transitRouteNodeDot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
   flex-shrink: 0;
   box-sizing: border-box;
+  z-index: 1;
+  background: #fff;
+  margin-top: 4px;
 }
 .transitRouteWalkDot {
   border: 2px dashed #8a939c;
@@ -9152,16 +9210,30 @@ select:focus-visible {
   background: #2bb24c;
   box-shadow: 0 0 0 1px #2bb24c;
 }
-.transitRouteAlightDot {
-  border: 2px solid #555;
+.transitRouteNodeDot {
+  border: 2.5px solid #555;
   background: #fff;
 }
-.transitRouteRideRail {
+.transitRouteRideRailPad {
   width: 6px;
-  min-height: 22px;
-  border-radius: 3px;
-  flex-shrink: 0;
+  height: 14px;
+  margin-top: 4px;
+}
+.transitRouteVertRail {
+  flex: 1;
+  width: 4px;
+  min-height: 18px;
   margin-top: 2px;
+  border-radius: 2px;
+}
+.transitRouteVertRail.is-ride {
+  background: #888;
+}
+.transitRouteVertRail.is-walk {
+  width: 0;
+  border-left: 2px dashed #8a939c;
+  background: transparent;
+  margin-left: 0;
 }
 .transitRouteRideBody {
   flex: 1;
@@ -9171,16 +9243,21 @@ select:focus-visible {
   border: 0;
   background: transparent;
   padding: 0;
-  font: inherit;
-  color: #222;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 400;
+  color: #8a939c;
   cursor: pointer;
   text-align: left;
+  font-family: inherit;
 }
 .transitRouteStopList {
+  list-style: none;
   margin: 6px 0 0;
-  padding: 0 0 0 12px;
-  color: #444;
-  font-size: 12px;
-  line-height: 1.5;
+  padding: 0;
+  color: #8a939c;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.transitRouteStopList li {
+  padding: 1px 0;
 }

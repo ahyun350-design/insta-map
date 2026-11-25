@@ -159,17 +159,72 @@ function asStepType(raw: unknown): TransitStepType | null {
   return null;
 }
 
+/** Korea mainland+islands envelope used to drop 0/NaN/swapped garbage points. */
+export function isValidKoreaLatLng(lat: number, lng: number): boolean {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat !== 0 &&
+    lng !== 0 &&
+    lat >= 33 &&
+    lat <= 39.5 &&
+    lng >= 124 &&
+    lng <= 132.5
+  );
+}
+
+/**
+ * Kakao path pairs are [lng, lat]. If values look swapped ([lat, lng]), correct them.
+ * Drops 0 / NaN / non-Korea points so fitBounds cannot zoom to the whole country.
+ */
+export function normalizeKakaoPathPair(
+  a: number,
+  b: number,
+): { lat: number; lng: number } | null {
+  const x = Number(a);
+  const y = Number(b);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x === 0 || y === 0) return null;
+  // Preferred: [lng, lat]
+  if (isValidKoreaLatLng(y, x)) return { lat: y, lng: x };
+  // Swapped: [lat, lng]
+  if (isValidKoreaLatLng(x, y)) return { lat: x, lng: y };
+  return null;
+}
+
 function parsePathPoints(points: unknown): Array<{ lat: number; lng: number }> {
   if (!Array.isArray(points)) return [];
   const out: Array<{ lat: number; lng: number }> = [];
   for (const p of points) {
     if (!Array.isArray(p) || p.length < 2) continue;
-    const lng = Number(p[0]);
-    const lat = Number(p[1]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    out.push({ lat, lng });
+    const pt = normalizeKakaoPathPair(Number(p[0]), Number(p[1]));
+    if (pt) out.push(pt);
   }
   return out;
+}
+
+export function distanceMetersBetween(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+/** Subway stop label: ensure trailing 역 when missing. */
+export function formatTransitStopLabel(
+  name: string,
+  mode?: "BUS" | "SUBWAY" | "WALKING" | string,
+): string {
+  const n = String(name ?? "").trim();
+  if (!n) return "";
+  if (mode === "SUBWAY" && !/역$/u.test(n) && !/\(/u.test(n)) return `${n}역`;
+  return n;
 }
 
 function parseStep(raw: KakaoStep): TransitStep | null {
@@ -359,17 +414,20 @@ export function transitCameraFitPadding(
   mapHeightPx?: number,
 ): { top: number; right: number; bottom: number; left: number } {
   const edge = TRANSIT_FIT_EDGE_PAD_PX;
-  const panel = Math.max(0, Math.round(Number(panelHeightPx) || 0));
+  let panel = Math.max(0, Math.round(Number(panelHeightPx) || 0));
+  if (typeof mapHeightPx === "number" && mapHeightPx > 0) {
+    // Cap panel so ≥220px of map stays for the route (avoids country-scale fit).
+    panel = Math.min(panel, Math.max(0, Math.floor(mapHeightPx - edge - 220)));
+  }
   let bottom = panel + edge;
   if (typeof mapHeightPx === "number" && mapHeightPx > 0) {
-    // Leave at least 80px of map for the route after top + bottom padding.
-    const maxBottom = Math.max(edge, Math.floor(mapHeightPx - edge - 80));
+    const maxBottom = Math.max(edge, Math.floor(mapHeightPx - edge - 220));
     bottom = Math.min(bottom, maxBottom);
   }
   return { top: edge, right: edge, bottom, left: edge };
 }
 
-/** Points used to fit the camera (path + board/alight + endpoints). */
+/** Points used to fit the camera (path + board/alight + endpoints) — Korea-valid only. */
 export function transitFitPoints(route: TransitRoute): Array<{ lat: number; lng: number }> {
   const pts: Array<{ lat: number; lng: number }> = [];
   for (const s of transitRouteToMapSegments(route)) {
@@ -383,7 +441,103 @@ export function transitFitPoints(route: TransitRoute): Array<{ lat: number; lng:
     pts.push({ lat: ends.start.lat, lng: ends.start.lng });
     pts.push({ lat: ends.end.lat, lng: ends.end.lng });
   }
-  return pts;
+  return pts.filter((p) => isValidKoreaLatLng(p.lat, p.lng));
+}
+
+/** Minimum MapLibre zoom after transit fit (street/neighbourhood, not country). */
+export const TRANSIT_FIT_MIN_ZOOM = 12;
+
+/**
+ * Prepend/append walking legs when Kakao omits origin→first board / last alight→dest.
+ * Estimates distance/time from coords (live path not stored).
+ */
+export function augmentTransitRouteWithEndpointWalks(
+  route: TransitRoute,
+  opts: {
+    origin: { lat: number; lng: number } | null;
+    dest: { lat: number; lng: number } | null;
+  },
+): TransitRoute {
+  let steps = route.steps.map((s) => ({
+    ...s,
+    path: s.path.filter((p) => isValidKoreaLatLng(p.lat, p.lng)),
+    stops: [...s.stops],
+    vehicles: [...s.vehicles],
+  }));
+  let addedSec = 0;
+
+  const firstPt = steps.find((s) => s.path.length > 0)?.path[0] ?? null;
+  const origin = opts.origin && isValidKoreaLatLng(opts.origin.lat, opts.origin.lng) ? opts.origin : null;
+  if (origin && firstPt) {
+    const d = distanceMetersBetween(origin, firstPt);
+    const nearWalk =
+      steps[0]?.type === "WALKING" &&
+      steps[0].path[0] &&
+      distanceMetersBetween(origin, steps[0].path[0]) < 80;
+    if (d > 50 && !nearWalk) {
+      const firstRide = steps.find((s) => s.type !== "WALKING");
+      const boardName = formatTransitStopLabel(
+        firstRide?.stops[0]?.name ?? "",
+        firstRide?.type,
+      );
+      const timeSec = Math.max(60, Math.round(d / 1.25));
+      addedSec += timeSec;
+      steps = [
+        {
+          type: "WALKING",
+          timeSec,
+          distanceM: Math.round(d),
+          guidance: boardName ? `${boardName}까지 도보` : "출발지까지 도보",
+          stops: boardName
+            ? [{ name: "내 위치" }, { name: boardName }]
+            : [{ name: "내 위치" }],
+          vehicles: [],
+          path: [origin, firstPt],
+          colour: WALK_LINE_COLOUR,
+        },
+        ...steps,
+      ];
+    }
+  }
+
+  const lastStep = [...steps].reverse().find((s) => s.path.length > 0);
+  const lastPt = lastStep?.path[lastStep.path.length - 1] ?? null;
+  const dest = opts.dest && isValidKoreaLatLng(opts.dest.lat, opts.dest.lng) ? opts.dest : null;
+  if (dest && lastPt) {
+    const d = distanceMetersBetween(lastPt, dest);
+    const last = steps[steps.length - 1];
+    const nearWalk =
+      last?.type === "WALKING" &&
+      last.path[last.path.length - 1] &&
+      distanceMetersBetween(last.path[last.path.length - 1]!, dest) < 80;
+    if (d > 50 && !nearWalk) {
+      const timeSec = Math.max(60, Math.round(d / 1.25));
+      addedSec += timeSec;
+      steps = [
+        ...steps,
+        {
+          type: "WALKING",
+          timeSec,
+          distanceM: Math.round(d),
+          guidance: "도착지까지 도보",
+          stops: [{ name: "하차" }, { name: "도착" }],
+          vehicles: [],
+          path: [lastPt, dest],
+          colour: WALK_LINE_COLOUR,
+        },
+      ];
+    }
+  }
+
+  const walkTimeSec = steps
+    .filter((s) => s.type === "WALKING")
+    .reduce((sum, s) => sum + s.timeSec, 0);
+  return {
+    ...route,
+    steps,
+    walkTimeSec,
+    totalTimeSec: Math.max(route.totalTimeSec, route.totalTimeSec + addedSec),
+  };
 }
 
 export const TRANSIT_NO_RESULTS_MESSAGE =
@@ -505,7 +659,14 @@ export function transitRideSummaryParts(route: TransitRoute): TransitRideSummary
 }
 
 export type TransitDetailRow =
-  | { id: string; kind: "place"; role: "origin" | "dest"; label: string }
+  | {
+      id: string;
+      kind: "place";
+      role: "origin" | "dest";
+      label: string;
+      atSec: number;
+      emphasis: true;
+    }
   | {
       id: string;
       kind: "walk";
@@ -513,15 +674,22 @@ export type TransitDetailRow =
       distanceM: number;
       exit: string | null;
       toLabel: string;
+      atSec: number;
+      emphasis: false;
+      rail: "walk";
     }
   | {
       id: string;
       kind: "board";
       line: string;
       colour: string;
-      stop: string;
+      /** e.g. "망원역 승차" — line name not repeated. */
+      stopLabel: string;
       bound: string | null;
       mode: "BUS" | "SUBWAY";
+      atSec: number;
+      emphasis: true;
+      rail: "ride";
     }
   | {
       id: string;
@@ -529,20 +697,52 @@ export type TransitDetailRow =
       minutes: number;
       hopCount: number;
       hopLabel: string;
-      stops: string[];
+      /** Intermediate stops only (board/alight excluded). */
+      middleStops: string[];
       colour: string;
+      atSec: number;
+      emphasis: false;
+      rail: "ride";
     }
-  | { id: string; kind: "alight"; stop: string };
+  | {
+      id: string;
+      kind: "alight";
+      stopLabel: string;
+      colour: string;
+      atSec: number;
+      emphasis: true;
+      rail: "ride";
+    };
+
+export function formatClockFromOffset(
+  offsetSec: number,
+  now: Date = new Date(),
+): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const d = new Date(now.getTime() + Math.max(0, offsetSec) * 1000);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export function buildTransitDetailRows(
   route: TransitRoute,
   opts: { originLabel: string; destLabel: string },
 ): TransitDetailRow[] {
   const rows: TransitDetailRow[] = [];
-  rows.push({ id: "origin", kind: "place", role: "origin", label: opts.originLabel });
+  let cursor = 0;
+  rows.push({
+    id: "origin",
+    kind: "place",
+    role: "origin",
+    label: opts.originLabel,
+    atSec: 0,
+    emphasis: true,
+  });
   route.steps.forEach((s, i) => {
     if (s.type === "WALKING") {
-      const toLabel = s.stops[s.stops.length - 1]?.name?.trim() || "";
+      const toLabel = formatTransitStopLabel(
+        s.stops[s.stops.length - 1]?.name?.trim() || "",
+        "SUBWAY",
+      );
       rows.push({
         id: `walk-${i}`,
         kind: "walk",
@@ -550,21 +750,34 @@ export function buildTransitDetailRows(
         distanceM: s.distanceM,
         exit: extractTransitExitFromGuidance(s.guidance),
         toLabel,
+        atSec: cursor,
+        emphasis: false,
+        rail: "walk",
       });
+      cursor += Math.max(0, s.timeSec);
       return;
     }
-    const line = formatTransitBadgeName(s.vehicles[0]?.name || (s.type === "BUS" ? "버스" : "지하철"));
-    const board = s.stops[0]?.name?.trim() || "";
-    const alight = s.stops.length > 1 ? s.stops[s.stops.length - 1]!.name.trim() : "";
+    const line = formatTransitBadgeName(
+      s.vehicles[0]?.name || (s.type === "BUS" ? "버스" : "지하철"),
+    );
+    const boardRaw = s.stops[0]?.name?.trim() || "";
+    const alightRaw =
+      s.stops.length > 1 ? s.stops[s.stops.length - 1]!.name.trim() : "";
+    const board = formatTransitStopLabel(boardRaw, s.type);
+    const alight = formatTransitStopLabel(alightRaw, s.type);
     const hopCount = Math.max(0, s.stops.length - 1);
+    const middleStops = s.stops.slice(1, -1).map((x) => x.name);
     rows.push({
       id: `board-${i}`,
       kind: "board",
       line,
       colour: s.colour,
-      stop: board,
+      stopLabel: board ? `${board} 승차` : "승차",
       bound: transitStepBoundLabel(s),
       mode: s.type,
+      atSec: cursor,
+      emphasis: true,
+      rail: "ride",
     });
     rows.push({
       id: `ride-${i}`,
@@ -572,14 +785,33 @@ export function buildTransitDetailRows(
       minutes: formatTransitMinutes(s.timeSec),
       hopCount,
       hopLabel: s.type === "SUBWAY" ? `${hopCount}개 역` : `${hopCount}개 정류장`,
-      stops: s.stops.map((x) => x.name),
+      middleStops,
       colour: s.colour,
+      atSec: cursor,
+      emphasis: false,
+      rail: "ride",
     });
+    cursor += Math.max(0, s.timeSec);
     if (alight) {
-      rows.push({ id: `alight-${i}`, kind: "alight", stop: alight });
+      rows.push({
+        id: `alight-${i}`,
+        kind: "alight",
+        stopLabel: `${alight} 하차`,
+        colour: s.colour,
+        atSec: cursor,
+        emphasis: true,
+        rail: "ride",
+      });
     }
   });
-  rows.push({ id: "dest", kind: "place", role: "dest", label: opts.destLabel });
+  rows.push({
+    id: "dest",
+    kind: "place",
+    role: "dest",
+    label: opts.destLabel,
+    atSec: Math.max(cursor, route.totalTimeSec),
+    emphasis: true,
+  });
   return rows;
 }
 

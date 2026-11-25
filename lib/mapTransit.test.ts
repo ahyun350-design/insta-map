@@ -4,14 +4,18 @@ import {
   BUS_LINE_COLOUR,
   TRANSIT_NO_RESULTS_MESSAGE,
   WALK_LINE_COLOUR,
+  augmentTransitRouteWithEndpointWalks,
   buildTransitDetailRows,
   extractTransitExitFromGuidance,
   formatTransitBadgeName,
   formatTransitMinutes,
+  formatTransitStopLabel,
   formatTransitStepLabel,
   groupTransitVehicles,
+  isValidKoreaLatLng,
   mapKakaoHttpError,
   mapTransitStatusToError,
+  normalizeKakaoPathPair,
   parseKakaoPublicTraffic,
   subwayRefFromVehicleName,
   transitBoardAlightMarkers,
@@ -197,7 +201,8 @@ test("transitBoardAlightMarkers + endpoints from Kakao path points", () => {
   assert.equal(pad.bottom, 260); // 220 panel + 40
   const padClamped = transitCameraFitPadding(500, 400);
   assert.equal(padClamped.top, 40);
-  assert.ok(padClamped.bottom <= 400 - 40 - 80);
+  // Reserve ≥220px map above padding.
+  assert.ok(padClamped.bottom <= 400 - 40 - 220);
   const fit = transitFitPoints(route);
   assert.ok(fit.length >= route.steps.reduce((n, s) => n + s.path.length, 0));
 });
@@ -345,11 +350,103 @@ test("extractTransitExitFromGuidance + group alts + timeline + summary", () => {
   assert.equal(detail[0]!.kind, "place");
   assert.ok(detail.some((r) => r.kind === "walk" && r.exit === "9번 출구"));
   assert.ok(detail.some((r) => r.kind === "ride" && r.hopLabel.includes("역")));
-  assert.ok(detail.some((r) => r.kind === "board" && r.bound?.includes("합정")));
+  const board = detail.find((r) => r.kind === "board");
+  assert.ok(board && board.kind === "board");
+  if (board && board.kind === "board") {
+    assert.match(board.stopLabel, /망원역 승차/);
+    assert.equal(board.stopLabel.includes("6호선"), false);
+    assert.match(board.bound ?? "", /합정/);
+  }
+  const ride = detail.find((r) => r.kind === "ride" && r.middleStops.length > 0);
+  assert.ok(ride && ride.kind === "ride");
+  if (ride && ride.kind === "ride") {
+    assert.deepEqual(ride.middleStops, ["합정"]);
+    assert.equal(ride.middleStops.includes("망원"), false);
+  }
   assert.equal(detail[detail.length - 1]!.kind, "place");
 
   const labels = transitLineLabels(route);
   assert.equal(labels.length, 2);
   assert.match(labels[0]!.text, /6호선/);
   assert.match(labels[1]!.text, /151/);
+});
+
+test("normalizeKakaoPathPair + Korea filter + augment endpoint walks", () => {
+  assert.deepEqual(normalizeKakaoPathPair(126.91, 37.556), { lat: 37.556, lng: 126.91 });
+  assert.deepEqual(normalizeKakaoPathPair(37.556, 126.91), { lat: 37.556, lng: 126.91 });
+  assert.equal(normalizeKakaoPathPair(0, 0), null);
+  assert.equal(normalizeKakaoPathPair(NaN, 126.91), null);
+  assert.equal(isValidKoreaLatLng(37.5, 127), true);
+  assert.equal(isValidKoreaLatLng(0, 0), false);
+  assert.equal(formatTransitStopLabel("망원", "SUBWAY"), "망원역");
+
+  const swapped = parseKakaoPublicTraffic({
+    status: "OK",
+    routes: [
+      {
+        properties: { type: "SUBWAY", totalTime: 600, transfers: 0, fare: { value: 1400 } },
+        steps: [
+          {
+            properties: {
+              type: "SUBWAY",
+              time: 600,
+              distance: 1000,
+              stops: [{ name: "망원" }, { name: "합정" }],
+              vehicles: [{ type: "일반", name: "6호선" }],
+            },
+            // Intentionally swapped pairs — parser must correct
+            path: { points: [[37.556, 126.91], [37.55, 126.92]] },
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(swapped.ok, true);
+  if (!swapped.ok) return;
+  const path0 = swapped.routes[0]!.steps[0]!.path[0]!;
+  assert.ok(isValidKoreaLatLng(path0.lat, path0.lng));
+  assert.ok(path0.lat > 33 && path0.lat < 39);
+  assert.ok(path0.lng > 124);
+
+  const withJunk = parseKakaoPublicTraffic({
+    status: "OK",
+    routes: [
+      {
+        properties: { type: "SUBWAY", totalTime: 600, transfers: 0, fare: { value: 1400 } },
+        steps: [
+          {
+            properties: {
+              type: "SUBWAY",
+              time: 600,
+              distance: 1000,
+              stops: [{ name: "망원" }, { name: "합정" }],
+              vehicles: [{ type: "일반", name: "6호선" }],
+            },
+            path: {
+              points: [
+                [126.91, 37.556],
+                [0, 0],
+                [126.92, 37.55],
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(withJunk.ok, true);
+  if (!withJunk.ok) return;
+  assert.equal(withJunk.routes[0]!.steps[0]!.path.length, 2);
+  const fit = transitFitPoints(withJunk.routes[0]!);
+  assert.ok(fit.every((p) => isValidKoreaLatLng(p.lat, p.lng)));
+  assert.equal(fit.some((p) => p.lat === 0), false);
+
+  const bare = withJunk.routes[0]!;
+  const origin = { lat: 37.557, lng: 126.909 };
+  const dest = { lat: 37.51765, lng: 126.96005 };
+  const aug = augmentTransitRouteWithEndpointWalks(bare, { origin, dest });
+  assert.equal(aug.steps[0]!.type, "WALKING");
+  assert.equal(aug.steps[aug.steps.length - 1]!.type, "WALKING");
+  assert.ok(aug.steps[0]!.distanceM > 50);
+  assert.ok(transitTimelineSegments(aug).some((s) => s.kind === "walk"));
 });

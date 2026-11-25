@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import {
   TRANSIT_NO_RESULTS_MESSAGE,
   buildTransitDetailRows,
+  formatClockFromOffset,
   formatTransitBadgeName,
   formatTransitMinutes,
   transitDepartureArrivalLabel,
@@ -21,7 +22,12 @@ type Props = {
   selectedIndex: number | null;
   originLabel?: string;
   destLabel?: string;
-  modeTimes?: { transit: number | null; car: number | null; walk: number | null };
+  modeTimes?: {
+    transit: number | null;
+    car: number | null;
+    walk: number | null;
+    walkFailed?: boolean;
+  };
   onSelect: (index: number) => void;
   onBackToList: () => void;
   onClose: () => void;
@@ -69,9 +75,12 @@ export default function TransitRoutePanel({
       (routes.length === 0 && !error));
 
   const selected = selectedIndex != null ? routes[selectedIndex] : null;
+  const inDetail = selected != null;
   const transitMin =
     modeTimes?.transit ??
     (routes[0] ? formatTransitMinutes(routes[0].totalTimeSec) : null);
+  const walkFailed = Boolean(modeTimes?.walkFailed);
+  const walkMin = modeTimes?.walk ?? null;
 
   useEffect(() => {
     const el = rootRef.current;
@@ -88,6 +97,8 @@ export default function TransitRoutePanel({
 
   useEffect(() => {
     setOpenStopIds({});
+    // Detail opens at ~60% height (not fully collapsed).
+    setSheetExpanded(false);
   }, [selectedIndex]);
 
   const onHandlePointerDown = (e: ReactPointerEvent) => {
@@ -109,12 +120,21 @@ export default function TransitRoutePanel({
     ? buildTransitDetailRows(selected, { originLabel, destLabel })
     : [];
 
+  const panelClass = [
+    "transitRoutePanel",
+    inDetail ? "is-detail" : "",
+    sheetExpanded ? "is-expanded" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div
       ref={rootRef}
-      className={`transitRoutePanel${sheetExpanded ? " is-expanded" : ""}`}
+      className={panelClass}
       data-testid="transit-route-panel"
       data-expanded={sheetExpanded ? "1" : "0"}
+      data-detail={inDetail ? "1" : "0"}
     >
       <div
         className="transitRoutePanelHandle"
@@ -134,7 +154,9 @@ export default function TransitRoutePanel({
           <span className="transitRouteOdArrow" aria-hidden>
             →
           </span>
-          <span className="transitRouteOdTo">{destLabel}</span>
+          <span className="transitRouteOdTo" data-testid="transit-dest-label">
+            {destLabel}
+          </span>
           <button type="button" className="transitRoutePanelClose" aria-label="닫기" onClick={onClose}>
             ×
           </button>
@@ -142,28 +164,48 @@ export default function TransitRoutePanel({
         <div className="transitRouteModeTabs" role="tablist" aria-label="이동수단">
           {(
             [
-              { id: "transit" as const, label: "대중교통", min: transitMin },
-              { id: "car" as const, label: "자동차", min: modeTimes?.car ?? null },
-              { id: "walk" as const, label: "도보", min: modeTimes?.walk ?? null },
+              { id: "transit" as const, label: "대중교통", min: transitMin, disabled: false },
+              { id: "car" as const, label: "자동차", min: modeTimes?.car ?? null, disabled: false },
+              {
+                id: "walk" as const,
+                label: "도보",
+                min: walkMin,
+                disabled: walkFailed,
+              },
             ] as const
-          ).map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              role="tab"
-              aria-selected={m.id === "transit"}
-              className={
-                m.id === "transit"
-                  ? "transitRouteModeTab is-active"
-                  : "transitRouteModeTab"
-              }
-              data-testid={`transit-mode-${m.id}`}
-              onClick={() => onModeChange?.(m.id)}
-            >
-              <span>{m.label}</span>
-              <strong>{m.min != null ? `${m.min}분` : "—"}</strong>
-            </button>
-          ))}
+          ).map((m) => {
+            const walkEmpty = m.id === "walk" && walkFailed;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="tab"
+                aria-selected={m.id === "transit"}
+                disabled={m.disabled}
+                className={
+                  m.id === "transit"
+                    ? "transitRouteModeTab is-active"
+                    : m.disabled
+                      ? "transitRouteModeTab is-disabled"
+                      : "transitRouteModeTab"
+                }
+                data-testid={`transit-mode-${m.id}`}
+                onClick={() => {
+                  if (m.disabled) return;
+                  onModeChange?.(m.id);
+                }}
+              >
+                <span>{m.label}</span>
+                <strong>
+                  {walkEmpty
+                    ? "도보 정보 없음"
+                    : m.min != null
+                      ? `${m.min}분`
+                      : "—"}
+                </strong>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -233,16 +275,19 @@ export default function TransitRoutePanel({
                     {summary.map((p, pi) =>
                       p.kind === "alight" ? (
                         <span key={pi} className="transitRouteRideAlight">
-                          {pi > 0 ? " → " : null}하차 {p.stop}
+                          {pi > 0 ? <span className="transitRouteRideSep"> → </span> : null}
+                          하차 {p.stop}
                         </span>
                       ) : (
                         <span key={pi} className="transitRouteRidePart">
-                          {pi > 0 ? " → " : null}
+                          {pi > 0 ? <span className="transitRouteRideSep"> → </span> : null}
                           <LineBadge
                             name={p.typeLabel && p.alts ? p.typeLabel : p.badge}
                             colour={p.colour}
                           />
-                          {p.board ? <span className="transitRouteRideBoard"> {p.board}</span> : null}
+                          {p.board ? (
+                            <span className="transitRouteRideBoard"> {p.board}</span>
+                          ) : null}
                           {p.alts ? (
                             <span className="transitRouteRideAlts"> {p.alts}</span>
                           ) : null}
@@ -279,77 +324,114 @@ export default function TransitRoutePanel({
             ) : null}
           </p>
           <ol className="transitRouteSteps" data-testid="transit-detail-steps">
-            {detailRows.map((row) => {
-              if (row.kind === "place") {
-                return (
-                  <li key={row.id} className="transitRouteStep is-place">
-                    <span className="transitRoutePlaceDot" data-role={row.role} />
-                    <span>{row.label}</span>
-                  </li>
-                );
-              }
-              if (row.kind === "walk") {
-                const destBit = row.toLabel
-                  ? row.exit
-                    ? `${row.toLabel} ${row.exit}까지 `
-                    : `${row.toLabel}까지 `
-                  : row.exit
-                    ? `${row.exit}까지 `
-                    : "";
-                return (
-                  <li key={row.id} className="transitRouteStep is-walk">
-                    <span className="transitRouteWalkDot" aria-hidden />
-                    <span>
-                      도보 {destBit}
-                      {row.distanceM > 0 ? `${row.distanceM}m·` : ""}
-                      {row.minutes}분
-                    </span>
-                  </li>
-                );
-              }
-              if (row.kind === "board") {
-                return (
-                  <li key={row.id} className="transitRouteStep is-board">
-                    <LineBadge name={row.line} colour={row.colour} />
-                    <span>
-                      {row.line} {row.stop ? `${row.stop} 승차` : "승차"}
-                      {row.bound ? `, ${row.bound}` : ""}
-                    </span>
-                  </li>
-                );
-              }
-              if (row.kind === "ride") {
-                const open = !!openStopIds[row.id];
-                return (
-                  <li key={row.id} className="transitRouteStep is-ride">
-                    <span className="transitRouteRideRail" style={{ background: row.colour }} />
-                    <div className="transitRouteRideBody">
-                      <button
-                        type="button"
-                        className="transitRouteRideToggle"
-                        data-testid="transit-stops-toggle"
-                        aria-expanded={open}
-                        onClick={() =>
-                          setOpenStopIds((prev) => ({ ...prev, [row.id]: !prev[row.id] }))
-                        }
-                      >
-                        {row.hopLabel} 이동·{row.minutes}분 {open ? "▾" : "▸"}
-                      </button>
-                      {open ? (
-                        <ol className="transitRouteStopList" data-testid="transit-stop-list">
-                          {row.stops.map((n, si) => (
-                            <li key={`${row.id}-${si}`}>{n}</li>
-                          ))}
-                        </ol>
-                      ) : null}
-                    </div>
-                  </li>
-                );
-              }
+            {detailRows.map((row, idx) => {
+              const clock = formatClockFromOffset(row.atSec);
+              const next = detailRows[idx + 1];
+              const railKind =
+                row.kind === "walk"
+                  ? "walk"
+                  : row.kind === "place"
+                    ? next?.kind === "walk"
+                      ? "walk"
+                      : "ride"
+                    : "rail" in row
+                      ? row.rail
+                      : "ride";
+              const railColour =
+                row.kind === "board" || row.kind === "ride" || row.kind === "alight"
+                  ? row.colour
+                  : undefined;
+
               return (
-                <li key={row.id} className="transitRouteStep is-alight">
-                  <span className="transitRouteAlightDot" />
-                  <span>{row.stop} 하차</span>
+                <li
+                  key={row.id}
+                  className={`transitRouteStep is-${row.kind}${row.emphasis ? " is-emphasis" : " is-muted"}`}
+                >
+                  <span className="transitRouteStepClock" data-testid="transit-step-clock">
+                    {clock}
+                  </span>
+                  <div className="transitRouteStepRailCol" aria-hidden>
+                    {row.kind === "place" ? (
+                      <span
+                        className="transitRoutePlaceDot"
+                        data-role={row.role}
+                      />
+                    ) : row.kind === "board" || row.kind === "alight" ? (
+                      <span
+                        className="transitRouteNodeDot"
+                        style={{ borderColor: row.colour }}
+                      />
+                    ) : row.kind === "walk" ? (
+                      <span className="transitRouteWalkDot" />
+                    ) : (
+                      <span className="transitRouteRideRailPad" />
+                    )}
+                    {idx < detailRows.length - 1 ? (
+                      <span
+                        className={`transitRouteVertRail is-${railKind}`}
+                        style={
+                          railKind === "ride" && railColour
+                            ? { background: railColour }
+                            : undefined
+                        }
+                      />
+                    ) : null}
+                  </div>
+                  <div className="transitRouteStepBody">
+                    {row.kind === "place" ? (
+                      <p className="transitRouteStepPrimary">{row.label}</p>
+                    ) : null}
+                    {row.kind === "walk" ? (
+                      <p className="transitRouteStepSecondary">
+                        {row.toLabel
+                          ? row.exit
+                            ? `${row.toLabel} ${row.exit}까지 도보 `
+                            : `${row.toLabel}까지 도보 `
+                          : row.exit
+                            ? `${row.exit}까지 도보 `
+                            : "도보 "}
+                        {row.distanceM > 0 ? `${row.distanceM}m·` : ""}
+                        {row.minutes}분
+                      </p>
+                    ) : null}
+                    {row.kind === "board" ? (
+                      <>
+                        <p className="transitRouteStepPrimary">
+                          <LineBadge name={row.line} colour={row.colour} />
+                          <span>{row.stopLabel}</span>
+                        </p>
+                        {row.bound ? (
+                          <p className="transitRouteStepSecondary">{row.bound}</p>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {row.kind === "ride" ? (
+                      <div className="transitRouteRideBody">
+                        <button
+                          type="button"
+                          className="transitRouteRideToggle"
+                          data-testid="transit-stops-toggle"
+                          aria-expanded={!!openStopIds[row.id]}
+                          onClick={() =>
+                            setOpenStopIds((prev) => ({ ...prev, [row.id]: !prev[row.id] }))
+                          }
+                        >
+                          {row.hopLabel} 이동·{row.minutes}분{" "}
+                          {openStopIds[row.id] ? "▾" : "▸"}
+                        </button>
+                        {openStopIds[row.id] ? (
+                          <ul className="transitRouteStopList" data-testid="transit-stop-list">
+                            {row.middleStops.map((n, si) => (
+                              <li key={`${row.id}-${si}`}>{n}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {row.kind === "alight" ? (
+                      <p className="transitRouteStepPrimary">{row.stopLabel}</p>
+                    ) : null}
+                  </div>
                 </li>
               );
             })}

@@ -112,6 +112,7 @@ export type CompactMapSurface = {
   fitPoints: (
     points: MapLatLng[],
     padding?: { top: number; right: number; bottom: number; left: number },
+    opts?: { minZoom?: number; maxZoom?: number },
   ) => void;
   /** Id-diff pin sync (cluster off). */
   setPins: (pins: CompactPinInput[]) => void;
@@ -164,6 +165,8 @@ export type ExpandedMapSurface = CompactMapSurface & {
   findRenderedMapPoi: (
     kinds: Array<"shop" | "sangga" | "tour" | "landmark" | "park" | "station" | "bus">,
   ) => { x: number; y: number; name: string; kind: string } | null;
+  /** MapLibre zoom (not Kakao level). */
+  getZoom: () => number;
   /** E2E / QA: exact MapLibre zoom jump (no Kakao level rounding). */
   /** `asUser`: E2E stand-in for a drag / pinch (the move counts as the user's own). */
   jumpToZoom: (lat: number, lng: number, zoom: number, opts?: { asUser?: boolean }) => void;

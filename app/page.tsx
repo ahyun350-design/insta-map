@@ -256,6 +256,8 @@ import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import DirectionsMiniCard from "@/components/DirectionsMiniCard";
 import TransitRoutePanel from "@/components/TransitRoutePanel";
 import {
+  TRANSIT_FIT_MIN_ZOOM,
+  augmentTransitRouteWithEndpointWalks,
   formatTransitMinutes,
   transitBoardAlightMarkers,
   transitCameraFitPadding,
@@ -2205,6 +2207,7 @@ function HomePageContent() {
     originLabel: string;
     carMin: number | null;
     walkMin: number | null;
+    walkFailed: boolean;
   } | null>(null);
   /** Compact/home sheet transit on admin MapLibre: expand first, then open in-app panel. */
   const pendingInAppTransitRef = useRef<{ lat: number; lng: number; destName?: string } | null>(null);
@@ -8695,6 +8698,7 @@ function HomePageContent() {
         originLabel: "내 위치",
         carMin: null as number | null,
         walkMin: null as number | null,
+        walkFailed: false,
       };
       setTransitUi({
         loading: true,
@@ -8768,15 +8772,24 @@ function HomePageContent() {
           });
           return;
         }
+        const routes = data.routes.map((r) =>
+          augmentTransitRouteWithEndpointWalks(r, {
+            origin,
+            dest: { lat: destLat, lng: destLng },
+          }),
+        );
         setTransitUi({
           loading: false,
           error: null,
-          routes: data.routes,
+          routes,
           selectedIndex: null,
           ...baseUi,
         });
         // Car/walk ETAs for mode tabs (existing directions APIs — not Kakao publictraffic).
         void (async () => {
+          let carMin: number | null = null;
+          let walkMin: number | null = null;
+          let walkFailed = false;
           try {
             const [carRes, walkRes] = await Promise.all([
               fetch("/api/directions", {
@@ -8805,8 +8818,6 @@ function HomePageContent() {
                 cache: "no-store",
               }),
             ]);
-            let carMin: number | null = null;
-            let walkMin: number | null = null;
             if (carRes.ok) {
               const carData = await carRes.json().catch(() => null);
               const dur = carData?.routes?.[0]?.summary?.duration;
@@ -8817,16 +8828,20 @@ function HomePageContent() {
               const totals = walkData ? readTmapWalkTotals(walkData) : { timeSec: null };
               if (totals.timeSec != null && totals.timeSec > 0) {
                 walkMin = Math.max(1, Math.round(totals.timeSec / 60));
+              } else {
+                walkFailed = true;
               }
+            } else {
+              walkFailed = true;
             }
-            setTransitUi((prev) =>
-              prev && prev.destLat === destLat && prev.destLng === destLng
-                ? { ...prev, carMin, walkMin }
-                : prev,
-            );
           } catch {
-            /* ignore ETA failures */
+            walkFailed = true;
           }
+          setTransitUi((prev) =>
+            prev && prev.destLat === destLat && prev.destLng === destLng
+              ? { ...prev, carMin, walkMin, walkFailed }
+              : prev,
+          );
         })();
       } catch {
         setTransitUi({
@@ -8864,13 +8879,18 @@ function HomePageContent() {
   const fitTransitCameraToPanel = useCallback((route: TransitRoute, panelHeightPx: number) => {
     const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
     if (!gl) return;
+    const pts = transitFitPoints(route);
+    if (pts.length === 0) return;
     const mapH =
       mapExpandedRef.current?.clientHeight ??
       (typeof document !== "undefined"
         ? document.querySelector<HTMLElement>('[aria-label="전체 지도"] .kakaoMap')?.clientHeight
         : null) ??
       0;
-    gl.fitPoints(transitFitPoints(route), transitCameraFitPadding(panelHeightPx, mapH || undefined));
+    gl.fitPoints(pts, transitCameraFitPadding(panelHeightPx, mapH || undefined), {
+      minZoom: TRANSIT_FIT_MIN_ZOOM,
+      maxZoom: 16,
+    });
   }, []);
 
   const selectTransitRoute = useCallback(
@@ -8908,12 +8928,31 @@ function HomePageContent() {
     });
   }, [paintTransitRoute]);
 
-  // List view: preview first route on the map.
+  // List view: preview first route + fit camera (height observer may not re-fire).
   useEffect(() => {
     if (!transitUi || transitUi.loading || transitUi.routes.length === 0) return;
     if (transitUi.selectedIndex != null) return;
-    paintTransitRoute(transitUi.routes[0]!);
-  }, [transitUi?.loading, transitUi?.routes, transitUi?.selectedIndex, paintTransitRoute]);
+    const route = transitUi.routes[0]!;
+    paintTransitRoute(route);
+    transitFitKeyRef.current = null;
+    const runFit = () => {
+      const panelEl =
+        typeof document !== "undefined"
+          ? document.querySelector<HTMLElement>('[data-testid="transit-route-panel"]')
+          : null;
+      const h = panelEl?.getBoundingClientRect().height;
+      if (h && h > 0) fitTransitCameraToPanel(route, h);
+    };
+    runFit();
+    const t = window.setTimeout(runFit, 120);
+    return () => window.clearTimeout(t);
+  }, [
+    transitUi?.loading,
+    transitUi?.routes,
+    transitUi?.selectedIndex,
+    paintTransitRoute,
+    fitTransitCameraToPanel,
+  ]);
 
   /** 장소 시트 → 전체화면 지도. 컴팩트에서 이동수단을 고른 뒤면 준비 후 자동 길찾기 */
   const expandPlaceSheetToFullscreen = useCallback(
@@ -14601,6 +14640,12 @@ function HomePageContent() {
                   getBearing?: () => number;
                   getCenter?: () => { lat: number; lng: number } | null;
                   getLevel?: () => number | null;
+                  getZoom?: () => number;
+                  fitPoints?: (
+                    points: Array<{ lat: number; lng: number }>,
+                    padding?: { top: number; right: number; bottom: number; left: number },
+                    opts?: { minZoom?: number; maxZoom?: number },
+                  ) => void;
                   project?: (lat: number, lng: number) => { x: number; y: number } | null;
                   searchPinState?: () => { search: number; focus: string | null; dimmed: boolean; onTop: boolean } | null;
                   searchPinPoints?: () => Array<{ id: string; x: number; y: number }>;
@@ -14646,6 +14691,18 @@ function HomePageContent() {
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getCenter() ?? null,
                 getLevel: () =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.getLevel() ?? null,
+                getZoom: () =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.getZoom() ?? 0,
+                fitPoints: (
+                  points: Array<{ lat: number; lng: number }>,
+                  padding?: { top: number; right: number; bottom: number; left: number },
+                  opts?: { minZoom?: number; maxZoom?: number },
+                ) =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.fitPoints(
+                    points,
+                    padding,
+                    opts,
+                  ),
                 project: (lat, lng) =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.project(lat, lng) ?? null,
                 jumpToZoom: (lat, lng, zoom) =>
@@ -19775,6 +19832,7 @@ function HomePageContent() {
                               : null,
                             car: transitUi.carMin,
                             walk: transitUi.walkMin,
+                            walkFailed: transitUi.walkFailed,
                           }}
                           onSelect={selectTransitRoute}
                           onBackToList={backTransitToList}
