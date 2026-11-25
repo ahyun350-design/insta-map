@@ -206,11 +206,15 @@ function parseRoute(raw: KakaoRoute): TransitRoute | null {
   const walkTimeSec = steps
     .filter((s) => s.type === "WALKING")
     .reduce((sum, s) => sum + s.timeSec, 0);
-  const fareRaw = raw.properties?.fare?.value;
+  const fareObj = raw.properties?.fare;
+  const fareCandidate =
+    typeof fareObj?.value === "number" && Number.isFinite(fareObj.value)
+      ? fareObj.value
+      : typeof fareObj?.min === "number" && Number.isFinite(fareObj.min)
+        ? fareObj.min
+        : null;
   const fareWon =
-    typeof fareRaw === "number" && Number.isFinite(fareRaw) && fareRaw >= 0
-      ? Math.round(fareRaw)
-      : null;
+    fareCandidate != null && fareCandidate >= 0 ? Math.round(fareCandidate) : null;
   const vehicles: TransitVehicle[] = [];
   for (const s of steps) {
     if (s.type === "WALKING") continue;
@@ -384,3 +388,219 @@ export function transitFitPoints(route: TransitRoute): Array<{ lat: number; lng:
 
 export const TRANSIT_NO_RESULTS_MESSAGE =
   "대중교통 경로가 없어요, 도보를 이용해 보세요";
+
+/** Badge text: drop spaces, flatten parentheses — e.g. N15(심야) → N15심야. Never hard-truncate. */
+export function formatTransitBadgeName(name: string): string {
+  let n = String(name ?? "").trim();
+  if (!n) return "";
+  n = n.replace(/\(([^)]*)\)/gu, "$1");
+  n = n.replace(/\s+/gu, "");
+  return n;
+}
+
+/** Exit number only appears in Kakao guidance text, e.g. "(9번 출구)". */
+export function extractTransitExitFromGuidance(guidance: string): string | null {
+  const m = String(guidance ?? "").match(/(\d+)\s*번\s*출구/u);
+  return m?.[1] ? `${m[1]}번 출구` : null;
+}
+
+/** Subway "방면": next stop name when available (Kakao has no dedicated bound field). */
+export function transitStepBoundLabel(step: TransitStep): string | null {
+  if (step.type === "WALKING") return null;
+  const next = step.stops[1]?.name?.trim();
+  return next ? `${next} 방면` : null;
+}
+
+export type TransitVehicleGroup = {
+  typeLabel: string;
+  badges: TransitVehicle[];
+  extraCount: number;
+  colour: string;
+};
+
+/** Prefer 2 badge names + "외 N대" for the rest (same-step alternate lines). */
+export function groupTransitVehicles(
+  vehicles: TransitVehicle[],
+  colour: string,
+  maxBadges = 2,
+): TransitVehicleGroup {
+  const list = vehicles.filter((v) => v.name);
+  const badges = list.slice(0, Math.max(0, maxBadges));
+  const extraCount = Math.max(0, list.length - badges.length);
+  const typeLabel = list[0]?.type?.trim() || "";
+  return { typeLabel, badges, extraCount, colour };
+}
+
+export type TransitTimelineSeg = {
+  kind: "walk" | "bus" | "subway";
+  colour: string;
+  minutes: number;
+  /** 0–1 share of total ride+walk time for bar width. */
+  ratio: number;
+};
+
+export function transitTimelineSegments(route: TransitRoute): TransitTimelineSeg[] {
+  const parts = route.steps
+    .map((s) => ({
+      kind: (s.type === "WALKING" ? "walk" : s.type === "BUS" ? "bus" : "subway") as
+        | "walk"
+        | "bus"
+        | "subway",
+      colour: s.colour,
+      minutes: formatTransitMinutes(s.timeSec),
+      timeSec: Math.max(1, s.timeSec),
+    }))
+    .filter((p) => p.minutes > 0);
+  const sum = parts.reduce((a, p) => a + p.timeSec, 0) || 1;
+  return parts.map(({ kind, colour, minutes, timeSec }) => ({
+    kind,
+    colour,
+    minutes,
+    ratio: timeSec / sum,
+  }));
+}
+
+export function transitDepartureArrivalLabel(
+  totalTimeSec: number,
+  now: Date = new Date(),
+): { depart: string; arrive: string } {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const fmt = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const arrive = new Date(now.getTime() + Math.max(0, totalTimeSec) * 1000);
+  return { depart: fmt(now), arrive: fmt(arrive) };
+}
+
+export type TransitRideSummaryPart =
+  | { kind: "ride"; badge: string; colour: string; board: string; alts?: string; typeLabel?: string }
+  | { kind: "alight"; stop: string };
+
+/** List card ride line: [6호선] 망원 → [간선] 정류장 '151·752 외 11대' → 하차 노들섬 */
+export function transitRideSummaryParts(route: TransitRoute): TransitRideSummaryPart[] {
+  const parts: TransitRideSummaryPart[] = [];
+  const rides = route.steps.filter((s) => s.type !== "WALKING");
+  rides.forEach((s, i) => {
+    const group = groupTransitVehicles(s.vehicles, s.colour, 2);
+    const badgeNames = group.badges.map((v) => formatTransitBadgeName(v.name)).filter(Boolean);
+    const badge =
+      badgeNames[0] || (s.type === "BUS" ? "버스" : "지하철");
+    const alts =
+      badgeNames.length > 1 || group.extraCount > 0
+        ? `${badgeNames.join("·")}${group.extraCount > 0 ? ` 외 ${group.extraCount}대` : ""}`
+        : undefined;
+    const board = s.stops[0]?.name?.trim() || "";
+    parts.push({
+      kind: "ride",
+      badge,
+      colour: s.colour,
+      board,
+      typeLabel: group.typeLabel || undefined,
+      alts,
+    });
+    if (i === rides.length - 1) {
+      const alight = s.stops[s.stops.length - 1]?.name?.trim();
+      if (alight) parts.push({ kind: "alight", stop: alight });
+    }
+  });
+  return parts;
+}
+
+export type TransitDetailRow =
+  | { id: string; kind: "place"; role: "origin" | "dest"; label: string }
+  | {
+      id: string;
+      kind: "walk";
+      minutes: number;
+      distanceM: number;
+      exit: string | null;
+      toLabel: string;
+    }
+  | {
+      id: string;
+      kind: "board";
+      line: string;
+      colour: string;
+      stop: string;
+      bound: string | null;
+      mode: "BUS" | "SUBWAY";
+    }
+  | {
+      id: string;
+      kind: "ride";
+      minutes: number;
+      hopCount: number;
+      hopLabel: string;
+      stops: string[];
+      colour: string;
+    }
+  | { id: string; kind: "alight"; stop: string };
+
+export function buildTransitDetailRows(
+  route: TransitRoute,
+  opts: { originLabel: string; destLabel: string },
+): TransitDetailRow[] {
+  const rows: TransitDetailRow[] = [];
+  rows.push({ id: "origin", kind: "place", role: "origin", label: opts.originLabel });
+  route.steps.forEach((s, i) => {
+    if (s.type === "WALKING") {
+      const toLabel = s.stops[s.stops.length - 1]?.name?.trim() || "";
+      rows.push({
+        id: `walk-${i}`,
+        kind: "walk",
+        minutes: formatTransitMinutes(s.timeSec),
+        distanceM: s.distanceM,
+        exit: extractTransitExitFromGuidance(s.guidance),
+        toLabel,
+      });
+      return;
+    }
+    const line = formatTransitBadgeName(s.vehicles[0]?.name || (s.type === "BUS" ? "버스" : "지하철"));
+    const board = s.stops[0]?.name?.trim() || "";
+    const alight = s.stops.length > 1 ? s.stops[s.stops.length - 1]!.name.trim() : "";
+    const hopCount = Math.max(0, s.stops.length - 1);
+    rows.push({
+      id: `board-${i}`,
+      kind: "board",
+      line,
+      colour: s.colour,
+      stop: board,
+      bound: transitStepBoundLabel(s),
+      mode: s.type,
+    });
+    rows.push({
+      id: `ride-${i}`,
+      kind: "ride",
+      minutes: formatTransitMinutes(s.timeSec),
+      hopCount,
+      hopLabel: s.type === "SUBWAY" ? `${hopCount}개 역` : `${hopCount}개 정류장`,
+      stops: s.stops.map((x) => x.name),
+      colour: s.colour,
+    });
+    if (alight) {
+      rows.push({ id: `alight-${i}`, kind: "alight", stop: alight });
+    }
+  });
+  rows.push({ id: "dest", kind: "place", role: "dest", label: opts.destLabel });
+  return rows;
+}
+
+export type TransitLineLabel = {
+  lat: number;
+  lng: number;
+  text: string;
+  colour: string;
+};
+
+/** Mid-path labels for ride legs: "6호선 ›". */
+export function transitLineLabels(route: TransitRoute): TransitLineLabel[] {
+  const out: TransitLineLabel[] = [];
+  for (const s of route.steps) {
+    if (s.type === "WALKING" || s.path.length < 2) continue;
+    const mid = s.path[Math.floor(s.path.length / 2)]!;
+    const name = formatTransitBadgeName(
+      s.vehicles[0]?.name || (s.type === "BUS" ? "버스" : "지하철"),
+    );
+    if (!name) continue;
+    out.push({ lat: mid.lat, lng: mid.lng, text: `${name} ›`, colour: s.colour });
+  }
+  return out;
+}

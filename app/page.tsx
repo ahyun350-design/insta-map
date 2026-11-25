@@ -256,9 +256,11 @@ import { PlaceDetailSheet } from "@/components/PlaceDetailSheet";
 import DirectionsMiniCard from "@/components/DirectionsMiniCard";
 import TransitRoutePanel from "@/components/TransitRoutePanel";
 import {
+  formatTransitMinutes,
   transitBoardAlightMarkers,
   transitCameraFitPadding,
   transitFitPoints,
+  transitLineLabels,
   transitRouteEndpoints,
   transitRouteToMapSegments,
   type TransitRoute,
@@ -2199,9 +2201,13 @@ function HomePageContent() {
     selectedIndex: number | null;
     destLat: number;
     destLng: number;
+    destName: string;
+    originLabel: string;
+    carMin: number | null;
+    walkMin: number | null;
   } | null>(null);
   /** Compact/home sheet transit on admin MapLibre: expand first, then open in-app panel. */
-  const pendingInAppTransitRef = useRef<{ lat: number; lng: number } | null>(null);
+  const pendingInAppTransitRef = useRef<{ lat: number; lng: number; destName?: string } | null>(null);
   const directionsPathRef = useRef<{ lat: number; lng: number }[] | null>(null);
   const directionsModeRef = useRef(directionsMode);
   directionsModeRef.current = directionsMode;
@@ -8675,19 +8681,27 @@ function HomePageContent() {
   }, [resolveDirectionsOrigin]);
 
   const openInAppTransit = useCallback(
-    async (destLat: number, destLng: number) => {
+    async (destLat: number, destLng: number, destName?: string) => {
       if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) {
         showToast("이 장소는 위치 정보가 없어 길찾기를 할 수 없어요", "info");
         return;
       }
+      const placeName = (destName || "도착").trim() || "도착";
       setDirectionsSheetExpanded(false);
+      const baseUi = {
+        destLat,
+        destLng,
+        destName: placeName,
+        originLabel: "내 위치",
+        carMin: null as number | null,
+        walkMin: null as number | null,
+      };
       setTransitUi({
         loading: true,
         error: null,
         routes: [],
         selectedIndex: null,
-        destLat,
-        destLng,
+        ...baseUi,
       });
       try {
         const origin = await resolveTransitOrigin();
@@ -8697,8 +8711,7 @@ function HomePageContent() {
             error: "no_origin",
             routes: [],
             selectedIndex: null,
-            destLat,
-            destLng,
+            ...baseUi,
           });
           return;
         }
@@ -8711,16 +8724,16 @@ function HomePageContent() {
             error: "unauthorized",
             routes: [],
             selectedIndex: null,
-            destLat,
-            destLng,
+            ...baseUi,
           });
           return;
         }
+        const token = session.access_token;
         const res = await fetch("/api/admin/map-transit", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             startLat: origin.lat,
@@ -8741,8 +8754,7 @@ function HomePageContent() {
             error: data.error || "fetch_failed",
             routes: [],
             selectedIndex: null,
-            destLat,
-            destLng,
+            ...baseUi,
           });
           return;
         }
@@ -8752,8 +8764,7 @@ function HomePageContent() {
             error: data.error || "no_results",
             routes: [],
             selectedIndex: null,
-            destLat,
-            destLng,
+            ...baseUi,
           });
           return;
         }
@@ -8762,17 +8773,68 @@ function HomePageContent() {
           error: null,
           routes: data.routes,
           selectedIndex: null,
-          destLat,
-          destLng,
+          ...baseUi,
         });
+        // Car/walk ETAs for mode tabs (existing directions APIs — not Kakao publictraffic).
+        void (async () => {
+          try {
+            const [carRes, walkRes] = await Promise.all([
+              fetch("/api/directions", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  origin,
+                  destination: { lat: destLat, lng: destLng },
+                  mode: "car",
+                }),
+                cache: "no-store",
+              }),
+              fetch("/api/walk-directions", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  origin,
+                  destination: { lat: destLat, lng: destLng },
+                }),
+                cache: "no-store",
+              }),
+            ]);
+            let carMin: number | null = null;
+            let walkMin: number | null = null;
+            if (carRes.ok) {
+              const carData = await carRes.json().catch(() => null);
+              const dur = carData?.routes?.[0]?.summary?.duration;
+              if (typeof dur === "number" && dur > 0) carMin = Math.max(1, Math.round(dur / 60));
+            }
+            if (walkRes.ok) {
+              const walkData = await walkRes.json().catch(() => null);
+              const totals = walkData ? readTmapWalkTotals(walkData) : { timeSec: null };
+              if (totals.timeSec != null && totals.timeSec > 0) {
+                walkMin = Math.max(1, Math.round(totals.timeSec / 60));
+              }
+            }
+            setTransitUi((prev) =>
+              prev && prev.destLat === destLat && prev.destLng === destLng
+                ? { ...prev, carMin, walkMin }
+                : prev,
+            );
+          } catch {
+            /* ignore ETA failures */
+          }
+        })();
       } catch {
         setTransitUi({
           loading: false,
           error: "fetch_failed",
           routes: [],
           selectedIndex: null,
-          destLat,
-          destLng,
+          ...baseUi,
         });
       }
     },
@@ -8783,6 +8845,7 @@ function HomePageContent() {
     const segments = transitRouteToMapSegments(route);
     const stops = transitBoardAlightMarkers(route);
     const ends = transitRouteEndpoints(route);
+    const labels = transitLineLabels(route);
     const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
     if (!gl || segments.length === 0) return;
     // Keep the normal bright basemap — do not enable directions chrome/theme.
@@ -8792,6 +8855,7 @@ function HomePageContent() {
       stops,
       start: ends?.start ?? null,
       end: ends?.end ?? null,
+      labels,
     });
   }, []);
 
@@ -8823,10 +8887,11 @@ function HomePageContent() {
 
   const onTransitPanelHeight = useCallback(
     (heightPx: number) => {
-      if (!transitUi || transitUi.selectedIndex == null) return;
-      const route = transitUi.routes[transitUi.selectedIndex];
+      if (!transitUi || transitUi.routes.length === 0) return;
+      const idx = transitUi.selectedIndex ?? 0;
+      const route = transitUi.routes[idx];
       if (!route) return;
-      const key = `${transitUi.selectedIndex}:${Math.round(heightPx)}`;
+      const key = `${idx}:${Math.round(heightPx)}`;
       if (transitFitKeyRef.current === key) return;
       transitFitKeyRef.current = key;
       fitTransitCameraToPanel(route, heightPx);
@@ -8835,10 +8900,20 @@ function HomePageContent() {
   );
 
   const backTransitToList = useCallback(() => {
-    const gl = getExpandedMapLibreAdapter(expandedMapRef.current);
-    gl?.clearTransitRoute?.();
-    setTransitUi((prev) => (prev ? { ...prev, selectedIndex: null } : prev));
-  }, []);
+    transitFitKeyRef.current = null;
+    setTransitUi((prev) => {
+      if (!prev) return prev;
+      if (prev.routes[0]) paintTransitRoute(prev.routes[0]);
+      return { ...prev, selectedIndex: null };
+    });
+  }, [paintTransitRoute]);
+
+  // List view: preview first route on the map.
+  useEffect(() => {
+    if (!transitUi || transitUi.loading || transitUi.routes.length === 0) return;
+    if (transitUi.selectedIndex != null) return;
+    paintTransitRoute(transitUi.routes[0]!);
+  }, [transitUi?.loading, transitUi?.routes, transitUi?.selectedIndex, paintTransitRoute]);
 
   /** 장소 시트 → 전체화면 지도. 컴팩트에서 이동수단을 고른 뒤면 준비 후 자동 길찾기 */
   const expandPlaceSheetToFullscreen = useCallback(
@@ -9040,9 +9115,9 @@ function HomePageContent() {
             adminExpandedMapLibre === "force_maplibre");
         if (adminMl) {
           if (mapExpanded && expandedMapIsMapLibre) {
-            void openInAppTransit(lat, lng);
+            void openInAppTransit(lat, lng, destName);
           } else {
-            pendingInAppTransitRef.current = { lat, lng };
+            pendingInAppTransitRef.current = { lat, lng, destName };
             expandPlaceSheetToFullscreen(placeData);
           }
           return;
@@ -9182,7 +9257,7 @@ function HomePageContent() {
     const pending = pendingInAppTransitRef.current;
     if (!pending) return;
     pendingInAppTransitRef.current = null;
-    void openInAppTransit(pending.lat, pending.lng);
+    void openInAppTransit(pending.lat, pending.lng, pending.destName);
   }, [mapExpanded, expandedMapIsMapLibre, openInAppTransit]);
 
   /** 큐레이션 상세 → SAVED 장소 클릭과 동일 경로 (지도 탭 + 컴팩트 시트, 닫으면 상세 복귀) */
@@ -16597,7 +16672,7 @@ function HomePageContent() {
               expandedMapIsMapLibre,
             })
           ) {
-            void openInAppTransit(lat, lng);
+            void openInAppTransit(lat, lng, selectedPlace.place_name);
             return;
           }
           openTransitInKakaoMap(selectedPlace.place_name, lat, lng);
@@ -19692,11 +19767,28 @@ function HomePageContent() {
                           error={transitUi.error}
                           routes={transitUi.routes}
                           selectedIndex={transitUi.selectedIndex}
+                          originLabel={transitUi.originLabel}
+                          destLabel={transitUi.destName}
+                          modeTimes={{
+                            transit: transitUi.routes[0]
+                              ? formatTransitMinutes(transitUi.routes[0].totalTimeSec)
+                              : null,
+                            car: transitUi.carMin,
+                            walk: transitUi.walkMin,
+                          }}
                           onSelect={selectTransitRoute}
                           onBackToList={backTransitToList}
                           onPanelHeight={onTransitPanelHeight}
                           onClose={() => {
                             clearRoute();
+                          }}
+                          onModeChange={(mode) => {
+                            if (mode === "transit") return;
+                            const lat = transitUi.destLat;
+                            const lng = transitUi.destLng;
+                            setTransitUi(null);
+                            setDirectionsMode(mode);
+                            void drawRoute(lat, lng, mode);
                           }}
                           onWalkFallback={() => {
                             const lat = transitUi.destLat;
@@ -19728,6 +19820,7 @@ function HomePageContent() {
                               void openInAppTransit(
                                 parseFloat(selectedPlace.y),
                                 parseFloat(selectedPlace.x),
+                                selectedPlace.place_name,
                               );
                               return;
                             }

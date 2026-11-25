@@ -44,11 +44,20 @@ export type TransitEndpointMarkerInput = {
   label: "출발" | "도착";
 };
 
+export type TransitLineLabelInput = {
+  lat: number;
+  lng: number;
+  text: string;
+  colour: string;
+};
+
 export type TransitRouteDrawInput = {
   segments: TransitMapSegmentInput[];
   stops?: TransitStopMarkerInput[];
   start?: TransitEndpointMarkerInput | null;
   end?: TransitEndpointMarkerInput | null;
+  /** Mid-leg line name chips ("6호선 ›"). */
+  labels?: TransitLineLabelInput[];
 };
 
 /** Result pin badge: a map POI icon, or the house badge for a 도로명주소 result. */

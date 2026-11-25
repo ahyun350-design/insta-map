@@ -132,6 +132,8 @@ const TRANSIT_STOPS_LAYER = "compact-transit-stops-circle";
 const TRANSIT_ENDS_SOURCE = "compact-transit-ends";
 const TRANSIT_ENDS_CIRCLE_LAYER = "compact-transit-ends-circle";
 const TRANSIT_ENDS_LABEL_LAYER = "compact-transit-ends-label";
+const TRANSIT_LINE_LABELS_SOURCE = "compact-transit-line-labels";
+const TRANSIT_LINE_LABELS_LAYER = "compact-transit-line-labels";
 const FOCUS_SOURCE = "compact-focus";
 const FOCUS_LAYER = "compact-focus-symbol";
 const MYLOC_SOURCE = "compact-myloc";
@@ -1036,6 +1038,29 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         "text-halo-width": 2,
       },
     });
+    map.addSource(TRANSIT_LINE_LABELS_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: TRANSIT_LINE_LABELS_LAYER,
+      type: "symbol",
+      source: TRANSIT_LINE_LABELS_SOURCE,
+      layout: {
+        "text-field": ["get", "text"],
+        "text-size": 12,
+        "text-font": ["Noto Sans Bold"],
+        "text-anchor": "center",
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+        "text-padding": 2,
+      },
+      paint: {
+        "text-color": ["get", "colour"],
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2.2,
+      },
+    });
     map.addSource(ROUTE_DEST_SOURCE, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
@@ -1910,6 +1935,19 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         })),
       });
     }
+
+    if (map.getSource(TRANSIT_LINE_LABELS_SOURCE)) {
+      (map.getSource(TRANSIT_LINE_LABELS_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: (draw.labels ?? [])
+          .filter((l) => Number.isFinite(l.lat) && Number.isFinite(l.lng) && l.text)
+          .map((l) => ({
+            type: "Feature" as const,
+            properties: { text: l.text, colour: l.colour || "#111111" },
+            geometry: { type: "Point" as const, coordinates: [l.lng, l.lat] },
+          })),
+      });
+    }
   }
 
   clearTransitRoute() {
@@ -1927,6 +1965,12 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     }
     if (map.getSource(TRANSIT_ENDS_SOURCE)) {
       (map.getSource(TRANSIT_ENDS_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+    if (map.getSource(TRANSIT_LINE_LABELS_SOURCE)) {
+      (map.getSource(TRANSIT_LINE_LABELS_SOURCE) as GeoJSONSource).setData({
         type: "FeatureCollection",
         features: [],
       });
