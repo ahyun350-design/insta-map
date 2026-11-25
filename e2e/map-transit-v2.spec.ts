@@ -29,13 +29,7 @@ type GlDebug = {
   ) => { x: number; y: number; name: string; kind: string } | null;
   jumpToZoom?: (lat: number, lng: number, zoom: number) => void;
   getZoom?: () => number;
-  getCenter?: () => { lat: number; lng: number } | null;
   project?: (lat: number, lng: number) => { x: number; y: number } | null;
-  fitPoints?: (
-    pts: Array<{ lat: number; lng: number }>,
-    pad?: { top: number; right: number; bottom: number; left: number },
-    opts?: { minZoom?: number; maxZoom?: number },
-  ) => void;
 };
 
 /** Shaped like live 망원→노들섬 (Kakao omits first/last walk — client augments). */
@@ -353,7 +347,7 @@ test("transit-v2: list / detail / stops expanded", async ({ browser }) => {
   await expect(panel.getByTestId("transit-mode-walk")).not.toContainText("—");
   await expect(panel.locator('[data-testid="transit-ride-line"]').first()).toContainText("노들섬");
   await expect(panel.locator(".transitRouteTimelineSeg.is-walk").first()).toBeVisible();
-  // Fit + assert in one poll (survives panel-height refits).
+  // Assert only — never move the camera. App fitBounds must place both ends above the panel.
   await expect
     .poll(
       async () => {
@@ -367,67 +361,29 @@ test("transit-v2: list / detail / stops expanded", async ({ browser }) => {
             const panelEl = document.querySelector<HTMLElement>(
               '[data-testid="transit-route-panel"]',
             );
-            if (!gl?.project || !gl.getZoom || !gl.fitPoints || !mapEl || !panelEl) {
-              return "missing";
+            if (!gl?.project || !gl.getZoom || !mapEl || !panelEl) return "missing";
+            const z = gl.getZoom();
+            if (z < minZoom) {
+              const c = gl.getCenter?.() ?? null;
+              return `zoom_${z.toFixed(2)}_c${c ? `${c.lat.toFixed(4)},${c.lng.toFixed(4)}` : "?"}`;
             }
             const map = mapEl.getBoundingClientRect();
             const panelRect = panelEl.getBoundingClientRect();
+            const s = gl.project(start.lat, start.lng);
+            const e = gl.project(end.lat, end.lng);
+            if (!s || !e) return "no_project";
             const left = edge;
             const right = map.width - edge;
             const top = edge;
             const bottom = panelRect.top - map.top - edge;
-            if (bottom - top < 120) return `band_${(bottom - top).toFixed(0)}`;
-
-            // Pad from actual panel top (not capped height) so fit matches assert.
-            const padBottom = Math.max(edge, Math.round(map.height - bottom));
-            gl.fitPoints(
-              [
-                { lat: start.lat, lng: start.lng },
-                { lat: end.lat, lng: end.lng },
-              ],
-              { top: edge, right: edge, bottom: padBottom, left: edge },
-              { minZoom, maxZoom: 16 },
-            );
-
-            const zTarget = Math.max(minZoom, 12.05);
             const inArea = (p: { x: number; y: number }) =>
               p.x >= left && p.x <= right && p.y >= top && p.y <= bottom;
-
-            for (let i = 0; i < 6; i++) {
-              const s0 = gl.project!(start.lat, start.lng);
-              const e0 = gl.project!(end.lat, end.lng);
-              if (!s0 || !e0) return "no_project";
-              if (inArea(s0) && inArea(e0) && (gl.getZoom?.() ?? 0) >= minZoom) {
-                return "ok";
-              }
-              const c = gl.getCenter?.() ?? {
-                lat: (start.lat + end.lat) / 2,
-                lng: (start.lng + end.lng) / 2,
-              };
-              const midY = (s0.y + e0.y) / 2;
-              const midX = (s0.x + e0.x) / 2;
-              const targetY = (top + bottom) / 2;
-              const targetX = (left + right) / 2;
-              const z = Math.max(zTarget, gl.getZoom?.() ?? zTarget);
-              const mPerPx =
-                (156543.03392 * Math.cos((c.lat * Math.PI) / 180)) / 2 ** z;
-              // Dampen to avoid overshoot; ↓lat when mid too low; ↑lng when mid too right.
-              const gain = 0.55;
-              const dLat = (((midY - targetY) * mPerPx) / 111_320) * gain;
-              const dLng =
-                (((midX - targetX) * mPerPx) /
-                  (111_320 * Math.max(0.2, Math.cos((c.lat * Math.PI) / 180)))) *
-                gain;
-              gl.jumpToZoom?.(c.lat - dLat, c.lng + dLng, z);
+            if (!inArea(s)) {
+              return `start_out_${s.x.toFixed(0)}_${s.y.toFixed(0)}_b${bottom.toFixed(0)}`;
             }
-
-            const s = gl.project(start.lat, start.lng);
-            const e = gl.project(end.lat, end.lng);
-            if (!s || !e) return "no_project";
-            const z = gl.getZoom();
-            if (z < minZoom) return `zoom_${z.toFixed(2)}`;
-            if (!inArea(s)) return `start_out_${s.x.toFixed(0)}_${s.y.toFixed(0)}_b${bottom.toFixed(0)}`;
-            if (!inArea(e)) return `end_out_${e.x.toFixed(0)}_${e.y.toFixed(0)}_b${bottom.toFixed(0)}`;
+            if (!inArea(e)) {
+              return `end_out_${e.x.toFixed(0)}_${e.y.toFixed(0)}_b${bottom.toFixed(0)}`;
+            }
             return "ok";
           },
           {
@@ -438,7 +394,7 @@ test("transit-v2: list / detail / stops expanded", async ({ browser }) => {
           },
         );
       },
-      { timeout: 15_000, intervals: [350] },
+      { timeout: 15_000, intervals: [400] },
     )
     .toBe("ok");
 

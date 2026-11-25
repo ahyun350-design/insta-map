@@ -261,6 +261,7 @@ import {
   formatTransitMinutes,
   transitBoardAlightMarkers,
   transitCameraFitPadding,
+  transitCameraFitPaddingFromRects,
   transitFitPoints,
   transitLineLabels,
   transitRouteEndpoints,
@@ -2209,6 +2210,8 @@ function HomePageContent() {
     walkMin: number | null;
     walkFailed: boolean;
   } | null>(null);
+  const transitUiRef = useRef(transitUi);
+  transitUiRef.current = transitUi;
   /** Compact/home sheet transit on admin MapLibre: expand first, then open in-app panel. */
   const pendingInAppTransitRef = useRef<{ lat: number; lng: number; destName?: string } | null>(null);
   const directionsPathRef = useRef<{ lat: number; lng: number }[] | null>(null);
@@ -2992,6 +2995,8 @@ function HomePageContent() {
     opts?: { paddingBottom?: number },
   ) => {
     try {
+      // In-app transit owns the camera; ignore place-card re-pads while the panel is open.
+      if (transitUiRef.current) return;
       const map = expandedMapRef.current;
       if (!map) return;
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
@@ -8881,13 +8886,24 @@ function HomePageContent() {
     if (!gl) return;
     const pts = transitFitPoints(route);
     if (pts.length === 0) return;
-    const mapH =
-      mapExpandedRef.current?.clientHeight ??
+    const mapEl =
+      mapExpandedRef.current ??
       (typeof document !== "undefined"
-        ? document.querySelector<HTMLElement>('[aria-label="전체 지도"] .kakaoMap')?.clientHeight
-        : null) ??
-      0;
-    gl.fitPoints(pts, transitCameraFitPadding(panelHeightPx, mapH || undefined), {
+        ? document.querySelector<HTMLElement>('[aria-label="전체 지도"] .kakaoMap')
+        : null);
+    const panelEl =
+      typeof document !== "undefined"
+        ? document.querySelector<HTMLElement>('[data-testid="transit-route-panel"]')
+        : null;
+    const mapH = mapEl?.clientHeight ?? 0;
+    const pad =
+      mapEl && panelEl
+        ? transitCameraFitPaddingFromRects(
+            mapEl.getBoundingClientRect(),
+            panelEl.getBoundingClientRect(),
+          )
+        : transitCameraFitPadding(panelHeightPx, mapH || undefined);
+    gl.fitPoints(pts, pad, {
       minZoom: TRANSIT_FIT_MIN_ZOOM,
       maxZoom: 16,
     });
@@ -8928,23 +8944,21 @@ function HomePageContent() {
     });
   }, [paintTransitRoute]);
 
-  // List view: preview first route + fit camera (height observer may not re-fire).
+  // List view: preview first route; one fit after layout (height observer may not re-fire).
   useEffect(() => {
     if (!transitUi || transitUi.loading || transitUi.routes.length === 0) return;
     if (transitUi.selectedIndex != null) return;
     const route = transitUi.routes[0]!;
     paintTransitRoute(route);
     transitFitKeyRef.current = null;
-    const runFit = () => {
+    const t = window.setTimeout(() => {
       const panelEl =
         typeof document !== "undefined"
           ? document.querySelector<HTMLElement>('[data-testid="transit-route-panel"]')
           : null;
       const h = panelEl?.getBoundingClientRect().height;
       if (h && h > 0) fitTransitCameraToPanel(route, h);
-    };
-    runFit();
-    const t = window.setTimeout(runFit, 120);
+    }, 80);
     return () => window.clearTimeout(t);
   }, [
     transitUi?.loading,
@@ -15246,6 +15260,8 @@ function HomePageContent() {
   /** Re-pad camera when the place card height changes so the pin stays above it. */
   useEffect(() => {
     if (!mapExpanded || !selectedPlace) return;
+    // Transit fit owns the camera while the in-app panel is open — do not re-center on the place pin.
+    if (transitUi) return;
     const lat = parseFloat(String(selectedPlace.y ?? ""));
     const lng = parseFloat(String(selectedPlace.x ?? ""));
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
@@ -15289,6 +15305,7 @@ function HomePageContent() {
     selectedPlace?.y,
     selectedPlace?.x,
     selectedPlace?.place_name,
+    transitUi,
     measureExpandedPlaceCardPaddingBottom,
   ]);
 

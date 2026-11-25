@@ -20,6 +20,7 @@ import {
   subwayRefFromVehicleName,
   transitBoardAlightMarkers,
   transitCameraFitPadding,
+  transitCameraFitPaddingFromRects,
   transitDepartureArrivalLabel,
   transitFitPoints,
   transitLineLabels,
@@ -198,11 +199,17 @@ test("transitBoardAlightMarkers + endpoints from Kakao path points", () => {
   assert.equal(pad.top, 40);
   assert.equal(pad.right, 40);
   assert.equal(pad.left, 40);
-  assert.equal(pad.bottom, 260); // 220 panel + 40
+  assert.equal(pad.bottom, 270); // 220 panel + 10 sheet gap + 40
   const padClamped = transitCameraFitPadding(500, 400);
   assert.equal(padClamped.top, 40);
-  // Reserve ≥220px map above padding.
-  assert.ok(padClamped.bottom <= 400 - 40 - 220);
+  // Reserve ≥120px map above padding when panel would overflow the map.
+  assert.ok(padClamped.bottom <= 400 - 40 - 120);
+  assert.equal(padClamped.bottom, 400 - 40 - 120);
+  const fromRects = transitCameraFitPaddingFromRects(
+    { top: 0, bottom: 800, height: 800 },
+    { top: 500 },
+  );
+  assert.equal(fromRects.bottom, 800 - 500 + 40); // mapBottom - panelTop + edge
   const fit = transitFitPoints(route);
   assert.ok(fit.length >= route.steps.reduce((n, s) => n + s.path.length, 0));
 });

@@ -40,6 +40,7 @@ import {
 } from "./kakaoZoom";
 import { haversineMeters } from "./tilePrefetch";
 import { fitSearchResultsOn, resultCameraPadding, searchFitPadding } from "./cameraPadding";
+import { isValidKoreaLatLng } from "@/lib/mapTransit";
 import type {
   CompactMapSurface,
   CompactPinInput,
@@ -1539,20 +1540,14 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     const bounds = new maplibregl.LngLatBounds();
     let n = 0;
     for (const p of points) {
-      if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
-      if (p.lat === 0 && p.lng === 0) continue;
+      // Drop 0/NaN/swapped/non-Korea so fitBounds cannot zoom to the whole country.
+      if (!isValidKoreaLatLng(p.lat, p.lng)) continue;
       bounds.extend([p.lng, p.lat]);
       n += 1;
     }
     if (n === 0) return;
     if (n === 1) {
-      const only = points.find(
-        (p) =>
-          Number.isFinite(p.lat) &&
-          Number.isFinite(p.lng) &&
-          !(p.lat === 0 && p.lng === 0),
-      );
-      if (!only) return;
+      const only = bounds.getCenter();
       map.jumpTo({
         center: [only.lng, only.lat],
         zoom: Math.max(minZoom ?? 0, kakaoLevelToMapLibreZoom(4)),
@@ -1561,39 +1556,28 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     }
     const mapH = map.getContainer()?.clientHeight || 0;
     const mapW = map.getContainer()?.clientWidth || 0;
-    // Honor large bottom pads (transit panel ~60–90%). Only leave ≥100px content window.
-    const minContent = 100;
+    // Keep caller padding (transit panel height). Only ensure a usable content window.
+    const minContent = 120;
     const safePad = {
       top: Math.max(0, Math.min(pad.top, Math.max(0, mapH - minContent))),
-      right: Math.max(0, Math.min(pad.right, Math.max(0, Math.floor(mapW * 0.35)))),
+      right: Math.max(0, Math.min(pad.right, Math.max(0, Math.floor(mapW * 0.4)))),
       bottom: Math.max(0, Math.min(pad.bottom, Math.max(0, mapH - minContent))),
-      left: Math.max(0, Math.min(pad.left, Math.max(0, Math.floor(mapW * 0.35)))),
+      left: Math.max(0, Math.min(pad.left, Math.max(0, Math.floor(mapW * 0.4)))),
     };
     if (mapH > 0 && safePad.top + safePad.bottom > mapH - minContent) {
       safePad.bottom = Math.max(0, mapH - safePad.top - minContent);
     }
     try {
-      const cam = map.cameraForBounds(bounds, { padding: safePad, maxZoom });
-      if (!cam || cam.center == null || cam.zoom == null) {
-        map.fitBounds(bounds, { padding: safePad, maxZoom, duration: 0 });
-        return;
-      }
-      let zoom = cam.zoom;
-      let center: maplibregl.LngLatLike = cam.center;
-      // Raise zoom when pathologically zoomed out, then re-anchor so the route
-      // sits in the padded (above-panel) band instead of the raw map center.
-      if (typeof minZoom === "number" && zoom < minZoom) {
-        zoom = minZoom;
-        const mid = bounds.getCenter();
-        map.jumpTo({ center: [mid.lng, mid.lat], zoom, bearing: 0, pitch: 0 });
-        // Visual mid of padded area is above the container mid when bottom pad is large.
-        const offsetY = (safePad.bottom - safePad.top) / 2;
-        const projected = map.project(mid);
-        center = map.unproject([projected.x, projected.y + offsetY]);
-      }
-      map.jumpTo({
-        center,
-        zoom,
+      // Cancel in-flight easeTo (e.g. place-card re-pad) so it cannot overwrite this fit.
+      map.stop();
+      // Place-card easeTo leaves persistent map padding; fitBounds would ADD our pad on top
+      // and zoom pathologically far out. Clear it so only `safePad` counts (see fitSearchResultsOn).
+      map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
+      // Single fitBounds — no iterative re-anchor / minZoom re-center loops.
+      map.fitBounds(bounds, {
+        padding: safePad,
+        maxZoom,
+        duration: 0,
         bearing: 0,
         pitch: 0,
       });
@@ -1602,6 +1586,8 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       map.jumpTo({
         center: [c.lng, c.lat],
         zoom: Math.max(minZoom ?? 12, 12),
+        bearing: 0,
+        pitch: 0,
       });
     }
   }

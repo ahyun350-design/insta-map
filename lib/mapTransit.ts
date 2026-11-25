@@ -414,14 +414,31 @@ export function transitCameraFitPadding(
   mapHeightPx?: number,
 ): { top: number; right: number; bottom: number; left: number } {
   const edge = TRANSIT_FIT_EDGE_PAD_PX;
-  let panel = Math.max(0, Math.round(Number(panelHeightPx) || 0));
+  const panel = Math.max(0, Math.round(Number(panelHeightPx) || 0));
+  // Panel sits above a ~10px bottom inset (see .transitRoutePanel).
+  const sheetBottomGap = 10;
+  let bottom = panel + sheetBottomGap + edge;
   if (typeof mapHeightPx === "number" && mapHeightPx > 0) {
-    // Cap panel so ≥220px of map stays for the route (avoids country-scale fit).
-    panel = Math.min(panel, Math.max(0, Math.floor(mapHeightPx - edge - 220)));
+    // Only clamp when the map is shorter than panel+edges; leave ≥120px for the route.
+    const maxBottom = Math.max(edge, Math.floor(mapHeightPx - edge - 120));
+    bottom = Math.min(bottom, maxBottom);
   }
-  let bottom = panel + edge;
-  if (typeof mapHeightPx === "number" && mapHeightPx > 0) {
-    const maxBottom = Math.max(edge, Math.floor(mapHeightPx - edge - 220));
+  return { top: edge, right: edge, bottom, left: edge };
+}
+
+/**
+ * Padding from live map/panel geometry: bottom = mapBottom→panelTop + edge.
+ * Prefer this over height-only estimates when both elements are mounted.
+ */
+export function transitCameraFitPaddingFromRects(
+  mapRect: { top: number; bottom: number; height: number },
+  panelRect: { top: number },
+): { top: number; right: number; bottom: number; left: number } {
+  const edge = TRANSIT_FIT_EDGE_PAD_PX;
+  const mapH = Math.max(0, Math.round(mapRect.height));
+  let bottom = Math.max(edge, Math.round(mapRect.bottom - panelRect.top + edge));
+  if (mapH > 0) {
+    const maxBottom = Math.max(edge, Math.floor(mapH - edge - 120));
     bottom = Math.min(bottom, maxBottom);
   }
   return { top: edge, right: edge, bottom, left: edge };
@@ -441,7 +458,28 @@ export function transitFitPoints(route: TransitRoute): Array<{ lat: number; lng:
     pts.push({ lat: ends.start.lat, lng: ends.start.lng });
     pts.push({ lat: ends.end.lat, lng: ends.end.lng });
   }
-  return pts.filter((p) => isValidKoreaLatLng(p.lat, p.lng));
+  const korea = pts.filter((p) => isValidKoreaLatLng(p.lat, p.lng));
+  if (korea.length < 2) return korea;
+  // If a bad vertex slipped through the envelope, span explodes and zoom drops
+  // country-scale. Fall back to start/end only when span is implausible for a trip.
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  for (const p of korea) {
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lat > maxLat) maxLat = p.lat;
+    if (p.lng < minLng) minLng = p.lng;
+    if (p.lng > maxLng) maxLng = p.lng;
+  }
+  if (maxLat - minLat > 1.2 || maxLng - minLng > 1.2) {
+    const endsOnly = [
+      ends ? { lat: ends.start.lat, lng: ends.start.lng } : null,
+      ends ? { lat: ends.end.lat, lng: ends.end.lng } : null,
+    ].filter((p): p is { lat: number; lng: number } => !!p && isValidKoreaLatLng(p.lat, p.lng));
+    if (endsOnly.length >= 2) return endsOnly;
+  }
+  return korea;
 }
 
 /** Minimum MapLibre zoom after transit fit (street/neighbourhood, not country). */
