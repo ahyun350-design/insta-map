@@ -122,6 +122,12 @@ export type CompactMapSurface = {
   /** Multi-colour transit path (walk dashed) + stop/endpoint markers. No theme change. */
   setTransitRoute: (input: TransitRouteDrawInput | TransitMapSegmentInput[]) => void;
   clearTransitRoute: () => void;
+  /** E2E: each transit segment path start/end (board/alight check). */
+  getTransitPathEnds: () => Array<{
+    kind: string;
+    start: MapLatLng;
+    end: MapLatLng;
+  }>;
   clearRoute: () => void;
   setFocusMarker: (pin: CompactPinInput) => void;
   clearFocusMarker: () => void;

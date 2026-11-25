@@ -9022,6 +9022,7 @@ select:focus-visible {
   padding: 12px 12px 10px;
   cursor: pointer;
   font-family: inherit;
+  overflow: visible;
 }
 .transitRouteItemTop {
   display: flex;
@@ -9072,17 +9073,20 @@ select:focus-visible {
 }
 .transitRouteRideLine {
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: #222;
   display: block;
   white-space: normal;
+  overflow: visible;
   overflow-wrap: anywhere;
   word-break: keep-all;
+  max-width: 100%;
 }
 .transitRouteRidePart,
 .transitRouteRideAlight {
   display: inline;
   white-space: normal;
+  overflow: visible;
 }
 .transitRouteRideSep {
   white-space: pre;

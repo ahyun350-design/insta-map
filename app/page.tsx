@@ -8896,11 +8896,17 @@ function HomePageContent() {
         ? document.querySelector<HTMLElement>('[data-testid="transit-route-panel"]')
         : null;
     const mapH = mapEl?.clientHeight ?? 0;
+    const searchEl =
+      typeof document !== "undefined"
+        ? document.querySelector<HTMLElement>(".expandedMapLibreSearchPill") ||
+          document.querySelector<HTMLElement>('[data-testid="expanded-maplibre-search-input"]')
+        : null;
     const pad =
       mapEl && panelEl
         ? transitCameraFitPaddingFromRects(
             mapEl.getBoundingClientRect(),
             panelEl.getBoundingClientRect(),
+            searchEl?.getBoundingClientRect() ?? null,
           )
         : transitCameraFitPadding(panelHeightPx, mapH || undefined);
     gl.fitPoints(pts, pad, {
@@ -14663,6 +14669,11 @@ function HomePageContent() {
                   project?: (lat: number, lng: number) => { x: number; y: number } | null;
                   searchPinState?: () => { search: number; focus: string | null; dimmed: boolean; onTop: boolean } | null;
                   searchPinPoints?: () => Array<{ id: string; x: number; y: number }>;
+                  getTransitPathEnds?: () => Array<{
+                    kind: string;
+                    start: { lat: number; lng: number };
+                    end: { lat: number; lng: number };
+                  }>;
                 };
               };
               const prev = w.__PINDMAP_EXPANDED_GL__;
@@ -14727,6 +14738,8 @@ function HomePageContent() {
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.searchPinState() ?? null,
                 searchPinPoints: () =>
                   getExpandedMapLibreAdapter(expandedMapRef.current)?.searchPinPoints() ?? [],
+                getTransitPathEnds: () =>
+                  getExpandedMapLibreAdapter(expandedMapRef.current)?.getTransitPathEnds() ?? [],
               };
             } catch {
               /* noop */

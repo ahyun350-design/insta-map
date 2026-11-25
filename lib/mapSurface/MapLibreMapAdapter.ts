@@ -1573,11 +1573,15 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
       // Place-card easeTo leaves persistent map padding; fitBounds would ADD our pad on top
       // and zoom pathologically far out. Clear it so only `safePad` counts (see fitSearchResultsOn).
       map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
-      // Single fitBounds — no iterative re-anchor / minZoom re-center loops.
+      // One fitBounds with search/panel padding. Do not pass minZoom: MapLibre would clamp
+      // zoom up and ignore padding, pushing start/end under the search bar / panel.
+      // Callers may still pass minZoom for single-point jumpTo fallbacks above.
+      void minZoom;
       map.fitBounds(bounds, {
         padding: safePad,
         maxZoom,
         duration: 0,
+        linear: true,
         bearing: 0,
         pitch: 0,
       });
@@ -1939,6 +1943,9 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     }
   }
 
+  /** Last transit polylines (for e2e: segment ends ↔ board/alight). */
+  private lastTransitSegments: TransitMapSegmentInput[] = [];
+
   /**
    * Multi-leg transit polyline on the normal basemap (no directions chrome / theme swap).
    * Walk = gray dashed; bus/subway = line colour solid; board/alight dots; 출발/도착 labels.
@@ -1948,6 +1955,11 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     if (!map?.getSource(TRANSIT_SOURCE)) return;
     const draw: TransitRouteDrawInput = Array.isArray(input) ? { segments: input } : input;
     const segments = draw.segments ?? [];
+    this.lastTransitSegments = segments.map((s) => ({
+      kind: s.kind,
+      colour: s.colour,
+      path: s.path.map((p) => ({ lat: p.lat, lng: p.lng })),
+    }));
     // Never flip to directions route theme for transit.
     if (this.directionsChromeActive) {
       this.setDirectionsChrome({ active: false, restoreCamera: false });
@@ -2017,7 +2029,26 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     }
   }
 
+  /** Segment path endpoints for e2e (no camera mutation). */
+  getTransitPathEnds(): Array<{
+    kind: string;
+    start: { lat: number; lng: number };
+    end: { lat: number; lng: number };
+  }> {
+    return this.lastTransitSegments
+      .filter((s) => s.path.length >= 2)
+      .map((s) => ({
+        kind: s.kind,
+        start: { lat: s.path[0]!.lat, lng: s.path[0]!.lng },
+        end: {
+          lat: s.path[s.path.length - 1]!.lat,
+          lng: s.path[s.path.length - 1]!.lng,
+        },
+      }));
+  }
+
   clearTransitRoute() {
+    this.lastTransitSegments = [];
     const map = this.map;
     if (!map?.getSource(TRANSIT_SOURCE)) return;
     (map.getSource(TRANSIT_SOURCE) as GeoJSONSource).setData({

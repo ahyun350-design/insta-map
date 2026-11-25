@@ -347,9 +347,13 @@ export default function TransitRoutePanel({
                   key={row.id}
                   className={`transitRouteStep is-${row.kind}${row.emphasis ? " is-emphasis" : " is-muted"}`}
                 >
-                  <span className="transitRouteStepClock" data-testid="transit-step-clock">
-                    {clock}
-                  </span>
+                  {row.emphasis ? (
+                    <span className="transitRouteStepClock" data-testid="transit-step-clock">
+                      {clock}
+                    </span>
+                  ) : (
+                    <span className="transitRouteStepClock is-empty" aria-hidden />
+                  )}
                   <div className="transitRouteStepRailCol" aria-hidden>
                     {row.kind === "place" ? (
                       <span
@@ -382,7 +386,8 @@ export default function TransitRoutePanel({
                       <p className="transitRouteStepPrimary">{row.label}</p>
                     ) : null}
                     {row.kind === "walk" ? (
-                      <p className="transitRouteStepSecondary">
+                      <p className="transitRouteStepSecondary" data-testid="transit-walk-step">
+                        {row.fromOrigin ? "내 위치 → " : ""}
                         {row.toLabel
                           ? row.exit
                             ? `${row.toLabel} ${row.exit}까지 도보 `

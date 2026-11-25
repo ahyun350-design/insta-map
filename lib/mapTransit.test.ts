@@ -356,6 +356,11 @@ test("extractTransitExitFromGuidance + group alts + timeline + summary", () => {
   });
   assert.equal(detail[0]!.kind, "place");
   assert.ok(detail.some((r) => r.kind === "walk" && r.exit === "9번 출구"));
+  const walkToBus = detail.find((r) => r.kind === "walk" && r.exit === "9번 출구");
+  assert.ok(walkToBus && walkToBus.kind === "walk");
+  if (walkToBus && walkToBus.kind === "walk") {
+    assert.equal(walkToBus.toLabel.includes("전쟁기념관역"), false);
+  }
   assert.ok(detail.some((r) => r.kind === "ride" && r.hopLabel.includes("역")));
   const board = detail.find((r) => r.kind === "board");
   assert.ok(board && board.kind === "board");
@@ -364,6 +369,10 @@ test("extractTransitExitFromGuidance + group alts + timeline + summary", () => {
     assert.equal(board.stopLabel.includes("6호선"), false);
     assert.match(board.bound ?? "", /합정/);
   }
+  const emphasisKinds = detail.filter((r) => r.emphasis).map((r) => r.kind);
+  assert.ok(emphasisKinds.every((k) => k === "place" || k === "board" || k === "alight"));
+  assert.ok(detail.every((r) => r.kind !== "walk" || r.emphasis === false));
+  assert.ok(detail.every((r) => r.kind !== "ride" || r.emphasis === false));
   const ride = detail.find((r) => r.kind === "ride" && r.middleStops.length > 0);
   assert.ok(ride && ride.kind === "ride");
   if (ride && ride.kind === "ride") {
@@ -386,6 +395,58 @@ test("normalizeKakaoPathPair + Korea filter + augment endpoint walks", () => {
   assert.equal(isValidKoreaLatLng(37.5, 127), true);
   assert.equal(isValidKoreaLatLng(0, 0), false);
   assert.equal(formatTransitStopLabel("망원", "SUBWAY"), "망원역");
+  assert.equal(formatTransitStopLabel("망원역", "SUBWAY"), "망원역");
+  assert.equal(
+    formatTransitStopLabel("삼각지역.전쟁기념관", "BUS"),
+    "삼각지역.전쟁기념관",
+  );
+  assert.equal(
+    formatTransitStopLabel("삼각지역.전쟁기념관", "SUBWAY"),
+    "삼각지역.전쟁기념관",
+  );
+  assert.notEqual(
+    formatTransitStopLabel("삼각지역.전쟁기념관", "SUBWAY"),
+    "삼각지역.전쟁기념관역",
+  );
+  assert.equal(formatTransitStopLabel("삼각지(전쟁기념관)", "SUBWAY"), "삼각지(전쟁기념관)");
+
+  // Live-shaped [lng,lat] dense path must not be dropped by Korea filter.
+  const densePts = Array.from({ length: 40 }, (_, i) => [
+    126.91 + i * 0.0015,
+    37.556 - i * 0.0005,
+  ]);
+  const dense = parseKakaoPublicTraffic({
+    status: "OK",
+    routes: [
+      {
+        properties: { type: "SUBWAY", totalTime: 780, transfers: 0, fare: { value: 1550 } },
+        steps: [
+          {
+            properties: {
+              type: "SUBWAY",
+              time: 780,
+              distance: 6500,
+              stops: [{ name: "망원" }, { name: "삼각지(전쟁기념관)" }],
+              vehicles: [{ type: "일반", name: "6호선" }],
+            },
+            path: { points: densePts },
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(dense.ok, true);
+  if (dense.ok) {
+    assert.equal(dense.routes[0]!.steps[0]!.path.length, 40);
+  }
+
+  const padSearch = transitCameraFitPaddingFromRects(
+    { top: 0, bottom: 800, height: 800 },
+    { top: 500 },
+    { bottom: 120 },
+  );
+  assert.equal(padSearch.top, 120 + 8);
+  assert.equal(padSearch.bottom, 800 - 500 + 40);
 
   const swapped = parseKakaoPublicTraffic({
     status: "OK",

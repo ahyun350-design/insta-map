@@ -216,15 +216,25 @@ export function distanceMetersBetween(
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 
-/** Subway stop label: ensure trailing 역 when missing. */
+/**
+ * Stop / station display name.
+ * - SUBWAY: ensure a single trailing `역` (never `…역역` / `삼각지역.전쟁기념관역`).
+ * - BUS / other: keep Kakao name as-is (bus stops often already include `역` mid-string).
+ */
 export function formatTransitStopLabel(
   name: string,
   mode?: "BUS" | "SUBWAY" | "WALKING" | string,
 ): string {
   const n = String(name ?? "").trim();
   if (!n) return "";
-  if (mode === "SUBWAY" && !/역$/u.test(n) && !/\(/u.test(n)) return `${n}역`;
-  return n;
+  if (mode === "BUS" || mode === "WALKING") return n.replace(/역역$/u, "역");
+  if (mode === "SUBWAY") {
+    if (/\(/u.test(n)) return n.replace(/역역$/u, "역");
+    // Already has 역 anywhere (e.g. "삼각지역.전쟁기념관") — do not append another.
+    if (/역/u.test(n)) return n.replace(/역역$/u, "역");
+    return `${n}역`;
+  }
+  return n.replace(/역역$/u, "역");
 }
 
 function parseStep(raw: KakaoStep): TransitStep | null {
@@ -433,15 +443,25 @@ export function transitCameraFitPadding(
 export function transitCameraFitPaddingFromRects(
   mapRect: { top: number; bottom: number; height: number },
   panelRect: { top: number },
+  /** Search chrome bottom (viewport Y); top pad clears the search bar. */
+  searchRect?: { bottom: number } | null,
 ): { top: number; right: number; bottom: number; left: number } {
   const edge = TRANSIT_FIT_EDGE_PAD_PX;
   const mapH = Math.max(0, Math.round(mapRect.height));
+  let top = edge;
+  if (searchRect && Number.isFinite(searchRect.bottom)) {
+    // Clear the search chrome; small inset (not a full edge) so fit can stay ≥ street zoom.
+    top = Math.max(edge, Math.round(searchRect.bottom - mapRect.top + 8));
+  }
   let bottom = Math.max(edge, Math.round(mapRect.bottom - panelRect.top + edge));
   if (mapH > 0) {
-    const maxBottom = Math.max(edge, Math.floor(mapH - edge - 120));
+    const maxBottom = Math.max(edge, Math.floor(mapH - top - 120));
     bottom = Math.min(bottom, maxBottom);
+    if (top + bottom > mapH - 120) {
+      top = Math.max(edge, Math.min(top, mapH - bottom - 120));
+    }
   }
-  return { top: edge, right: edge, bottom, left: edge };
+  return { top, right: edge, bottom, left: edge };
 }
 
 /** Points used to fit the camera (path + board/alight + endpoints) — Korea-valid only. */
@@ -494,10 +514,13 @@ export function augmentTransitRouteWithEndpointWalks(
   opts: {
     origin: { lat: number; lng: number } | null;
     dest: { lat: number; lng: number } | null;
+    /** Optional boarding-exit hint for the synthesized first walk (e.g. "1번 출구"). */
+    boardExit?: string | null;
   },
 ): TransitRoute {
   let steps = route.steps.map((s) => ({
     ...s,
+    // Keep Kakao polyline vertices as parsed — only drop non-Korea garbage.
     path: s.path.filter((p) => isValidKoreaLatLng(p.lat, p.lng)),
     stops: [...s.stops],
     vehicles: [...s.vehicles],
@@ -518,16 +541,23 @@ export function augmentTransitRouteWithEndpointWalks(
         firstRide?.stops[0]?.name ?? "",
         firstRide?.type,
       );
+      const exit =
+        (opts.boardExit && String(opts.boardExit).trim()) ||
+        extractTransitExitFromGuidance(steps.find((s) => s.type === "WALKING")?.guidance ?? "") ||
+        null;
       const timeSec = Math.max(60, Math.round(d / 1.25));
       addedSec += timeSec;
+      const exitBit = exit ? ` (${exit})` : "";
       steps = [
         {
           type: "WALKING",
           timeSec,
           distanceM: Math.round(d),
-          guidance: boardName ? `${boardName}까지 도보` : "출발지까지 도보",
+          guidance: boardName
+            ? `${boardName}${exitBit}까지 도보로 이동`
+            : "출발지까지 도보로 이동",
           stops: boardName
-            ? [{ name: "내 위치" }, { name: boardName }]
+            ? [{ name: "내 위치" }, { name: firstRide?.stops[0]?.name ?? boardName }]
             : [{ name: "내 위치" }],
           vehicles: [],
           path: [origin, firstPt],
@@ -712,6 +742,8 @@ export type TransitDetailRow =
       distanceM: number;
       exit: string | null;
       toLabel: string;
+      /** True when this leg is origin → first board (show "내 위치 → …"). */
+      fromOrigin: boolean;
       atSec: number;
       emphasis: false;
       rail: "walk";
@@ -777,10 +809,15 @@ export function buildTransitDetailRows(
   });
   route.steps.forEach((s, i) => {
     if (s.type === "WALKING") {
+      const nextRide = route.steps.slice(i + 1).find((x) => x.type !== "WALKING");
+      const toMode = nextRide?.type === "BUS" ? "BUS" : "SUBWAY";
       const toLabel = formatTransitStopLabel(
         s.stops[s.stops.length - 1]?.name?.trim() || "",
-        "SUBWAY",
+        toMode,
       );
+      const fromOrigin =
+        s.stops[0]?.name?.trim() === "내 위치" ||
+        (i === 0 && s.stops.some((x) => x.name?.trim() === "내 위치"));
       rows.push({
         id: `walk-${i}`,
         kind: "walk",
@@ -788,6 +825,7 @@ export function buildTransitDetailRows(
         distanceM: s.distanceM,
         exit: extractTransitExitFromGuidance(s.guidance),
         toLabel,
+        fromOrigin,
         atSec: cursor,
         emphasis: false,
         rail: "walk",
