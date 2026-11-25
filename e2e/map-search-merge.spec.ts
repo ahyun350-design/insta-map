@@ -245,18 +245,13 @@ test("exact address alone + its pin opens it; pin ↔ card by id; 재검색 only
   await page.waitForTimeout(2000);
   await expect(research).toHaveCount(0);
 
-  // 5) The user's own move shows it, below the chips (no overlap with 인기 장소 / category chips)
+  // 5) The user's own move shows 재검색; category chips stay hidden
   const c = (await center(page))!;
   const l = (await call(page, "getLevel")) as number;
   await call(page, "userMoveTo", c.lat + 0.0045, c.lng, 19 - l);
   await expect(research).toBeVisible({ timeout: 5_000 });
-  const r = (await research.boundingBox())!;
-  for (const other of [dialog.getByLabel("인기 장소 레이어"), dialog.getByTestId("admin-map-category-chips")]) {
-    if (!(await other.count())) continue;
-    const o = (await other.first().boundingBox())!;
-    const overlap = r.x < o.x + o.width && o.x < r.x + r.width && r.y < o.y + o.height && o.y < r.y + r.height;
-    expect(overlap, "재검색 button clear of the chips").toBe(false);
-  }
+  await expect(dialog.getByTestId("admin-map-category-chips")).toHaveCount(0);
+  await expect(dialog.getByLabel("인기 장소 레이어")).toHaveCount(0);
 
   // 2) 망원로4길 3: the exact address alone, with its own (house) pin in view above the sheet
   await search("망원로4길 3");

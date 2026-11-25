@@ -8439,8 +8439,12 @@ select:focus-visible {
 .expandedMapLibreTopChromeFlow .expandedMapLibreDiscoverChip {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
-/* Research: search bottom (safe+12+44) + 10 = safe+66; + category chips row (6 gap + 38) */
+/* Research: search bottom (safe+12+44) + 8px — category chips row hidden */
 .expandedMapLibreStage .mapResearchAreaBtn {
+  top: calc(64px + env(safe-area-inset-top, 0px));
+}
+/* When e2e forces category chips visible, keep the taller offset */
+.expandedMapLibreStage.is-category-chips-on .mapResearchAreaBtn {
   top: calc(110px + env(safe-area-inset-top, 0px));
 }
 .expandedMapLibreStage .expandedMapLibreRouteLoading {

@@ -263,6 +263,10 @@ import {
   transitRouteToMapSegments,
   type TransitRoute,
 } from "@/lib/mapTransit";
+import {
+  shouldOpenInAppTransit,
+  showAdminMapCategoryChrome,
+} from "@/lib/adminMapLibreChrome";
 import { AddToListSheet } from "@/components/AddToListSheet";
 import { PlaceMemoSheet } from "@/components/PlaceMemoSheet";
 import { MyListsScreen } from "@/components/MyListsScreen";
@@ -2196,6 +2200,8 @@ function HomePageContent() {
     destLat: number;
     destLng: number;
   } | null>(null);
+  /** Compact/home sheet transit on admin MapLibre: expand first, then open in-app panel. */
+  const pendingInAppTransitRef = useRef<{ lat: number; lng: number } | null>(null);
   const directionsPathRef = useRef<{ lat: number; lng: number }[] | null>(null);
   const directionsModeRef = useRef(directionsMode);
   directionsModeRef.current = directionsMode;
@@ -9027,6 +9033,20 @@ function HomePageContent() {
       }
       const destName = String(placeData.place_name ?? "장소");
       if (mode === "transit") {
+        // Admin MapLibre → in-app panel; Kakao map path (일반 사용자) stays external.
+        const adminMl =
+          userIdRef.current === ADMIN_USER_ID &&
+          (adminCompactMapLibre === "force_maplibre" ||
+            adminExpandedMapLibre === "force_maplibre");
+        if (adminMl) {
+          if (mapExpanded && expandedMapIsMapLibre) {
+            void openInAppTransit(lat, lng);
+          } else {
+            pendingInAppTransitRef.current = { lat, lng };
+            expandPlaceSheetToFullscreen(placeData);
+          }
+          return;
+        }
         openTransitInKakaoMap(destName, lat, lng);
         return;
       }
@@ -9142,8 +9162,28 @@ function HomePageContent() {
         setDirectionsLoading(false);
       }
     },
-    [drawRouteOnCompactMap, fitCompactMapToPoints, resolveDirectionsOrigin, showToast],
+    [
+      drawRouteOnCompactMap,
+      fitCompactMapToPoints,
+      resolveDirectionsOrigin,
+      showToast,
+      adminCompactMapLibre,
+      adminExpandedMapLibre,
+      mapExpanded,
+      expandedMapIsMapLibre,
+      openInAppTransit,
+      expandPlaceSheetToFullscreen,
+    ],
   );
+
+  // Admin MapLibre: after expand from compact/home transit tap, open in-app panel once ready.
+  useEffect(() => {
+    if (!mapExpanded || !expandedMapIsMapLibre) return;
+    const pending = pendingInAppTransitRef.current;
+    if (!pending) return;
+    pendingInAppTransitRef.current = null;
+    void openInAppTransit(pending.lat, pending.lng);
+  }, [mapExpanded, expandedMapIsMapLibre, openInAppTransit]);
 
   /** 큐레이션 상세 → SAVED 장소 클릭과 동일 경로 (지도 탭 + 컴팩트 시트, 닫으면 상세 복귀) */
   const goToMapFromDetailPost = () => {
@@ -16551,7 +16591,12 @@ function HomePageContent() {
         onOpenTransit={() => {
           const lat = parseFloat(selectedPlace.y);
           const lng = parseFloat(selectedPlace.x);
-          if (expandedMapIsMapLibre) {
+          if (
+            shouldOpenInAppTransit({
+              showAdminMapExtras,
+              expandedMapIsMapLibre,
+            })
+          ) {
             void openInAppTransit(lat, lng);
             return;
           }
@@ -19237,6 +19282,7 @@ function HomePageContent() {
                                 ? "is-sheet-open"
                                 : "",
                               adminDirectionsChrome ? "is-directions-chrome" : "",
+                              showAdminMapCategoryChrome() ? "is-category-chips-on" : "",
                             ]
                               .filter(Boolean)
                               .join(" ")
@@ -19354,7 +19400,8 @@ function HomePageContent() {
                                   setAdminRecentSearches([]);
                                 }}
                               />
-                              {!adminSearchFocused && (
+                              {/* Category chips kept in tree behind a display gate (not deleted). */}
+                              {!adminSearchFocused && showAdminMapCategoryChrome() ? (
                                 <AdminMapCategoryChips
                                   active={activeCategoryChip}
                                   loading={categoryLoading}
@@ -19366,8 +19413,10 @@ function HomePageContent() {
                                     void runCategoryChipSearch(id);
                                   }}
                                 />
-                              )}
-                              {showAdminMapExtras && discoverChipEnabled ? (
+                              ) : null}
+                              {showAdminMapCategoryChrome() &&
+                              showAdminMapExtras &&
+                              discoverChipEnabled ? (
                                 <div className="expandedMapLibreDiscoverRow">
                                   <button
                                     type="button"
@@ -19401,6 +19450,7 @@ function HomePageContent() {
                         </div>
                       )}
                       {useMapLibreExpandedChrome &&
+                      showAdminMapCategoryChrome() &&
                       discoverTipVisible &&
                       discoverChipEnabled &&
                       !adminDirectionsMiniCard ? (
