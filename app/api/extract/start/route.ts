@@ -16,6 +16,11 @@ import {
   resolveExtractEntry,
   type ExtractEntry,
 } from "@/app/api/extract/_entry";
+import {
+  classifyAuthFailClient,
+  classifyAuthFailReason,
+  recordExtractStartAuthFail,
+} from "@/app/api/extract/_authFail";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -42,6 +47,15 @@ async function recordShareReceived(
   }
 }
 
+function adminFromService(
+  supabaseUrl: string,
+  serviceKey: string,
+): SupabaseClient {
+  return createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 export async function POST(req: Request) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
@@ -55,12 +69,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `서버 환경변수 미설정: ${missingEnv.join(", ")}` }, { status: 500 });
     }
 
+    const ua = req.headers.get("user-agent");
+    const authFailClient = classifyAuthFailClient(ua);
+
     const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
     if (!authHeader?.toLowerCase().startsWith("bearer ")) {
+      const adminClient = adminFromService(supabaseUrl, serviceKey);
+      await recordExtractStartAuthFail(adminClient, {
+        reason: classifyAuthFailReason({ hasBearerHeader: false }),
+        client: authFailClient,
+      });
       return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
     }
     const jwt = authHeader.slice(7).trim();
     if (!jwt) {
+      const adminClient = adminFromService(supabaseUrl, serviceKey);
+      await recordExtractStartAuthFail(adminClient, {
+        reason: classifyAuthFailReason({ hasBearerHeader: true, jwtEmpty: true }),
+        client: authFailClient,
+      });
       return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
     }
 
@@ -71,15 +98,21 @@ export async function POST(req: Request) {
     const { data: authData, error: authError } = await userClient.auth.getUser(jwt);
     const authUser = authData?.user;
     if (authError || !authUser?.id) {
+      const adminClient = adminFromService(supabaseUrl, serviceKey);
+      await recordExtractStartAuthFail(adminClient, {
+        reason: classifyAuthFailReason({
+          hasBearerHeader: true,
+          jwtEmpty: false,
+          authErrorMessage: authError?.message ?? null,
+          hasUser: !!authUser?.id,
+        }),
+        client: authFailClient,
+      });
       return NextResponse.json({ error: "유효하지 않은 세션입니다." }, { status: 401 });
     }
     const userId = authUser.id;
 
-    const adminClient = createClient(
-      supabaseUrl,
-      serviceKey,
-      { auth: { persistSession: false, autoRefreshToken: false } },
-    );
+    const adminClient = adminFromService(supabaseUrl, serviceKey);
 
     const body = (await req.json()) as {
       instagramUrl?: string;

@@ -138,6 +138,8 @@ type AdminStatusPayload = {
   activeUsers7d: number;
   /** Distinct users with share|share_fallback extract_timing or share_received (7d) */
   shareSaveUsers7d?: number;
+  /** Share-extension extract/start auth fails (7d), reason summary */
+  shareExtAuthFail7dSummary?: string;
   userEventsTotal: number;
   userEventsEstimated?: boolean;
   todayPlaces?: {
@@ -472,6 +474,7 @@ import {
   consumePendingShareUrl,
   shouldSkipExtractAlreadyStartedByExtension,
 } from "@/lib/pendingShare";
+import { canConsumeAppGroupShare } from "@/lib/appGroupShareReady";
 import { App } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 import { parseFeedPostFromRow, feedCommentCount, isOwnFeedAuthor, FEED_PAGE_SIZE, FEED_POST_LIST_SELECT, FEED_POST_DETAIL_SELECT, type FeedPost, type PhotoPlaceTag } from "@/lib/feedPost";
@@ -10751,12 +10754,29 @@ function HomePageContent() {
 
   const consumeAppGroupShareAndExtract = useCallback(async () => {
     if (!Capacitor.isNativePlatform()) return;
-    // Wait for session restore — calling before userId is set drops the share.
-    if (!userIdRef.current) return;
+    // Wait for user + usable access token — do not clear App Group key yet.
+    const accessToken = await getAccessToken();
+    if (
+      !canConsumeAppGroupShare({
+        userId: userIdRef.current,
+        accessToken,
+      })
+    ) {
+      return;
+    }
     const outcome = await consumePendingShareUrl();
+    if (outcome.status === "plugin_error") {
+      showToast("공유한 릴스를 저장하지 못했어요", "error");
+      return;
+    }
     if (!outcome.url) return;
-    startShareExtractOnce(outcome.url);
-  }, [startShareExtractOnce]);
+    showToast("공유한 릴스를 저장하고 있어요", "info");
+    try {
+      startShareExtractOnce(outcome.url);
+    } catch {
+      showToast("공유한 릴스를 저장하지 못했어요", "error");
+    }
+  }, [startShareExtractOnce, showToast]);
 
   const applyPindmapDeepLink = useCallback(async (rawUrl: string) => {
     const action = parsePindmapDeepLink(rawUrl);
@@ -20840,6 +20860,11 @@ function HomePageContent() {
                                   {row(
                                     "최근 7일 공유 저장 사용자 수",
                                     `${adminStatus.shareSaveUsers7d ?? 0}명`,
+                                    false,
+                                  )}
+                                  {row(
+                                    "최근 7일 공유 확장 인증 실패 수(사유별)",
+                                    adminStatus.shareExtAuthFail7dSummary ?? "0건",
                                     false,
                                   )}
                                   {row(
