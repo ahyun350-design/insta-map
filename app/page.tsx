@@ -58,6 +58,10 @@ import {
   type ExtractReviewJobItem,
 } from "@/lib/extractReviewBatch";
 import { mapExtractErrorToUserMessage } from "@/lib/extractUserError";
+import {
+  buildClientExtractStartBody,
+  type ClientExtractEntry,
+} from "@/app/api/extract/_entry";
 import { toUserMessage } from "@/lib/userErrorMessage";
 import {
   fetchListPlaces,
@@ -132,6 +136,8 @@ type AdminStatusPayload = {
   recentFailures: Array<{ error_message: string | null; at: string | null }>;
   signups: { today: number; total: number };
   activeUsers7d: number;
+  /** Distinct users with share|share_fallback extract_timing or share_received (7d) */
+  shareSaveUsers7d?: number;
   userEventsTotal: number;
   userEventsEstimated?: boolean;
   todayPlaces?: {
@@ -10578,7 +10584,7 @@ function HomePageContent() {
 
   const handleAddFromInstagram = async (
     urlOverride?: string,
-    opts?: { forceRetry?: boolean },
+    opts?: { forceRetry?: boolean; entry?: ClientExtractEntry },
   ) => {
     const sourceUrl = (urlOverride ?? instagramUrl).trim();
     if (!sourceUrl || isSubmitting) return;
@@ -10620,6 +10626,12 @@ function HomePageContent() {
       if (!extractToken) {
         throw new Error("세션이 만료됐어요. 다시 로그인해 주세요.");
       }
+      const entry: ClientExtractEntry = opts?.entry === "share_fallback" ? "share_fallback" : "app";
+      const startBody = buildClientExtractStartBody({
+        instagramUrl: trimmedUrl,
+        forceRetry: opts?.forceRetry === true,
+        entry,
+      });
       devLog("[PindMap:url] /api/extract/start request", { url: trimmedUrl });
       dlog.perf.fetchStart(perfScreen);
       const response = await fetch("/api/extract/start", {
@@ -10629,10 +10641,7 @@ function HomePageContent() {
           Authorization: `Bearer ${extractToken}`,
         },
         credentials: "include",
-        body: JSON.stringify({
-          instagramUrl: trimmedUrl,
-          forceRetry: opts?.forceRetry === true,
-        }),
+        body: JSON.stringify(startBody),
         signal: controller.signal,
       });
       window.clearTimeout(timeout);
@@ -10735,7 +10744,8 @@ function HomePageContent() {
       if (await shouldSkipExtractAlreadyStartedByExtension(cleaned)) return;
       console.log("pending_share|extract_start");
       setActiveTab("home");
-      void handleAddFromInstagramRef.current(cleaned);
+      // App Group / pindmap://extract fallback — tag as share_fallback (not paste/app).
+      void handleAddFromInstagramRef.current(cleaned, { entry: "share_fallback" });
     })();
   }, []);
 
@@ -20825,6 +20835,11 @@ function HomePageContent() {
                                   {row(
                                     "오늘 가입",
                                     `${adminStatus.signups.today}명 (전체 ${adminStatus.signups.total}명)`,
+                                    false,
+                                  )}
+                                  {row(
+                                    "최근 7일 공유 저장 사용자 수",
+                                    `${adminStatus.shareSaveUsers7d ?? 0}명`,
                                     false,
                                   )}
                                   {row(
