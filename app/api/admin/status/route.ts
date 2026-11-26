@@ -21,6 +21,10 @@ import {
   type MapGlStatusMetrics,
 } from "./_mapGlMetrics";
 import { countShareSaveUsers } from "./_shareMetrics";
+import {
+  countShareExtAuthFailsByReason,
+  formatShareExtAuthFailSummary,
+} from "./_shareAuthFailMetrics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +50,10 @@ type AdminStatusBody = {
   activeUsers7d: number;
   /** Distinct users: extract_timing entry∈{share,share_fallback} ∪ share_received (7d) */
   shareSaveUsers7d?: number;
+  /** Share-extension extract/start 401s in 7d, by reason (display string) */
+  shareExtAuthFail7dSummary?: string;
+  /** Share-extension auth fail counts by reason (7d) */
+  shareExtAuthFail7dByReason?: Record<string, number>;
   userEventsTotal: number;
   userEventsEstimated?: boolean;
   todayPlaces: {
@@ -205,6 +213,28 @@ async function loadShareSaveUsers7d(
   }
 }
 
+async function loadShareExtAuthFails7d(
+  admin: ReturnType<typeof getSupabaseAdmin>,
+): Promise<{ byReason: Record<string, number>; summary: string }> {
+  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const { data } = await admin
+      .from("user_events")
+      .select("event,meta")
+      .eq("event", "extract_start_auth_fail")
+      .gte("created_at", since7d)
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    const byReason = countShareExtAuthFailsByReason(
+      (data ?? []) as Array<{ event: string; meta: unknown }>,
+    );
+    return { byReason, summary: formatShareExtAuthFailSummary(byReason) };
+  } catch (e) {
+    console.error("[admin/status] shareExtAuthFail7d", e);
+    return { byReason: {}, summary: "0건" };
+  }
+}
+
 function normalizeRpcPayload(raw: unknown): AdminStatusBody {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const today = (o.today && typeof o.today === "object" ? o.today : {}) as Record<
@@ -356,12 +386,17 @@ export async function GET(req: Request) {
     const tShare = Date.now();
     const shareSaveUsers7d = await loadShareSaveUsers7d(admin);
     timings.share_save_users_ms = Date.now() - tShare;
+    const tShareAuthFail = Date.now();
+    const shareExtAuth = await loadShareExtAuthFails7d(admin);
+    timings.share_ext_auth_fail_ms = Date.now() - tShareAuthFail;
     const withWarn: AdminStatusBody = {
       ...body,
       pipelineWarn,
       recentFailTop3,
       mapGl,
       shareSaveUsers7d,
+      shareExtAuthFail7dByReason: shareExtAuth.byReason,
+      shareExtAuthFail7dSummary: shareExtAuth.summary,
     };
     cache = { at: Date.now(), body: withWarn };
     timings.total_ms = Date.now() - t0;
