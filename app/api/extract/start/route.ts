@@ -11,10 +11,36 @@ import {
   EXTRACT_INTERNAL_HEADER,
   getExtractInternalSecret,
 } from "@/app/api/extract/_internalAuth";
-import { classifyExtractEntry } from "@/app/api/extract/_entry";
+import {
+  isShareExtractEntry,
+  resolveExtractEntry,
+  type ExtractEntry,
+} from "@/app/api/extract/_entry";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** One share_received event — meta.entry only (no URL/coords). */
+async function recordShareReceived(
+  admin: SupabaseClient,
+  userId: string,
+  entry: ExtractEntry,
+): Promise<void> {
+  if (!isShareExtractEntry(entry)) return;
+  try {
+    const { error } = await admin.from("user_events").insert({
+      user_id: userId,
+      event: "share_received",
+      meta: { entry },
+    });
+    if (error) {
+      console.warn("[extract/start] share_received insert failed", error.message);
+    }
+  } catch (e) {
+    console.warn("[extract/start] share_received insert threw", e);
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -58,9 +84,12 @@ export async function POST(req: Request) {
     const body = (await req.json()) as {
       instagramUrl?: string;
       forceRetry?: boolean;
+      entry?: unknown;
     };
     const rawUrl = body.instagramUrl?.trim();
     const forceRetry = body.forceRetry === true;
+    // body.entry preferred; direct Share Extension POST still resolves via UA → share
+    const entry = resolveExtractEntry(body.entry, req.headers.get("user-agent"));
 
     if (!rawUrl) {
       return NextResponse.json({ error: "instagramUrl이 필요합니다." }, { status: 400 });
@@ -86,6 +115,7 @@ export async function POST(req: Request) {
         .maybeSingle();
       if (existingErr) throw existingErr;
       if (existing?.id) {
+        await recordShareReceived(adminClient, userId, entry);
         return NextResponse.json({ jobId: existing.id, deduped: true });
       }
     }
@@ -105,6 +135,8 @@ export async function POST(req: Request) {
     });
     if (insertError) throw insertError;
 
+    await recordShareReceived(adminClient, userId, entry);
+
     const baseUrl = req.headers.get("origin") || process.env.NEXT_PUBLIC_SITE_URL?.trim() || new URL(req.url).origin;
     if (!baseUrl) {
       return NextResponse.json({ error: "서버 base URL을 확인할 수 없습니다." }, { status: 500 });
@@ -114,9 +146,6 @@ export async function POST(req: Request) {
     if (!internalSecret) {
       return NextResponse.json({ error: "서버 환경변수 미설정: EXTRACT_INTERNAL_SECRET" }, { status: 500 });
     }
-
-    // Entry for timing only — never log/store User-Agent string
-    const entry = classifyExtractEntry(req.headers.get("user-agent"));
 
     const triggerProcess = async () => {
       const res = await fetch(processUrl, {

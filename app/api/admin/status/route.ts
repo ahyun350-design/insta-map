@@ -20,6 +20,7 @@ import {
   emptyMapGlWindow,
   type MapGlStatusMetrics,
 } from "./_mapGlMetrics";
+import { countShareSaveUsers } from "./_shareMetrics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +44,8 @@ type AdminStatusBody = {
   recentFailures: Array<{ error_message: string | null; at: string | null }>;
   signups: { today: number; total: number };
   activeUsers7d: number;
+  /** Distinct users: extract_timing entry∈{share,share_fallback} ∪ share_received (7d) */
+  shareSaveUsers7d?: number;
   userEventsTotal: number;
   userEventsEstimated?: boolean;
   todayPlaces: {
@@ -173,6 +176,32 @@ async function loadMapGlMetrics(
   } catch (e) {
     console.error("[admin/status] mapGl metrics", e);
     return { last24h: emptyMapGlWindow(), last7d: emptyMapGlWindow() };
+  }
+}
+
+/** Route-side count only — does not change admin_status RPC / DB functions. */
+async function loadShareSaveUsers7d(
+  admin: ReturnType<typeof getSupabaseAdmin>,
+): Promise<number> {
+  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const { data } = await admin
+      .from("user_events")
+      .select("event,meta,user_id")
+      .in("event", ["extract_timing", "share_received"])
+      .gte("created_at", since7d)
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    return countShareSaveUsers(
+      (data ?? []) as Array<{
+        event: string;
+        meta: unknown;
+        user_id?: string | null;
+      }>,
+    );
+  } catch (e) {
+    console.error("[admin/status] shareSaveUsers7d", e);
+    return 0;
   }
 }
 
@@ -324,11 +353,15 @@ export async function GET(req: Request) {
     const tMapGl = Date.now();
     const mapGl = await loadMapGlMetrics(admin);
     timings.map_gl_ms = Date.now() - tMapGl;
+    const tShare = Date.now();
+    const shareSaveUsers7d = await loadShareSaveUsers7d(admin);
+    timings.share_save_users_ms = Date.now() - tShare;
     const withWarn: AdminStatusBody = {
       ...body,
       pipelineWarn,
       recentFailTop3,
       mapGl,
+      shareSaveUsers7d,
     };
     cache = { at: Date.now(), body: withWarn };
     timings.total_ms = Date.now() - t0;
