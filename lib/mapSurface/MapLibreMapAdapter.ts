@@ -40,6 +40,7 @@ import {
 } from "./kakaoZoom";
 import { haversineMeters } from "./tilePrefetch";
 import { fitSearchResultsOn, resultCameraPadding, searchFitPadding } from "./cameraPadding";
+import { isValidKoreaLatLng } from "@/lib/mapTransit";
 import type {
   CompactMapSurface,
   CompactPinInput,
@@ -132,6 +133,8 @@ const TRANSIT_STOPS_LAYER = "compact-transit-stops-circle";
 const TRANSIT_ENDS_SOURCE = "compact-transit-ends";
 const TRANSIT_ENDS_CIRCLE_LAYER = "compact-transit-ends-circle";
 const TRANSIT_ENDS_LABEL_LAYER = "compact-transit-ends-label";
+const TRANSIT_LINE_LABELS_SOURCE = "compact-transit-line-labels";
+const TRANSIT_LINE_LABELS_LAYER = "compact-transit-line-labels";
 const FOCUS_SOURCE = "compact-focus";
 const FOCUS_LAYER = "compact-focus-symbol";
 const MYLOC_SOURCE = "compact-myloc";
@@ -1025,8 +1028,21 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         "text-field": ["get", "label"],
         "text-size": 13,
         "text-font": ["Noto Sans Bold"],
-        "text-offset": [0, 1.45],
-        "text-anchor": "top",
+        // 출발 below / 도착 above — avoids overlap when endpoints are close.
+        "text-offset": [
+          "match",
+          ["get", "label"],
+          "도착",
+          ["literal", [0, -1.55]],
+          ["literal", [0, 1.45]],
+        ],
+        "text-anchor": [
+          "match",
+          ["get", "label"],
+          "도착",
+          "bottom",
+          "top",
+        ],
         "text-allow-overlap": true,
         "text-ignore-placement": true,
       },
@@ -1034,6 +1050,29 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         "text-color": "#111111",
         "text-halo-color": "#ffffff",
         "text-halo-width": 2,
+      },
+    });
+    map.addSource(TRANSIT_LINE_LABELS_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: TRANSIT_LINE_LABELS_LAYER,
+      type: "symbol",
+      source: TRANSIT_LINE_LABELS_SOURCE,
+      layout: {
+        "text-field": ["get", "text"],
+        "text-size": 12,
+        "text-font": ["Noto Sans Bold"],
+        "text-anchor": "center",
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+        "text-padding": 2,
+      },
+      paint: {
+        "text-color": ["get", "colour"],
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2.2,
       },
     });
     map.addSource(ROUTE_DEST_SOURCE, {
@@ -1480,6 +1519,7 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
   fitPoints(
     points: MapLatLng[],
     padding?: { top: number; right: number; bottom: number; left: number },
+    opts?: { minZoom?: number; maxZoom?: number },
   ) {
     const pad =
       padding ??
@@ -1488,16 +1528,72 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         : COMPACT_ROUTE_FIT_PADDING);
     const map = this.map;
     if (!map || points.length === 0) return;
+    const maxZoom = opts?.maxZoom ?? 16;
+    const minZoom = opts?.minZoom;
     if (points.length === 1) {
       map.jumpTo({
         center: [points[0]!.lng, points[0]!.lat],
-        zoom: kakaoLevelToMapLibreZoom(4),
+        zoom: Math.max(minZoom ?? 0, kakaoLevelToMapLibreZoom(4)),
       });
       return;
     }
     const bounds = new maplibregl.LngLatBounds();
-    for (const p of points) bounds.extend([p.lng, p.lat]);
-    map.fitBounds(bounds, { padding: pad, maxZoom: 16, duration: 0 });
+    let n = 0;
+    for (const p of points) {
+      // Drop 0/NaN/swapped/non-Korea so fitBounds cannot zoom to the whole country.
+      if (!isValidKoreaLatLng(p.lat, p.lng)) continue;
+      bounds.extend([p.lng, p.lat]);
+      n += 1;
+    }
+    if (n === 0) return;
+    if (n === 1) {
+      const only = bounds.getCenter();
+      map.jumpTo({
+        center: [only.lng, only.lat],
+        zoom: Math.max(minZoom ?? 0, kakaoLevelToMapLibreZoom(4)),
+      });
+      return;
+    }
+    const mapH = map.getContainer()?.clientHeight || 0;
+    const mapW = map.getContainer()?.clientWidth || 0;
+    // Keep caller padding (transit panel height). Only ensure a usable content window.
+    const minContent = 120;
+    const safePad = {
+      top: Math.max(0, Math.min(pad.top, Math.max(0, mapH - minContent))),
+      right: Math.max(0, Math.min(pad.right, Math.max(0, Math.floor(mapW * 0.4)))),
+      bottom: Math.max(0, Math.min(pad.bottom, Math.max(0, mapH - minContent))),
+      left: Math.max(0, Math.min(pad.left, Math.max(0, Math.floor(mapW * 0.4)))),
+    };
+    if (mapH > 0 && safePad.top + safePad.bottom > mapH - minContent) {
+      safePad.bottom = Math.max(0, mapH - safePad.top - minContent);
+    }
+    try {
+      // Cancel in-flight easeTo (e.g. place-card re-pad) so it cannot overwrite this fit.
+      map.stop();
+      // Place-card easeTo leaves persistent map padding; fitBounds would ADD our pad on top
+      // and zoom pathologically far out. Clear it so only `safePad` counts (see fitSearchResultsOn).
+      map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
+      // One fitBounds with search/panel padding. Do not pass minZoom: MapLibre would clamp
+      // zoom up and ignore padding, pushing start/end under the search bar / panel.
+      // Callers may still pass minZoom for single-point jumpTo fallbacks above.
+      void minZoom;
+      map.fitBounds(bounds, {
+        padding: safePad,
+        maxZoom,
+        duration: 0,
+        linear: true,
+        bearing: 0,
+        pitch: 0,
+      });
+    } catch {
+      const c = bounds.getCenter();
+      map.jumpTo({
+        center: [c.lng, c.lat],
+        zoom: Math.max(minZoom ?? 12, 12),
+        bearing: 0,
+        pitch: 0,
+      });
+    }
   }
 
   setPins(pins: CompactPinInput[]) {
@@ -1847,6 +1943,9 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     }
   }
 
+  /** Last transit polylines (for e2e: segment ends ↔ board/alight). */
+  private lastTransitSegments: TransitMapSegmentInput[] = [];
+
   /**
    * Multi-leg transit polyline on the normal basemap (no directions chrome / theme swap).
    * Walk = gray dashed; bus/subway = line colour solid; board/alight dots; 출발/도착 labels.
@@ -1856,6 +1955,11 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     if (!map?.getSource(TRANSIT_SOURCE)) return;
     const draw: TransitRouteDrawInput = Array.isArray(input) ? { segments: input } : input;
     const segments = draw.segments ?? [];
+    this.lastTransitSegments = segments.map((s) => ({
+      kind: s.kind,
+      colour: s.colour,
+      path: s.path.map((p) => ({ lat: p.lat, lng: p.lng })),
+    }));
     // Never flip to directions route theme for transit.
     if (this.directionsChromeActive) {
       this.setDirectionsChrome({ active: false, restoreCamera: false });
@@ -1910,9 +2014,41 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
         })),
       });
     }
+
+    if (map.getSource(TRANSIT_LINE_LABELS_SOURCE)) {
+      (map.getSource(TRANSIT_LINE_LABELS_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: (draw.labels ?? [])
+          .filter((l) => Number.isFinite(l.lat) && Number.isFinite(l.lng) && l.text)
+          .map((l) => ({
+            type: "Feature" as const,
+            properties: { text: l.text, colour: l.colour || "#111111" },
+            geometry: { type: "Point" as const, coordinates: [l.lng, l.lat] },
+          })),
+      });
+    }
+  }
+
+  /** Segment path endpoints for e2e (no camera mutation). */
+  getTransitPathEnds(): Array<{
+    kind: string;
+    start: { lat: number; lng: number };
+    end: { lat: number; lng: number };
+  }> {
+    return this.lastTransitSegments
+      .filter((s) => s.path.length >= 2)
+      .map((s) => ({
+        kind: s.kind,
+        start: { lat: s.path[0]!.lat, lng: s.path[0]!.lng },
+        end: {
+          lat: s.path[s.path.length - 1]!.lat,
+          lng: s.path[s.path.length - 1]!.lng,
+        },
+      }));
   }
 
   clearTransitRoute() {
+    this.lastTransitSegments = [];
     const map = this.map;
     if (!map?.getSource(TRANSIT_SOURCE)) return;
     (map.getSource(TRANSIT_SOURCE) as GeoJSONSource).setData({
@@ -1927,6 +2063,12 @@ export class MapLibreMapAdapter implements CompactMapSurface, ExpandedMapSurface
     }
     if (map.getSource(TRANSIT_ENDS_SOURCE)) {
       (map.getSource(TRANSIT_ENDS_SOURCE) as GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: [],
+      });
+    }
+    if (map.getSource(TRANSIT_LINE_LABELS_SOURCE)) {
+      (map.getSource(TRANSIT_LINE_LABELS_SOURCE) as GeoJSONSource).setData({
         type: "FeatureCollection",
         features: [],
       });

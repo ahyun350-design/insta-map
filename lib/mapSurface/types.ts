@@ -44,11 +44,20 @@ export type TransitEndpointMarkerInput = {
   label: "출발" | "도착";
 };
 
+export type TransitLineLabelInput = {
+  lat: number;
+  lng: number;
+  text: string;
+  colour: string;
+};
+
 export type TransitRouteDrawInput = {
   segments: TransitMapSegmentInput[];
   stops?: TransitStopMarkerInput[];
   start?: TransitEndpointMarkerInput | null;
   end?: TransitEndpointMarkerInput | null;
+  /** Mid-leg line name chips ("6호선 ›"). */
+  labels?: TransitLineLabelInput[];
 };
 
 /** Result pin badge: a map POI icon, or the house badge for a 도로명주소 result. */
@@ -103,6 +112,7 @@ export type CompactMapSurface = {
   fitPoints: (
     points: MapLatLng[],
     padding?: { top: number; right: number; bottom: number; left: number },
+    opts?: { minZoom?: number; maxZoom?: number },
   ) => void;
   /** Id-diff pin sync (cluster off). */
   setPins: (pins: CompactPinInput[]) => void;
@@ -112,6 +122,12 @@ export type CompactMapSurface = {
   /** Multi-colour transit path (walk dashed) + stop/endpoint markers. No theme change. */
   setTransitRoute: (input: TransitRouteDrawInput | TransitMapSegmentInput[]) => void;
   clearTransitRoute: () => void;
+  /** E2E: each transit segment path start/end (board/alight check). */
+  getTransitPathEnds: () => Array<{
+    kind: string;
+    start: MapLatLng;
+    end: MapLatLng;
+  }>;
   clearRoute: () => void;
   setFocusMarker: (pin: CompactPinInput) => void;
   clearFocusMarker: () => void;
@@ -155,6 +171,8 @@ export type ExpandedMapSurface = CompactMapSurface & {
   findRenderedMapPoi: (
     kinds: Array<"shop" | "sangga" | "tour" | "landmark" | "park" | "station" | "bus">,
   ) => { x: number; y: number; name: string; kind: string } | null;
+  /** MapLibre zoom (not Kakao level). */
+  getZoom: () => number;
   /** E2E / QA: exact MapLibre zoom jump (no Kakao level rounding). */
   /** `asUser`: E2E stand-in for a drag / pinch (the move counts as the user's own). */
   jumpToZoom: (lat: number, lng: number, zoom: number, opts?: { asUser?: boolean }) => void;
